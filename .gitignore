@@ -24,5 +24,5 @@ build/
 .DS_Store
 Thumbs.db
 
-# Personal metadata
+# Personal metadata (Actual Budget IDs, encryption keys)
 **/metadata.json

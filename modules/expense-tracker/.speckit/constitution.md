@@ -71,6 +71,31 @@ The intelligence layer is a **DeepSeek LLM agent** — the Python host provides 
 - **Feature namespace:** Each feature gets its own folder under `.speckit/features/`. Global constitution and agent harness live at `.speckit/` root.
 - **Implementation phase:** A separate agent handles `/implement` after spec approval. This constitution governs all features.
 
+### 4.1 TDD (Test-Driven Development) — Non-Negotiable
+
+**Every line of implementation code MUST be preceded by a failing test. No exceptions.**
+
+The TDD cycle is mandatory for all implementation work:
+
+```
+RED → GREEN → REFACTOR
+```
+
+| Step | Description | Requirement |
+|---|---|---|
+| **RED** | Write a failing test first | Test must fail for the expected reason before any implementation code is written. Tests must be run and confirmed failing. |
+| **GREEN** | Write the minimum code to pass | Implement only enough code to make the test pass. No extra features, no speculative code. |
+| **REFACTOR** | Clean up without changing behavior | Improve code structure, remove duplication, enhance readability. All tests must remain green after refactoring. |
+
+**Enforcement Rules:**
+
+1. **No implementation without a test.** Every function, class method, and module must have corresponding tests written *before* the implementation.
+2. **Tests must fail first.** Run the test suite after writing each test and confirm it fails (`pytest tests/test_<module>.py -v`). If a test passes without implementation code, it is a false positive and must be fixed.
+3. **All tests must pass.** Before marking any task complete, run `pytest tests/ -v` and verify 100% pass rate. No skipped tests (`xfail` without good reason), no ignored failures.
+4. **Test isolation.** Each test must be independent — no shared mutable state between tests. Use fixtures and mocks to isolate external dependencies (Actual Budget API, IMAP, DeepSeek, SMTP).
+5. **Test coverage for edge cases.** Every edge case listed in `spec.md` must have a corresponding test.
+6. **Tests are documentation.** Test function names must clearly describe the scenario being tested (e.g., `test_insert_duplicate_returns_true` not `test_dedup_1`).
+
 ---
 
 ## 5. Amendment Process
