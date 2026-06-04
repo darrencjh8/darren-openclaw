@@ -9,7 +9,7 @@
 
 ## Overview
 
-An LLM-powered agent (OpenClaw) that monitors a dedicated Outlook burner inbox via IMAP IDLE. When a receipt or transaction alert email is forwarded to this inbox, the agent extracts structured transaction data and inserts it into the user's existing **Actual Budget** instance (hosted on Fly.io) using internal networking.
+An LLM-powered agent (OpenClaw) that monitors a dedicated Zoho burner inbox via IMAP IDLE. When a receipt or transaction alert email is forwarded to this inbox, the agent extracts structured transaction data and inserts it into the user's existing **Actual Budget** instance.
 
 The intelligence layer is a **DeepSeek LLM** (`deepseek-chat`). The Python host provides 10 deterministic tools that the LLM calls to fetch live context and execute actions. No business rules (category mapping, account matching, currency detection) are hardcoded in Python.
 
@@ -24,7 +24,7 @@ The intelligence layer is a **DeepSeek LLM** (`deepseek-chat`). The Python host 
 **So that** transactions appear in Actual Budget within seconds of the email arriving.
 
 **Acceptance Criteria:**
-- [ ] OpenClaw maintains a persistent IMAP IDLE connection to Outlook (`outlook.office365.com:993`)
+- [ ] OpenClaw maintains a persistent IMAP IDLE connection to Zoho (`imap.zoho.com:993`)
 - [ ] New emails are detected within 5 seconds of arrival
 - [ ] If the IMAP connection drops, OpenClaw reconnects automatically and performs a catch-up fetch of any emails missed during the disconnection
 - [ ] Each email is processed exactly once (idempotent via dedup)

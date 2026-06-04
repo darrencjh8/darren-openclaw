@@ -77,7 +77,7 @@ Phase 3: Integration & Deploy
   - Validate required variables on startup; raise clear error messages for missing vars
   - Expose typed config object: `Config` dataclass with fields for all env vars
 - [ ] Write `config/actual_config.json` (minimal: `{"api_url": "http://actual-budget.internal:5006"}`)
-- [ ] Write `config/email_config.json` (minimal: `{"imap_host": "outlook.office365.com", "imap_port": 993}`)
+- [ ] Write `config/email_config.json` (minimal: `{"imap_host": "imap.zoho.com", "imap_port": 993}`)
 - [ ] Implement `config/__init__.py` that loads JSON configs
 
 **Validation:** `python -c "from src.config import Config; Config.from_env()"` raises clear error for missing variables. `.env.example` has a line for every variable.
@@ -360,7 +360,7 @@ Phase 3: Integration & Deploy
 
 ---
 
-### T3.2 — Docker & Fly.io Configuration
+### T3.2 — Docker Configuration
 
 **Priority:** P0 (blocker)  
 **Estimate:** 30 minutes  
@@ -374,13 +374,9 @@ Phase 3: Integration & Deploy
   - Create `/app/data` directory
   - Set `CMD ["python", "-m", "src.main"]`
   - Non-root user for security (`user: appuser`)
-- [ ] Write `docker/fly.toml`:
-  - `app = "openclaw"` (or your chosen name)
-  - Environment variables (non-secret only): `ACTUAL_BUDGET_URL`
-  - Mount: `source = "openclaw_data"`, `destination = "/app/data"`
-  - Internal port 8080 for health check
-  - `kill_signal = "SIGINT"`, `kill_timeout = 10`
-  - Note: secrets (API keys, passwords) set via `fly secrets set`
+- [ ] Write `../../openclaw-node/docker-compose.yml` with expense-tracker service:
+  - Maps port 8080, mounts `.env` and `data/` volume
+  - Uses the Dockerfile from docker/
 - [ ] Ensure `.dockerignore` excludes `.env`, `data/`, `.git/`, `__pycache__/`, `.speckit/`, `tests/`
 
 **Validation:** `docker build -f docker/Dockerfile .` succeeds.
@@ -417,17 +413,16 @@ Phase 3: Integration & Deploy
 - [ ] Write `README.md`:
   - Project overview (what OpenClaw does)
   - Architecture diagram (ASCII)
-  - Prerequisites: Fly.io account, DeepSeek API key, Outlook/Microsoft 365 burner account with IMAP enabled, running Actual Budget instance
-  - Setup instructions:
-    1. Clone repo
-    2. Copy `.env.example` to `.env`, fill in all values
-    3. Generate an Outlook app-specific password (Microsoft Account → Security → App passwords)
-    4. `pip install -r requirements.txt`
-    5. `python -m src.main` (local test)
-    6. `fly deploy` (production)
-  - How to set up the Outlook burner inbox (step-by-step)
-  - How to configure email forwarding from bank/payment apps → burner email
-  - How to view logs (`fly logs -a openclaw`)
+   - Prerequisites: Docker + Docker Compose, DeepSeek API key, Zoho Mail burner account with IMAP enabled, running Actual Budget instance
+   - Setup instructions:
+     1. Clone repo
+     2. Copy `.env.example` to `.env`, fill in all values
+     3. Generate a Zoho app-specific password (Zoho Mail → Settings → Mail Accounts → IMAP Access)
+     4. `docker compose up -d` (from `openclaw-node/`)
+     5. Or: `pip install -r requirements.txt && python -m src.main` (local dev)
+   - How to set up the Zoho burner inbox (step-by-step)
+   - How to configure email forwarding from bank/payment apps → burner email
+   - How to view logs (`docker compose logs -f expense-tracker`)
   - Known limitations (PDF OCR needs Tesseract, no SMS support)
 - [ ] Verify `.env.example` includes ALL required variables from plan.md Section 9
 
@@ -452,7 +447,7 @@ Phase 3: Integration & Deploy
 | 11 | T2.2 — Agent Orchestrator | Agent | After T1.5, T2.1 |
 | 12 | T2.3 — DeepSeek Integration | Agent | After T2.2 |
 | 13 | T3.1 — Entry Point | Integration | After T1.5, T2.2 |
-| 14 | T3.2 — Docker & Fly | Integration | After T3.1 |
+| 14 | T3.2 — Docker Config | Integration | After T3.1 |
 | 15 | T3.3 — Integration Tests | Integration | After T3.1 |
 | 16 | T3.4 — README | Integration | After T3.2 |
 

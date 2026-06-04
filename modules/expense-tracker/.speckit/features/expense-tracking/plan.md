@@ -21,7 +21,7 @@
 | Config | `.env` + `os.environ` | — | 12-factor app; no YAML/JSON config parsing needed |
 | Dedup DB | `sqlite3` (stdlib) | built-in | Zero-dependency; single-file journal |
 | Logging | `json` + `logging` (stdlib) | built-in | JSON-line structured logs to stdout |
-| Container | Docker + Fly.io | — | `Dockerfile` + `fly.toml` |
+| Container | Docker Compose | — | `Dockerfile` + `docker-compose.yml` |
 
 ---
 
@@ -29,7 +29,7 @@
 
 ```
 ┌──────────────────────────────────────────────────────────────┐
-│  Fly.io VM #2: OpenClaw (256MB RAM, Python 3.12-slim)        │
+│  Ubuntu Laptop (Docker): expense-tracker (~150MB RAM)        │
 │                                                              │
 │  ┌────────────────────────────────────────────────────────┐  │
 │  │  main.py (entry point)                                  │  │
@@ -81,7 +81,7 @@
 │                                                              │
 │  ┌──────────────────────┐  ┌─────────────────────────────────┐   │
 │  │  SQLite Journal       │  │  IMAP Connection               │   │
-│  │  (data/dedup.db)      │  │  outlook.office365.com:993     │   │
+│  │  (data/dedup.db)      │  │  imap.zoho.com:993             │   │
 │  └──────────────────────┘  │  (SSL)                         │   │
 │                            └─────────────────────────────────┘   │
 └──────────────────────────────────────────────────────────────┘
@@ -100,7 +100,7 @@
 ## 3. Data Flow (Per-Email Sequence)
 
 ```
-Email arrives at Outlook burner inbox
+Email arrives at Zoho burner inbox
     │
     ▼
 IMAP IDLE detects new message → fires callback
@@ -384,11 +384,11 @@ Actual Budget's API uses a simple API key or token. Configured via `ACTUAL_BUDGE
 
 ### Connection
 
-- **Host:** `outlook.office365.com`
+- **Host:** `imap.zoho.com`
 - **Port:** 993 (SSL/TLS)
 - **Credentials:** `IMAP_USERNAME` / `IMAP_PASSWORD` from environment
 - **Mailbox:** `INBOX`
-- **Auth note:** Outlook supports IMAP with app-specific passwords. If using a Microsoft 365 account, generate an app password under Security → App passwords. OAuth2 is supported as an alternative but adds complexity.
+- **Auth note:** Zoho Mail supports IMAP with app-specific passwords. Generate an app password under Zoho Mail → Settings → Mail Accounts → IMAP Access. OAuth2 is supported as an alternative but adds complexity.
 
 ### IDLE Loop (pseudocode)
 
@@ -455,10 +455,10 @@ def compute_hash(date: str, amount_cents: int, account_id: str, merchant: str) -
 | `ACTUAL_BUDGET_PASSWORD` | ✅ | Actual Budget server password |
 | `ACTUAL_BUDGET_FILE` | ✅ | Budget file ID or name |
 | `ACTUAL_BUDGET_ENCRYPTION_PASSWORD` | ❌ | Optional encryption password |
-| `IMAP_HOST` | ✅ | `outlook.office365.com` |
+| `IMAP_HOST` | ✅ | `imap.zoho.com` |
 | `IMAP_PORT` | ❌ | Default: `993` |
-| `IMAP_USERNAME` | ✅ | Burner email address (Outlook/Microsoft 365 account) |
-| `IMAP_PASSWORD` | ✅ | App-specific password (generated via Microsoft Account Security settings) |
+| `IMAP_USERNAME` | ✅ | Burner email address (Zoho Mail account) |
+| `IMAP_PASSWORD` | ✅ | Zoho app-specific password |
 | `NOTIFICATION_SMTP_HOST` | ✅ | SMTP server for notifications |
 | `NOTIFICATION_SMTP_PORT` | ❌ | Default: `587` |
 | `NOTIFICATION_EMAIL` | ✅ | Your main email address for notifications |
@@ -495,25 +495,20 @@ RUN mkdir -p /app/data
 CMD ["python", "-m", "src.main"]
 ```
 
-### fly.toml (High-Level)
+### docker-compose.yml (High-Level)
 
-```toml
-app = "openclaw"
-kill_signal = "SIGINT"
-kill_timeout = 10
-
-[env]
-  ACTUAL_BUDGET_URL = "http://actual-budget.internal:5006"
-
-[mounts]
-  source = "openclaw_data"
-  destination = "/app/data"
-
-[[services]]
-  internal_port = 8080  # Health check only
-
-[experimental]
-  auto_rollback = true
+```yaml
+services:
+  expense-tracker:
+    build:
+      context: ../modules/expense-tracker
+      dockerfile: docker/Dockerfile
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./data:/app/data
+      - ./.env:/app/.env:ro
+    restart: unless-stopped
 ```
 
 ---
@@ -532,7 +527,7 @@ darren-openclaw/
 │           └── tasks.md
 ├── config/
 │   ├── actual_config.json          # Only: api_url (runtime-discovered budgets)
-│   └── email_config.json           # Only: imap_host (outlook.office365.com), imap_port (993)
+│   └── email_config.json           # Only: imap_host (imap.zoho.com), imap_port (993)
 ├── src/
 │   ├── __init__.py
 │   ├── main.py                     # Entry point
@@ -560,8 +555,7 @@ darren-openclaw/
 │       ├── dedup.py
 │       └── logging.py
 ├── docker/
-│   ├── Dockerfile
-│   └── fly.toml
+│   └── Dockerfile
 ├── tests/
 │   ├── __init__.py
 │   ├── conftest.py                 # Shared fixtures (mock Actual Budget, mock IMAP)
@@ -591,7 +585,7 @@ darren-openclaw/
 |---|---|
 | Fly.io VM #2 (free tier, 256MB) | $0.00 |
 | DeepSeek API (~100 emails/month) | ~$0.10 |
-| Outlook/Microsoft 365 burner account | $0.00 (free tier) |
+| Zoho Mail burner account | $0.00 (free tier) |
 | **Total** | **~$0.10/month** |
 
 ---
@@ -604,5 +598,5 @@ darren-openclaw/
 | IMAP IDLE connection drops | Medium | Auto-reconnect with catch-up fetch of unread emails |
 | Actual Budget API schema change | Low | Version-locked in Actual Budget; check release notes |
 | LLM hallucinates transaction data | Medium | Guardrails in system prompt; check_duplicate catches repeats; notify_user on uncertainty |
-| Outlook blocks automated IMAP access | Low | Use app-specific password generated via Microsoft Account Security settings; OAuth2 fallback available |
+| Zoho blocks automated IMAP access | Low | Use Zoho app-specific password; OAuth2 fallback available |
 | 256MB RAM insufficient for Tesseract OCR | Medium | Make PDF/OCR optional; can process PDFs as plain text attachment fallback |

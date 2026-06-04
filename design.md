@@ -56,7 +56,7 @@ darren-openclaw/                          # Umbrella repository root
 │       ├── config/                       # Static configuration (non-secret)
 │       │   ├── .gitkeep
 │       │   ├── actual_config.json        # API URL for Actual Budget
-│       │   └── email_config.json         # IMAP host/port for Outlook
+│       │   └── email_config.json         # IMAP host/port for Zoho
 │       ├── src/                          # Python source (stubs only — not yet implemented)
 │       │   ├── __init__.py
 │       │   ├── agent/                    # LLM orchestration
@@ -66,7 +66,7 @@ darren-openclaw/                          # Umbrella repository root
 │       │   ├── notifier/                 # SMTP notification sender
 │       │   └── utils/                    # Dedup journal, structured logging
 │       ├── tests/                        # Test suite (stubs only)
-│       ├── docker/                       # Dockerfile + fly.toml
+│       ├── docker/                       # Dockerfile for expense-tracker container
 │       └── db.sqlite                     # Dedup journal (runtime artifact)
 └── openclaw-node/                        # Node.js module (scaffold only)
     └── .speckit/                         # Spec-Kit scaffold
@@ -83,12 +83,12 @@ darren-openclaw/                          # Umbrella repository root
 ```mermaid
 graph TB
     subgraph External["External Services"]
-        Zoho["Outlook Mail<br/>outlook.office365.com:993"]
+        Zoho["Zoho Mail<br/>imap.zoho.com:993"]
         DeepSeek["DeepSeek API<br/>api.deepseek.com/v1"]
         AB["Actual Budget<br/>Fly.io VM #1<br/>actual-budget.internal:5006"]
     end
 
-    subgraph OpenClaw["Fly.io VM #2: OpenClaw Agent (256MB RAM, Python 3.12-slim)"]
+    subgraph OpenClaw["Ubuntu Laptop (Docker Compose): expense-tracker (Python 3.12-slim, ~150MB RAM)"]
         subgraph Main["main.py"]
             IMAP["IMAP IDLE Loop<br/>imap/idle_handler.py"]
             Orch["Agent Orchestrator<br/>agent/orchestrator.py"]
@@ -133,11 +133,11 @@ graph LR
         F["Forwarded<br/>Receipts"]
     end
 
-    E --> Outlook
-    F --> Outlook
+    E --> Zoho
+    F --> Zoho
 
     subgraph Processing["Processing Pipeline"]
-        Outlook["Outlook Burner<br/>Inbox"] -->|"IMAP IDLE"| Handler["IMAP Handler"]
+        Zoho["Zoho Burner<br/>Inbox"] -->|"IMAP IDLE"| Handler["IMAP Handler"]
         Handler -->|"raw MIME"| Extract["Content Extractor<br/>HTML→text / PDF→OCR"]
         Extract -->|"cleaned text"| LLM["DeepSeek LLM<br/>System Prompt + Tools"]
         LLM -->|"tool_calls"| Executor["Tool Executor"]
@@ -165,36 +165,41 @@ OpenClaw uses the **LLM Agent Pattern**: the Python host is a thin runtime that 
 
 | Component | Host | Network Access | Specs |
 |---|---|---|---|
-| **Actual Budget** | Fly.io VM #1 (existing) | Public HTTPS for web UI; internal HTTP for OpenClaw API | Existing production instance |
+| **Actual Budget** | Fly.io VM #1 (existing) | Public HTTPS for web UI; API via HTTPS (with auth) | Existing production instance |
 | **OpenClaw Gateway** | Ubuntu laptop (Docker) | Agent orchestration, channels, skills, tool calling | ~400MB RAM |
 | **Expense-tracker** | Ubuntu laptop (Docker) | 10 deterministic Python tools, IMAP IDLE | ~150MB RAM |
-| **Actual Budget** | Fly.io VM #1 (existing) | Public HTTPS for web UI; internal HTTP for expense-tracker | Existing production instance |
 | **Zoho Mail Burner** | Zoho (zoho.com) | Public IMAP (imap.zoho.com:993) | Free tier, dedicated inbox |
 | **DeepSeek API** | DeepSeek Cloud | Public HTTPS (api.deepseek.com/v1) | Pay-per-token |
 | **Windows Node** (future) | Windows laptop | Canvas, camera, screen, voice — connects via WebSocket | Any modern Windows PC |
 
 ### Internal Networking
 
-OpenClaw communicates with Actual Budget exclusively over Fly.io's internal private network (`http://actual-budget.internal:5006`). Actual Budget's API port is **not** exposed to the public internet — only the web UI port (5006) is publicly accessible with HTTPS enforcement. This means automation traffic never traverses the public internet.
+The expense-tracker container accesses Actual Budget's API via HTTPS over the public internet. Actual Budget's web UI port (5006) is publicly accessible with HTTPS enforcement and API authentication.
 
 ### Network Diagram
 
 ```mermaid
 graph TB
-    subgraph FlyIO["Fly.io Private Network"]
-        AB["Actual Budget VM<br/>Public: :5006 (HTTPS web UI)<br/>Internal: actual-budget.internal:5006"]
-        OC["OpenClaw VM<br/>outbound only"]
-        OC -->|"internal HTTP"| AB
+    subgraph Docker["Ubuntu Laptop — Docker Compose"]
+        GW["OpenClaw Gateway<br/>Port :18789"]
+        ET["expense-tracker<br/>Port :8080"]
+        GW -->|"HTTP /tools/*"| ET
+    end
+
+    subgraph FlyIO["Fly.io"]
+        AB["Actual Budget VM<br/>HTTPS :5006"]
     end
 
     subgraph Public["Public Internet"]
         DS["DeepSeek API<br/>api.deepseek.com:443"]
-        Outlook["Outlook IMAP<br/>outlook.office365.com:993"]
+        Zoho["Zoho IMAP<br/>imap.zoho.com:993"]
         User["User Browser<br/>(Actual Budget UI)"]
     end
 
-    OC -->|"HTTPS"| DS
-    OC -->|"IMAP/SSL"| Outlook
+    ET -->|"HTTPS"| DS
+    ET -->|"IMAP/SSL"| Zoho
+    ET -->|"HTTPS"| AB
+    GW -->|"HTTPS"| DS
     User -->|"HTTPS"| AB
 ```
 
@@ -204,7 +209,7 @@ graph TB
 
 ### 5.1 Purpose
 
-An LLM-powered agent that monitors a dedicated Outlook burner inbox via IMAP IDLE. When a receipt or transaction alert email arrives, the agent extracts structured transaction data and inserts it into the user's Actual Budget instance.
+An LLM-powered agent that monitors a dedicated Zoho burner inbox via IMAP IDLE. When a receipt or transaction alert email arrives, the agent extracts structured transaction data and inserts it into the user's Actual Budget instance.
 
 ### 5.2 Technology Stack
 
@@ -219,7 +224,7 @@ An LLM-powered agent that monitors a dedicated Outlook burner inbox via IMAP IDL
 | PDF OCR | `pytesseract` + `pdf2image` | Optional; Tesseract binary in Docker image |
 | Dedup | `sqlite3` (stdlib) | Zero-dependency single-file journal |
 | Logging | `logging` + `json` (stdlib) | JSON-line structured logs to stdout |
-| Container | Docker + Fly.io | `Dockerfile` + `fly.toml` |
+| Container | Docker Compose | `Dockerfile` + `docker-compose.yml` |
 
 ### 5.3 User Stories (from spec.md)
 
@@ -303,7 +308,7 @@ sequenceDiagram
 
 ### 5.6 Dedup Journal
 
-SHA-256 hash computed over `(date, amount_cents, account_id, merchant)` and stored in a local SQLite database. The journal is persisted on a Fly.io volume mount and survives restarts/redeploys.
+SHA-256 hash computed over `(date, amount_cents, account_id, merchant)` and stored in a local SQLite database. The journal is persisted on a Docker volume mount and survives container restarts.
 
 ```sql
 CREATE TABLE dedup_journal (
@@ -323,33 +328,34 @@ CREATE TABLE dedup_journal (
 | Variable | Required | Description |
 |---|---|---|
 | `DEEPSEEK_API_KEY` | ✅ | DeepSeek API key |
-| `ACTUAL_BUDGET_API_KEY` | ✅ | Actual Budget API auth token |
-| `ACTUAL_BUDGET_URL` | ✅ | `http://actual-budget.internal:5006` |
-| `IMAP_HOST` | ✅ | `outlook.office365.com` |
+| `ACTUAL_BUDGET_URL` | ✅ | Actual Budget server URL |
+| `ACTUAL_BUDGET_PASSWORD` | ✅ | Actual Budget server password |
+| `ACTUAL_BUDGET_FILE` | ✅ | Budget file ID or name |
+| `ACTUAL_BUDGET_ENCRYPTION_PASSWORD` | ❌ | Optional encryption password |
+| `IMAP_HOST` | ✅ | `imap.zoho.com` |
 | `IMAP_PORT` | ❌ | Default: `993` |
-| `IMAP_USERNAME` | ✅ | Burner email address (Outlook/Microsoft 365 account) |
-| `IMAP_PASSWORD` | ✅ | App-specific password (generated via Microsoft Account Security → App passwords) |
-| `NOTIFICATION_SMTP_HOST` | ✅ | SMTP server for notifications |
+| `IMAP_USERNAME` | ✅ | Burner email address (Zoho Mail account) |
+| `IMAP_PASSWORD` | ✅ | Zoho app-specific password |
+| `NOTIFICATION_SMTP_HOST` | ✅ | SMTP server for notifications (`smtp.zoho.com`) |
 | `NOTIFICATION_SMTP_PORT` | ❌ | Default: `587` |
 | `NOTIFICATION_EMAIL` | ✅ | User's main email for notifications |
-| `NOTIFICATION_EMAIL_PASSWORD` | ✅ | SMTP password |
+| `NOTIFICATION_EMAIL_PASSWORD` | ✅ | SMTP password (defaults to IMAP_PASSWORD if not set) |
 | `DEDUP_DB_PATH` | ❌ | Default: `data/dedup.db` |
 | `LOG_LEVEL` | ❌ | Default: `INFO` |
 
-### 5.8 Outlook vs Zoho — Migration Notes
+### 5.8 Zoho Mail Configuration
 
-| Aspect | Zoho (Old) | Outlook (New) |
-|---|---|---|
-| IMAP Host | `imap.zoho.com` | `outlook.office365.com` |
-| Port | 993 (SSL) | 993 (SSL) — unchanged |
-| IDLE Support | ✅ Yes | ✅ Yes — unchanged |
-| Auth Method | App-specific password | App-specific password (same concept) |
-| Free Tier | Zoho Mail free | Microsoft 365 free / Outlook.com free |
-| IMAP Library | `aioimaplib` | `aioimaplib` — unchanged |
-| SMTP for Notifications | Separate | Separate (unchanged) |
-| Architectural Impact | None | **None — hostname-only change** |
-
-**Impact Assessment:** The switch from Zoho to Outlook requires **no architectural changes**. The IMAP protocol, port (993), SSL/TLS, IDLE support, and app-password authentication model are identical. Only `IMAP_HOST` and `IMAP_PASSWORD` (to an Outlook app password) change. All source code, tool schemas, Docker configuration, and Fly.io setup remain unchanged.
+| Aspect | Setting |
+|---|---|
+| IMAP Host | `imap.zoho.com` |
+| IMAP Port | 993 (SSL) |
+| IDLE Support | ✅ Yes |
+| Auth Method | App-specific password |
+| Free Tier | Zoho Mail free |
+| IMAP Library | `aioimaplib` |
+| SMTP Host (Notifications) | `smtp.zoho.com` |
+| SMTP Port | 587 (STARTTLS) |
+| Architectural Impact | **Hostname-only configuration change** from any other IMAP provider |
 
 ### 5.9 Implementation Status
 
@@ -465,7 +471,7 @@ The node exposes device capabilities (`nodes.camera`, `nodes.screen`, `nodes.can
 
 ```mermaid
 flowchart TD
-    A["Email arrives at<br/>Outlook burner inbox"] --> B["IMAP IDLE detects<br/>new message"]
+    A["Email arrives at<br/>Zoho burner inbox"] --> B["IMAP IDLE detects<br/>new message"]
     B --> C["Raw email fetched<br/>(MIME envelope + body + attachments)"]
     C --> D["extract_email_content()"]
     
@@ -522,7 +528,7 @@ stateDiagram-v2
 
 All credentials are injected via environment variables:
 - **DeepSeek API key** — `DEEPSEEK_API_KEY`
-- **IMAP password** — `IMAP_PASSWORD` (Outlook app-specific password)
+- **IMAP password** — `IMAP_PASSWORD` (Zoho app-specific password)
 - **Actual Budget API key** — `ACTUAL_BUDGET_API_KEY`
 - **SMTP password** — `NOTIFICATION_EMAIL_PASSWORD`
 
@@ -532,15 +538,14 @@ Secrets are set via `fly secrets set` in production and `.env` file locally. `.e
 
 | Path | Protocol | Exposure |
 |---|---|---|
-| OpenClaw → Actual Budget API | HTTP (internal) | Fly.io private network only |
-| OpenClaw → DeepSeek | HTTPS (public) | Outbound only |
-| OpenClaw → Outlook IMAP | IMAP/SSL (public) | Outbound only |
+| expense-tracker → Actual Budget API | HTTPS (public) | Outbound only (with auth) |
+| expense-tracker → DeepSeek | HTTPS (public) | Outbound only |
+| expense-tracker → Zoho IMAP | IMAP/SSL (public) | Outbound only |
 | User → Actual Budget UI | HTTPS (public) | For manual budget management |
-| Automation → Actual Budget API | — | **Not exposed publicly** |
 
 ### 8.3 Burner Email Isolation
 
-The Outlook burner inbox is a dedicated, isolated account. Compromise of this inbox:
+The Zoho burner inbox is a dedicated, isolated account. Compromise of this inbox:
 - Cannot access Actual Budget (API key is not in emails)
 - Cannot access user's main email (separate accounts)
 - Only exposes transaction alert emails (which are already sent to this address)
@@ -579,7 +584,7 @@ Every email's IMAP `message_id` is carried through the entire pipeline as `corre
 
 ### 9.3 Health Check
 
-OpenClaw exposes an HTTP health check on port 8080 (returns 200 OK) for Fly.io's health monitoring. No other endpoints are exposed.
+The expense-tracker container exposes an HTTP health check on port 8080 (returns 200 OK) for Docker health monitoring. No other endpoints are exposed.
 
 ---
 
@@ -588,9 +593,9 @@ OpenClaw exposes an HTTP health check on port 8080 (returns 200 OK) for Fly.io's
 | Resource | Monthly Cost |
 |---|---|
 | Fly.io VM #1 (Actual Budget, existing) | $0.00 (free tier) |
-| Fly.io VM #2 (OpenClaw, 256MB) | $0.00 (free tier) |
+| Ubuntu laptop (Docker, self-hosted) | $0.00 (existing hardware) |
 | DeepSeek API (~100 emails/month) | ~$0.10 |
-| Outlook/Microsoft 365 burner inbox | $0.00 (free tier) |
+| Zoho Mail burner inbox | $0.00 (free tier) |
 | **Total incremental cost** | **~$0.10/month** |
 
 Token economics per email: ~2000 input tokens (system prompt + email content + tool results) + ~200 output tokens = ~$0.001 per email.
@@ -649,9 +654,9 @@ flowchart LR
 | IMAP IDLE connection drops | Medium | Missed emails | Auto-reconnect with catch-up fetch of unread emails |
 | Actual Budget API schema change | Low | Insertions fail | Version-locked; check Actual Budget release notes |
 | LLM hallucinates transaction data | Medium | Bad data in Actual Budget | Guardrails in system prompt; `check_duplicate` catches repeats; `notify_user` on uncertainty |
-| Outlook blocks automated IMAP access | Low | No email ingestion | Use app-specific password via Microsoft Account Security; OAuth2 fallback available |
+| Zoho blocks automated IMAP access | Low | No email ingestion | Use Zoho app-specific password; fallback to different burner email provider |
 | 256MB RAM insufficient for Tesseract OCR | Medium | PDF processing fails | PDF/OCR is optional; fallback to plain text attachment extraction |
-| Fly.io free tier changes/removal | Low | Hosting cost | Migration to another provider (Docker-based, portable) |
+| Docker host failure | Low | Processing stalls | Restart Docker Compose; dedup journal prevents duplicates on recovery |
 
 ---
 
@@ -686,7 +691,7 @@ gantt
     
     section Integration (Phase 3)
     T3.1 Entry Point (main.py)             :t31, after t23, 1d
-    T3.2 Docker & Fly.io Config            :t32, after t31, 0.5d
+    T3.2 Docker & Compose Config            :t32, after t31, 0.5d
     T3.3 Integration Tests                 :t33, after t31, 1d
     T3.4 README & Documentation            :t34, after t32, 0.5d
 ```
