@@ -534,10 +534,10 @@ stateDiagram-v2
 All credentials are injected via environment variables:
 - **DeepSeek API key** — `DEEPSEEK_API_KEY`
 - **IMAP password** — `IMAP_PASSWORD` (Zoho app-specific password)
-- **Actual Budget API key** — `ACTUAL_BUDGET_API_KEY`
+- **Actual Budget password** — `ACTUAL_BUDGET_PASSWORD`
 - **SMTP password** — `NOTIFICATION_EMAIL_PASSWORD`
 
-Secrets are set via `fly secrets set` in production and `.env` file locally. `.env` is `.gitignore`d.
+Secrets are set via `.env` file (mounted as read-only volume in Docker Compose). `.env` is `.gitignore`d.
 
 ### 8.2 Network Isolation
 
@@ -561,7 +561,7 @@ The Zoho burner inbox is a dedicated, isolated account. Compromise of this inbox
 
 ### 9.1 Logging
 
-All logs are JSON-line format written to stdout and consumed via `fly logs`:
+All logs are JSON-line format written to stdout and consumed via `docker compose logs`:
 
 ```json
 {

@@ -3,8 +3,8 @@
 **Project:** darren-openclaw (umbrella)  
 **Module:** expense-tracker  
 **Current Feature:** expense-tracking  
-**Constitution Hash:** `v1.0.0`  
-**Last Updated:** 2026-06-04T21:15:00+08:00  
+**Constitution Hash:** `v2.0.0`  
+**Last Updated:** 2026-06-05T02:30:00+08:00  
 
 ---
 
@@ -30,7 +30,7 @@
 
 ### System Summary
 
-OpenClaw is an **LLM-powered expense-tracking agent** that monitors an Outlook burner inbox via IMAP IDLE. When a receipt or transaction alert email arrives, the agent:
+OpenClaw is an **LLM-powered expense-tracking agent** that monitors a Zoho burner inbox via IMAP IDLE. When a receipt or transaction alert email arrives, the agent:
 
 1. Extracts the raw content (HTML → text, or PDF → OCR)
 2. Sends it to **DeepSeek** (`deepseek-chat` model) with a system prompt and a set of tools
@@ -46,7 +46,7 @@ OpenClaw is an **LLM-powered expense-tracking agent** that monitors an Outlook b
 |---|---|
 | **LLM agent pattern** (not deterministic parsers) | Zero maintenance when bank email formats change; DeepSeek generalizes across formats |
 | **No hardcoded mapping configs** | All account/category/payee data fetched live from Actual Budget API. Changing a category name in Actual Budget's UI never breaks OpenClaw |
-| **Fly.io internal networking** | OpenClaw → Actual Budget over private `.internal` DNS. No public API exposure for automation |
+| **Docker Compose** | Two containers (gateway + expense-tracker) on one Docker network. Gateway on Fly.io-free Ubuntu laptop |
 | **IMAP IDLE** (not polling) | Real-time reaction; persistent connection; zero-cost on Fly.io free VM |
 | **DeepSeek `deepseek-chat`** | $0.14/1M input tokens, $0.28/1M output. ~$0.001 per email |
 | **SQLite dedup journal** | SHA-256 hash of `(date, amount, account, merchant)`. Idempotent re-runs |
@@ -76,11 +76,11 @@ OpenClaw is an **LLM-powered expense-tracking agent** that monitors an Outlook b
 
 ### Target Environment
 
-- **OS:** Alpine Linux (Docker on Fly.io)
+- **OS:** Ubuntu laptop (Docker Compose)
 - **Python:** 3.12 (slim image, ~80MB base)
 - **DeepSeek API:** `https://api.deepseek.com/v1`
-- **IMAP:** `outlook.office365.com:993` (SSL)
-- **Actual Budget:** `http://actual-budget.internal:5006` (internal)
+- **IMAP:** `imap.zoho.com:993` (SSL)
+- **Actual Budget:** public HTTPS endpoint (API key auth)
 
 ### Pre-Implementation Checklist (for `/implement` agent)
 
@@ -97,7 +97,7 @@ OpenClaw is an **LLM-powered expense-tracking agent** that monitors an Outlook b
 - [ ] All stub files created with correct interfaces
 - [ ] `pyproject.toml` or `requirements.txt` complete
 - [ ] `docker/Dockerfile` builds successfully
-- [ ] `docker/fly.toml` references correct Actual Budget app name
+- [ ] `docker-compose.yml` correctly configured
 - [ ] Unit tests pass for all deterministic tools
 - [ ] Test fixtures cover DBS, OCBC, Grab, and MYR email samples
 - [ ] Agent orchestrator integration tests pass (mocked LLM responses)

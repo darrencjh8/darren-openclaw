@@ -38,7 +38,7 @@ class Config:
     actual_budget_file: str
     actual_budget_encryption_password: str | None
 
-    # IMAP (Outlook)
+    # IMAP (Zoho)
     imap_host: str
     imap_port: int
     imap_username: str

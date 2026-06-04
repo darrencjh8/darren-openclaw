@@ -1,8 +1,8 @@
 # Project Constitution
 
 **Project:** darren-openclaw — OpenClaw Expense Tracking Agent  
-**Version:** 1.0.0  
-**Last Amended:** 2026-06-04  
+**Version:** 2.0.0  
+**Last Amended:** 2026-06-05  
 **Workflow:** Spec-Kit (Spec-Driven Development)
 
 ---
@@ -17,9 +17,9 @@ The intelligence layer is a **DeepSeek LLM agent** — the Python host provides 
 
 ## 2. Non-Negotiable Architecture Principles
 
-### 2.1 Memory Constraint: 256MB RAM Target
+### 2.1 Memory Constraint: 150MB RAM Target
 
-- The OpenClaw VM on Fly.io (free tier) is capped at 256MB RAM.
+- The expense-tracker container runs on Ubuntu laptop via Docker Compose, targeting ~150MB RAM.
 - Python 3.12-slim base image. No heavyweight ORMs, no async frameworks that spawn thread pools.
 - Single-process architecture: one IMAP IDLE connection, one LLM conversation at a time.
 - Dependencies: `aiohttp`, `aioimaplib`, `beautifulsoup4`, `openai` (DeepSeek-compatible client), `pytesseract` (optional, for PDF).
@@ -27,11 +27,11 @@ The intelligence layer is a **DeepSeek LLM agent** — the Python host provides 
 
 ### 2.2 Security Isolation
 
-- **Internal networking:** OpenClaw communicates with Actual Budget over Fly.io's internal network (`http://actual-budget.internal:5006`). Actual Budget's API port is NOT exposed publicly for automation traffic.
-- **Actual Budget public exposure:** Only the web UI port (5006) is exposed for user dashboard access, with HTTPS enforced.
-- **Secrets management:** All credentials (DeepSeek API key, IMAP password, Actual Budget API key, notification SMTP credentials) are injected via environment variables. Never committed to source control. `.env` file is `.gitignore`d.
-- **No database exposure:** The SQLite dedup journal is local to the OpenClaw VM. Actual Budget's database is never accessed directly — only via its REST API.
-- **Burner email isolation:** The Outlook burner inbox is a dedicated, isolated account. Compromise of this inbox does not expose any other services.
+- **Networking:** The expense-tracker container accesses Actual Budget via HTTPS over the public internet with API authentication (`ACTUAL_BUDGET_PASSWORD`).
+- **Docker network isolation:** The expense-tracker container is only accessible within the Docker Compose network. The gateway container communicates with it via HTTP on the internal Docker network.
+- **Secrets management:** All credentials (DeepSeek API key, IMAP password, Actual Budget password, notification SMTP credentials) are injected via environment variables. Never committed to source control. `.env` file is `.gitignore`d.
+- **No database exposure:** The SQLite dedup journal is local to the expense-tracker container. Actual Budget's database is never accessed directly — only via its REST API.
+- **Burner email isolation:** The Zoho burner inbox is a dedicated, isolated account. Compromise of this inbox does not expose any other services.
 
 ### 2.3 Data Integrity
 
@@ -51,7 +51,7 @@ The intelligence layer is a **DeepSeek LLM agent** — the Python host provides 
 
 - **Structured logging:** All output to stdout/stderr is JSON-line format with fields: `timestamp`, `level`, `correlation_id` (email msg_id), `event`, `data`.
 - **Correlation ID:** Every email processed carries its IMAP `message_id` through the entire pipeline — logs, dedup journal, Actual Budget transaction `notes` field.
-- **No third-party monitoring:** No Sentry, no Datadog, no external telemetry. Logs are consumed via Fly.io's built-in `fly logs`.
+- **No third-party monitoring:** No Sentry, no Datadog, no external telemetry. Logs are consumed via Docker's built-in logging (`docker compose logs`).
 
 ---
 
@@ -59,9 +59,10 @@ The intelligence layer is a **DeepSeek LLM agent** — the Python host provides 
 
 | Component | Host | Network |
 |---|---|---|
-| Actual Budget | Fly.io VM #1 (existing) | Public HTTPS for UI; internal for API |
-| OpenClaw Agent | Fly.io VM #2 (free tier, 256MB) | Internal → Actual Budget; outbound HTTPS → DeepSeek API, IMAP → Outlook |
-| Outlook Burner Inbox | Microsoft 365 (outlook.office365.com) | Public IMAP (outlook.office365.com:993) |
+| Actual Budget | Fly.io VM #1 (existing) | Public HTTPS |
+| OpenClaw Gateway | Ubuntu laptop (Docker) | Internal Docker network, port 18789 |
+| expense-tracker | Ubuntu laptop (Docker) | Internal Docker network, port 8080; IMAP→Zoho |
+| Zoho Mail Burner | Zoho (zoho.com) | Public IMAP (imap.zoho.com:993) |
 
 ---
 
