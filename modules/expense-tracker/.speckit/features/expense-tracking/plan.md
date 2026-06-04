@@ -130,8 +130,9 @@ Python executes requested tools, returns results to LLM
     ▼
 LLM makes final decision:
     ├── HAPPY PATH: insert_transaction(account_id, amount, category, date, description)
-    ├── SKIP: mark_email_read() + log_decision("not a transaction")
-    └── NOTIFY: notify_user(reason, email_content) — email left unread
+    │   └── mark_email_read() ← only mark read on successful insert
+    ├── SKIP: log_decision("not a transaction") ← leave unread (re-process on restart)
+    └── NOTIFY: notify_user(reason, email_content) ← leave unread (manual review)
     │
     ▼
 On successful insert: mark_email_read() + log_decision("inserted")
@@ -325,9 +326,10 @@ RULES (non-negotiable):
 9. The user's Actual Budget date format is DD/MM/YYYY. Convert all dates to 
    YYYY-MM-DD before calling insert_transaction().
 10. If the email is a promotional message, bank statement summary, or 
-    anything NOT a single transaction → mark_email_read() + log_decision("skipped").
-11. Always explain your reasoning in the response before making tool calls.
-12. After all actions are complete, call log_decision() with the final outcome.
+    anything NOT a single transaction → log_decision("skipped"). Do NOT mark as read.
+11. Only call mark_email_read() after a successful insert_transaction().
+12. Always explain your reasoning in the response before making tool calls.
+13. After all actions are complete, call log_decision() with the final outcome.
 
 WORKFLOW:
 1. extract_email_content()
@@ -341,7 +343,7 @@ WORKFLOW:
 9. fetch_recent_transactions(budget_id, account_id, days=3)
 10. check_duplicate(date, amount_cents, account_id, merchant)
 11. insert_transaction(...)
-12. mark_email_read()
+12. mark_email_read() ← ONLY after successful insert
 13. log_decision("inserted", ...)
 ```
 

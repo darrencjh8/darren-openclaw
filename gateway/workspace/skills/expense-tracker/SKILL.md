@@ -34,7 +34,7 @@ Use this skill when the user wants to:
 5. **Categories are optional** — leave `category_id` as null if uncertain
 6. **Amounts in integer cents** — S$12.80 = -1280 (negative for spending)
 7. **Dates in YYYY-MM-DD** — convert from any format
-8. **Promotional emails → skip** — not a transaction, mark as read, log decision
+8. **Promotional emails → skip** — log decision, leave unread (do NOT mark as read)
 9. **Always explain reasoning** before making tool calls
 10. **Always log the final decision** via `log_decision`
 
@@ -54,4 +54,4 @@ Use this skill when the user wants to:
 - **Currency unclear**: "Is this SGD or MYR?" → `notify_user`
 - **Account not found**: "Account 'XYZ' not found. Available: DBS Yuu, UOB One, ..." → `notify_user`
 - **No amount**: "How much was the transaction?" → `notify_user`
-- **Promotional email**: Skip, mark read, log decision
+- **Promotional email**: Skip, log decision, leave unread

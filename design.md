@@ -301,8 +301,8 @@ sequenceDiagram
         Orch->>Tools: mark_email_read()
         Orch->>Tools: log_decision("inserted")
     else Promotional / Skip
-        Orch->>Tools: mark_email_read()
         Orch->>Tools: log_decision("skipped")
+        Note over Orch: email left unread for re-processing on restart
     else Uncertain / Error
         Orch->>Tools: notify_user(reason, content)
         Tools->>SMTP: send notification email
@@ -501,8 +501,8 @@ flowchart TD
     J --> K["mark_email_read()"]
     K --> L["log_decision('inserted')"]
     
-    I -->|"Not a transaction"| M["mark_email_read()"]
-    M --> N["log_decision('skipped')"]
+    I -->|"Not a transaction"| N["log_decision('skipped')"]
+    N --> Q2["Email left UNREAD<br/>for re-processing on restart"]
     
     I -->|"Uncertain/Error"| O["notify_user(reason, content)"]
     O --> P["log_decision('notified')"]
@@ -516,12 +516,13 @@ stateDiagram-v2
     [*] --> New: Email arrives in inbox
     New --> Processing: IMAP IDLE callback fires
     Processing --> Processed: LLM confident → insert + mark \Seen
-    Processing --> Processed_Skip: LLM identifies as non-transactional → mark \Seen
+    Processing --> Processed_Skip: LLM identifies as non-transactional → log decision
     Processing --> Failed: LLM uncertain / API error → notify_user
+    Processed_Skip --> Processing: On restart: unread emails re-fetched
     Failed --> Processing: On restart: unread emails re-fetched
     Processed --> [*]
-    Processed_Skip --> [*]
 
+    note right of Processed_Skip: Email left \Unseen
     note right of Failed: Email left \Unseen for manual review
 ```
 

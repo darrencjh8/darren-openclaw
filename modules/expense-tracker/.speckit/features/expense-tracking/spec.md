@@ -126,7 +126,8 @@ The intelligence layer is a **DeepSeek LLM** (`deepseek-chat`). The Python host 
 **So that** crashes or redeploys don't cause duplicate or lost transactions.
 
 **Acceptance Criteria:**
-- [ ] Emails are marked as read (`\Seen` flag) only after successful insertion (or explicit skip decision)
+- [ ] Emails are marked as read (`\Seen` flag) only after successful transaction insertion
+- [ ] Skipped emails (promos/spam) and uncertain emails remain unread — re-processed on restart
 - [ ] On startup, OpenClaw fetches any unread emails and processes them
 - [ ] The dedup journal prevents re-insertion of already-processed transactions
 - [ ] If OpenClaw crashes mid-processing, the email remains unread and is re-processed on restart
