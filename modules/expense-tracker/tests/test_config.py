@@ -50,6 +50,7 @@ class TestConfig:
 
         for k, v in _REQUIRED_ENV.items():
             monkeypatch.setenv(k, v)
+        monkeypatch.delenv("ACTUAL_BUDGET_ENCRYPTION_PASSWORD", raising=False)
 
         config = Config.from_env()
         assert config.imap_port == 993

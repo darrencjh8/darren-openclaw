@@ -2,9 +2,9 @@
 
 **Project:** darren-openclaw (umbrella)  
 **Module:** openclaw-node  
-**Current Feature:** companion-service  
-**Constitution Hash:** `v1.0.0`  
-**Last Updated:** 2026-06-05T01:22:00+08:00  
+**Current Feature:** expense-tracker-skill  
+**Constitution Hash:** `v3.0.0`  
+**Last Updated:** 2026-06-05T01:52:00+08:00  
 
 ---
 
@@ -18,39 +18,42 @@
 | Phase | Command | Status | Artifact |
 |---|---|---|---|
 | 0: Constitution | `/speckit.constitution` | ✅ Complete | `.speckit/constitution.md` |
-| 1: Specify | `/speckit.specify` | ✅ Complete | `.speckit/features/agent-framework/spec.md` |
-| 2: Plan | `/speckit.plan` | ✅ Complete | `.speckit/features/agent-framework/plan.md` |
-| 3: Tasks | `/speckit.tasks` | ✅ Complete | `.speckit/features/agent-framework/tasks.md` |
-| 4: Implement | `/speckit.implement` | ⬜ Pending | Source files |
+| 1: Specify | `/speckit.specify` | ✅ Complete | `.speckit/features/expense-tracker-skill/spec.md` |
+| 2: Plan | `/speckit.plan` | ✅ Complete | `.speckit/features/expense-tracker-skill/plan.md` |
+| 3: Tasks | `/speckit.tasks` | ✅ Complete | `.speckit/features/expense-tracker-skill/tasks.md` |
+| 4: Implement | `/speckit.implement` | ⬜ Pending | SKILL.md, SKILL.js, tools_api.py, docker-compose |
 | 5: Validate | `/speckit.validate` | ⬜ Pending | Test results |
 
 ---
 
 ## Context Dump
 
-openclaw-node is a Node.js 22 companion service that provides:
+openclaw-node deploys the **OpenClaw Gateway** with a custom **expense-tracker skill**. The skill wraps 10 deterministic Python tools behind HTTP endpoints.
 
-- `GET /health` — Fly.io liveness probe
-- `GET /ready` — Readiness probe (503 during shutdown)
-- `GET /status` — Service metadata + registered agents
-- `POST /agents/register` — Dynamic agent registration
-- `POST /agents/{name}/heartbeat` — Agent heartbeat
-- `GET/POST /webhook` — Generic webhook ingress for future channels
+### Architecture
+
+```
+OpenClaw Gateway (Container)
+  └── skills/expense-tracker/
+      ├── SKILL.md   → LLM instructions
+      └── SKILL.js   → 10 tool functions, each calls HTTP
+
+expense-tracker (Container)
+  └── tools_api.py   → HTTP endpoints for each tool
+      └── calls: actualpy, dedup, extractors, imap, notifier
+```
 
 ### Key Decisions
 
 | Decision | Rationale |
 |---|---|
-| Express 4.x | Minimal, well-known, no overhead |
-| In-memory state only | No database — resets on restart is acceptable |
-| Agent registration | expense-tracker registers on startup + sends heartbeats |
-| Webhook passthrough | No channel-specific logic — forwards to expense-tracker |
-| Graceful shutdown | SIGTERM → mark unready → drain connections → exit |
-| TDD mandatory | RED → GREEN → REFACTOR for every task |
+| Gateway is installed, not built | OpenClaw provides all infra |
+| Skills call Python over HTTP | Separation of concerns — Node.js shouldn't run Python tools |
+| Deterministic tools in Python | Same code works standalone or as skill backend |
+| Docker Compose | Two containers, one network |
 
 ### Target Environment
 
-- **OS:** Alpine Linux (Docker on Fly.io)
-- **Runtime:** Node.js 22 LTS
-- **Port:** 8080 (internal only)
-- **Expense-tracker URL:** `http://expense-tracker.internal:8080`
+- **Gateway:** Ubuntu laptop, Docker, Node.js 24 (via openclaw image)
+- **Expense-tracker:** Python 3.12-slim, Docker
+- **Actual Budget:** Fly.io existing instance

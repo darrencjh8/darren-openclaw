@@ -166,10 +166,12 @@ OpenClaw uses the **LLM Agent Pattern**: the Python host is a thin runtime that 
 | Component | Host | Network Access | Specs |
 |---|---|---|---|
 | **Actual Budget** | Fly.io VM #1 (existing) | Public HTTPS for web UI; internal HTTP for OpenClaw API | Existing production instance |
-| **OpenClaw Agent** | Fly.io VM #2 (free tier) | Outbound: HTTPS → DeepSeek, IMAP → Zoho; Internal → Actual Budget + openclaw-node | 256MB RAM, shared CPU |
-| **openclaw-node** | Fly.io VM #3 (free tier) | Internal HTTP only — health/status/agents/webhook | 256MB RAM, shared CPU |
+| **OpenClaw Gateway** | Ubuntu laptop (Docker) | Agent orchestration, channels, skills, tool calling | ~400MB RAM |
+| **Expense-tracker** | Ubuntu laptop (Docker) | 10 deterministic Python tools, IMAP IDLE | ~150MB RAM |
+| **Actual Budget** | Fly.io VM #1 (existing) | Public HTTPS for web UI; internal HTTP for expense-tracker | Existing production instance |
 | **Zoho Mail Burner** | Zoho (zoho.com) | Public IMAP (imap.zoho.com:993) | Free tier, dedicated inbox |
 | **DeepSeek API** | DeepSeek Cloud | Public HTTPS (api.deepseek.com/v1) | Pay-per-token |
+| **Windows Node** (future) | Windows laptop | Canvas, camera, screen, voice — connects via WebSocket | Any modern Windows PC |
 
 ### Internal Networking
 
@@ -362,72 +364,98 @@ CREATE TABLE dedup_journal (
 
 ---
 
-## 6. Module: openclaw-node (Companion Service)
+## 6. Module: openclaw-node (OpenClaw Gateway + Skill)
 
 ### 6.1 Purpose
 
-A **Node.js 22 companion service** running on Express that provides health monitoring, agent registration/heartbeat tracking, and a generic webhook ingress for future channel expansion (WhatsApp, Telegram). The expense-tracker registers itself as an agent on startup and sends periodic heartbeats.
+An **OpenClaw Gateway deployment** running the official `openclaw` Node.js gateway on Ubuntu/Docker, loaded with a custom **expense-tracker skill**. The gateway provides channels (WhatsApp/Telegram/WebChat), agent orchestration, session management, and tool calling. WE provide the skills and deterministic tools.
 
-### 6.2 Endpoints
+The gateway can be joined by **OpenClaw nodes** — separate machines (Windows/macOS/iOS/Android) that connect via WebSocket and expose device capabilities (camera, screen capture, canvas, voice).
 
-| Method | Endpoint | Description |
-|---|---|---|
-| GET | `/health` | Liveness probe — always returns 200 |
-| GET | `/ready` | Readiness probe — 503 during startup/shutdown |
-| GET | `/status` | Service metadata + registered agents |
-| POST | `/agents/register` | Register a new agent (201) or re-register (200) |
-| POST | `/agents/{name}/heartbeat` | Update agent heartbeat timestamp |
-| GET/POST | `/webhook` | Future channel ingress — forwards to expense-tracker |
-
-### 6.3 Inter-Service Communication
+### 6.2 Architecture
 
 ```mermaid
 graph TB
-    subgraph FlyIO["Fly.io Private Network"]
-        OC["openclaw-node<br/>Express :8080<br/>health/ready/status<br/>agents/register/heartbeat<br/>/webhook"]
-        ET["expense-tracker<br/>Python :8080<br/>/health<br/>/process (future)"]
+    subgraph Local["Ubuntu Laptop — Docker Compose"]
+        GW["OpenClaw Gateway<br/>ghcr.io/openclaw/openclaw:latest<br/>Port 18789"]
         
-        ET -->|"POST /agents/register (startup)"| OC
-        ET -->|"POST /agents/heartbeat (periodic)"| OC
-        OC -->|"POST /process (webhook forward)"| ET
+        subgraph Skill["expense-tracker Skill"]
+            MD["SKILL.md — LLM instructions"]
+            JS["SKILL.js — 10 tool wrappers"]
+        end
+        
+        ET["expense-tracker<br/>Python 3.12-slim<br/>Port 8080<br/>10 tool endpoints + IMAP IDLE"]
+        
+        GW -->|"calls tool functions"| JS
+        JS -->|"HTTP POST /tools/*"| ET
     end
 
-    subgraph Future["Future Channels"]
-        WA["WhatsApp Cloud API"]
-        TG["Telegram Bot API"]
-    end
+    DS["DeepSeek API"] --> GW
+    ET --> AB["Actual Budget (Fly.io)"]
+    ET --> Zoho["Zoho Mail (IMAP IDLE)"]
 
-    WA -->|"webhook"| OC
-    TG -->|"webhook"| OC
+    subgraph Nodes["OpenClaw Nodes (future)"]
+        WIN["Windows Node<br/>canvas, camera, screen, voice"]
+    end
+    WIN -->|"WebSocket"| GW
 ```
 
-### 6.4 WhatsApp Expansion (Future)
+### 6.3 We Do NOT Build HTTP Endpoints
 
-The `/webhook` endpoint is designed as a **generic passthrough** — it validates the payload format and forwards to the expense-tracker's `/process` endpoint. No channel-specific logic lives in the companion service.
+The OpenClaw Gateway provides all infrastructure:
+- Channel handlers (WhatsApp, Telegram, WebChat, 26+ others)
+- Agent orchestration (LLM loop, tool calling, session management)
+- DM pairing and security
+- Webhook verification
+- Graceful shutdown and health checks
 
-**Flow:** WhatsApp → webhook → openclaw-node validates → forwards to expense-tracker → LLM agent orchestrator → Actual Budget
+We configure `openclaw.json` — we do not build a custom server.
 
-The expense-tracker's `POST /process` endpoint (not yet implemented) accepts:
+### 6.4 We Build Skills + Deterministic Python Tools
+
+| File | Language | Purpose |
+|---|---|---|
+| `SKILL.md` | Markdown | LLM instructions for expense tracking |
+| `SKILL.js` | Node.js | 10 async functions → HTTP calls to Python tool API |
+| `src/tools_api.py` | Python | HTTP endpoints for each deterministic tool |
+| `openclaw.json` | JSON | Gateway config (model, skills path, channels) |
+| `docker-compose.yml` | YAML | Two containers: gateway + expense-tracker |
+
+### 6.5 WhatsApp/Telegram — Zero Code Required
+
+OpenClaw natively supports 26+ channels. To enable WhatsApp:
 ```json
+// openclaw.json
 {
-  "source": "whatsapp",
-  "from": "+65xxxxxxxx",
-  "text": "Track $12.80 at Toast Box from DBS Yuu",
-  "correlation_id": "uuid",
-  "timestamp": "2026-06-05T01:18:00+08:00"
+  "channels": {
+    "whatsapp": { "enabled": true }
+  }
 }
 ```
 
-### 6.5 Status
+The gateway handles Meta webhook verification, message parsing, and DM pairing. No custom code needed.
+
+### 6.6 Windows Node Expansion (Future)
+
+A Windows laptop can connect as an OpenClaw node:
+```bash
+openclaw node connect --gateway <ubuntu-ip>:18789
+```
+
+The node exposes device capabilities (`nodes.camera`, `nodes.screen`, `nodes.canvas`, `nodes.voice`) to the gateway agent. No code changes in darren-openclaw.
+
+### 6.7 Status
 
 | Artifact | Status |
 |---|---|
 | `.speckit/` scaffold | ✅ Created |
-| Constitution (TDD mandated) | ✅ Complete |
-| Spec (8 user stories, v2.0.0) | ✅ Complete |
-| Plan (Mermaid diagrams, env vars) | ✅ Complete |
-| Tasks (9 tasks, ~2.5h) | ✅ Complete |
-| Implementation | ⬜ Pending |
+| Constitution (v3.0.0, OpenClaw-native) | ✅ Complete |
+| Spec (4 user stories) | ✅ Complete |
+| Plan (Mermaid + Docker Compose + SKILL.js) | ✅ Complete |
+| Tasks (8 tasks, ~3.5h) | ✅ Complete |
+| SKILL.md + SKILL.js + openclaw.json | ✅ Written |
+| docker-compose.yml | ✅ Written |
+| Implementation (tools_api.py) | ⬜ Pending |
 
 ---
 

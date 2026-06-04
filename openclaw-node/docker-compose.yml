@@ -1,0 +1,27 @@
+services:
+  openclaw:
+    image: ghcr.io/openclaw/openclaw:latest
+    ports:
+      - "18789:18789"
+    volumes:
+      - ./openclaw.json:/app/openclaw.json:ro
+      - ./skills:/app/skills:ro
+      - ./workspace:/app/workspace
+      - openclaw_data:/app/data
+    environment:
+      - OPENCLAW_CONFIG_PATH=/app/openclaw.json
+    restart: unless-stopped
+
+  expense-tracker:
+    build:
+      context: ../modules/expense-tracker
+      dockerfile: docker/Dockerfile
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - ../modules/expense-tracker/data:/app/data
+      - ../modules/expense-tracker/.env:/app/.env:ro
+    restart: unless-stopped
+
+volumes:
+  openclaw_data:

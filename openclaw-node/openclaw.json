@@ -1,0 +1,17 @@
+{
+  "agent": {
+    "model": "deepseek/deepseek-chat"
+  },
+  "gateway": {
+    "port": 18789,
+    "bind": "0.0.0.0"
+  },
+  "skills": {
+    "directory": "/app/skills"
+  },
+  "channels": {
+    "whatsapp": {
+      "enabled": false
+    }
+  }
+}
