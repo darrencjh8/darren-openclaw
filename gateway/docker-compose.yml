@@ -10,6 +10,7 @@ services:
     environment:
       - OPENCLAW_CONFIG_PATH=/app/openclaw.json
       - OPENCLAW_HOME=/app
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
     restart: unless-stopped
 
   expense-tracker:

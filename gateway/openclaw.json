@@ -4,6 +4,10 @@
       "workspace": "/app/workspace",
       "model": {
         "primary": "deepseek/deepseek-chat"
+      },
+      "skills": ["expense-tracker"],
+      "session": {
+        "dmScope": "per-channel-peer"
       }
     }
   },
@@ -12,8 +16,11 @@
     "bind": "0.0.0.0"
   },
   "channels": {
-    "whatsapp": {
-      "enabled": false
+    "telegram": {
+      "enabled": true,
+      "botToken": "${TELEGRAM_BOT_TOKEN}",
+      "dmPolicy": "allowlist",
+      "allowFrom": ["tg:YOUR_TELEGRAM_USER_ID"]
     }
   }
 }

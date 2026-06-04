@@ -2,9 +2,9 @@
 
 **Project:** darren-openclaw (umbrella)  
 **Module:** gateway  
-**Current Feature:** expense-tracker-skill  
+**Current Features:** gateway-baseline, expense-tracker-skill  
 **Constitution Hash:** `v3.0.0`  
-**Last Updated:** 2026-06-05T01:52:00+08:00  
+**Last Updated:** 2026-06-05T02:40:00+08:00  
 
 ---
 
@@ -18,10 +18,10 @@
 | Phase | Command | Status | Artifact |
 |---|---|---|---|
 | 0: Constitution | `/speckit.constitution` | ✅ Complete | `.speckit/constitution.md` |
-| 1: Specify | `/speckit.specify` | ✅ Complete | `.speckit/features/expense-tracker-skill/spec.md` |
-| 2: Plan | `/speckit.plan` | ✅ Complete | `.speckit/features/expense-tracker-skill/plan.md` |
-| 3: Tasks | `/speckit.tasks` | ✅ Complete | `.speckit/features/expense-tracker-skill/tasks.md` |
-| 4: Implement | `/speckit.implement` | ⬜ Pending | SKILL.md, SKILL.js, tools_api.py, docker-compose |
+| 1: Specify | `/speckit.specify` | ✅ Complete | `.speckit/features/gateway-baseline/spec.md`, `expense-tracker-skill/spec.md` |
+| 2: Plan | `/speckit.plan` | ✅ Complete | `.speckit/features/gateway-baseline/plan.md`, `expense-tracker-skill/plan.md` |
+| 3: Tasks | `/speckit.tasks` | ✅ Complete | `.speckit/features/gateway-baseline/tasks.md`, `expense-tracker-skill/tasks.md` |
+| 4: Implement | `/speckit.implement` | ⬜ Pending | openclaw.json, AGENTS.md, docker-compose, SKILL.md, SKILL.js, tools_api.py |
 | 5: Validate | `/speckit.validate` | ⬜ Pending | Test results |
 
 ---

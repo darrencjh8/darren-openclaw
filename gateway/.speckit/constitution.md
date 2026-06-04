@@ -19,7 +19,15 @@ The gateway can be joined by **OpenClaw nodes** — separate machines (Windows/m
 
 ### 2.1 We Do NOT Build HTTP Endpoints
 
-The OpenClaw Gateway provides all infrastructure: channel handlers, webhook verification, agent orchestration, DM pairing, session management, logging, and graceful shutdown. We configure it — we do not build it.
+The OpenClaw Gateway provides all infrastructure: channel handlers (Telegram via Bot API), webhook verification, agent orchestration, DM pairing, session management, logging, and graceful shutdown. We configure it — we do not build it.
+
+### 2.2 Telegram Bot as Primary Channel
+
+- The gateway communicates with users exclusively via a **Telegram bot** (Bot API token).
+- The bot is a standalone entity with no access to the user's private chats, contacts, or groups.
+- `dmPolicy: "allowlist"` restricts access to pre-approved Telegram user IDs.
+- `dmScope: "per-channel-peer"` isolates each user's session.
+- Bot token is injected via `${TELEGRAM_BOT_TOKEN}` env var substitution — never committed to git.
 
 ### 2.2 We Build Skills + Deterministic Tools
 
