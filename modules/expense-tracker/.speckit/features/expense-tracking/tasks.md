@@ -374,7 +374,7 @@ Phase 3: Integration & Deploy
   - Create `/app/data` directory
   - Set `CMD ["python", "-m", "src.main"]`
   - Non-root user for security (`user: appuser`)
-- [ ] Write `../../openclaw-node/docker-compose.yml` with expense-tracker service:
+- [ ] Write `../../gateway/docker-compose.yml` with expense-tracker service:
   - Maps port 8080, mounts `.env` and `data/` volume
   - Uses the Dockerfile from docker/
 - [ ] Ensure `.dockerignore` excludes `.env`, `data/`, `.git/`, `__pycache__/`, `.speckit/`, `tests/`
@@ -418,7 +418,7 @@ Phase 3: Integration & Deploy
      1. Clone repo
      2. Copy `.env.example` to `.env`, fill in all values
      3. Generate a Zoho app-specific password (Zoho Mail → Settings → Mail Accounts → IMAP Access)
-     4. `docker compose up -d` (from `openclaw-node/`)
+     4. `docker compose up -d` (from `gateway/`)
      5. Or: `pip install -r requirements.txt && python -m src.main` (local dev)
    - How to set up the Zoho burner inbox (step-by-step)
    - How to configure email forwarding from bank/payment apps → burner email

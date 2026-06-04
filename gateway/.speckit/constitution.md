@@ -1,6 +1,6 @@
-# Project Constitution — openclaw-node
+# Project Constitution — gateway
 
-**Project:** darren-openclaw — OpenClaw Gateway Node  
+**Project:** darren-openclaw — OpenClaw Gateway  
 **Version:** 3.0.0  
 **Last Amended:** 2026-06-05  
 **Workflow:** Spec-Kit (Spec-Driven Development)
@@ -9,7 +9,7 @@
 
 ## 1. System Identity
 
-openclaw-node is an **OpenClaw Gateway deployment** — it runs the official `openclaw` Node.js gateway (https://openclaw.ai) on Ubuntu/Docker, loaded with custom skills. It is NOT a custom-built companion service. The gateway provides channels (WhatsApp/Telegram/WebChat), agent orchestration, session management, and tool calling. WE provide the skills.
+The gateway is an **OpenClaw Gateway deployment** — it runs the official `openclaw` Node.js gateway (https://openclaw.ai) on Ubuntu/Docker, loaded with custom skills. It is NOT a custom-built companion service. The gateway provides channels (WhatsApp/Telegram/WebChat), agent orchestration, session management, and tool calling. WE provide the skills and tools.
 
 The gateway can be joined by **OpenClaw nodes** — separate machines (Windows/macOS/iOS/Android) that connect via WebSocket and expose device capabilities (camera, screen capture, canvas, voice).
 

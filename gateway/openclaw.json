@@ -1,0 +1,19 @@
+{
+  "agents": {
+    "defaults": {
+      "workspace": "/app/workspace",
+      "model": {
+        "primary": "deepseek/deepseek-chat"
+      }
+    }
+  },
+  "gateway": {
+    "port": 18789,
+    "bind": "0.0.0.0"
+  },
+  "channels": {
+    "whatsapp": {
+      "enabled": false
+    }
+  }
+}

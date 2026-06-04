@@ -14,7 +14,7 @@
 3. [System Architecture](#3-system-architecture)
 4. [Hosting Topology](#4-hosting-topology)
 5. [Module: expense-tracker](#5-module-expense-tracker)
-6. [Module: openclaw-node](#6-module-openclaw-node)
+6. [Module: gateway](#6-module-gateway)
 7. [Data Flow](#7-data-flow)
 8. [Security Design](#8-security-design)
 9. [Observability](#9-observability)
@@ -33,8 +33,8 @@
 
 | Module | Purpose | Status |
 |---|---|---|
-| **expense-tracker** | Automated expense tracking via email → Actual Budget | Specified, Planned, Tasked — Implementation Pending |
-| **openclaw-node** | (TBD) Node.js-based agent module | Scaffold only |
+| **expense-tracker** | Automated expense tracking via email → Actual Budget (Python tool backend) | Specified, Planned, Tasked — Implementation Pending |
+| **gateway** | OpenClaw Gateway deployment with expense-tracker skill | Config + skills written, implementation pending |
 
 ---
 
@@ -68,10 +68,15 @@ darren-openclaw/                          # Umbrella repository root
 │       ├── tests/                        # Test suite (stubs only)
 │       ├── docker/                       # Dockerfile for expense-tracker container
 │       └── db.sqlite                     # Dedup journal (runtime artifact)
-└── openclaw-node/                        # Node.js module (scaffold only)
-    └── .speckit/                         # Spec-Kit scaffold
-        ├── .gitkeep
-        └── features/                     # Feature specs (empty)
+└── gateway/                              # OpenClaw Gateway config + skills
+    ├── openclaw.json                     # Gateway configuration
+    ├── docker-compose.yml                # Gateway + expense-tracker containers
+    ├── workspace/                        # Agent workspace (persisted)
+    │   └── skills/                       # Skills loaded by the gateway
+    │       └── expense-tracker/          # Expense tracker skill
+    │           ├── SKILL.md              # LLM instructions for expense tracking
+    │           └── SKILL.js              # Tool wrappers (HTTP → Python tools)
+    └── .speckit/                         # Spec-Kit artifacts (gateway + skill)
 ```
 
 ---
@@ -370,7 +375,7 @@ CREATE TABLE dedup_journal (
 
 ---
 
-## 6. Module: openclaw-node (OpenClaw Gateway + Skill)
+## 6. Module: gateway
 
 ### 6.1 Purpose
 
@@ -417,14 +422,14 @@ The OpenClaw Gateway provides all infrastructure:
 
 We configure `openclaw.json` — we do not build a custom server.
 
-### 6.4 We Build Skills + Deterministic Python Tools
+### 6.4 We Build Skills + Tools
 
 | File | Language | Purpose |
 |---|---|---|
-| `SKILL.md` | Markdown | LLM instructions for expense tracking |
+| `SKILL.md` | Markdown | LLM instructions for expense tracking (in `workspace/skills/expense-tracker/`) |
 | `SKILL.js` | Node.js | 10 async functions → HTTP calls to Python tool API |
-| `src/tools_api.py` | Python | HTTP endpoints for each deterministic tool |
-| `openclaw.json` | JSON | Gateway config (model, skills path, channels) |
+| `tools_api.py` | Python | HTTP endpoints for each deterministic tool (in `modules/expense-tracker/src/`) |
+| `openclaw.json` | JSON5 | Gateway config (agent model, workspace, channels) |
 | `docker-compose.yml` | YAML | Two containers: gateway + expense-tracker |
 
 ### 6.5 WhatsApp/Telegram — Zero Code Required
@@ -704,5 +709,5 @@ gantt
 | | expense-tracker: `/implement` — Phase 2 (Agent Intelligence) | ⬜ |
 | | expense-tracker: `/implement` — Phase 3 (Integration & Deploy) | ⬜ |
 | | expense-tracker: `/validate` — Test suite + Docker build | ⬜ |
-| **Future** | openclaw-node: `/speckit.constitution` | ⬜ |
-| | openclaw-node: Feature specification & implementation | ⬜ |
+| **Future** | gateway: `/speckit.constitution` | ✅ |
+| | gateway: Feature specification & implementation | ⬜ |

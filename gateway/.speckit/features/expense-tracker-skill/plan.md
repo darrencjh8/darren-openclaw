@@ -54,11 +54,11 @@ services:
       - "18789:18789"
     volumes:
       - ./openclaw.json:/app/openclaw.json:ro
-      - ./skills:/app/skills:ro
       - ./workspace:/app/workspace
       - openclaw_data:/app/data
     environment:
       - OPENCLAW_CONFIG_PATH=/app/openclaw.json
+      - OPENCLAW_HOME=/app
     restart: unless-stopped
 
   expense-tracker:
@@ -134,14 +134,17 @@ export async function log_decision({ action, reasoning, transaction_id }) {
 
 ```json
 {
-  "agent": {
-    "model": "deepseek/deepseek-chat"
+  "agents": {
+    "defaults": {
+      "workspace": "/app/workspace",
+      "model": {
+        "primary": "deepseek/deepseek-chat"
+      }
+    }
   },
   "gateway": {
-    "port": 18789
-  },
-  "skills": {
-    "directory": "/app/skills"
+    "port": 18789,
+    "bind": "0.0.0.0"
   },
   "channels": {
     "whatsapp": {

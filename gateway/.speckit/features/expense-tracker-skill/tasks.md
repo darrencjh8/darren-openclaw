@@ -90,7 +90,7 @@ No tests (content reviewed manually).
 
 Write `openclaw.json`:
 - Model: `deepseek/deepseek-chat`
-- Skills directory: `/app/skills`
+- Workspace: `/app/workspace` (skills auto-discovered from `workspace/skills/`)
 - Gateway port: 18789
 - WhatsApp channel disabled by default
 

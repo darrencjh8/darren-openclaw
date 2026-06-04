@@ -1,7 +1,7 @@
-# Spec-Kit Agent Harness — openclaw-node
+# Spec-Kit Agent Harness — gateway
 
 **Project:** darren-openclaw (umbrella)  
-**Module:** openclaw-node  
+**Module:** gateway  
 **Current Feature:** expense-tracker-skill  
 **Constitution Hash:** `v3.0.0`  
 **Last Updated:** 2026-06-05T01:52:00+08:00  
@@ -28,7 +28,7 @@
 
 ## Context Dump
 
-openclaw-node deploys the **OpenClaw Gateway** with a custom **expense-tracker skill**. The skill wraps 10 deterministic Python tools behind HTTP endpoints.
+The gateway deploys the **OpenClaw Gateway** with a custom **expense-tracker skill**. The skill wraps 10 deterministic Python tools behind HTTP endpoints.
 
 ### Architecture
 

@@ -7,18 +7,19 @@ LLM-powered automation agents for personal finance and productivity.
 ```
 Ubuntu Laptop (Docker Compose)
 ├── OpenClaw Gateway (:18789) — openclaw:latest image
-│   └── skills/expense-tracker/SKILL.js → HTTP → expense-tracker
+│   └── workspace/skills/expense-tracker/ — skill (SKILL.md + SKILL.js)
+│       └── HTTP → expense-tracker tools
 ├── expense-tracker (:8080) — Python 3.12 container
 │   └── 10 deterministic tools + IMAP IDLE → Zoho
 └── → Actual Budget (Fly.io VM)
 ```
 
-## Modules
+## Structure
 
-| Module | Description | Status |
-|---|---|---|
-| **expense-tracker** | Automated expense tracking via Zoho email → Actual Budget | Specified, Planned, Tasked — Implementation Pending |
-| **openclaw-node** | OpenClaw Gateway + expense-tracker skill (Docker Compose) | Specified, Planned, Tasked |
+| Directory | Purpose |
+|---|---|
+| `gateway/` | OpenClaw Gateway config, docker-compose, workspace + skills |
+| `modules/expense-tracker/` | Python tool backend (IMAP IDLE, Actual Budget client, extractors) |
 
 ## Setup
 
@@ -32,7 +33,7 @@ cp modules/expense-tracker/.env.example modules/expense-tracker/.env
 # Edit .env with your Zoho, DeepSeek, and Actual Budget credentials
 
 # Run with Docker Compose
-cd openclaw-node
+cd gateway
 docker compose up -d
 ```
 
