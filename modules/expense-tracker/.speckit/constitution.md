@@ -1,0 +1,80 @@
+# Project Constitution
+
+**Project:** darren-openclaw — OpenClaw Expense Tracking Agent  
+**Version:** 1.0.0  
+**Last Amended:** 2026-06-04  
+**Workflow:** Spec-Kit (Spec-Driven Development)
+
+---
+
+## 1. System Identity
+
+OpenClaw is an **LLM-powered expense-tracking agent** that reacts to receipt/transaction emails forwarded to a dedicated burner inbox. It extracts structured transaction data and inserts it into an existing **Actual Budget** instance via its REST API.
+
+The intelligence layer is a **DeepSeek LLM agent** — the Python host provides deterministic tools (IMAP, Actual Budget API, dedup, notification). All parsing, classification, matching, and decision-making is delegated to the LLM.
+
+---
+
+## 2. Non-Negotiable Architecture Principles
+
+### 2.1 Memory Constraint: 256MB RAM Target
+
+- The OpenClaw VM on Fly.io (free tier) is capped at 256MB RAM.
+- Python 3.12-slim base image. No heavyweight ORMs, no async frameworks that spawn thread pools.
+- Single-process architecture: one IMAP IDLE connection, one LLM conversation at a time.
+- Dependencies: `aiohttp`, `aioimaplib`, `beautifulsoup4`, `openai` (DeepSeek-compatible client), `pytesseract` (optional, for PDF).
+- Tesseract binary only included if PDF parsing is enabled.
+
+### 2.2 Security Isolation
+
+- **Internal networking:** OpenClaw communicates with Actual Budget over Fly.io's internal network (`http://actual-budget.internal:5006`). Actual Budget's API port is NOT exposed publicly for automation traffic.
+- **Actual Budget public exposure:** Only the web UI port (5006) is exposed for user dashboard access, with HTTPS enforced.
+- **Secrets management:** All credentials (DeepSeek API key, IMAP password, Actual Budget API key, notification SMTP credentials) are injected via environment variables. Never committed to source control. `.env` file is `.gitignore`d.
+- **No database exposure:** The SQLite dedup journal is local to the OpenClaw VM. Actual Budget's database is never accessed directly — only via its REST API.
+- **Burner email isolation:** The Outlook burner inbox is a dedicated, isolated account. Compromise of this inbox does not expose any other services.
+
+### 2.3 Data Integrity
+
+- **Dual-currency:** The system supports SGD and MYR budgets (separate budget files in Actual Budget). Currency is detected by the LLM from email content. Unknown currencies are rejected and trigger a notification.
+- **Duplicate prevention:** Every transaction is hashed via SHA-256 over `(date, amount_cents, account_id, imported_description)` before insertion. The hash is checked against a local SQLite dedup journal. Transactions that already exist are skipped silently.
+- **Idempotency:** The pipeline is safe to re-run. IMAP emails are marked as read (`\Seen`) only after successful insertion. If the process crashes, unprocessed emails are re-fetched.
+- **No silent failures:** If the LLM cannot confidently parse an email (ambiguous currency, unknown merchant, missing amount), it calls the `notify_user` tool and skips insertion. Bad data is never pushed to Actual Budget.
+
+### 2.4 LLM Agent Principles
+
+- **No hardcoded business rules in Python.** Category assignments, account matching, currency detection — all performed by the LLM using live data fetched from Actual Budget's API.
+- **Tools, not code.** The Python layer exposes 10 deterministic tools (see Plan). The LLM chooses which to call and in what order.
+- **Auditability.** Every LLM decision is logged as structured JSON (tool calls, reasoning, final action). The dedup journal stores the `msg_id` of the source email.
+- **Fallback safety:** If the DeepSeek API is unreachable, the agent retries 3 times with exponential backoff (1s, 2s, 4s). If all retries fail, the email is left unread and a notification is sent.
+
+### 2.5 Observability
+
+- **Structured logging:** All output to stdout/stderr is JSON-line format with fields: `timestamp`, `level`, `correlation_id` (email msg_id), `event`, `data`.
+- **Correlation ID:** Every email processed carries its IMAP `message_id` through the entire pipeline — logs, dedup journal, Actual Budget transaction `notes` field.
+- **No third-party monitoring:** No Sentry, no Datadog, no external telemetry. Logs are consumed via Fly.io's built-in `fly logs`.
+
+---
+
+## 3. Hosting Topology
+
+| Component | Host | Network |
+|---|---|---|
+| Actual Budget | Fly.io VM #1 (existing) | Public HTTPS for UI; internal for API |
+| OpenClaw Agent | Fly.io VM #2 (free tier, 256MB) | Internal → Actual Budget; outbound HTTPS → DeepSeek API, IMAP → Outlook |
+| Outlook Burner Inbox | Microsoft 365 (outlook.office365.com) | Public IMAP (outlook.office365.com:993) |
+
+---
+
+## 4. Development Methodology
+
+- **Spec-Kit framework:** All features are specified, planned, and tasked in `.speckit/features/<name>/` before implementation.
+- **Feature namespace:** Each feature gets its own folder under `.speckit/features/`. Global constitution and agent harness live at `.speckit/` root.
+- **Implementation phase:** A separate agent handles `/implement` after spec approval. This constitution governs all features.
+
+---
+
+## 5. Amendment Process
+
+- This constitution can only be amended by re-running `/speckit.constitution`.
+- Changes must be reflected in all downstream artifacts (spec, plan, tasks) of affected features.
+- The `agent.md` harness tracks the current constitution version hash.

@@ -1,0 +1,28 @@
+# Environment
+.env
+.env.*
+
+# Database
+*.sqlite
+*.sqlite3
+*.db
+data/
+
+# Python
+__pycache__/
+*.py[cod]
+*.so
+*.egg-info/
+dist/
+build/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Personal metadata
+**/metadata.json
