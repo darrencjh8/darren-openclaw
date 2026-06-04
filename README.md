@@ -4,50 +4,49 @@ LLM-powered personal finance assistant — track expenses from Telegram, auto-in
 
 ## Architecture
 
-```
-                         ┌─────────────────────────────────────────┐
-                         │         Ubuntu Laptop (Docker)          │
-                         │                                         │
-  ┌──────────┐           │  ┌──────────────────────────────────┐  │
-  │ Telegram │  Bot API  │  │        OpenClaw Gateway           │  │
-  │   User   │──────────▶│  │     ghcr.io/openclaw:latest       │  │
-  │    📱    │◀──────────│  │           Port 18789              │  │
-  └──────────┘  replies  │  │                                  │  │
-                         │  │  ┌────────────────────────────┐  │  │
-                         │  │  │  workspace/                 │  │  │
-                         │  │  │  ├── AGENTS.md (persona)    │  │  │
-                         │  │  │  └── skills/                │  │  │
-                         │  │  │      └── expense-tracker/   │  │  │
-                         │  │  │          ├── SKILL.md       │  │  │
-                         │  │  │          └── SKILL.js ──┐   │  │  │
-                         │  │  └────────────────────────┬─┘   │  │
-                         │  └───────────────────────────┬─────┘  │
-                         │                              │        │
-                         │              HTTP POST /tools/*        │
-                         │                              ▼        │
-                         │  ┌──────────────────────────────────┐ │
-                         │  │       expense-tracker             │ │
-                         │  │    Python 3.12-slim, Port 8080    │ │
-                         │  │                                  │ │
-                         │  │  ┌──────────┐  ┌──────────────┐  │ │
-                         │  │  │ 10 tools │  │  IMAP IDLE   │  │ │
-                         │  │  │ REST API │  │   listener   │  │ │
-                         │  │  └────┬─────┘  └──────┬───────┘  │ │
-                         │  └───────┼────────────────┼──────────┘ │
-                         └──────────┼────────────────┼────────────┘
-                                    │                │
-                    ┌───────────────┼──────┐  ┌──────┴──────────┐
-                    │  Actual Budget│      │  │   Zoho Mail     │
-                    │   (Fly.io VM) │      │  │  IMAP IDLE      │
-                    │               ▼      │  │  imap.zoho.com  │
-                    │  REST API ◀──────────┘  │  Port 993 (SSL) │
-                    │  HTTPS :5006            └─────────────────┘
-                    └────────────────┘
-                                        ┌──────────────────┐
-                                        │   DeepSeek API   │
-                                        │  deepseek-chat   │
-                                        │ api.deepseek.com │
-                                        └──────────────────┘
+```mermaid
+graph TB
+    TG["📱 Telegram User"] -->|"Bot API"| GW
+    GW -->|"replies"| TG
+
+    subgraph Docker["Ubuntu Laptop — Docker Compose"]
+        GW["OpenClaw Gateway<br/>:18789"]
+
+        subgraph Workspace["workspace/"]
+            AGENTS["AGENTS.md<br/>persona"]
+            subgraph Skills["skills/expense-tracker/"]
+                SKILL_MD["SKILL.md<br/>LLM instructions"]
+                SKILL_JS["SKILL.js<br/>tool wrappers"]
+            end
+        end
+
+        GW -->|"auto-discovers"| SKILL_MD
+        GW -->|"calls"| SKILL_JS
+
+        ET["expense-tracker<br/>Python 3.12 :8080"]
+        subgraph Tools["10 tools"]
+            FA["fetch_accounts"]
+            IT["insert_transaction"]
+            CD["check_duplicate"]
+            OTH["... 7 more"]
+        end
+        subgraph IMAP["IMAP IDLE"]
+            IDLE["listener → Zoho"]
+        end
+
+        SKILL_JS -->|"HTTP POST /tools/*"| ET
+        ET --> Tools
+        ET --> IMAP
+    end
+
+    AB["Actual Budget<br/>Fly.io VM<br/>REST API :5006"]
+    Zoho["Zoho Mail<br/>imap.zoho.com:993"]
+    DS["DeepSeek API<br/>deepseek-chat"]
+
+    ET -->|"REST API"| AB
+    ET -->|"IMAP IDLE (SSL)"| Zoho
+    GW -->|"HTTPS"| DS
+    ET -->|"HTTPS"| DS
 ```
 
 ### How it works
