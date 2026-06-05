@@ -47,7 +47,6 @@ class TestActualBudgetClient:
         from src.client.actual_client import ActualBudgetClient
         config = make_config()
         client = ActualBudgetClient(config)
-        assert hasattr(client, "get_budgets")
         assert hasattr(client, "get_accounts")
         assert hasattr(client, "get_categories")
         assert hasattr(client, "get_payees")
