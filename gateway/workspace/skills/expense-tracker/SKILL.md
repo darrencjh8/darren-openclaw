@@ -35,28 +35,30 @@ All tools are HTTP POST endpoints at `http://expense-tracker:8080/tools/<name>`.
 
 ## How to Call a Tool
 
-Use `exec` with curl. Example:
+Use `exec` with curl. The `budget_id` is auto-discovered from your Actual Budget
+config — you do NOT need to pass it (the defaults come from your `.env`).
 
+Example — fetch accounts:
 ```
 exec: curl -s -X POST http://expense-tracker:8080/tools/fetch-accounts \
   -H "Content-Type: application/json" \
-  -d '{"budget_id":"Darren-SGD-29ed82a"}'
+  -d '{}'
+```
+
+Example — insert a transaction:
+```
+exec: curl -s -X POST http://expense-tracker:8080/tools/insert-transaction \
+  -H "Content-Type: application/json" \
+  -d '{"date":"2026-06-05","amount_cents":-1280,"imported_description":"Toast Box"}'
 ```
 
 The response is JSON. Parse it to extract account names, IDs, etc.
 
-## Budget IDs
-
-The user has these budgets in Actual Budget:
-- SGD budget: `Darren-SGD-29ed82a`
-- MYR budget: (name TBD — fetch it first)
-
 ## Rules
 
-1. Always call `fetch-accounts` first to match accounts by name
-2. Always call `check-duplicate` before `insert-transaction`
+1. Always call `fetch-accounts` first to match accounts by name. Just pass `{}`.
+2. Always call `check-duplicate` before `insert-transaction`.
 3. Amounts are in INTEGER CENTS. S$12.80 = -1280. Negative for spending.
-4. Categories are optional — leave `category_id` empty if uncertain
+4. Leave `category_id` empty if uncertain.
 5. Confirm before inserting: "I'll log S$X.XX at [merchant] under [account]. Proceed?"
-6. If you can't match an account, show the user the available options
-7. Use SGD budget by default unless the user mentions MYR
+6. If you can't match an account, show the available options from the API response.
