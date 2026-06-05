@@ -63,9 +63,9 @@ class TestOpenclawJson:
         assert p["apiKey"] == "${DEEPSEEK_API_KEY}"
 
     def test_agent_model(self):
-        """Agent uses deepseek/deepseek-v4-pro."""
+        """Agent uses deepseek/deepseek-v4-flash."""
         m = self.config["agents"]["defaults"]["model"]
-        assert m["primary"] == "deepseek/deepseek-v4-pro"
+        assert m["primary"] == "deepseek/deepseek-v4-flash"
 
     def test_telegram_channel(self):
         """Telegram: enabled, botToken ref, allowlist, valid user IDs."""

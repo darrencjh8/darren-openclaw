@@ -1,7 +1,7 @@
 """Dedup journal — SHA-256 hash-based duplicate detection for transactions.
 
 Uses a local SQLite database to track processed transactions. The hash
-is computed over (date, amount_cents, account_id, merchant) to uniquely
+is computed over (date, amount_cents, account_id, payee_name) to uniquely
 identify a transaction.
 """
 
@@ -10,14 +10,10 @@ import sqlite3
 import threading
 
 
-def compute_hash(date: str, amount_cents: int, account_id: str, merchant: str) -> str:
-    """Compute a SHA-256 hash for a transaction's dedup key.
-
-    The merchant is lowercased and stripped to normalize minor formatting
-    differences (whitespace, case) that should not affect dedup.
-    """
-    normalized_merchant = merchant.lower().strip()
-    payload = f"{date}|{amount_cents}|{account_id}|{normalized_merchant}"
+def compute_hash(date: str, amount_cents: int, account_id: str, payee_name: str) -> str:
+    """Compute a SHA-256 hash for a transaction's dedup key."""
+    normalized = payee_name.lower().strip()
+    payload = f"{date}|{amount_cents}|{account_id}|{normalized}"
     return hashlib.sha256(payload.encode()).hexdigest()
 
 
@@ -42,7 +38,7 @@ class DedupJournal:
                     date TEXT NOT NULL,
                     amount_cents INTEGER NOT NULL,
                     account_id TEXT NOT NULL,
-                    merchant TEXT NOT NULL,
+                    payee_name TEXT NOT NULL,
                     created_at TEXT NOT NULL DEFAULT (datetime('now'))
                 )
             """)
@@ -51,9 +47,9 @@ class DedupJournal:
             """)
             self._conn.commit()
 
-    def check(self, date: str, amount_cents: int, account_id: str, merchant: str) -> bool:
+    def check(self, date: str, amount_cents: int, account_id: str, payee_name: str) -> bool:
         """Return True if a transaction with the same dedup key already exists."""
-        tx_hash = compute_hash(date, amount_cents, account_id, merchant)
+        tx_hash = compute_hash(date, amount_cents, account_id, payee_name)
         with self._lock:
             self._cursor.execute(
                 "SELECT 1 FROM dedup_journal WHERE hash = ?", (tx_hash,)
@@ -65,18 +61,18 @@ class DedupJournal:
         date: str,
         amount_cents: int,
         account_id: str,
-        merchant: str,
+        payee_name: str,
         msg_id: str,
     ) -> None:
         """Record a transaction in the dedup journal."""
-        tx_hash = compute_hash(date, amount_cents, account_id, merchant)
+        tx_hash = compute_hash(date, amount_cents, account_id, payee_name)
         with self._lock:
             self._cursor.execute(
                 """
                 INSERT OR IGNORE INTO dedup_journal
-                    (hash, msg_id, date, amount_cents, account_id, merchant)
+                    (hash, msg_id, date, amount_cents, account_id, payee_name)
                 VALUES (?, ?, ?, ?, ?, ?)
                 """,
-                (tx_hash, msg_id, date, amount_cents, account_id, merchant),
+                (tx_hash, msg_id, date, amount_cents, account_id, payee_name),
             )
             self._conn.commit()

@@ -14,8 +14,8 @@
   "agents": {
     "defaults": {
       "model": {
-        "primary": "deepseek/deepseek-v4-pro",
-        "fallbacks": ["deepseek/deepseek-v4-flash"]
+        "primary": "deepseek/deepseek-v4-flash",
+        "fallbacks": ["deepseek/deepseek-v4-pro"]
       }
     }
   },

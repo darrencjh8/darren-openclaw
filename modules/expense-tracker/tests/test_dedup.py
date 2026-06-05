@@ -44,7 +44,7 @@ class TestDedupJournal:
             date="2026-06-04",
             amount_cents=-1280,
             account_id="acc-123",
-            merchant="Toast Box",
+            payee_name="Toast Box",
             msg_id="<msg-001@mail.com>"
         )
 
@@ -52,7 +52,7 @@ class TestDedupJournal:
             date="2026-06-04",
             amount_cents=-1280,
             account_id="acc-123",
-            merchant="Toast Box"
+            payee_name="Toast Box"
         )
         assert result is True
 
@@ -62,7 +62,7 @@ class TestDedupJournal:
             date="2026-06-04",
             amount_cents=-1280,
             account_id="acc-123",
-            merchant="Toast Box",
+            payee_name="Toast Box",
             msg_id="<msg-001@mail.com>"
         )
 
@@ -70,7 +70,7 @@ class TestDedupJournal:
             date="2026-06-04",
             amount_cents=-5000,  # Different amount
             account_id="acc-123",
-            merchant="Toast Box"
+            payee_name="Toast Box"
         )
         assert result is False
 
@@ -80,7 +80,7 @@ class TestDedupJournal:
             date="2026-06-04",
             amount_cents=-1280,
             account_id="acc-123",
-            merchant="Toast Box",
+            payee_name="Toast Box",
             msg_id="<msg-001@mail.com>"
         )
 
@@ -88,7 +88,7 @@ class TestDedupJournal:
             date="2026-06-05",  # Different date
             amount_cents=-1280,
             account_id="acc-123",
-            merchant="Toast Box"
+            payee_name="Toast Box"
         )
         assert result is False
 
@@ -98,7 +98,7 @@ class TestDedupJournal:
             date="2026-06-04",
             amount_cents=-1280,
             account_id="acc-123",
-            merchant="Toast Box",
+            payee_name="Toast Box",
             msg_id="<msg-001@mail.com>"
         )
 
@@ -106,17 +106,17 @@ class TestDedupJournal:
             date="2026-06-04",
             amount_cents=-1280,
             account_id="acc-456",  # Different account
-            merchant="Toast Box"
+            payee_name="Toast Box"
         )
         assert result is False
 
-    def test_different_merchant_not_duplicate(self, dedup_journal):
-        """Different merchants should not be detected as duplicates."""
+    def test_different_payee_not_duplicate(self, dedup_journal):
+        """Different payees should not be detected as duplicates."""
         dedup_journal.record(
             date="2026-06-04",
             amount_cents=-1280,
             account_id="acc-123",
-            merchant="Toast Box",
+            payee_name="Toast Box",
             msg_id="<msg-001@mail.com>"
         )
 
@@ -124,17 +124,17 @@ class TestDedupJournal:
             date="2026-06-04",
             amount_cents=-1280,
             account_id="acc-123",
-            merchant="Ya Kun Kaya Toast"  # Different merchant
+            payee_name="Ya Kun Kaya Toast"  # Different payee
         )
         assert result is False
 
-    def test_merchant_whitespace_normalized(self, dedup_journal):
-        """Whitespace differences in merchant should be normalized."""
+    def test_payee_whitespace_normalized(self, dedup_journal):
+        """Whitespace differences in payee_name should be normalized."""
         dedup_journal.record(
             date="2026-06-04",
             amount_cents=-1280,
             account_id="acc-123",
-            merchant="Toast Box",
+            payee_name="Toast Box",
             msg_id="<msg-001@mail.com>"
         )
 
@@ -142,17 +142,17 @@ class TestDedupJournal:
             date="2026-06-04",
             amount_cents=-1280,
             account_id="acc-123",
-            merchant="  Toast Box  "  # Extra whitespace
+            payee_name="  Toast Box  "  # Extra whitespace
         )
         assert result is True
 
-    def test_merchant_case_normalized(self, dedup_journal):
-        """Case differences in merchant should be normalized."""
+    def test_payee_case_normalized(self, dedup_journal):
+        """Case differences in payee_name should be normalized."""
         dedup_journal.record(
             date="2026-06-04",
             amount_cents=-1280,
             account_id="acc-123",
-            merchant="Toast Box",
+            payee_name="Toast Box",
             msg_id="<msg-001@mail.com>"
         )
 
@@ -160,7 +160,7 @@ class TestDedupJournal:
             date="2026-06-04",
             amount_cents=-1280,
             account_id="acc-123",
-            merchant="toast box"  # Different case
+            payee_name="toast box"  # Different case
         )
         assert result is True
 
@@ -190,6 +190,6 @@ class TestDedupJournal:
             date="2026-06-04",
             amount_cents=-9999,
             account_id="nonexistent",
-            merchant="Fake Merchant"
+            payee_name="Fake Merchant"
         )
         assert result is False

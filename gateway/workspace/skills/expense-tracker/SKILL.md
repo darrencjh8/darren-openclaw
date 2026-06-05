@@ -22,7 +22,7 @@ Use this skill when the user wants to:
 1. Extract: amount, currency, date, (optional) account, (optional) description
 2. If currency not detected → assume SGD
 3. Call `fetch-accounts` to match the account
-4. Call `fetch-payees` to match the merchant/payee (see Payee Matching below)
+4. Call `fetch-payees` to match the payee (see Payee Matching below)
 5. Call `check-duplicate`
 6. Confirm with user: "I'll log S$X.XX as [Payee] under [Account]. OK?"
 7. If user confirms → call `insert-transaction`
@@ -39,7 +39,7 @@ All tools are HTTP POST endpoints at `http://expense-tracker:8080/tools/<name>`.
 | fetch-payees | POST /tools/fetch-payees | `{"budget_id":"..."}` | Payee list |
 | fetch-recent-transactions | POST /tools/fetch-recent-transactions | `{"budget_id":"...","account_id":"...","days":7}` | Transaction list |
 | insert-transaction | POST /tools/insert-transaction | `{"budget_id":"...","account_id":"...","date":"YYYY-MM-DD","amount_cents":-1280,"imported_description":"Toast Box","category_id":"...","notes":"..."}` | Created transaction |
-| check-duplicate | POST /tools/check-duplicate | `{"date":"YYYY-MM-DD","amount_cents":-1280,"account_id":"...","merchant":"..."}` | true/false |
+| check-duplicate | POST /tools/check-duplicate | `{"date":"YYYY-MM-DD","amount_cents":-1280,"account_id":"...","payee_name":"..."}` | true/false |
 | mark-email-read | POST /tools/mark-email-read | `{}` | true |
 | notify-user | POST /tools/notify-user | `{"subject":"...","body":"..."}` | true |
 | extract-email-content | POST /tools/extract-email-content | `{"include_headers":true}` | text |
@@ -72,7 +72,7 @@ The response is JSON. Parse it to extract account names, IDs, etc.
 2. Always call `check-duplicate` before `insert-transaction`.
 3. Amounts are in INTEGER CENTS. S$12.80 = -1280. Negative for spending.
 4. Leave `category_id` empty if uncertain.
-5. Confirm before inserting: "I'll log S$X.XX at [merchant] under [account]. Proceed?"
+5. Confirm before inserting: "I'll log S$X.XX as [Payee] under [Account]. OK?"
 
 ## Payee Matching (auto-derive merchant)
 

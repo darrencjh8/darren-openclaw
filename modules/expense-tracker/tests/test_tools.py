@@ -77,13 +77,13 @@ class TestToolRegistry:
             "date": "2026-06-04",
             "amount_cents": -1280,
             "account_id": "acct-1",
-            "merchant": "Toast Box",
+            "payee_name": "Toast Box",
         })
         result = await registry.execute_tool("check_duplicate", {
             "date": "2026-06-04",
             "amount_cents": -1280,
             "account_id": "acct-1",
-            "merchant": "Toast Box",
+            "payee_name": "Toast Box",
         })
 
         assert result is True
@@ -99,13 +99,13 @@ class TestToolRegistry:
             "date": "2026-06-04",
             "amount_cents": -1280,
             "account_id": "acct-1",
-            "merchant": "Toast Box",
+            "payee_name": "Toast Box",
         })
         result = await registry.execute_tool("check_duplicate", {
             "date": "2026-06-04",
             "amount_cents": -5000,
             "account_id": "acct-1",
-            "merchant": "NTUC",
+            "payee_name": "NTUC",
         })
 
         assert result is False

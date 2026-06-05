@@ -86,7 +86,7 @@ class TestToolsAPI:
                     "date": "2026-06-05",
                     "amount_cents": -9999,
                     "account_id": "acct-test",
-                    "merchant": "Test Co",
+                    "payee_name": "Test Co",
                 },
             ) as resp:
                 assert resp.status == 200
@@ -99,7 +99,7 @@ class TestToolsAPI:
             "date": "2026-06-05",
             "amount_cents": -1280,
             "account_id": "acct-dup",
-            "merchant": "Toast Box Dupe",
+            "payee_name": "Toast Box Dupe",
         }
         async with aiohttp.ClientSession() as session:
             async with session.post(f"{server_url}/tools/check-duplicate", json=payload) as resp:

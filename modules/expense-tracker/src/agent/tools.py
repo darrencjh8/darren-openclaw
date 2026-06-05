@@ -78,10 +78,10 @@ class ToolRegistry:
             txn["category"] = category_id
         return await self._ab.create_transaction(budget_id, txn)
 
-    async def _handle_check_duplicate(self, date: str, amount_cents: int, account_id: str, merchant: str) -> bool:
-        if self._dedup.check(date, amount_cents, account_id, merchant):
+    async def _handle_check_duplicate(self, date: str, amount_cents: int, account_id: str, payee_name: str) -> bool:
+        if self._dedup.check(date, amount_cents, account_id, payee_name):
             return True
-        self._dedup.record(date, amount_cents, account_id, merchant, "test-msg-id")
+        self._dedup.record(date, amount_cents, account_id, payee_name, "test-msg-id")
         return False
 
     async def _handle_mark_email_read(self) -> bool:
@@ -189,16 +189,16 @@ _TOOLS = [
     },
     {
         "name": "check_duplicate",
-        "description": "Check if a transaction already exists in the dedup journal.",
+        "description": "Check if a transaction already exists in the dedup journal by payee name.",
         "schema": {
             "type": "object",
             "properties": {
                 "date": {"type": "string", "description": "YYYY-MM-DD"},
                 "amount_cents": {"type": "integer"},
                 "account_id": {"type": "string"},
-                "merchant": {"type": "string"},
+                "payee_name": {"type": "string"},
             },
-            "required": ["date", "amount_cents", "account_id", "merchant"],
+            "required": ["date", "amount_cents", "account_id", "payee_name"],
         },
     },
     {
