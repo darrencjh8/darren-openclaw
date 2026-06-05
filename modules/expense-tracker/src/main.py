@@ -28,8 +28,6 @@ async def main() -> None:
     logger.info("dedup_initialized", extra={"correlation_id": "", "data": {"path": cfg.dedup_db_path}})
 
     registry = ToolRegistry(cfg)
-    await registry.ab._init()
-    logger.info("actual_budget_connected", extra={"correlation_id": "", "data": {}})
 
     from aiohttp import web
 

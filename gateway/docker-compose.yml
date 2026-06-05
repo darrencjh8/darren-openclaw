@@ -28,6 +28,18 @@ services:
       - ../modules/expense-tracker/.env:/app/.env:ro
     restart: unless-stopped
 
+  actual-api:
+    build:
+      context: ./actual-api
+      dockerfile: Dockerfile
+    ports:
+      - "127.0.0.1:3000:3000"
+    environment:
+      - ACTUAL_BUDGET_URL=${ACTUAL_BUDGET_URL}
+      - ACTUAL_BUDGET_PASSWORD=${ACTUAL_BUDGET_PASSWORD}
+      - ACTUAL_BUDGET_FILE=${ACTUAL_BUDGET_FILE}
+    restart: unless-stopped
+
 volumes:
   openclaw_data:
   openclaw_home:
