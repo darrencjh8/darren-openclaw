@@ -1,4 +1,4 @@
-"""Actual Budget client using the actualpy library (sync protocol)."""
+"""Actual Budget client using actualpy (sync protocol) — no VACUUM on commit."""
 
 import asyncio
 import datetime
@@ -111,6 +111,12 @@ class ActualBudgetClient:
             cleared=transaction.get("cleared", False),
         )
 
-        loop = asyncio.get_event_loop()
-        await loop.run_in_executor(_executor, self._actual.commit)
+        self._actual.session.flush()
+        original = self._actual.cleanup
+        self._actual.cleanup = lambda: None
+        try:
+            self._actual.commit()
+        finally:
+            self._actual.cleanup = original
+
         return {"id": txn.id, "amount": transaction.get("amount", 0)}
