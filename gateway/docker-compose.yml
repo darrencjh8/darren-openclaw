@@ -10,7 +10,9 @@ services:
     environment:
       - OPENCLAW_CONFIG_PATH=/app/openclaw.json
       - OPENCLAW_HOME=/app
+      - OPENCLAW_GATEWAY_TOKEN=${OPENCLAW_GATEWAY_TOKEN}
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
     restart: unless-stopped
 
   expense-tracker:

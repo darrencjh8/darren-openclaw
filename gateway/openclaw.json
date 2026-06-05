@@ -1,19 +1,23 @@
 {
+  "models": {
+    "providers": {
+      "deepseek": {
+        "baseUrl": "https://api.deepseek.com/v1",
+        "apiKey": "${DEEPSEEK_API_KEY}"
+      }
+    }
+  },
   "agents": {
     "defaults": {
-      "workspace": "/app/workspace",
       "model": {
-        "primary": "deepseek/deepseek-chat"
-      },
-      "skills": ["expense-tracker"],
-      "session": {
-        "dmScope": "per-channel-peer"
+        "primary": "deepseek/deepseek-v4-flash"
       }
     }
   },
   "gateway": {
     "port": 18789,
-    "bind": "0.0.0.0"
+    "bind": "lan",
+    "mode": "local"
   },
   "channels": {
     "telegram": {
