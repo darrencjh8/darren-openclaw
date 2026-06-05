@@ -205,7 +205,7 @@ class TestStatementProcessor:
         assert result is not None
 
     async def test_process_statement_calls_mark_email_read_always(self):
-        """Even on 'error' path, mark_email_read is called."""
+        """Even on 'error' path, mark_email_read is called via tools."""
         orch, tools = _make_orchestrator()
         imap = AsyncMock()
         tools.set_email_context("msg-001", b"raw", imap)
@@ -238,4 +238,4 @@ class TestStatementProcessor:
         orch = StatementProcessor(config, tools=tools)
 
         assert isinstance(orch._llm, DeepSeekClient)
-        assert orch._llm._model == "deepseek-v4-pro"
+        assert orch._llm._model == "deepseek-chat"

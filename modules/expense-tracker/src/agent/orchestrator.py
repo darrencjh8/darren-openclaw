@@ -26,6 +26,12 @@ class DeepSeekClient:
         )
         self._model = "deepseek-chat"
 
+    def _merge_reasoning(self, data: dict) -> None:
+        for choice in data.get("choices", []):
+            msg = choice.get("message", {})
+            if not msg.get("content") and msg.get("reasoning_content"):
+                msg["content"] = msg["reasoning_content"]
+
     async def chat(self, messages: list[dict], tools: list[dict] | None = None) -> dict:
         kwargs = {
             "model": self._model,
@@ -41,9 +47,11 @@ class DeepSeekClient:
             try:
                 response = await asyncio.wait_for(
                     self._client.chat.completions.create(**kwargs),
-                    timeout=30,
+                    timeout=60,
                 )
-                return response.model_dump()
+                data = response.model_dump()
+                self._merge_reasoning(data)
+                return data
             except asyncio.TimeoutError:
                 if attempt < 2:
                     logger.warning("DeepSeek timeout, retry %d/3", attempt + 2)

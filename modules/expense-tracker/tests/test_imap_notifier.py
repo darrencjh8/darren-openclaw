@@ -216,7 +216,7 @@ class TestImapIdleHandler:
         handler._imap = mock_imap
 
         await handler.mark_read("42")
-        mock_imap.store.assert_called_once_with("42", "+FLAGS", "\\Seen")
+        mock_imap.store.assert_called_once_with("42", "+FLAGS", "(\\Seen)")
 
     async def test_mark_read_handles_integer_msg_id(self):
         """mark_read converts integer msg_id to string."""
@@ -229,7 +229,7 @@ class TestImapIdleHandler:
         handler._imap = mock_imap
 
         await handler.mark_read(42)
-        mock_imap.store.assert_called_once_with("42", "+FLAGS", "\\Seen")
+        mock_imap.store.assert_called_once_with("42", "+FLAGS", "(\\Seen)")
 
     async def test_idle_loop_calls_callback_on_new_email(self):
         """idle_loop invokes callback when IDLE detects new messages."""

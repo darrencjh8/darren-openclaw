@@ -193,3 +193,13 @@ class TestDedupJournal:
             payee_name="Fake Merchant"
         )
         assert result is False
+
+    def test_check_exact_ignores_payee(self, dedup_journal):
+        """check_exact matches on date+amount+account, ignoring payee."""
+        dedup_journal.record("2026-06-04", -1280, "acct-dbs", "Food", "msg-1")
+        assert dedup_journal.check_exact("2026-06-04", -1280, "acct-dbs") is True
+        assert dedup_journal.check_exact("2026-06-04", -1280, "acct-ocbc") is False
+
+    def test_check_exact_no_records(self, dedup_journal):
+        """check_exact returns False when no matching records."""
+        assert dedup_journal.check_exact("2026-06-04", -1280, "acct-dbs") is False

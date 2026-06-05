@@ -2,13 +2,14 @@
 
 
 CLASSIFICATION_PROMPT = """\
-You classify financial emails. Respond ONLY with a single word.
+Classify this email as "statement" or "transaction". Respond with ONLY one word.
 
-Classify this email as one of:
-- "statement" — monthly bank/credit card statement with MULTIPLE transaction line items
-- "transaction" — single purchase, receipt, or instant transaction alert
+"statement" = monthly bank/credit card statement with multiple transactions, PDF attached, or eStatement.
+Keywords: statement, eStatement, e-Statement, monthly, billing cycle, attached PDF.
 
-DO NOT explain. Respond with only "statement" or "transaction"."""
+"transaction" = single purchase, receipt, instant alert, promo, notification, sign-in alert.
+
+DO NOT explain. Only respond with "statement" or "transaction"."""
 
 
 STATEMENT_PROMPT = """\
@@ -21,30 +22,50 @@ THIS IS DIFFERENT FROM TRANSACTION ALERTS:
 - "Match found" in AB = RECONCILE (mark as cleared), NOT "duplicate to skip".
 - "No match" in AB = INSERT AS OUTLIER (cleared=false), NOT "skip or ask".
 
+CRITICAL: The conversation below includes example exchanges as CONTEXT.
+Only process the LAST user message which contains the ACTUAL statement to reconcile.
+Do NOT process transactions from examples — they are illustrative only.
+Only process transactions found in the LAST user message.
+
 RULES:
-1. First, extract ALL transactions from the statement text.
+1. First, extract ALL transactions from the LAST user message statement text.
 2. Identify: statement period (start/end dates), account name, currency.
-3. Call fetch_accounts + fetch_categories + fetch_statement_history in parallel.
+3. Call fetch_accounts + fetch_categories + fetch_payees + fetch_statement_history in parallel.
 4. If fetch_statement_history returns a record for this (account, period):
    → This statement was ALREADY processed. Notify user and stop. Do NOT re-process.
 5. Call fetch_unreconciled_transactions(account_id, date_from, date_to).
    This returns all uncleared AB transactions in the statement's date range.
-6. For EACH statement line item:
+6. For EACH actual statement line item:
    a. Compare against uncleared AB transactions.
-      Use fuzzy_match to find candidate matches (scored by amount, date, merchant).
-   b. If a MATCH is found (high-confidence match):
+   b. If a MATCH is found (same amount, same date ±2d, similar merchant):
       → reconcile_transaction(ab_txn_id, "Statement [period]")
-      This marks the AB transaction as CLEARED (bank confirmed).
-   c. If NO match is found:
-      → insert_transaction(...) with notes="OUTLIER | Statement [period]"
-      This creates an uncleared transaction in AB for manual review.
-      Use the SAME account_id, date, amount_cents (negative), and description.
-      Fetch categories/payees just once — reuse for all line items.
+   c. If NO match:
+      → First, call check_statement_duplicate(date, amount_cents, account_id).
+        This checks if ANY transaction with the same date+amount+account exists,
+        regardless of payee name. If it returns True → already recorded, skip.
+      → If check_statement_duplicate returns False → call insert_transaction() with:
+        notes="OUTLIER | Statement [period]"
+        category_id and payee from the fetch_categories/fetch_payees results.
+        NEVER invent new payee names — only use payees returned by fetch_payees().
 7. After ALL line items are processed:
-   → record_statement(...) — log the reconciliation to prevent double-processing.
+   → record_statement(...) — log to prevent double-processing.
    → notify_user(...) — send reconciliation summary.
    → mark_email_read() — always mark the email as read.
 8. On any failure → notify_user + mark_email_read + log_decision("error").
+
+NOTIFICATION RULES:
+  Always begin by acknowledging the email that was just received.
+  Use phrases like "Just got your", "I just received", "New statement arrived".
+  If already processed: "Just got your [Account] statement for [period] again — but it was already processed on [date]. Nothing to do! ✅"
+  If new with results: "Just got your [Account] statement for [period]. Processed: ✅ X reconciled and cleared ⚠️ Y outliers: [list]"
+  If all outliers: add "No prior alerts for this account — may be new or unmonitored."
+  Keep it warm and conversational. Use occasional emojis (~, ✅, ⚠️).
+
+PAYEE MATCHING:
+  Match statement merchant descriptions to EXISTING payees from fetch_payees().
+  Common payees: Food, Groceries, Transport, Coffee, Utility, Shopping, Healthcare.
+  If no payee matches, use a generic payee like "Food" or "Shopping".
+  NEVER insert with a payee name that wasn't returned by fetch_payees().
 
 AMOUNTS:
   INTEGER CENTS, negative for spending. S$12.80 = -1280. MYR 45.50 = -4550.
@@ -53,21 +74,10 @@ NOTIFICATION FORMAT:
   "[Account] statement for [period] processed:
    ✅ X transactions reconciled and cleared
    ⚠️ Y outliers inserted but not cleared:
-     - [date]: [amount] at [description]
-     - ..."
-
-  If ALL outliers (no prior alerts): add a note:
-  "No prior transaction alerts for this account — may be new or unmonitored."
+     - [date]: [amount] at [description]"
 
 CURRENCY ROUTING:
   SGD → budget "Darren SGD". MYR/RM → budget "Darren MYR".
-  Pass budget_id for ALL tool calls.
-
-DUPLICATE HANDLING:
-  If fetch_statement_history returns a row for the SAME (account, period_start, period_end):
-  → notify_user("This statement for [account] covering [period] was already processed on [date].")
-  → mark_email_read()
-  → STOP. Do not re-process.
 """
 
 
@@ -76,46 +86,42 @@ STATEMENT_FEW_SHOT = [
         {
             "role": "user",
             "content": "Process this credit card statement:\n\n"
-            "DBS YUU CARD STATEMENT\n"
+            "EXAMPLE CARD STATEMENT\n"
             "Period: 01/05/2026 - 31/05/2026\n\n"
             "Date        Description          Amount\n"
-            "04/05/2026  TOAST BOX            S$12.80\n"
-            "15/05/2026  NTUC FAIRPRICE       S$45.50\n"
-            "28/05/2026  GRAB                 S$8.50\n",
+            "04/05/2026  EXAMPLE CAFE          S$12.80\n"
+            "15/05/2026  EXAMPLE GROCERY        S$45.50\n",
         },
         {
             "role": "assistant",
-            "content": "Statement identified: DBS Yuu, May 2026, 3 transactions, SGD. Let me fetch accounts and check if this period was already processed.",
+            "content": "Statement identified: Example Card, May 2026, 2 transactions, SGD.",
         },
         {
             "role": "assistant",
             "content": None,
             "tool_calls": [
-                {
-                    "id": "call_1",
-                    "type": "function",
-                    "function": {
-                        "name": "fetch_accounts",
-                        "arguments": '{"budget_id": "Darren SGD"}',
-                    },
-                },
-                {
-                    "id": "call_2",
-                    "type": "function",
-                    "function": {
-                        "name": "fetch_categories",
-                        "arguments": '{"budget_id": "Darren SGD"}',
-                    },
-                },
-                {
-                    "id": "call_3",
-                    "type": "function",
-                    "function": {
-                        "name": "fetch_statement_history",
-                        "arguments": '{"account_id": "acct-dbs-yuu", "period_start": "2026-05-01", "period_end": "2026-05-31"}',
-                    },
-                },
+                {"id": "call_e1", "type": "function", "function": {"name": "fetch_accounts", "arguments": '{}'}},
+                {"id": "call_e2", "type": "function", "function": {"name": "fetch_categories", "arguments": '{}'}},
+                {"id": "call_e3", "type": "function", "function": {"name": "fetch_statement_history",
+                 "arguments": '{"account_id":"acct-example","period_start":"2026-05-01","period_end":"2026-05-31"}'}},
             ],
         },
+        {"role": "tool", "tool_call_id": "call_e1", "content": '[{"id":"acct-example","name":"Example Card"}]'},
+        {"role": "tool", "tool_call_id": "call_e2", "content": '[{"id":"cat-food","name":"Food"}]'},
+        {"role": "tool", "tool_call_id": "call_e3", "content": "null"},
+        {
+            "role": "assistant",
+            "content": "New statement. Fetching unreconciled transactions.",
+        },
+        {
+            "role": "assistant",
+            "content": None,
+            "tool_calls": [
+                {"id": "call_e4", "type": "function", "function": {"name": "fetch_unreconciled_transactions",
+                 "arguments": '{"account_id":"acct-example","date_from":"2026-05-01","date_to":"2026-05-31"}'}},
+            ],
+        },
+        {"role": "tool", "tool_call_id": "call_e4",
+         "content": '[{"id":"txn-e1","date":"2026-05-04","amount":-1280,"payee":"Example Cafe","cleared":false}]'},
     ],
 ]

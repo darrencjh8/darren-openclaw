@@ -73,7 +73,7 @@ class ImapIdleHandler:
         return result
 
     async def mark_read(self, msg_id: str):
-        await self._imap.store(str(msg_id), "+FLAGS", "\\Seen")
+        await self._imap.store(str(msg_id), "+FLAGS", "(\\Seen)")
         logger.debug("Marked email %s as read", msg_id)
 
     async def idle_loop(self, callback: Callable):

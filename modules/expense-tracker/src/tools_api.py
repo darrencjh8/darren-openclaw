@@ -28,6 +28,7 @@ def register_tools_api(app: web.Application, config, registry):
         ("/tools/fetch-unreconciled-transactions", "fetch_unreconciled_transactions"),
         ("/tools/record-statement", "record_statement"),
         ("/tools/fetch-statement-history", "fetch_statement_history"),
+        ("/tools/check-statement-duplicate", "check_statement_duplicate"),
     ]
 
     for path, tool_name in routes:

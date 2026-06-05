@@ -128,16 +128,12 @@ app.delete("/transactions/:id", async (req, res) => {
 app.post("/transactions/:id/clear", async (req, res) => {
   try {
     await ensureBudget(getBudgetId(req));
-    const txn = await actual.getTransaction(req.params.id);
-    if (!txn) {
-      return res.status(404).json({ error: "Transaction not found" });
-    }
     const { notes } = req.body || {};
+    const fields = { cleared: true };
     if (notes) {
-      txn.notes = (txn.notes ? txn.notes + " | " : "") + notes;
+      fields.notes = notes;
     }
-    txn.cleared = true;
-    await actual.updateTransaction(req.params.id, txn);
+    await actual.updateTransaction(req.params.id, fields);
     res.json({ status: "cleared", id: req.params.id });
   } catch(e) { res.status(500).json({error:e.message}); }
 });

@@ -389,14 +389,14 @@ class TestEmailContentExtraction:
         assert "04/06/2026" in result
 
     def test_very_long_email_returns_plain_text(self):
-        """Very long email body is returned as cleaned text (default max_length=4000 truncates)."""
+        """Very long email body is returned as cleaned text (default max_length=60000 truncates)."""
         from src.extractors import extract_email_content
 
         long_text = "A" * 5000
         msg = MIMEText(long_text, "plain")
 
         result = extract_email_content(msg)
-        assert len(result) == 4000
+        assert len(result) == 5000
 
     def test_pdf_only_email_extracts_ocr(self):
         """Email with only a PDF attachment (no text part) extracts OCR text."""

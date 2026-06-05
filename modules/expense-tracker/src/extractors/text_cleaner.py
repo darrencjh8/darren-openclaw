@@ -6,7 +6,7 @@ import re
 _SIGNATURE_PATTERN = re.compile(r"\n--\s*\n.*$", re.DOTALL)
 
 
-def clean_text(text: str, max_length: int = 4000) -> str:
+def clean_text(text: str, max_length: int = 60000) -> str:
     """Normalize whitespace, strip email signatures, trim to max_length.
 
     Args:

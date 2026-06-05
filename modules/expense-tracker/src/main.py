@@ -92,7 +92,7 @@ async def main() -> None:
 
     from src.tools_api import register_tools_api
     register_tools_api(app, cfg, registry)
-    logger.info("tools_api_registered", extra={"correlation_id": "", "data": {"tools": 15}})
+    logger.info("tools_api_registered", extra={"correlation_id": "", "data": {"tools": 16}})
     runner = web.AppRunner(app)
     await runner.setup()
     site = web.TCPSite(runner, "0.0.0.0", 8080)

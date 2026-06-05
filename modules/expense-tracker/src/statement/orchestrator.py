@@ -26,6 +26,12 @@ class DeepSeekClient:
         )
         self._model = model
 
+    def _merge_reasoning(self, data: dict) -> None:
+        for choice in data.get("choices", []):
+            msg = choice.get("message", {})
+            if not msg.get("content") and msg.get("reasoning_content"):
+                msg["content"] = msg["reasoning_content"]
+
     async def chat(self, messages: list[dict], tools: list[dict] | None = None) -> dict:
         kwargs = {
             "model": self._model,
@@ -41,9 +47,11 @@ class DeepSeekClient:
             try:
                 response = await asyncio.wait_for(
                     self._client.chat.completions.create(**kwargs),
-                    timeout=30,
+                    timeout=60,
                 )
-                return response.model_dump()
+                data = response.model_dump()
+                self._merge_reasoning(data)
+                return data
             except asyncio.TimeoutError:
                 if attempt < 2:
                     logger.warning("DeepSeek timeout, retry %d/3", attempt + 2)
@@ -68,7 +76,7 @@ class StatementProcessor:
 
     def __init__(self, config: Config, tools: ToolRegistry | None = None):
         self._config = config
-        self._llm = DeepSeekClient(config, model="deepseek-v4-pro")
+        self._llm = DeepSeekClient(config, model="deepseek-chat")
         self._tools = tools or ToolRegistry(config)
 
     @property
@@ -113,7 +121,9 @@ class StatementProcessor:
                 tool_calls = message.get("tool_calls")
                 if not tool_calls:
                     if finish_reason == "stop":
-                        return {"action": "completed", "details": message.get("content", "")}
+                        result = {"action": "completed", "details": message.get("content", "")}
+                        await self._ensure_email_read()
+                        return result
                     return {"action": "error", "details": f"Unexpected finish: {finish_reason}"}
 
                 assistant_msg = {
@@ -121,8 +131,6 @@ class StatementProcessor:
                     "content": message.get("content"),
                     "tool_calls": tool_calls,
                 }
-                if assistant_msg["content"] is None:
-                    del assistant_msg["content"]
                 messages.append(assistant_msg)
 
                 for tc in tool_calls:
@@ -148,11 +156,7 @@ class StatementProcessor:
 
         except Exception as e:
             logger.error("Statement processing failed: %s", e, exc_info=True)
-            try:
-                if self._tools._imap_handler:
-                    await self._tools.execute_tool("mark_email_read", {})
-            except Exception:
-                pass
+            await self._ensure_email_read()
             try:
                 await self._tools.execute_tool("notify_user", {
                     "message": f"Failed processing statement: {str(e)[:200]}",
@@ -161,12 +165,18 @@ class StatementProcessor:
                 pass
             return {"action": "error", "details": str(e)[:500]}
 
+    async def _ensure_email_read(self):
+        try:
+            await self._tools.execute_tool("mark_email_read", {})
+            logger.info("Marked email as read via tools")
+        except Exception as e:
+            logger.warning("Failed to mark email read: %s", e)
+
     def _build_messages(self, statement_content: str) -> list[dict]:
-        messages = [{"role": "system", "content": STATEMENT_PROMPT}]
-        for example in STATEMENT_FEW_SHOT:
-            messages.extend(example)
-        messages.append({
-            "role": "user",
-            "content": f"Process this credit card statement:\n\n{statement_content[:60000]}",
-        })
-        return messages
+        return [
+            {"role": "system", "content": STATEMENT_PROMPT},
+            {
+                "role": "user",
+                "content": f"Process this credit card statement:\n\n{statement_content[:60000]}",
+            },
+        ]

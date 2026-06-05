@@ -76,3 +76,20 @@ class DedupJournal:
                 (tx_hash, msg_id, date, amount_cents, account_id, payee_name),
             )
             self._conn.commit()
+
+    def check_exact(self, date: str, amount_cents: int, account_id: str) -> bool:
+        """Return True if ANY transaction with the same (date, amount, account) exists.
+
+        Ignores payee — used by statement pipeline to detect duplicates
+        that may have been recorded with different payee names.
+        """
+        with self._lock:
+            self._cursor.execute(
+                """
+                SELECT 1 FROM dedup_journal
+                WHERE date = ? AND amount_cents = ? AND account_id = ?
+                LIMIT 1
+                """,
+                (date, amount_cents, account_id),
+            )
+            return self._cursor.fetchone() is not None

@@ -156,6 +156,9 @@ class ToolRegistry:
         self._dedup.record(date, amount_cents, account_id, payee_name, msg_id)
         return False
 
+    async def _handle_check_statement_duplicate(self, date: str, amount_cents: int, account_id: str) -> bool:
+        return self._dedup.check_exact(date, amount_cents, account_id)
+
     async def _handle_mark_email_read(self) -> bool:
         if self._imap_handler is not None and self._email_msg_id is not None:
             await self._imap_handler.mark_read(self._email_msg_id)
@@ -451,6 +454,19 @@ _TOOLS = [
                 "period_end": {"type": "string", "description": "Statement period end (YYYY-MM-DD)"},
             },
             "required": ["account_id", "period_start", "period_end"],
+        },
+    },
+    {
+        "name": "check_statement_duplicate",
+        "description": "Check if a transaction with the same date, amount, and account already exists (ignoring payee). Used to prevent statement pipeline from inserting duplicates with different payee names.",
+        "schema": {
+            "type": "object",
+            "properties": {
+                "date": {"type": "string", "description": "Transaction date (YYYY-MM-DD)"},
+                "amount_cents": {"type": "integer", "description": "Amount in cents (negative for spend)"},
+                "account_id": {"type": "string", "description": "AB account ID"},
+            },
+            "required": ["date", "amount_cents", "account_id"],
         },
     },
 ]

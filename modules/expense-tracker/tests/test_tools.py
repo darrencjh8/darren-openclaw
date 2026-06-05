@@ -32,15 +32,15 @@ def make_config(**overrides):
 class TestToolRegistry:
     """Tests for tool registry and tool execution."""
 
-    async def test_registry_returns_15_schemas(self):
-        """ToolRegistry returns exactly 15 tool schemas."""
+    async def test_registry_returns_16_schemas(self):
+        """ToolRegistry returns exactly 16 tool schemas."""
         from src.agent.tools import ToolRegistry
 
         config = make_config()
         registry = ToolRegistry(config)
         schemas = registry.get_tool_schemas()
 
-        assert len(schemas) == 15
+        assert len(schemas) == 16
         names = [s["function"]["name"] for s in schemas]
         assert "fetch_accounts" in names
         assert "insert_transaction" in names

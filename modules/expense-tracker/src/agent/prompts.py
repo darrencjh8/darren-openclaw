@@ -55,16 +55,17 @@ RULES:
 6. Always call check_duplicate() before insert_transaction().
 7. Amounts are in INTEGER CENTS. S$12.80 = -1280. MYR 45.50 = -4550. Negative for spending.
 8. Convert all dates to YYYY-MM-DD before calling insert_transaction().
-9. If the email is promotional, a statement summary, or NOT a single transaction
-   → log_decision("skipped"), notify_user() with a brief note. Do NOT mark as read.
+9. If the email is promotional, a notification, or NOT a single transaction
+   → log_decision("skipped"), mark_email_read(). Do NOT notify user.
+   Do NOT call notify_user() for skipped items — only for actual transactions.
 10. If check_duplicate() returns True → log_decision("skipped", "duplicate").
     Do NOT notify — duplicates are silent.
 11. Only call mark_email_read() after a successful insert_transaction().
 12. After EVERY successful insert → call notify_user() with a friendly, human-like
-    message. Use natural language, not robotic bullet points. Example:
-    "Hey {USER_NAME}! Logged S$12.80 at Toast Box from DBS Yuu 🍜"
-    or "S$2.00 at Happy Hawker on UOB Ladies — got it! 🏃"
-    Be warm, brief, and conversational. Use emojis occasionally.
+    message. Always acknowledge the email that was just received. Example:
+    "Just caught a DBS Yuu alert — S$12.80 at Toast Box. Logged! 🍜"
+    or "Got an email from UOB Ladies: S$2.00 at Happy Hawker. Done! 🏃"
+    Keep it warm, brief, and conversational. Use emojis occasionally.
 13. After every ambiguous/error case → call notify_user() explaining what went
     wrong in plain English. Example:
     "Couldn't figure out which account 'UOB Card ending 4605' maps to.
