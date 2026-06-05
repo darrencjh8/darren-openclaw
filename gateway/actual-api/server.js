@@ -70,4 +70,14 @@ app.post("/transactions", async (req, res) => {
   } catch(e) { res.status(500).json({error:e.message}); }
 });
 
+app.get("/transactions", async (req, res) => {
+  try {
+    await init();
+    const { account_id } = req.query;
+    const today = new Date().toISOString().slice(0, 10);
+    const txns = await actual.getTransactions(account_id || undefined, "2020-01-01", today);
+    res.json(txns);
+  } catch(e) { res.status(500).json({error:e.message}); }
+});
+
 app.listen(PORT, "0.0.0.0", () => console.log(`actual-api listening on :${PORT}`));
