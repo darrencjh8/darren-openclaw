@@ -1,9 +1,10 @@
-"""Email content extraction — MIME parsing, HTML→text, text cleaning."""
+"""Email content extraction — MIME parsing, HTML→text, PDF→OCR, text cleaning."""
 
 import email
 from email.message import Message
 
 from src.extractors.html_extractor import extract_html
+from src.extractors.pdf_extractor import extract_pdf
 from src.extractors.text_cleaner import clean_text
 
 
@@ -36,6 +37,10 @@ def extract_email_content(msg: Message) -> str:
             elif content_type == "text/html":
                 if sub_type != "alternative" or not has_plain:
                     parts.append(clean_text(extract_html(decoded)))
+            elif content_type == "application/pdf":
+                pdf_text = extract_pdf(payload)
+                if pdf_text.strip():
+                    parts.append(clean_text(pdf_text))
 
         result = " ".join(parts)
         if result.strip():
@@ -57,4 +62,7 @@ def extract_email_content(msg: Message) -> str:
         return clean_text(decoded)
     elif content_type == "text/html":
         return clean_text(extract_html(decoded))
+    elif content_type == "application/pdf":
+        pdf_text = extract_pdf(payload)
+        return clean_text(pdf_text) if pdf_text.strip() else ""
     return ""

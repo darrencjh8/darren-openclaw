@@ -1,10 +1,12 @@
 """OpenClaw Expense Tracker — entry point.
 
 Sets up all components: config, logging, dedup journal, tool registry,
-agent orchestrator, IMAP IDLE handler, and a health check HTTP server.
+agent orchestrator, statement processor, IMAP IDLE handler, and a health check HTTP server.
 """
 
 import asyncio
+import email as em
+import os
 import signal
 from pathlib import Path
 
@@ -13,7 +15,50 @@ from src.utils.logging import setup_logging, get_logger
 from src.utils.dedup import DedupJournal
 from src.agent.tools import ToolRegistry
 from src.agent.orchestrator import AgentOrchestrator
+from src.statement.orchestrator import StatementProcessor
+from src.statement.journal import StatementJournal
 from src.imap.idle_handler import ImapIdleHandler
+
+
+async def _classify_email(raw_email: bytes, subject: str, sender: str) -> str:
+    """Classify an email as 'statement' or 'transaction' using a lightweight LLM call.
+
+    Uses deepseek-v4-flash (no tools) for fast classification.
+    Defaults to 'transaction' on any error.
+    """
+    try:
+        from src.extractors import extract_email_content
+        from src.statement.prompts import CLASSIFICATION_PROMPT
+        from openai import AsyncOpenAI
+
+        msg = em.message_from_bytes(raw_email)
+        body = extract_email_content(msg)
+        text = f"Subject: {subject}\nFrom: {sender}\n\n{body[:2000]}"
+
+        client = AsyncOpenAI(
+            api_key=os.environ.get("DEEPSEEK_API_KEY", ""),
+            base_url="https://api.deepseek.com/v1",
+        )
+
+        response = await asyncio.wait_for(
+            client.chat.completions.create(
+                model="deepseek-chat",
+                messages=[
+                    {"role": "system", "content": CLASSIFICATION_PROMPT},
+                    {"role": "user", "content": text},
+                ],
+                temperature=0.0,
+                max_tokens=5,
+            ),
+            timeout=10,
+        )
+
+        result = response.choices[0].message.content.strip().lower()
+        if result == "statement":
+            return "statement"
+        return "transaction"
+    except Exception:
+        return "transaction"
 
 
 async def main() -> None:
@@ -30,6 +75,13 @@ async def main() -> None:
     registry = ToolRegistry(cfg)
     orchestrator = AgentOrchestrator(cfg, tools=registry)
 
+    stmt_db_path = os.environ.get("STATEMENT_DB_PATH", "data/statement.db")
+    Path(stmt_db_path).parent.mkdir(parents=True, exist_ok=True)
+    statement_journal = StatementJournal(db_path=stmt_db_path)
+    registry.set_statement_journal(statement_journal)
+    statement_processor = StatementProcessor(cfg, tools=registry)
+    logger.info("statement_processor_initialized", extra={"correlation_id": "", "data": {"db": stmt_db_path}})
+
     from aiohttp import web
 
     async def health(request: web.Request) -> web.Response:
@@ -40,7 +92,7 @@ async def main() -> None:
 
     from src.tools_api import register_tools_api
     register_tools_api(app, cfg, registry)
-    logger.info("tools_api_registered", extra={"correlation_id": "", "data": {"tools": 10}})
+    logger.info("tools_api_registered", extra={"correlation_id": "", "data": {"tools": 15}})
     runner = web.AppRunner(app)
     await runner.setup()
     site = web.TCPSite(runner, "0.0.0.0", 8080)
@@ -48,7 +100,13 @@ async def main() -> None:
     logger.info("health_check_started", extra={"correlation_id": "", "data": {"port": 8080}})
 
     async def on_new_email(msg: dict) -> None:
-        await orchestrator.process_email(msg["msg_id"], msg["raw_email"], imap_handler)
+        classification = await _classify_email(
+            msg.get("raw_email", b""), msg.get("subject", ""), msg.get("from", "")
+        )
+        if classification == "statement":
+            await statement_processor.process_statement(msg["msg_id"], msg["raw_email"], imap_handler)
+        else:
+            await orchestrator.process_email(msg["msg_id"], msg["raw_email"], imap_handler)
 
     imap_handler = ImapIdleHandler(
         cfg.imap_host, cfg.imap_port,

@@ -1,9 +1,9 @@
 # OpenClaw — Architecture Design Document
 
 **Project:** darren-openclaw
-**Version:** 1.0.0
-**Last Updated:** 2026-06-04
-**Status:** Specified & Planned — Implementation Pending
+**Version:** 2.0.0
+**Last Updated:** 2026-06-05
+**Status:** Specified & Planned — Implementation Pending (alert pipeline) + Statement Reconciliation (specified)
 
 ---
 
@@ -32,9 +32,10 @@
 ### Current Modules
 
 | Module | Purpose | Status |
-|---|---|---|
+|---|---|---|---|
 | **expense-tracker** | Automated expense tracking via email → Actual Budget (Python tool backend) | Specified, Planned, Tasked — Implementation Pending |
 | **gateway** | OpenClaw Gateway deployment with expense-tracker skill | Config + skills written, implementation pending |
+| **statement-reconciliation** | PDF credit card statement reconciliation + outlier detection | Specified, Planned, Tasked — Implementation Pending |
 
 ---
 
@@ -380,6 +381,139 @@ CREATE TABLE dedup_journal (
 
 ---
 
+## 5.A Module: statement-reconciliation (NEW)
+
+### 5A.1 Purpose
+
+A **parallel pipeline** that processes monthly credit card and bank **statements** (PDF or HTML tabular emails). Unlike the alert pipeline, which treats each email as a potential new transaction, the statement pipeline treats the statement as the **bank's authoritative final record** for a billing cycle:
+
+| | Alert Pipeline | Statement Pipeline |
+|---|---|---|
+| **Authority** | Hint (may miss txns) | Bank's official record |
+| **"Match found"** | Duplicate → skip silently | **Reconciliation** → mark cleared |
+| **"No match"** | Insert new txn (cleared=false) | **Insert as outlier** (cleared=false, noted) |
+| **Result** | 1 txn inserted or skipped | X cleared + Y outliers inserted |
+| **Email disposition** | Read on insert; unread on skip/fail | **Always marked read** |
+| **LLM Model** | deepseek-v4-flash | deepseek-v4-pro |
+| **Database** | dedup.db (dedup journal) | statement.db (statement journal) |
+
+### 5A.2 Architecture: Pre-Classification + Dispatch
+
+Every email goes through a **lightweight pre-classification LLM call** before dispatch to determine which pipeline to use:
+
+```
+Email arrives → extract content (text/HTML/PDF OCR)
+    │
+    ▼
+Pre-classification LLM call (deepseek-v4-flash, no tools):
+  "Classify: 'statement' or 'transaction'"
+    │
+    ├── "transaction" → AgentOrchestrator.process_email()
+    │                    (EXISTING alert pipeline — UC-1/2/3, UNCHANGED)
+    │
+    └── "statement"  → StatementProcessor.process_statement()
+                         (NEW — deepseek-v4-pro, max 20 iterations)
+```
+
+This handles all formats: single-receipt PDFs route to the alert pipeline, tabular HTML statements route to the statement pipeline. Ambiguous input defaults to "transaction" (safe).
+
+### 5A.3 Statement Processing Flow
+
+```
+Statement email dispatched to StatementProcessor (v4-pro)
+    │
+    ▼
+1. Extract content (PDF OCR or HTML text via extractors/__init__.py — now wired)
+    │
+    ▼
+2. LLM Turn 1: extracts statement period, account, currency, ALL line items
+      tool_calls: [fetch_accounts, fetch_categories, fetch_statement_history]
+        → Check: has this (account, period) been processed?
+        → If YES → notify "Already processed" → mark_read → STOP
+    │
+    ▼
+3. LLM Turn 2: fetch_unreconciled_transactions(account_id, period_start, period_end)
+        → GET /transactions?account_id=X&cleared=false&since_date=Y&until_date=Z
+    │
+    ▼
+4. LLM Turns 3-N: For EACH statement line item:
+      fuzzy_match(stmt_date, stmt_amount, stmt_desc, uncleared_txns)
+        → Returns top 3 scored candidates (amount ±20c, date ±2d, merchant overlap)
+        → MATCH (score ≥ 50):
+            reconcile_transaction(ab_txn_id, "Statement [period]")
+              → POST /transactions/:id/clear → cleared: true
+              → Notes: "... | Statement [period]"
+        → NO MATCH:
+            insert_transaction(account_id, date, amount, payee,
+                               notes="OUTLIER | Statement [period]")
+              → POST /transactions → created with cleared: false (default)
+    │
+    ▼
+5. Final turn:
+      tool_calls: [record_statement(...), notify_user(...), mark_email_read()]
+        → Telegram: "✅ X reconciled and cleared ⚠️ Y outliers inserted but not cleared: [details]"
+        → IMAP \Seen flag
+
+On ANY failure:
+      → notify_user("Failed: [error]") → mark_email_read() → log error
+```
+
+### 5A.4 New Tools (4 new, 15 total with existing 11)
+
+| # | Tool | Pipeline | Purpose |
+|---|---|---|---|
+| 12 | `fetch_unreconciled_transactions` | Statement | GET uncleared AB txns for account in date range |
+| 13 | `reconcile_transaction` | Statement | PATCH AB transaction → `cleared: true` |
+| 14 | `record_statement` | Statement | Log statement processing in statement journal |
+| 15 | `fetch_statement_history` | Statement | Check if (account, period) was already processed |
+
+Existing 11 alert tools are **shared** between both pipelines (unchanged).
+
+### 5A.5 Fuzzy Matching Algorithm
+
+| Signal | Weight | Condition |
+|---|---|---|
+| Amount exact | 80 | Same cents |
+| Amount within ±20c | 50 | Tolerance for rounding |
+| Date exact | 30 | Same calendar day |
+| Date within ±2d | 15 | Posting delay |
+| Merchant overlap > 0.5 | 20 | Jaccard token similarity |
+
+Threshold: 50. Returns top 3 candidates sorted by score.
+
+### 5A.6 actual-api Changes (gateway/actual-api/server.js)
+
+| Change | Endpoint | Purpose |
+|---|---|---|
+| NEW | `POST /transactions/:id/clear` | Mark transaction as cleared |
+| ENHANCED | `GET /transactions?cleared=false` | Filter uncleared transactions |
+| ENHANCED | `GET /transactions?since_date=X&until_date=Y` | Date range filtering |
+
+### 5A.7 User Stories (6 stories)
+
+| ID | Story |
+|---|---|
+| US-1 | LLM pre-classification ("statement" vs "transaction") |
+| US-2 | PDF ingestion via OCR (wire pdf_extractor.py) |
+| US-3 | Multi-transaction extraction from statement text |
+| US-4 | Reconciliation (match→clear) + outlier insertion (no-match→insert uncleared) |
+| US-5 | Statement period tracking (prevent double-processing) |
+| US-6 | Notification with reconciliation summary; always mark read |
+
+### 5A.8 Regression Isolation
+
+| Component | Alert Pipeline | Statement Pipeline | Shared? |
+|---|---|---|---|
+| Orchestrator | `agent/orchestrator.py` (MAX=5) | `statement/orchestrator.py` (MAX=20) | No |
+| LLM Model | deepseek-v4-flash | deepseek-v4-pro | No |
+| System Prompt | `agent/prompts.py` | `statement/prompts.py` | No |
+| Tool Registry | `agent/tools.py` (15 tools) | Same instance | Yes |
+| Journal | `dedup.db` | `statement.db` | No |
+| actual-api | `server.js` (original + new) | Same server | Yes |
+| Pre-classification | N/A | Flash LLM call in main.py | Yes (main.py) |
+
+---
+
 ## 6. Module: gateway
 
 ### 6.1 Purpose
@@ -708,15 +842,14 @@ gantt
 ```
 
 | Phase | Milestone | Status |
-|---|---|---|
-| **Current** | expense-tracker: Spec, Plan, Tasks complete | ✅ |
+|---|---|---|---|
+| **Current** | expense-tracker (alert pipeline): Spec, Plan, Tasks complete | ✅ |
+| **Current** | statement-reconciliation: Spec, Plan, Tasks complete | ✅ |
 | **Next** | expense-tracker: `/implement` — Phase 0 (Foundation) | ⬜ |
-| | expense-tracker: `/implement` — Phase 1 (Deterministic Tools) | ⬜ |
-| | expense-tracker: `/implement` — Phase 2 (Agent Intelligence) | ⬜ |
-| | expense-tracker: `/implement` — Phase 3 (Integration & Deploy) | ⬜ |
+| | statement-reconciliation: `/implement` — Phase 0 (Foundation) | ⬜ |
 | | expense-tracker: `/validate` — Test suite + Docker build | ⬜ |
-| **Future** | gateway: `/speckit.constitution` | ✅ |
-| | gateway: Feature specification & implementation | ⬜ |
+| | statement-reconciliation: `/validate` — Full regression suite | ⬜ |
+| **Future** | gateway: Feature specification & implementation | ⬜ |
 
 ### 13.1 Technical Debt
 

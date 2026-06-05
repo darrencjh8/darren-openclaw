@@ -105,9 +105,14 @@ app.post("/transactions", async (req, res) => {
 app.get("/transactions", async (req, res) => {
   try {
     await ensureBudget(getBudgetId(req));
-    const { account_id } = req.query;
+    const { account_id, cleared, since_date, until_date } = req.query;
     const today = new Date().toISOString().slice(0, 10);
-    const txns = await actual.getTransactions(account_id || undefined, "2020-01-01", today);
+    const start = since_date || "2020-01-01";
+    const end = until_date || today;
+    let txns = await actual.getTransactions(account_id || undefined, start, end);
+    if (cleared === "false") {
+      txns = txns.filter(t => !t.cleared);
+    }
     res.json(txns);
   } catch(e) { res.status(500).json({error:e.message}); }
 });
@@ -117,6 +122,23 @@ app.delete("/transactions/:id", async (req, res) => {
     await ensureBudget(getBudgetId(req));
     await actual.deleteTransaction(req.params.id);
     res.json({ status: "deleted", id: req.params.id });
+  } catch(e) { res.status(500).json({error:e.message}); }
+});
+
+app.post("/transactions/:id/clear", async (req, res) => {
+  try {
+    await ensureBudget(getBudgetId(req));
+    const txn = await actual.getTransaction(req.params.id);
+    if (!txn) {
+      return res.status(404).json({ error: "Transaction not found" });
+    }
+    const { notes } = req.body || {};
+    if (notes) {
+      txn.notes = (txn.notes ? txn.notes + " | " : "") + notes;
+    }
+    txn.cleared = true;
+    await actual.updateTransaction(req.params.id, txn);
+    res.json({ status: "cleared", id: req.params.id });
   } catch(e) { res.status(500).json({error:e.message}); }
 });
 

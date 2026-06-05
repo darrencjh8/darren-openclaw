@@ -24,6 +24,10 @@ def register_tools_api(app: web.Application, config, registry):
         ("/tools/notify-user", "notify_user"),
         ("/tools/log-decision", "log_decision"),
         ("/tools/learn-mapping", "learn_mapping"),
+        ("/tools/reconcile-transaction", "reconcile_transaction"),
+        ("/tools/fetch-unreconciled-transactions", "fetch_unreconciled_transactions"),
+        ("/tools/record-statement", "record_statement"),
+        ("/tools/fetch-statement-history", "fetch_statement_history"),
     ]
 
     for path, tool_name in routes:

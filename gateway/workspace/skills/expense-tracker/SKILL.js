@@ -32,7 +32,11 @@ module.exports = {
   insert_transaction: async ({ budget_id, account_id, date, amount_cents, imported_description, category_id, notes }) => callTool("insert-transaction", { budget_id, account_id, date, amount_cents, imported_description, category_id, notes }),
   check_duplicate: async ({ date, amount_cents, account_id, payee_name }) => callTool("check-duplicate", { date, amount_cents, account_id, payee_name }),
   mark_email_read: async () => callTool("mark-email-read", {}),
-  notify_user: async ({ subject, body }) => callTool("notify-user", { subject, body }),
+  notify_user: async ({ message, subject, body }) => callTool("notify-user", { message, subject, body }),
   extract_email_content: async ({ include_headers }) => callTool("extract-email-content", { include_headers }),
   log_decision: async ({ action, reasoning, transaction_id }) => callTool("log-decision", { action, reasoning, transaction_id }),
+  reconcile_transaction: async ({ ab_transaction_id, statement_ref, budget_id }) => callTool("reconcile-transaction", { ab_transaction_id, statement_ref, budget_id }),
+  fetch_unreconciled_transactions: async ({ account_id, date_from, date_to, budget_id }) => callTool("fetch-unreconciled-transactions", { account_id, date_from, date_to, budget_id }),
+  record_statement: async ({ account_id, budget_id, period_start, period_end, matched_count, outlier_count }) => callTool("record-statement", { account_id, budget_id, period_start, period_end, matched_count, outlier_count }),
+  fetch_statement_history: async ({ account_id, period_start, period_end }) => callTool("fetch-statement-history", { account_id, period_start, period_end }),
 };

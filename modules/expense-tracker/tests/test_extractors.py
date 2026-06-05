@@ -328,7 +328,7 @@ class TestEmailContentExtraction:
         assert "45.00" in result
 
     def test_multipart_mixed_with_attachment(self):
-        """Multipart/mixed with a text body and a PDF attachment extracts text only."""
+        """Multipart/mixed with a text body and a PDF attachment extracts both text and OCR."""
         from src.extractors import extract_email_content
 
         msg = MIMEMultipart("mixed")
@@ -340,6 +340,7 @@ class TestEmailContentExtraction:
         result = extract_email_content(msg)
         assert "Receipt" in result
         assert "Toast Box" in result
+        assert "[PDF_OCR_UNAVAILABLE]" in result
 
     def test_multipart_mixed_with_multiple_plain_parts(self):
         """Multipart/mixed with multiple text/plain parts concatenates them."""
@@ -355,14 +356,14 @@ class TestEmailContentExtraction:
         assert "S$12.80" in result
 
     def test_empty_body_returns_empty_string(self):
-        """Email with no body parts returns empty string."""
+        """Email with only a PDF attachment returns OCR marker, not empty."""
         from src.extractors import extract_email_content
 
         msg = MIMEMultipart("mixed")
         msg.attach(MIMEApplication(b"fake", "pdf"))
 
         result = extract_email_content(msg)
-        assert result == ""
+        assert "[PDF_OCR_UNAVAILABLE]" in result
 
     def test_structured_bank_alert_html(self):
         """Realistic DBS HTML alert is fully parsed to clean text."""
@@ -396,3 +397,37 @@ class TestEmailContentExtraction:
 
         result = extract_email_content(msg)
         assert len(result) == 4000
+
+    def test_pdf_only_email_extracts_ocr(self):
+        """Email with only a PDF attachment (no text part) extracts OCR text."""
+        from src.extractors import extract_email_content
+
+        msg = MIMEMultipart("mixed")
+        pdf_part = MIMEApplication(b"%PDF-1.4 fake statement", "pdf")
+        pdf_part.add_header("Content-Disposition", 'attachment; filename="statement.pdf"')
+        msg.attach(pdf_part)
+
+        result = extract_email_content(msg)
+        assert "[PDF_OCR_UNAVAILABLE]" in result
+
+    def test_pdf_inline_application_pdf(self):
+        """Inline application/pdf (not as attachment) is also extracted."""
+        from src.extractors import extract_email_content
+
+        msg = MIMEMultipart("mixed")
+        pdf_part = MIMEApplication(b"%PDF-1.4 inline", "pdf")
+        msg.attach(pdf_part)
+
+        result = extract_email_content(msg)
+        assert "[PDF_OCR_UNAVAILABLE]" in result
+
+    def test_multiple_pdf_parts_all_extracted(self):
+        """Email with multiple PDF attachments extracts text from all."""
+        from src.extractors import extract_email_content
+
+        msg = MIMEMultipart("mixed")
+        msg.attach(MIMEApplication(b"%PDF-1.4 page1", "pdf"))
+        msg.attach(MIMEApplication(b"%PDF-1.4 page2", "pdf"))
+
+        result = extract_email_content(msg)
+        assert "[PDF_OCR_UNAVAILABLE]" in result

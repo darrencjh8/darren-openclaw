@@ -139,8 +139,8 @@ class TestToolsAPI:
                 data = await resp.json()
                 assert data["code"] == "TOOL_ERROR"
 
-    async def test_all_11_endpoints_accept_post(self, server_url):
-        """All 11 tool endpoints accept POST requests."""
+    async def test_all_15_endpoints_accept_post(self, server_url):
+        """All 15 tool endpoints accept POST requests."""
         async with aiohttp.ClientSession() as session:
             endpoints = [
                 "/tools/extract-email-content",
@@ -154,6 +154,10 @@ class TestToolsAPI:
                 "/tools/notify-user",
                 "/tools/log-decision",
                 "/tools/learn-mapping",
+                "/tools/reconcile-transaction",
+                "/tools/fetch-unreconciled-transactions",
+                "/tools/record-statement",
+                "/tools/fetch-statement-history",
             ]
             for endpoint in endpoints:
                 async with session.post(f"{server_url}{endpoint}", json={}) as resp:

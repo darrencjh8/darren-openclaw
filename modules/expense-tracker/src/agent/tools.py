@@ -41,10 +41,14 @@ class ToolRegistry:
         self._config = config
         from src.utils.dedup import DedupJournal
         self._dedup = DedupJournal(config.dedup_db_path)
+        self._statement_journal = None
         self._http = None
         self._email_msg_id: str | None = None
         self._email_raw: bytes | None = None
         self._imap_handler = None
+
+    def set_statement_journal(self, journal):
+        self._statement_journal = journal
 
     async def close(self):
         if self._http:
@@ -198,6 +202,64 @@ class ToolRegistry:
         )
         return True
 
+    async def _handle_reconcile_transaction(
+        self, ab_transaction_id: str, statement_ref: str = "", budget_id: str = ""
+    ) -> dict:
+        body = {}
+        if statement_ref:
+            body["notes"] = statement_ref
+        return await self._post(
+            f"/transactions/{ab_transaction_id}/clear", body, budget_id=budget_id
+        )
+
+    async def _handle_fetch_unreconciled_transactions(
+        self, account_id: str, date_from: str, date_to: str, budget_id: str = ""
+    ) -> list:
+        return await self._get(
+            "/transactions",
+            budget_id=budget_id,
+            account_id=account_id,
+            cleared="false",
+            since_date=date_from,
+            until_date=date_to,
+        )
+
+    async def _handle_record_statement(
+        self,
+        account_id: str,
+        period_start: str,
+        period_end: str,
+        matched_count: int,
+        outlier_count: int,
+        budget_id: str = "",
+        total_amount_cents: int | None = None,
+        due_date: str | None = None,
+        currency: str = "SGD",
+    ) -> dict:
+        if self._statement_journal is None:
+            raise RuntimeError("Statement journal not configured")
+        sid = self._statement_journal.record_statement(
+            account_id=account_id,
+            budget_id=budget_id or self._config.actual_budget_file,
+            period_start=period_start,
+            period_end=period_end,
+            matched_count=matched_count,
+            outlier_count=outlier_count,
+            total_amount_cents=total_amount_cents,
+            due_date=due_date,
+            currency=currency,
+        )
+        return {"id": sid, "status": "recorded"}
+
+    async def _handle_fetch_statement_history(
+        self, account_id: str, period_start: str, period_end: str
+    ) -> dict | None:
+        if self._statement_journal is None:
+            raise RuntimeError("Statement journal not configured")
+        return self._statement_journal.check_processed(
+            account_id, period_start, period_end
+        )
+
 
 _TOOLS = [
     {
@@ -330,6 +392,65 @@ _TOOLS = [
                 "value": {"type": "string", "description": "The learned fact, e.g. 'credit card', 'Food', 'Transport'"},
             },
             "required": ["type", "key", "value"],
+        },
+    },
+    {
+        "name": "reconcile_transaction",
+        "description": "Mark an Actual Budget transaction as cleared (reconciled against a bank statement). Records a statement reference in the transaction notes.",
+        "schema": {
+            "type": "object",
+            "properties": {
+                "ab_transaction_id": {"type": "string", "description": "Actual Budget transaction ID to clear"},
+                "statement_ref": {"type": "string", "description": "Statement period reference (e.g. 'May 2026')", "default": ""},
+                "budget_id": {"type": "string", "description": "Budget ID (optional)", "default": ""},
+            },
+            "required": ["ab_transaction_id"],
+        },
+    },
+    {
+        "name": "fetch_unreconciled_transactions",
+        "description": "Fetch uncleared transactions from Actual Budget for an account within a date range.",
+        "schema": {
+            "type": "object",
+            "properties": {
+                "account_id": {"type": "string", "description": "Actual Budget account ID"},
+                "date_from": {"type": "string", "description": "Start date (YYYY-MM-DD)"},
+                "date_to": {"type": "string", "description": "End date (YYYY-MM-DD)"},
+                "budget_id": {"type": "string", "description": "Budget ID (optional)", "default": ""},
+            },
+            "required": ["account_id", "date_from", "date_to"],
+        },
+    },
+    {
+        "name": "record_statement",
+        "description": "Record a processed statement to prevent double-processing of the same period.",
+        "schema": {
+            "type": "object",
+            "properties": {
+                "account_id": {"type": "string", "description": "AB account ID"},
+                "period_start": {"type": "string", "description": "Statement period start (YYYY-MM-DD)"},
+                "period_end": {"type": "string", "description": "Statement period end (YYYY-MM-DD)"},
+                "matched_count": {"type": "integer", "description": "Transactions reconciled (cleared)"},
+                "outlier_count": {"type": "integer", "description": "Transactions flagged as outliers"},
+                "budget_id": {"type": "string", "description": "Budget ID (optional)", "default": ""},
+                "total_amount_cents": {"type": "integer", "description": "Total statement amount in cents (optional)"},
+                "due_date": {"type": "string", "description": "Payment due date (optional)"},
+                "currency": {"type": "string", "description": "Currency (default SGD)", "default": "SGD"},
+            },
+            "required": ["account_id", "period_start", "period_end", "matched_count", "outlier_count"],
+        },
+    },
+    {
+        "name": "fetch_statement_history",
+        "description": "Check if a statement period has already been processed for an account.",
+        "schema": {
+            "type": "object",
+            "properties": {
+                "account_id": {"type": "string", "description": "AB account ID"},
+                "period_start": {"type": "string", "description": "Statement period start (YYYY-MM-DD)"},
+                "period_end": {"type": "string", "description": "Statement period end (YYYY-MM-DD)"},
+            },
+            "required": ["account_id", "period_start", "period_end"],
         },
     },
 ]
