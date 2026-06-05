@@ -24,42 +24,15 @@ async function callTool(name, params = {}) {
   return res.json();
 }
 
-export async function fetch_accounts({ budget_id }) {
-  return callTool("fetch-accounts", { budget_id });
-}
-
-export async function fetch_categories({ budget_id }) {
-  return callTool("fetch-categories", { budget_id });
-}
-
-export async function fetch_payees({ budget_id }) {
-  return callTool("fetch-payees", { budget_id });
-}
-
-export async function fetch_recent_transactions({ budget_id, account_id, days }) {
-  return callTool("fetch-recent-transactions", { budget_id, account_id, days });
-}
-
-export async function insert_transaction({ budget_id, account_id, date, amount_cents, imported_description, category_id, notes }) {
-  return callTool("insert-transaction", { budget_id, account_id, date, amount_cents, imported_description, category_id, notes });
-}
-
-export async function check_duplicate({ date, amount_cents, account_id, merchant }) {
-  return callTool("check-duplicate", { date, amount_cents, account_id, merchant });
-}
-
-export async function mark_email_read() {
-  return callTool("mark-email-read", {});
-}
-
-export async function notify_user({ subject, body }) {
-  return callTool("notify-user", { subject, body });
-}
-
-export async function extract_email_content({ include_headers }) {
-  return callTool("extract-email-content", { include_headers });
-}
-
-export async function log_decision({ action, reasoning, transaction_id }) {
-  return callTool("log-decision", { action, reasoning, transaction_id });
-}
+module.exports = {
+  fetch_accounts: async ({ budget_id }) => callTool("fetch-accounts", { budget_id }),
+  fetch_categories: async ({ budget_id }) => callTool("fetch-categories", { budget_id }),
+  fetch_payees: async ({ budget_id }) => callTool("fetch-payees", { budget_id }),
+  fetch_recent_transactions: async ({ budget_id, account_id, days }) => callTool("fetch-recent-transactions", { budget_id, account_id, days }),
+  insert_transaction: async ({ budget_id, account_id, date, amount_cents, imported_description, category_id, notes }) => callTool("insert-transaction", { budget_id, account_id, date, amount_cents, imported_description, category_id, notes }),
+  check_duplicate: async ({ date, amount_cents, account_id, merchant }) => callTool("check-duplicate", { date, amount_cents, account_id, merchant }),
+  mark_email_read: async () => callTool("mark-email-read", {}),
+  notify_user: async ({ subject, body }) => callTool("notify-user", { subject, body }),
+  extract_email_content: async ({ include_headers }) => callTool("extract-email-content", { include_headers }),
+  log_decision: async ({ action, reasoning, transaction_id }) => callTool("log-decision", { action, reasoning, transaction_id }),
+};

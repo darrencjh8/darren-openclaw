@@ -1,3 +1,8 @@
+---
+name: expense-tracker
+description: Track expenses in Actual Budget via chat commands. Wraps 10 deterministic Python tools for account lookup, transaction insertion, duplicate checking, and email notifications.
+---
+
 # Expense Tracker Skill
 
 Track expenses in Actual Budget via chat commands. This skill wraps 10 deterministic Python tools that fetch live data from Actual Budget and perform transaction operations.
