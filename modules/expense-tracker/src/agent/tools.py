@@ -21,6 +21,12 @@ class ToolRegistry:
         self._dedup = DedupJournal(config.dedup_db_path)
         from src.client.actual_client import ActualBudgetClient
         self._ab = ActualBudgetClient(config)
+        self._warmed = False
+
+    async def _ensure_warm(self):
+        if not self._warmed:
+            await self._ab._init()
+            self._warmed = True
 
     async def _get_budget_id(self) -> str:
         return ""
@@ -51,26 +57,31 @@ class ToolRegistry:
         }
 
     async def _handle_fetch_accounts(self, budget_id: str = "") -> list:
+        await self._ensure_warm()
         return await self._ab.get_accounts(budget_id)
 
     async def _handle_fetch_categories(self, budget_id: str = "") -> list:
+        await self._ensure_warm()
         return await self._ab.get_categories(budget_id)
 
     async def _handle_fetch_payees(self, budget_id: str = "") -> list:
+        await self._ensure_warm()
         return await self._ab.get_payees(budget_id)
 
     async def _handle_fetch_recent_transactions(self, budget_id: str = "", account_id: str = "", days: int = 7) -> list:
+        await self._ensure_warm()
         return await self._ab.get_transactions(budget_id, account_id)
 
     async def _handle_insert_transaction(
         self, budget_id: str = "", account_id: str = "", date: str = "", amount_cents: int = 0,
         imported_description: str = "", payee_name: str = "", category_id: str = "", notes: str = "",
     ) -> dict:
+        await self._ensure_warm()
         txn = {
             "date": date,
             "amount": amount_cents,
             "account": account_id,
-            "imported_description": imported_description,
+            "imported_description": imported_description or payee_name,
             "notes": notes,
             "cleared": False,
         }

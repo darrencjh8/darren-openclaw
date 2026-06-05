@@ -28,6 +28,8 @@ async def main() -> None:
     logger.info("dedup_initialized", extra={"correlation_id": "", "data": {"path": cfg.dedup_db_path}})
 
     registry = ToolRegistry(cfg)
+    await registry._ensure_warm()
+    logger.info("actual_budget_connected", extra={"correlation_id": "", "data": {}})
 
     orchestrator = AgentOrchestrator(cfg, tools=registry)
     logger.info("orchestrator_initialized", extra={"correlation_id": "", "data": {}})
