@@ -1,4 +1,9 @@
 {
+  "skills": {
+    "load": {
+      "extraDirs": ["/app/skills"]
+    }
+  },
   "models": {
     "providers": {
       "deepseek": {

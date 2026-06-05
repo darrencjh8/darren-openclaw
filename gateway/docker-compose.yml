@@ -5,8 +5,10 @@ services:
       - "18789:18789"
     volumes:
       - ./openclaw.json:/app/openclaw.json:ro
-      - ./workspace:/app/workspace
+      - ./workspace/skills:/app/skills:ro
+      - openclaw_home:/app/.openclaw
       - openclaw_data:/app/data
+    user: node
     environment:
       - OPENCLAW_CONFIG_PATH=/app/openclaw.json
       - OPENCLAW_HOME=/app
@@ -28,3 +30,4 @@ services:
 
 volumes:
   openclaw_data:
+  openclaw_home:
