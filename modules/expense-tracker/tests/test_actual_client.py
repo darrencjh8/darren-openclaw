@@ -1,7 +1,7 @@
-"""Tests for ActualBudgetClient — integration with actualpy library.
+"""Tests for ActualBudgetClient — thin HTTP wrapper around actual-api (Node.js).
 
-The client now uses actualpy (sync protocol) instead of raw HTTP.
-These tests validate the client construction and basic connectivity.
+The client delegates to @actual-app/api (Node.js) via HTTP.
+These tests validate client construction and connectivity.
 Actual Budget connectivity is tested in test_credentials.py (integration).
 """
 

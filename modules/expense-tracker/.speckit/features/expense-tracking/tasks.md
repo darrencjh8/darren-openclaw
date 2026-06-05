@@ -76,7 +76,7 @@ Phase 3: Integration & Deploy
   - Load `.env` via `python-dotenv`
   - Validate required variables on startup; raise clear error messages for missing vars
   - Expose typed config object: `Config` dataclass with fields for all env vars
-- [ ] Write `config/actual_config.json` (minimal: `{"api_url": "http://actual-budget.internal:5006"}`)
+- [ ] Write `config/actual_config.json` (minimal: `{"api_url": "http://flyio-frosty-glitter-5667.fly.dev"}`)
 - [ ] Write `config/email_config.json` (minimal: `{"imap_host": "imap.zoho.com", "imap_port": 993}`)
 - [ ] Implement `config/__init__.py` that loads JSON configs
 

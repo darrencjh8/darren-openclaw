@@ -94,7 +94,7 @@ graph TB
     subgraph External["External Services"]
         Zoho["Zoho Mail<br/>imap.zoho.com:993"]
         DeepSeek["DeepSeek API<br/>api.deepseek.com/v1"]
-        AB["Actual Budget<br/>Fly.io VM #1<br/>actual-budget.internal:5006"]
+        AB["Actual Budget<br/>Fly.io VM #1<br/>flyio-frosty-glitter-5667.fly.dev"]
     end
 
     subgraph OpenClaw["Ubuntu Laptop (Docker Compose): expense-tracker (Python 3.12-slim, ~150MB RAM)"]

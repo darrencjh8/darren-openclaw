@@ -56,7 +56,7 @@ OpenClaw is an **LLM-powered expense-tracking agent** that monitors a Zoho burne
 ### Actual Budget Instance Reference
 
 - **Budget:** `Darren-SGD-29ed82a` (SGD), plus a separate MYR budget
-- **API:** REST API at `http://actual-budget.internal:5006`
+- **API:** REST API at `http://flyio-frosty-glitter-5667.fly.dev`
 - **Transaction schema:** `date` (YYYY-MM-DD), `amount` (integer cents, negative for spend), `account` (UUID), `imported_description` (merchant), `category` (UUID or null), `notes` (metadata), `cleared` (false)
 - **Active accounts (sample):** DBS Account, DBS Yuu, UOB One, OCBC 360, Trust Bank, Trust Card, HSBC Revolution, Citi Reward, POSB Cashback, DBS Altitude, SC Bonus Saver, SC Journeys, UOB Ladies, OCBC 90N, Revolut, plus MYR accounts (TouchNGo, Ryt Bank, Maybank XL, etc.)
 - **Category groups:** Income, Fixed, Essential (Food, Household, Transport, Utilities, Internet, Gym), Wants (Dining out, Date, Vacation, Gift, Clothing, Fun Money), Financial Goals, Insurance

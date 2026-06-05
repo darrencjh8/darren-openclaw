@@ -453,7 +453,7 @@ def compute_hash(date: str, amount_cents: int, account_id: str, merchant: str) -
 | Variable | Required | Description |
 |---|---|---|
 | `DEEPSEEK_API_KEY` | ✅ | DeepSeek API key |
-| `ACTUAL_BUDGET_URL` | ✅ | `http://actual-budget.internal:5006` |
+| `ACTUAL_BUDGET_URL` | ✅ | `http://flyio-frosty-glitter-5667.fly.dev` |
 | `ACTUAL_BUDGET_PASSWORD` | ✅ | Actual Budget server password |
 | `ACTUAL_BUDGET_FILE` | ✅ | Budget file ID or name |
 | `ACTUAL_BUDGET_ENCRYPTION_PASSWORD` | ❌ | Optional encryption password |
