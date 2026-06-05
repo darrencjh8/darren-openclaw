@@ -69,7 +69,8 @@ services:
   onedrive-sync:
     image: driveone/onedrive:latest
     volumes:
-      - ../modules/onedrive-sync/config:/onedrive/conf
+      - ../modules/onedrive-sync/config/onedrive:/onedrive/conf
+      - ../modules/onedrive-sync/config/sync_list:/onedrive/conf/sync_list:ro
       - onedrive_data:/onedrive/data
     environment:
       - ONEDRIVE_SYNC_INTERVAL=300
