@@ -80,7 +80,7 @@ OpenClaw is an **LLM-powered expense-tracking agent** that monitors a Zoho burne
 - **Python:** 3.12 (slim image, ~80MB base)
 - **DeepSeek API:** `https://api.deepseek.com/v1`
 - **IMAP:** `imap.zoho.com:993` (SSL)
-- **Actual Budget:** public HTTPS endpoint (API key auth)
+- **Actual Budget:** official `@actual-app/api` (Node.js) via `actual-api:3000` with WebSocket sync
 
 ### Pre-Implementation Checklist (for `/implement` agent)
 

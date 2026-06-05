@@ -197,7 +197,7 @@ No manual registration. The `skills` allowlist + workspace directory structure i
 
 5. LLM returns tool_call: fetch_accounts({budget_id: "Darren-SGD-29ed82a"})
    → SKILL.js → HTTP POST /tools/fetch-accounts → expense-tracker :8080
-   → ActualBudgetClient → Actual Budget API → account list
+   → ActualBudgetClient → actual-api:3000 → @actual-app/api → AB server
 
 6. Agent: "Found DBS Yuu. Let me check categories..."
    LLM calls fetch_categories({budget_id: "Darren-SGD-29ed82a"})

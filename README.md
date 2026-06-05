@@ -37,13 +37,16 @@ graph TB
         SKILL_JS -->|"HTTP POST /tools/*"| ET
         ET --> Tools
         ET --> IMAP
+
+        API["actual-api<br/>Node.js :3000<br/>@actual-app/api"]
+        ET -->|"HTTP"| API
     end
 
-    AB["Actual Budget<br/>Fly.io VM<br/>REST API :5006"]
+    AB["Actual Budget<br/>Fly.io VM<br/>WebSocket sync"]
     Zoho["Zoho Mail<br/>imap.zoho.com:993"]
     DS["DeepSeek API<br/>deepseek-chat"]
 
-    ET -->|"REST API"| AB
+    API -->|"WebSocket"| AB
     ET -->|"IMAP IDLE (SSL)"| Zoho
     GW -->|"HTTPS"| DS
     ET -->|"HTTPS"| DS
@@ -54,7 +57,7 @@ graph TB
 1. **You message the Telegram bot** → "Track S$12.80 at Toast Box from DBS Yuu"
 2. **Gateway receives it** → agent loads your persona + expense-tracker skill
 3. **LLM decides what to do** → calls `fetch_accounts`, `fetch_categories`, `check_duplicate`, `insert_transaction`
-4. **Python tools execute** → REST calls to Actual Budget, hash lookup in dedup SQLite
+4. **Python tools execute** → calls actual-api Node.js service → WebSocket sync to Actual Budget, hash lookup in dedup SQLite
 5. **Agent replies on Telegram** → "✅ Done! S$12.80 at Toast Box under DBS Yuu (Food)"
 
 **Bonus:** The expense-tracker also runs IMAP IDLE independently — bank alerts forwarded to your Zoho burner inbox are auto-ingested as transactions, no chat needed.

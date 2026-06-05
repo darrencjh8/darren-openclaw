@@ -131,18 +131,11 @@ Phase 3: Integration & Deploy
 **Estimate:** 1 hour  
 **Depends On:** T0.2, T0.3
 
-- [ ] Implement `src/client/actual_client.py`:
-  - `ActualBudgetClient` class:
-    - `__init__(base_url, api_key, session: aiohttp.ClientSession)`
-    - `async get_budgets() -> list[dict]`: GET `/budgets`
-    - `async get_accounts(budget_id) -> list[dict]`: GET `/budgets/{id}/accounts`
-    - `async get_categories(budget_id) -> list[dict]`: GET `/budgets/{id}/categories`
-    - `async get_payees(budget_id) -> list[dict]`: GET `/budgets/{id}/payees`
-    - `async get_transactions(budget_id, account_id=None, since_date=None) -> list[dict]`: GET with query params
-    - `async create_transaction(budget_id, transaction: dict) -> dict`: POST `/budgets/{id}/transactions`
-  - Retry logic: 3 retries with exponential backoff (1s, 2s, 4s) on 5xx or connection errors
-  - All methods return parsed JSON; raise `ActualBudgetError` on 4xx responses
-  - Structured logging on every API call
+- [x] Implement `src/client/actual_client.py`:
+  - Thin HTTP wrapper that delegates to the official `actual-api` Node.js service
+  - Uses `@actual-app/api` (JavaScript) with WebSocket-based sync — no HTTP proxy timeout
+  - Service runs as a separate Docker container at `actual-api:3000`
+  - Python client calls REST endpoints on actual-api, which handles Actual Budget protocol natively
 - [ ] Write `tests/test_actual_client.py`:
   - Test: mock aiohttp responses, verify correct URL construction
   - Test: retry on 503, 3rd attempt succeeds

@@ -70,12 +70,16 @@ darren-openclaw/                          # Umbrella repository root
 │       └── db.sqlite                     # Dedup journal (runtime artifact)
 └── gateway/                              # OpenClaw Gateway config + skills
     ├── openclaw.json                     # Gateway configuration
-    ├── docker-compose.yml                # Gateway + expense-tracker containers
+    ├── docker-compose.yml                # Gateway + expense-tracker + actual-api
     ├── workspace/                        # Agent workspace (persisted)
     │   └── skills/                       # Skills loaded by the gateway
     │       └── expense-tracker/          # Expense tracker skill
     │           ├── SKILL.md              # LLM instructions for expense tracking
     │           └── SKILL.js              # Tool wrappers (HTTP → Python tools)
+    ├── actual-api/                       # Official Actual Budget API (Node.js)
+    │   ├── server.js                     # Express.js wrapper around @actual-app/api
+    │   ├── package.json                  # @actual-app/api@^26.6.0
+    │   └── Dockerfile                    # Node.js container
     └── .speckit/                         # Spec-Kit artifacts (gateway + skill)
 ```
 
@@ -173,6 +177,7 @@ OpenClaw uses the **LLM Agent Pattern**: the Python host is a thin runtime that 
 | **Actual Budget** | Fly.io VM #1 (existing) | Public HTTPS for web UI; API via HTTPS (with auth) | Existing production instance |
 | **OpenClaw Gateway** | Ubuntu laptop (Docker) | Agent orchestration, channels, skills, tool calling | ~400MB RAM |
 | **Expense-tracker** | Ubuntu laptop (Docker) | 10 deterministic Python tools, IMAP IDLE | ~150MB RAM |
+| **actual-api** | Ubuntu laptop (Docker) | Official `@actual-app/api` (Node.js), WebSocket sync | ~100MB RAM |
 | **Zoho Mail Burner** | Zoho (zoho.com) | Public IMAP (imap.zoho.com:993) | Free tier, dedicated inbox |
 | **DeepSeek API** | DeepSeek Cloud | Public HTTPS (api.deepseek.com/v1) | Pay-per-token |
 | **Windows Node** (future) | Windows laptop | Canvas, camera, screen, voice — connects via WebSocket | Any modern Windows PC |

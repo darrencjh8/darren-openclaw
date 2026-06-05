@@ -15,7 +15,7 @@
 | LLM Provider | DeepSeek | `deepseek-chat` | $0.14/1M input, $0.28/1M output, OpenAI-compatible API, strong at structured extraction |
 | LLM Client | `openai` (Python SDK) | >=1.0 | DeepSeek is OpenAI-API-compatible (`base_url="https://api.deepseek.com/v1"`) |
 | IMAP Library | `aioimaplib` | latest | Async IMAP IDLE support, lightweight |
-| HTTP Client | `aiohttp` | latest | Async HTTP for Actual Budget REST API |
+| HTTP Client | `aiohttp` | latest | Async HTTP for actual-api Node.js service |
 | HTML Parsing | `beautifulsoup4` + `lxml` | latest | Extract plain text from HTML email bodies |
 | PDF OCR | `pytesseract` + `pdf2image` | latest | Optional; Tesseract binary must be in Docker image |
 | Config | `.env` + `os.environ` | — | 12-factor app; no YAML/JSON config parsing needed |
@@ -60,7 +60,7 @@
 │  │  │  ┌─────────────────────────────────────────────┐   │  │  │
 │  │  │  │ fetch_accounts()  ┐                          │   │  │
 │  │  │  │ fetch_categories()├─→ client/actual_client.py│   │  │  │
-│  │  │  │ fetch_payees()    │  (Actual Budget REST API)│   │  │  │
+│  │  │  │ fetch_payees()    │  (actual-api Node.js)    │   │  │  │
 │  │  │  │ fetch_recent_txns()┘                         │   │  │  │
 │  │  │  │ insert_transaction()                         │   │  │  │
 │  │  │  └─────────────────────────────────────────────┘   │  │  │

@@ -40,7 +40,7 @@ OpenClaw Gateway (Container)
 
 expense-tracker (Container)
   └── tools_api.py   → HTTP endpoints for each tool
-      └── calls: actualpy, dedup, extractors, imap, notifier
+      └── calls: @actual-app/api (Node.js WebSocket sync), dedup, extractors, imap, notifier
 ```
 
 ### Key Decisions
