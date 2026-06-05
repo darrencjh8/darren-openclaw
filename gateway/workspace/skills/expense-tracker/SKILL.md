@@ -1,62 +1,62 @@
 ---
 name: expense-tracker
-description: Track expenses in Actual Budget via chat commands. Wraps 10 deterministic Python tools for account lookup, transaction insertion, duplicate checking, and email notifications.
+description: Track expenses in Actual Budget. Fetch accounts, categories, payees, insert transactions, check duplicates, and notify user.
 ---
 
 # Expense Tracker Skill
 
-Track expenses in Actual Budget via chat commands. This skill wraps 10 deterministic Python tools that fetch live data from Actual Budget and perform transaction operations.
+You track expenses in the user's Actual Budget. The expense-tracker API runs at
+`http://expense-tracker:8080/tools/<tool-name>`. Call each tool by running
+`exec` with a `curl` command.
 
 ## When to Use
 
 Use this skill when the user wants to:
-- Track an expense: "Track $12.80 at Toast Box from DBS Yuu"
+- Track an expense: "Track S$12.80 at Toast Box from DBS Yuu"
 - Check recent transactions: "What did I spend on food this week?"
 - Look up accounts: "What accounts do I have?"
-- Check categories: "What categories are available?"
 
 ## Available Tools
 
-| Tool | Description | When to call |
-|---|---|---|
-| `fetch_accounts` | List all accounts from Actual Budget | Before matching any account |
-| `fetch_categories` | List all categories | Before assigning a category |
-| `fetch_payees` | List payees | Reference only |
-| `fetch_recent_transactions` | Get recent transactions | Context for dedup |
-| `insert_transaction` | Create a new transaction | After confirming all details |
-| `check_duplicate` | Check if transaction already exists | ALWAYS before insert |
-| `mark_email_read` | Mark email as read in IMAP | After successful insert (email source) |
-| `notify_user` | Send notification to user | When uncertain or on error |
-| `extract_email_content` | Parse email content | When processing forwarded emails |
-| `log_decision` | Log the final decision | After every action |
+All tools are HTTP POST endpoints at `http://expense-tracker:8080/tools/<name>`.
 
-## Rules (Non-Negotiable)
+| Tool | Path | Args | Returns |
+|---|---|---|---|
+| fetch-accounts | POST /tools/fetch-accounts | `{"budget_id":"..."}` | Account list |
+| fetch-categories | POST /tools/fetch-categories | `{"budget_id":"..."}` | Category list |
+| fetch-payees | POST /tools/fetch-payees | `{"budget_id":"..."}` | Payee list |
+| fetch-recent-transactions | POST /tools/fetch-recent-transactions | `{"budget_id":"...","account_id":"...","days":7}` | Transaction list |
+| insert-transaction | POST /tools/insert-transaction | `{"budget_id":"...","account_id":"...","date":"YYYY-MM-DD","amount_cents":-1280,"imported_description":"Toast Box","category_id":"...","notes":"..."}` | Created transaction |
+| check-duplicate | POST /tools/check-duplicate | `{"date":"YYYY-MM-DD","amount_cents":-1280,"account_id":"...","merchant":"..."}` | true/false |
+| mark-email-read | POST /tools/mark-email-read | `{}` | true |
+| notify-user | POST /tools/notify-user | `{"subject":"...","body":"..."}` | true |
+| extract-email-content | POST /tools/extract-email-content | `{"include_headers":true}` | text |
+| log-decision | POST /tools/log-decision | `{"action":"inserted|skipped|notified|error","reasoning":"...","transaction_id":"..."}` | true |
 
-1. **Never insert without confidence** — amount, currency, date, merchant, and account must all be known
-2. **SGD or MYR only** — unknown currencies → `notify_user`, do not insert
-3. **Always fetch live data** — accounts and categories must be fetched from Actual Budget, never guessed
-4. **Always check duplicates** — call `check_duplicate` before every `insert_transaction`
-5. **Categories are optional** — leave `category_id` as null if uncertain
-6. **Amounts in integer cents** — S$12.80 = -1280 (negative for spending)
-7. **Dates in YYYY-MM-DD** — convert from any format
-8. **Promotional emails → skip** — log decision, leave unread (do NOT mark as read)
-9. **Always explain reasoning** before making tool calls
-10. **Always log the final decision** via `log_decision`
+## How to Call a Tool
 
-## Workflow (Happy Path)
+Use `exec` with curl. Example:
 
-1. User sends message: "Track $12.80 at Toast Box from DBS Yuu"
-2. Identify: currency (SGD), amount (1280 cents), merchant (Toast Box), date (today), account (DBS Yuu)
-3. `fetch_accounts(budget_id)` → match "DBS Yuu"
-4. `fetch_categories(budget_id)` → match "Food" by merchant context
-5. `fetch_recent_transactions(budget_id, account_id, days=3)` → context
-6. `check_duplicate(date, amount_cents, account_id, merchant)` → false
-7. `insert_transaction(...)` → success
-8. `log_decision("inserted", "Toast Box, S$12.80, DBS Yuu, Food")`
+```
+exec: curl -s -X POST http://expense-tracker:8080/tools/fetch-accounts \
+  -H "Content-Type: application/json" \
+  -d '{"budget_id":"Darren-SGD-29ed82a"}'
+```
 
-## Edge Cases
+The response is JSON. Parse it to extract account names, IDs, etc.
 
-- **Currency unclear**: "Is this SGD or MYR?" → `notify_user`
-- **Account not found**: "Account 'XYZ' not found. Available: DBS Yuu, UOB One, ..." → `notify_user`
-- **No amount**: "How much was the transaction?" → `notify_user`
-- **Promotional email**: Skip, log decision, leave unread
+## Budget IDs
+
+The user has these budgets in Actual Budget:
+- SGD budget: `Darren-SGD-29ed82a`
+- MYR budget: (name TBD — fetch it first)
+
+## Rules
+
+1. Always call `fetch-accounts` first to match accounts by name
+2. Always call `check-duplicate` before `insert-transaction`
+3. Amounts are in INTEGER CENTS. S$12.80 = -1280. Negative for spending.
+4. Categories are optional — leave `category_id` empty if uncertain
+5. Confirm before inserting: "I'll log S$X.XX at [merchant] under [account]. Proceed?"
+6. If you can't match an account, show the user the available options
+7. Use SGD budget by default unless the user mentions MYR
