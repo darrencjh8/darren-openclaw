@@ -96,7 +96,7 @@ class ActualBudgetClient:
             date=transaction.get("date") or datetime.date.today().isoformat(),
             amount=transaction.get("amount") or 0,
             notes=transaction.get("notes") or "",
-            imported_description=transaction.get("imported_description", ""),
+            imported_payee=transaction.get("imported_description") or transaction.get("imported_payee") or transaction.get("payee_name") or "",
             cleared=transaction.get("cleared", False),
         )
         actual.commit()

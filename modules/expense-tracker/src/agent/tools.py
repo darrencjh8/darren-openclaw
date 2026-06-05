@@ -64,7 +64,7 @@ class ToolRegistry:
 
     async def _handle_insert_transaction(
         self, budget_id: str = "", account_id: str = "", date: str = "", amount_cents: int = 0,
-        imported_description: str = "", category_id: str = "", notes: str = "",
+        imported_description: str = "", payee_name: str = "", category_id: str = "", notes: str = "",
     ) -> dict:
         txn = {
             "date": date,
