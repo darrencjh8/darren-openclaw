@@ -123,8 +123,7 @@ class TestDotEnvExample:
         required = [
             "DEEPSEEK_API_KEY", "ACTUAL_BUDGET_URL", "ACTUAL_BUDGET_PASSWORD",
             "ACTUAL_BUDGET_FILE", "IMAP_HOST", "IMAP_PORT", "IMAP_USERNAME",
-            "IMAP_PASSWORD", "NOTIFICATION_SMTP_HOST", "NOTIFICATION_SMTP_PORT",
-            "NOTIFICATION_EMAIL",
+            "IMAP_PASSWORD", "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID",
         ]
         for key in required:
             assert key in self.et_env, f"Missing key: {key}"
@@ -141,10 +140,6 @@ class TestDotEnvExample:
         """IMAP_HOST template is imap.zoho.com."""
         assert self.et_env["IMAP_HOST"] == "imap.zoho.com"
 
-    def test_et_smtp_is_zoho(self):
-        """SMTP template is smtp.zoho.com."""
-        assert self.et_env["NOTIFICATION_SMTP_HOST"] == "smtp.zoho.com"
-
     def test_et_no_outlook_references(self):
         """No 'Outlook' anywhere in .env.example."""
         assert "Outlook" not in self.et_text, "Contains 'Outlook'"
@@ -160,9 +155,6 @@ class TestDotEnvExample:
 
     def test_et_imap_port_993(self):
         assert self.et_env["IMAP_PORT"] == "993"
-
-    def test_et_smtp_port_587(self):
-        assert self.et_env["NOTIFICATION_SMTP_PORT"] == "587"
 
     def test_gw_telegram_token_key(self):
         """gateway .env.example has TELEGRAM_BOT_TOKEN."""

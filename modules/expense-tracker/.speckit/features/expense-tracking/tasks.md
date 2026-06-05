@@ -481,3 +481,22 @@ Run after T3.1–T3.4:
 | Agent | 3 | 2h 30m |
 | Integration | 4 | 2h 35m |
 | **Total** | **16** | **~12 hours** |
+
+---
+
+## Future / Tech Debt
+
+### T4.1 — Consolidate into Node.js (optional)
+
+**Status:** Not planned
+**Estimate:** 3–4 hours
+**Depends On:** All Phase 3 tasks
+
+Replace the Python expense-tracker with a single Node.js service:
+- Use `@actual-app/api` directly (eliminate `tools.py` → HTTP → `actual-api:3000` bridge)
+- Replace `aioimaplib` with `node-imap` for IMAP IDLE
+- Replace `beautifulsoup4` with `cheerio` for HTML extraction
+- Replace `smtplib` with `nodemailer` for notifications
+- Port 167 unit tests from pytest to Node.js test framework
+
+Trade-off: single-language stack vs rewriting mature test suite.

@@ -1,8 +1,4 @@
-"""HTTP API exposing the 10 deterministic tools to the OpenClaw Gateway.
-
-Each tool is served at POST /tools/<name>. The gateway's SKILL.js wrappers
-call these endpoints, which forward to the ToolRegistry.
-"""
+"""HTTP API exposing the 11 deterministic tools to the OpenClaw Gateway."""
 
 import functools
 import logging
@@ -13,7 +9,7 @@ logger = logging.getLogger(__name__)
 
 
 def register_tools_api(app: web.Application, config, registry):
-    """Register all 10 tool endpoints on the given aiohttp app."""
+    """Register all 11 tool endpoints on the given aiohttp app."""
     _make_handler = functools.partial(_build_handler, config=config, registry=registry)
 
     routes = [
@@ -27,6 +23,7 @@ def register_tools_api(app: web.Application, config, registry):
         ("/tools/mark-email-read", "mark_email_read"),
         ("/tools/notify-user", "notify_user"),
         ("/tools/log-decision", "log_decision"),
+        ("/tools/learn-mapping", "learn_mapping"),
     ]
 
     for path, tool_name in routes:

@@ -226,13 +226,12 @@ class TestIMAPCredentials:
             pytest.fail(f"IMAP connection failed: {e}")
 
 
-class TestSMTPCredentials:
-    """Verify notification SMTP credentials."""
+class TestTelegramCredentials:
+    """Verify Telegram notification credentials."""
 
-    def test_smtp_notification_configured(self):
-        """SMTP notification credentials should be set."""
+    def test_telegram_configured(self):
+        """Telegram bot token and chat ID should be set."""
         config = _load_config()
-        assert config.notification_smtp_host, "NOTIFICATION_SMTP_HOST is empty"
-        assert config.notification_email, "NOTIFICATION_EMAIL is empty"
-        assert "@" in config.notification_email, "NOTIFICATION_EMAIL doesn't look like an email"
-        assert config.notification_email_password, "NOTIFICATION_EMAIL_PASSWORD is empty"
+        assert config.telegram_bot_token, "TELEGRAM_BOT_TOKEN is empty"
+        assert ":" in config.telegram_bot_token, "TELEGRAM_BOT_TOKEN doesn't look like a bot token"
+        assert config.telegram_chat_id, "TELEGRAM_CHAT_ID is empty"

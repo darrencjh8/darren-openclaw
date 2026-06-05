@@ -70,14 +70,21 @@ class AgentOrchestrator:
     def tools(self):
         return self._tools
 
-    async def process_email(self, msg_id: str, raw_email: bytes) -> dict:
+    async def process_email(self, msg_id: str, raw_email: bytes, imap_handler=None) -> dict:
         """Process a single email through the LLM agent pipeline.
+
+        Args:
+            msg_id: IMAP message ID.
+            raw_email: Raw MIME bytes of the email.
+            imap_handler: Optional ImapIdleHandler for mark_email_read.
 
         Returns:
             dict with keys: action (inserted|skipped|notified|error), details
         """
         from src.extractors import extract_email_content
         import email as em
+
+        self._tools.set_email_context(msg_id, raw_email, imap_handler)
 
         msg = em.message_from_bytes(raw_email)
         email_text = extract_email_content(msg)
@@ -95,11 +102,17 @@ class AgentOrchestrator:
                 messages.append({"role": "assistant", "content": message["content"]})
 
             tool_calls = message.get("tool_calls")
-            if not tool_calls and finish_reason != "tool_calls":
-                return {"action": "error", "details": "LLM returned no tool calls"}
+            if not tool_calls:
+                if finish_reason == "stop":
+                    return {"action": "completed", "details": message.get("content", "")}
+                return {"action": "error", "details": f"Unexpected finish_reason: {finish_reason}"}
 
             if tool_calls:
-                assistant_msg = {"role": "assistant", "content": message.get("content"), "tool_calls": tool_calls}
+                assistant_msg = {
+                    "role": "assistant",
+                    "content": message.get("content"),
+                    "tool_calls": tool_calls,
+                }
                 if assistant_msg["content"] is None:
                     del assistant_msg["content"]
                 messages.append(assistant_msg)

@@ -20,8 +20,8 @@ _REQUIRED_VARS = [
     "IMAP_HOST",
     "IMAP_USERNAME",
     "IMAP_PASSWORD",
-    "NOTIFICATION_SMTP_HOST",
-    "NOTIFICATION_EMAIL",
+    "TELEGRAM_BOT_TOKEN",
+    "TELEGRAM_CHAT_ID",
 ]
 
 
@@ -44,11 +44,13 @@ class Config:
     imap_username: str
     imap_password: str
 
-    # Notification SMTP
-    notification_smtp_host: str
-    notification_smtp_port: int
-    notification_email: str
-    notification_email_password: str
+    # Telegram notification
+    telegram_bot_token: str
+    telegram_chat_id: str
+
+    # User identity
+    user_name: str
+    system_prompt_extra: str
 
     # Dedup
     dedup_db_path: str
@@ -79,10 +81,10 @@ class Config:
             imap_port=int(os.environ.get("IMAP_PORT", "993")),
             imap_username=os.environ["IMAP_USERNAME"],
             imap_password=os.environ["IMAP_PASSWORD"],
-            notification_smtp_host=os.environ["NOTIFICATION_SMTP_HOST"],
-            notification_smtp_port=int(os.environ.get("NOTIFICATION_SMTP_PORT", "587")),
-            notification_email=os.environ["NOTIFICATION_EMAIL"],
-            notification_email_password=os.environ.get("NOTIFICATION_EMAIL_PASSWORD", os.environ.get("IMAP_PASSWORD", "")),
+            telegram_bot_token=os.environ["TELEGRAM_BOT_TOKEN"],
+            telegram_chat_id=os.environ["TELEGRAM_CHAT_ID"],
+            user_name=os.environ.get("USER_NAME", "there"),
+            system_prompt_extra=os.environ.get("SYSTEM_PROMPT_EXTRA", ""),
             dedup_db_path=os.environ.get("DEDUP_DB_PATH", "data/dedup.db"),
             log_level=os.environ.get("LOG_LEVEL", "INFO"),
         )

@@ -17,10 +17,10 @@ def make_config(**overrides):
         "imap_port": 993,
         "imap_username": "test@zoho.com",
         "imap_password": "test-pass",
-        "notification_smtp_host": "smtp.zoho.com",
-        "notification_smtp_port": 587,
-        "notification_email": "main@test.com",
-        "notification_email_password": "test-pass",
+        "telegram_bot_token": "123:test",
+        "telegram_chat_id": "123456",
+        "user_name": "TestUser",
+        "system_prompt_extra": "",
         "dedup_db_path": ":memory:",
         "log_level": "INFO",
     }
@@ -70,7 +70,7 @@ class TestAgentOrchestrator:
         client = DeepSeekClient(config)
         assert client is not None
 
-    def test_orchestrator_processes_happy_path(self):
+    async def test_orchestrator_processes_happy_path(self):
         """process_email handles a complete happy-path flow."""
         from src.agent.orchestrator import AgentOrchestrator
         from unittest.mock import AsyncMock, patch
@@ -104,5 +104,5 @@ class TestAgentOrchestrator:
             b"Apply now for 5% cashback."
         )
 
-        result = orch.process_email("test-002", raw_email)
+        result = await orch.process_email("test-002", raw_email)
         assert result is not None

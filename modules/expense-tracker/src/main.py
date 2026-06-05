@@ -28,6 +28,7 @@ async def main() -> None:
     logger.info("dedup_initialized", extra={"correlation_id": "", "data": {"path": cfg.dedup_db_path}})
 
     registry = ToolRegistry(cfg)
+    orchestrator = AgentOrchestrator(cfg, tools=registry)
 
     from aiohttp import web
 
@@ -47,7 +48,7 @@ async def main() -> None:
     logger.info("health_check_started", extra={"correlation_id": "", "data": {"port": 8080}})
 
     async def on_new_email(msg: dict) -> None:
-        await orchestrator.process_email(msg["msg_id"], msg["raw_email"])
+        await orchestrator.process_email(msg["msg_id"], msg["raw_email"], imap_handler)
 
     imap_handler = ImapIdleHandler(
         cfg.imap_host, cfg.imap_port,
