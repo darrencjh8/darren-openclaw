@@ -2,7 +2,6 @@
   "models": {
     "providers": {
       "deepseek": {
-        "baseUrl": "https://api.deepseek.com/v1",
         "apiKey": "${DEEPSEEK_API_KEY}"
       }
     }
@@ -10,7 +9,7 @@
   "agents": {
     "defaults": {
       "model": {
-        "primary": "deepseek/deepseek-v4-flash"
+        "primary": "deepseek/deepseek-chat"
       }
     }
   },
