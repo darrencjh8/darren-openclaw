@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Test MYR currency handling — synthetic MYR email through orchestrator."""
+"""Test MYR currency handling — creates test transaction, then cleans it up."""
 import asyncio, json, os, sys
 from pathlib import Path
 
@@ -14,23 +14,24 @@ cfg = Config.from_env()
 
 async def main():
     r = ToolRegistry(cfg)
+    inserted_ids = []
 
     orig_exec = r.execute_tool
     async def log_exec(name, args):
         result = await orig_exec(name, args)
-        budget = args.get("budget_id", "")
-        flag = f" [budget={budget}]" if budget else ""
-        if name in ("fetch_accounts", "fetch_payees", "fetch_categories"):
-            count = len(result) if isinstance(result, list) else "?"
-            print(f"  {name}(budget_id={budget!r}) → {count} items")
-        elif name == "insert_transaction":
-            print(f"  insert_transaction(budget_id={budget!r}) → {json.dumps(result, default=str)[:120]}")
-        elif name == "notify_user":
-            msg = args.get("message", str(args)[:80])
-            print(f"  notify_user: {msg[:100]}")
+        if name == "insert_transaction" and isinstance(result, dict):
+            txn_id = result.get("id")
+            if txn_id:
+                inserted_ids.append({"id": txn_id, "account": args.get("account_id", ""), "desc": args.get("imported_description", "")})
+            print(f"  insert_transaction → {json.dumps(result, default=str)[:120]}")
         else:
-            val = str(result)[:60]
-            print(f"  {name}({json.dumps({k: str(v)[:40] for k,v in args.items()}, default=str)[:100]}) → {val}")
+            budget = args.get("budget_id", "")
+            if name in ("fetch_accounts", "fetch_payees", "fetch_categories"):
+                count = len(result) if isinstance(result, list) else "?"
+                print(f"  {name} → {count} items")
+            else:
+                val = str(result)[:60]
+                print(f"  {name} → {val}")
         return result
     r.execute_tool = log_exec
 
@@ -46,10 +47,19 @@ async def main():
     )
 
     print("--- MYR Test: KFC RM 45.50 ---")
-    print(f"Raw: {myr_email.decode()[:200]}")
-
     result = await orch.process_email("myr-test-001", myr_email)
     print(f"\nResult: {json.dumps(result, indent=2)}")
+
+    # --- CLEANUP ---
+    if inserted_ids:
+        print(f"\n⚠️  Created {len(inserted_ids)} test transaction(s):")
+        for txn in inserted_ids:
+            print(f"   {txn['id']} — {txn['desc']}")
+        print("Run this to clean up from your host:")
+        print(f"  curl -X DELETE http://localhost:3000/transactions/ID")
+    else:
+        print("\n✅ No transactions created — clean.")
+
     await r.close()
 
 asyncio.run(main())
