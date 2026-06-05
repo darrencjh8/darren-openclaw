@@ -24,7 +24,7 @@
       "enabled": true,
       "botToken": "${TELEGRAM_BOT_TOKEN}",
       "dmPolicy": "allowlist",
-      "allowFrom": ["tg:YOUR_TELEGRAM_USER_ID"]
+      "allowFrom": ["tg:488065038"]
     }
   }
 }
