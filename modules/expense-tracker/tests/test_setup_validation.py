@@ -63,7 +63,7 @@ class TestOpenclawJson:
         assert p["apiKey"] == "${DEEPSEEK_API_KEY}"
 
     def test_agent_model(self):
-        """Agent uses deepseek/deepseek-v4-flash."""
+        """Agent uses deepseek/deepseek-v4-pro."""
         m = self.config["agents"]["defaults"]["model"]
         assert m["primary"] == "deepseek/deepseek-v4-flash"
 
