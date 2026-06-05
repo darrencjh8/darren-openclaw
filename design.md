@@ -717,3 +717,10 @@ gantt
 | | expense-tracker: `/validate` — Test suite + Docker build | ⬜ |
 | **Future** | gateway: `/speckit.constitution` | ✅ |
 | | gateway: Feature specification & implementation | ⬜ |
+
+### 13.1 Technical Debt
+
+| Item | Description | Priority |
+|---|---|---|
+| **actual_client.py removed** | Replaced by direct HTTP calls in `tools.py` → `actual-api:3000`. The Python/Node.js split is intentional: Python handles IMAP/LLM pipeline, Node.js wraps `@actual-app/api` for AB communication. | — |
+| **Port to Node.js (future)** | Consider consolidating all modules into a single Node.js service. `@actual-app/api` would talk directly to AB, eliminating the HTTP bridge. IMAP IDLE (`node-imap`), SMTP (`nodemailer`), HTML parsing (`cheerio`), and DeepSeek (HTTP) all have Node.js equivalents. Trade-off: ~3-4h rewrite of ~170 tests. | P2 |

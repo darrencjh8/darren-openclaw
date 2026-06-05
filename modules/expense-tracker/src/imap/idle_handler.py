@@ -52,7 +52,7 @@ class ImapIdleHandler:
         if status != "OK" or not messages[0]:
             return []
 
-        msg_ids = messages[0].split()
+        msg_ids = [mid.decode() if isinstance(mid, bytes) else mid for mid in messages[0].split()]
         result = []
         for msg_id in msg_ids:
             status, data = await self._imap.fetch(msg_id, "(RFC822)")
@@ -64,7 +64,7 @@ class ImapIdleHandler:
             msg = email.message_from_bytes(raw_bytes) if isinstance(raw_bytes, bytes) else email.message_from_string(raw_bytes)
 
             result.append({
-                "msg_id": str(msg_id.decode() if isinstance(msg_id, bytes) else msg_id),
+                "msg_id": str(msg_id),
                 "from": str(msg.get("From", "")),
                 "subject": str(msg.get("Subject", "")),
                 "date": str(msg.get("Date", "")),
@@ -109,20 +109,32 @@ class ImapIdleHandler:
 
 
 def _extract_bytes(data):
-    """Extract raw email bytes from aioimaplib fetch response data."""
+    """Extract raw email bytes from aioimaplib fetch response data.
+
+    aioimaplib returns a list like:
+        [FETCH line (bytes), body (bytearray), closing_paren (bytes), status (bytes)]
+    or for mock tests:
+        [FetchItem(), ...]
+    """
     if isinstance(data, bytes):
         return data
     if isinstance(data, (list, tuple)):
-        content_bytes = None
+        longest = None
         for item in data:
+            if isinstance(item, bytearray):
+                return bytes(item)
             if isinstance(item, bytes):
-                if b"From:" in item or b"from:" in item or b"Return-Path:" in item:
-                    return item
-                if content_bytes is None:
-                    content_bytes = item
+                stripped = item.lstrip()
+                if stripped.startswith(b"FETCH") or stripped.startswith(b"1 FETCH") or stripped.startswith(b"* "):
+                    continue
+                if stripped in (b")", b"Success", b"OK"):
+                    continue
+                if longest is None or len(item) > len(longest):
+                    longest = item
             if hasattr(item, "get_content"):
                 content = item.get_content()
                 if isinstance(content, bytes):
                     return content
-        return content_bytes
+        if longest is not None:
+            return longest
     return None

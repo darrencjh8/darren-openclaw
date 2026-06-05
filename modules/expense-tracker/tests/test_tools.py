@@ -17,10 +17,10 @@ def make_config(**overrides):
         "imap_port": 993,
         "imap_username": "test@zoho.com",
         "imap_password": "test-pass",
-        "notification_smtp_host": "smtp.zoho.com",
-        "notification_smtp_port": 587,
-        "notification_email": "main@test.com",
-        "notification_email_password": "test-pass",
+        "telegram_bot_token": "123:test",
+        "telegram_chat_id": "123456",
+        "user_name": "TestUser",
+        "system_prompt_extra": "",
         "dedup_db_path": ":memory:",
         "log_level": "INFO",
     }
@@ -40,11 +40,12 @@ class TestToolRegistry:
         registry = ToolRegistry(config)
         schemas = registry.get_tool_schemas()
 
-        assert len(schemas) == 10
+        assert len(schemas) == 11
         names = [s["function"]["name"] for s in schemas]
         assert "fetch_accounts" in names
         assert "insert_transaction" in names
         assert "check_duplicate" in names
+        assert "learn_mapping" in names
 
     async def test_execute_tool_dispatches_correctly(self):
         """execute_tool dispatches to the correct tool function."""
@@ -53,7 +54,9 @@ class TestToolRegistry:
         config = make_config()
         registry = ToolRegistry(config)
 
-        result = await registry.execute_tool("log_decision", {"action": "skipped", "reasoning": "test"})
+        result = await registry.execute_tool(
+            "log_decision", {"action": "skipped", "reasoning": "test"}
+        )
         assert result is True
 
     async def test_execute_unknown_tool_raises(self):
@@ -73,18 +76,24 @@ class TestToolRegistry:
         config = make_config()
         registry = ToolRegistry(config)
 
-        await registry.execute_tool("check_duplicate", {
-            "date": "2026-06-04",
-            "amount_cents": -1280,
-            "account_id": "acct-1",
-            "payee_name": "Toast Box",
-        })
-        result = await registry.execute_tool("check_duplicate", {
-            "date": "2026-06-04",
-            "amount_cents": -1280,
-            "account_id": "acct-1",
-            "payee_name": "Toast Box",
-        })
+        await registry.execute_tool(
+            "check_duplicate",
+            {
+                "date": "2026-06-04",
+                "amount_cents": -1280,
+                "account_id": "acct-1",
+                "payee_name": "Toast Box",
+            },
+        )
+        result = await registry.execute_tool(
+            "check_duplicate",
+            {
+                "date": "2026-06-04",
+                "amount_cents": -1280,
+                "account_id": "acct-1",
+                "payee_name": "Toast Box",
+            },
+        )
 
         assert result is True
 
@@ -95,17 +104,157 @@ class TestToolRegistry:
         config = make_config()
         registry = ToolRegistry(config)
 
-        await registry.execute_tool("check_duplicate", {
-            "date": "2026-06-04",
-            "amount_cents": -1280,
-            "account_id": "acct-1",
-            "payee_name": "Toast Box",
-        })
-        result = await registry.execute_tool("check_duplicate", {
-            "date": "2026-06-04",
-            "amount_cents": -5000,
-            "account_id": "acct-1",
-            "payee_name": "NTUC",
-        })
+        await registry.execute_tool(
+            "check_duplicate",
+            {
+                "date": "2026-06-04",
+                "amount_cents": -1280,
+                "account_id": "acct-1",
+                "payee_name": "Toast Box",
+            },
+        )
+        result = await registry.execute_tool(
+            "check_duplicate",
+            {
+                "date": "2026-06-04",
+                "amount_cents": -5000,
+                "account_id": "acct-1",
+                "payee_name": "NTUC",
+            },
+        )
 
         assert result is False
+
+
+@pytest.mark.asyncio
+class TestToolRegistryEmailContext:
+    """Tests for email context wiring — mark_read, extract_content, check_duplicate."""
+
+    def _make_registry(self):
+        from src.agent.tools import ToolRegistry
+        return ToolRegistry(make_config())
+
+    def _make_raw_email(self):
+        return (
+            b"From: alerts@dbs.com\r\n"
+            b"Subject: S$12.80 at Toast Box\r\n"
+            b"Date: Thu, 04 Jun 2026 13:00:00 +0800\r\n"
+            b"\r\n"
+            b"DBS Alert: SGD 12.80 at TOAST BOX"
+        )
+
+    async def test_set_email_context_accepts_params(self):
+        """set_email_context stores msg_id, raw_email, and imap_handler."""
+        registry = self._make_registry()
+        handler = AsyncMock()
+
+        registry.set_email_context(
+            msg_id="msg-001",
+            raw_email=self._make_raw_email(),
+            imap_handler=handler,
+        )
+
+        assert registry._email_msg_id == "msg-001"
+        assert registry._email_raw == self._make_raw_email()
+        assert registry._imap_handler is handler
+
+    async def test_mark_email_read_calls_imap_handler(self):
+        """mark_email_read calls imap_handler.mark_read() with the email msg_id."""
+        registry = self._make_registry()
+        handler = AsyncMock()
+        handler.mark_read = AsyncMock()
+
+        registry.set_email_context(
+            msg_id="msg-001",
+            raw_email=self._make_raw_email(),
+            imap_handler=handler,
+        )
+
+        result = await registry.execute_tool("mark_email_read", {})
+        assert result is True
+        handler.mark_read.assert_called_once_with("msg-001")
+
+    async def test_mark_email_read_no_handler_returns_false(self):
+        """mark_email_read returns False when no imap_handler is set."""
+        registry = self._make_registry()
+        registry.set_email_context(
+            msg_id="msg-001",
+            raw_email=self._make_raw_email(),
+            imap_handler=None,
+        )
+
+        result = await registry.execute_tool("mark_email_read", {})
+        assert result is False
+
+    async def test_mark_email_read_falls_back_to_legacy(self):
+        """mark_email_read returns True when no context is set (legacy compat)."""
+        registry = self._make_registry()
+
+        result = await registry.execute_tool("mark_email_read", {})
+        assert result is True
+
+    async def test_check_duplicate_uses_context_msg_id(self):
+        """check_duplicate records the real msg_id from context, not 'test-msg-id'."""
+        registry = self._make_registry()
+        registry.set_email_context(
+            msg_id="<abc123@mail.dbs.com>",
+            raw_email=self._make_raw_email(),
+            imap_handler=None,
+        )
+
+        await registry.execute_tool(
+            "check_duplicate",
+            {
+                "date": "2026-06-04",
+                "amount_cents": -1280,
+                "account_id": "acct-dbs",
+                "payee_name": "Toast Box",
+            },
+        )
+
+        record = registry._dedup._cursor.execute(
+            "SELECT msg_id FROM dedup_journal WHERE payee_name = 'Toast Box'"
+        ).fetchone()
+        assert record is not None
+        assert record[0] == "<abc123@mail.dbs.com>"
+
+    async def test_check_duplicate_uses_fallback_msg_id(self):
+        """check_duplicate uses a generated msg_id when no context is set."""
+        registry = self._make_registry()
+
+        await registry.execute_tool(
+            "check_duplicate",
+            {
+                "date": "2026-06-04",
+                "amount_cents": -9999,
+                "account_id": "acct-x",
+                "payee_name": "No Context Co",
+            },
+        )
+
+        record = registry._dedup._cursor.execute(
+            "SELECT msg_id FROM dedup_journal WHERE payee_name = 'No Context Co'"
+        ).fetchone()
+        assert record is not None
+        assert record[0] != "test-msg-id"
+
+    async def test_extract_email_content_returns_content_from_context(self):
+        """extract_email_content extracts text from the raw email in context."""
+        registry = self._make_registry()
+        registry.set_email_context(
+            msg_id="msg-001",
+            raw_email=self._make_raw_email(),
+            imap_handler=None,
+        )
+
+        result = await registry.execute_tool("extract_email_content", {})
+        assert isinstance(result, str)
+        assert "TOAST BOX" in result
+        assert "SGD" in result
+
+    async def test_extract_email_content_returns_empty_when_no_context(self):
+        """extract_email_content returns empty string when no context is set."""
+        registry = self._make_registry()
+
+        result = await registry.execute_tool("extract_email_content", {})
+        assert result == ""

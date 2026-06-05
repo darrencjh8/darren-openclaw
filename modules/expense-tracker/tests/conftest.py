@@ -20,10 +20,9 @@ def test_config():
         imap_port=993,
         imap_username="test@zoho.com",
         imap_password="test-pass",
-        notification_smtp_host="smtp.zoho.com",
-        notification_smtp_port=587,
-        notification_email="main@test.com",
-        notification_email_password="test-pass",
+        telegram_bot_token="123:test",
+        telegram_chat_id="123456",
+        user_name="TestUser",
         dedup_db_path=":memory:",
         log_level="INFO",
     )

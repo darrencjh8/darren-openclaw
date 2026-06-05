@@ -11,9 +11,8 @@ _REQUIRED_ENV = {
     "IMAP_HOST": "outlook.office365.com",
     "IMAP_USERNAME": "test@outlook.com",
     "IMAP_PASSWORD": "test-pass",
-    "NOTIFICATION_SMTP_HOST": "smtp.example.com",
-    "NOTIFICATION_EMAIL": "user@example.com",
-    "NOTIFICATION_EMAIL_PASSWORD": "smtp-pass",
+    "TELEGRAM_BOT_TOKEN": "123:abc",
+    "TELEGRAM_CHAT_ID": "488065038",
 }
 
 
@@ -54,7 +53,6 @@ class TestConfig:
 
         config = Config.from_env()
         assert config.imap_port == 993
-        assert config.notification_smtp_port == 587
         assert config.dedup_db_path == "data/dedup.db"
         assert config.log_level == "INFO"
         assert config.actual_budget_encryption_password is None
@@ -81,7 +79,18 @@ class TestConfig:
         config = Config.from_env()
         assert config.log_level == "DEBUG"
 
-    def test_config_fields_populated(self, monkeypatch):
+    def test_config_telegram_fields_populated(self, monkeypatch):
+        """Telegram fields should be populated from env."""
+        from src.config import Config
+
+        for k, v in _REQUIRED_ENV.items():
+            monkeypatch.setenv(k, v)
+
+        config = Config.from_env()
+        assert config.telegram_bot_token == "123:abc"
+        assert config.telegram_chat_id == "488065038"
+
+    def test_config_all_fields_populated(self, monkeypatch):
         """All config fields should be populated when valid env is set."""
         from src.config import Config
 
@@ -94,10 +103,8 @@ class TestConfig:
         monkeypatch.setenv("IMAP_PORT", "1143")
         monkeypatch.setenv("IMAP_USERNAME", "burner@test.com")
         monkeypatch.setenv("IMAP_PASSWORD", "imap-secret")
-        monkeypatch.setenv("NOTIFICATION_SMTP_HOST", "smtp.test.com")
-        monkeypatch.setenv("NOTIFICATION_SMTP_PORT", "2525")
-        monkeypatch.setenv("NOTIFICATION_EMAIL", "notify@test.com")
-        monkeypatch.setenv("NOTIFICATION_EMAIL_PASSWORD", "smtp-secret")
+        monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "456:def")
+        monkeypatch.setenv("TELEGRAM_CHAT_ID", "999999")
         monkeypatch.setenv("DEDUP_DB_PATH", "/tmp/dedup.db")
         monkeypatch.setenv("LOG_LEVEL", "DEBUG")
 
@@ -112,9 +119,7 @@ class TestConfig:
         assert config.imap_port == 1143
         assert config.imap_username == "burner@test.com"
         assert config.imap_password == "imap-secret"
-        assert config.notification_smtp_host == "smtp.test.com"
-        assert config.notification_smtp_port == 2525
-        assert config.notification_email == "notify@test.com"
-        assert config.notification_email_password == "smtp-secret"
+        assert config.telegram_bot_token == "456:def"
+        assert config.telegram_chat_id == "999999"
         assert config.dedup_db_path == "/tmp/dedup.db"
         assert config.log_level == "DEBUG"

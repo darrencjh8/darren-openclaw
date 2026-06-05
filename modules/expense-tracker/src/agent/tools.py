@@ -1,10 +1,32 @@
-"""Tool Registry — 10 deterministic LLM tools with OpenAI-compatible schemas."""
+"""Tool Registry — 11 deterministic LLM tools with OpenAI-compatible schemas."""
 
+import datetime
+import json
 import logging
+import os
+from pathlib import Path
+
+from aiohttp import ClientSession, ClientTimeout
 
 from src.config import Config
 
 logger = logging.getLogger(__name__)
+ACTUAL_API_URL = os.environ.get("ACTUAL_API_URL", "http://localhost:3000")
+MAPPINGS_PATH = Path("data/mappings.json")
+
+
+def load_mappings() -> dict:
+    if MAPPINGS_PATH.exists():
+        try:
+            return json.loads(MAPPINGS_PATH.read_text())
+        except (json.JSONDecodeError, OSError):
+            pass
+    return {"accounts": {}, "payees": {}, "categories": {}}
+
+
+def save_mappings(data: dict):
+    MAPPINGS_PATH.parent.mkdir(parents=True, exist_ok=True)
+    MAPPINGS_PATH.write_text(json.dumps(data, indent=2, ensure_ascii=False))
 
 
 class ToolRegistry:
@@ -19,11 +41,36 @@ class ToolRegistry:
         self._config = config
         from src.utils.dedup import DedupJournal
         self._dedup = DedupJournal(config.dedup_db_path)
-        from src.client.actual_client import ActualBudgetClient
-        self.ab = ActualBudgetClient(config)
+        self._http = None
+        self._email_msg_id: str | None = None
+        self._email_raw: bytes | None = None
+        self._imap_handler = None
 
-    async def _get_budget_id(self) -> str:
-        return ""
+    async def close(self):
+        if self._http:
+            await self._http.close()
+            self._http = None
+
+    def _session(self):
+        if self._http is None:
+            self._http = ClientSession(timeout=ClientTimeout(total=60))
+        return self._http
+
+    async def close(self):
+        if self._http:
+            await self._http.close()
+            self._http = None
+
+    def set_email_context(self, msg_id: str, raw_email: bytes, imap_handler=None):
+        """Set the current email context before processing.
+
+        Called by the orchestrator before each process_email call so
+        tools like mark_email_read, check_duplicate, and extract_email_content
+        have access to the real message ID and IMAP connection.
+        """
+        self._email_msg_id = msg_id
+        self._email_raw = raw_email
+        self._imap_handler = imap_handler
 
     def get_tool_schemas(self) -> list[dict]:
         """Return OpenAI-compatible function definitions for all 10 tools."""
@@ -50,57 +97,99 @@ class ToolRegistry:
             },
         }
 
+    async def _get(self, path: str, budget_id: str = "", **params):
+        url = f"{ACTUAL_API_URL}{path}"
+        if budget_id:
+            params["budget_id"] = budget_id
+        async with self._session().get(url, params=params or None) as r:
+            if not r.ok:
+                text = await r.text()
+                raise RuntimeError(f"actual-api {r.status}: {text[:200]}")
+            return await r.json()
+
+    async def _post(self, path: str, body: dict, budget_id: str = ""):
+        if budget_id:
+            body["budget_id"] = budget_id
+        async with self._session().post(f"{ACTUAL_API_URL}{path}", json=body) as r:
+            if not r.ok:
+                text = await r.text()
+                raise RuntimeError(f"actual-api {r.status}: {text[:200]}")
+            return await r.json()
+
     async def _handle_fetch_accounts(self, budget_id: str = "") -> list:
-        return await self.ab.get_accounts(budget_id)
+        return await self._get("/accounts", budget_id=budget_id)
 
     async def _handle_fetch_categories(self, budget_id: str = "") -> list:
-        return await self.ab.get_categories(budget_id)
+        return await self._get("/categories", budget_id=budget_id)
 
     async def _handle_fetch_payees(self, budget_id: str = "") -> list:
-        return await self.ab.get_payees(budget_id)
+        return await self._get("/payees", budget_id=budget_id)
 
     async def _handle_fetch_recent_transactions(self, budget_id: str = "", account_id: str = "", days: int = 7) -> list:
-        return await self.ab.get_transactions(budget_id, account_id)
+        params = {"account_id": account_id} if account_id else {}
+        return await self._get("/transactions", budget_id=budget_id, **params)
 
     async def _handle_insert_transaction(
         self, budget_id: str = "", account_id: str = "", date: str = "", amount_cents: int = 0,
         imported_description: str = "", payee_name: str = "", category_id: str = "", notes: str = "",
     ) -> dict:
-        txn = {
-            "date": date,
-            "amount": amount_cents,
+        body = {
             "account": account_id,
-            "imported_description": imported_description or payee_name,
+            "date": date or datetime.date.today().isoformat(),
+            "amount": amount_cents,
+            "payee_name": imported_description or payee_name,
             "notes": notes,
             "cleared": False,
         }
         if category_id:
-            txn["category"] = category_id
-        return await self.ab.create_transaction(budget_id, txn)
+            body["category"] = category_id
+        return await self._post("/transactions", body, budget_id=budget_id)
 
     async def _handle_check_duplicate(self, date: str, amount_cents: int, account_id: str, payee_name: str) -> bool:
         if self._dedup.check(date, amount_cents, account_id, payee_name):
             return True
-        self._dedup.record(date, amount_cents, account_id, payee_name, "test-msg-id")
+        msg_id = self._email_msg_id or f"no-ctx-{date}-{amount_cents}"
+        self._dedup.record(date, amount_cents, account_id, payee_name, msg_id)
         return False
 
     async def _handle_mark_email_read(self) -> bool:
+        if self._imap_handler is not None and self._email_msg_id is not None:
+            await self._imap_handler.mark_read(self._email_msg_id)
+            return True
+        if self._email_msg_id is not None:
+            logger.warning("mark_email_read called but no imap_handler set")
+            return False
         return True
 
-    async def _handle_notify_user(self, subject: str, body: str) -> bool:
-        from src.notifier.email_notifier import EmailNotifier
-        notifier = EmailNotifier(
-            self._config.notification_smtp_host,
-            self._config.notification_smtp_port,
-            self._config.imap_username,
-            self._config.notification_email_password,
-            self._config.notification_email,
-        )
-        await notifier.send(subject, body)
+    async def _handle_notify_user(self, message: str) -> bool:
+        url = f"https://api.telegram.org/bot{self._config.telegram_bot_token}/sendMessage"
+        async with self._session().post(url, json={
+            "chat_id": self._config.telegram_chat_id,
+            "text": message,
+        }) as r:
+            if not r.ok:
+                text = await r.text()
+                logger.error("Telegram notify failed: %s", text[:200])
+                return False
+            return True
+
+    async def _handle_learn_mapping(self, type: str, key: str, value: str) -> bool:
+        """types: accounts | payees | categories"""
+        data = load_mappings()
+        if type not in data:
+            data[type] = {}
+        data[type][key] = value
+        save_mappings(data)
+        logger.info("Learned: %s[%s] = %s", type, key, value)
         return True
 
     async def _handle_extract_email_content(self, include_headers: bool = True) -> str:
-        return ""
+        if self._email_raw is None:
+            return ""
+        from src.extractors import extract_email_content as _extract
+        import email as em
+        msg = em.message_from_bytes(self._email_raw)
+        return _extract(msg)
 
     async def _handle_log_decision(self, action: str, reasoning: str, transaction_id: str = "") -> bool:
         logger.info(
@@ -208,14 +297,13 @@ _TOOLS = [
     },
     {
         "name": "notify_user",
-        "description": "Send a notification email to the user.",
+        "description": "Send a Telegram message to Darren. Keep it casual, friendly, one-sentence. No title or subject line.",
         "schema": {
             "type": "object",
             "properties": {
-                "subject": {"type": "string"},
-                "body": {"type": "string"},
+                "message": {"type": "string", "description": "The message to send. Be conversational, like texting a friend."},
             },
-            "required": ["subject", "body"],
+            "required": ["message"],
         },
     },
     {
@@ -229,6 +317,19 @@ _TOOLS = [
                 "transaction_id": {"type": "string", "description": "AB transaction ID if inserted", "default": ""},
             },
             "required": ["action", "reasoning"],
+        },
+    },
+    {
+        "name": "learn_mapping",
+        "description": "Record a learned mapping so future matching is more accurate. Types: accounts (what is this account), payees (keyword→payee_name), categories (keyword→category_name).",
+        "schema": {
+            "type": "object",
+            "properties": {
+                "type": {"type": "string", "enum": ["accounts", "payees", "categories"]},
+                "key": {"type": "string", "description": "Account name, merchant keyword, or payee keyword"},
+                "value": {"type": "string", "description": "The learned fact, e.g. 'credit card', 'Food', 'Transport'"},
+            },
+            "required": ["type", "key", "value"],
         },
     },
 ]

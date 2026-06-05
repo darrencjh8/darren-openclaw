@@ -6,15 +6,20 @@ services:
     volumes:
       - ./openclaw.json:/app/openclaw.json:ro
       - ./workspace/skills:/app/skills:ro
+      - ./AGENTS.md.template:/app/AGENTS.md.template:ro
+      - ./docker-entrypoint.sh:/app/docker-entrypoint.sh:ro
       - openclaw_home:/app/.openclaw
       - openclaw_data:/app/data
     user: node
+    entrypoint: ["/app/docker-entrypoint.sh"]
     environment:
       - OPENCLAW_CONFIG_PATH=/app/openclaw.json
       - OPENCLAW_HOME=/app
       - OPENCLAW_GATEWAY_TOKEN=${OPENCLAW_GATEWAY_TOKEN}
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
       - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
+      - USER_NAME=${USER_NAME:-there}
+      - SYSTEM_PROMPT_EXTRA=${SYSTEM_PROMPT_EXTRA:-}
     restart: unless-stopped
 
   expense-tracker:
@@ -26,6 +31,8 @@ services:
     volumes:
       - ../modules/expense-tracker/data:/app/data
       - ../modules/expense-tracker/.env:/app/.env:ro
+    environment:
+      - ACTUAL_API_URL=http://actual-api:3000
     restart: unless-stopped
 
   actual-api:
@@ -38,6 +45,7 @@ services:
       - ACTUAL_BUDGET_URL=${ACTUAL_BUDGET_URL}
       - ACTUAL_BUDGET_PASSWORD=${ACTUAL_BUDGET_PASSWORD}
       - ACTUAL_BUDGET_FILE=${ACTUAL_BUDGET_FILE}
+      - MYR_BUDGET_FILE=${MYR_BUDGET_FILE}
     restart: unless-stopped
 
 volumes:
