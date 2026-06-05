@@ -127,11 +127,15 @@ NOTIFICATION_EMAIL=your-main@email.com
    "allowFrom": ["tg:YOUR_TELEGRAM_USER_ID"]
    ```
 
-### Step 3: Start the services
+### Step 3: Configure gateway and start services
 
 ```bash
+# Copy and fill in the gateway token
+cp gateway/.env.example gateway/.env
+# Edit gateway/.env with your Telegram bot token:
+#   TELEGRAM_BOT_TOKEN=123456:ABC-DEF1234gh...
+
 cd gateway
-export TELEGRAM_BOT_TOKEN=123456:ABC-DEF1234gh...
 docker compose up -d
 ```
 
