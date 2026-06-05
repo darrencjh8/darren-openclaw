@@ -61,10 +61,14 @@ class DeepSeekClient:
 class AgentOrchestrator:
     """Orchestrates the LLM conversation loop for processing emails."""
 
-    def __init__(self, config: Config):
+    def __init__(self, config: Config, tools: ToolRegistry | None = None):
         self._config = config
         self._llm = DeepSeekClient(config)
-        self._tools = ToolRegistry(config)
+        self._tools = tools or ToolRegistry(config)
+
+    @property
+    def tools(self):
+        return self._tools
 
     async def process_email(self, msg_id: str, raw_email: bytes) -> dict:
         """Process a single email through the LLM agent pipeline.

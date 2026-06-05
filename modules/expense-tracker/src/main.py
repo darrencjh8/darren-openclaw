@@ -27,7 +27,9 @@ async def main() -> None:
     dedup = DedupJournal(db_path=str(dedup_path))
     logger.info("dedup_initialized", extra={"correlation_id": "", "data": {"path": cfg.dedup_db_path}})
 
-    orchestrator = AgentOrchestrator(cfg)
+    registry = ToolRegistry(cfg)
+
+    orchestrator = AgentOrchestrator(cfg, tools=registry)
     logger.info("orchestrator_initialized", extra={"correlation_id": "", "data": {}})
 
     from aiohttp import web
@@ -37,6 +39,10 @@ async def main() -> None:
 
     app = web.Application()
     app.router.add_get("/health", health)
+
+    from src.tools_api import register_tools_api
+    register_tools_api(app, cfg, registry)
+    logger.info("tools_api_registered", extra={"correlation_id": "", "data": {"tools": 10}})
     runner = web.AppRunner(app)
     await runner.setup()
     site = web.TCPSite(runner, "0.0.0.0", 8080)
