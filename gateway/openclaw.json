@@ -9,7 +9,7 @@
   "agents": {
     "defaults": {
       "model": {
-        "primary": "deepseek/deepseek-chat"
+        "primary": "deepseek/deepseek-v4-pro"
       }
     }
   },
