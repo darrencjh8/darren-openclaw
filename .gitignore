@@ -30,3 +30,19 @@ node_modules/
 
 # Personal metadata (Actual Budget IDs, encryption keys)
 **/metadata.json
+
+# Java / Maven
+target/
+*.class
+*.jar
+!.mvn/
+
+# Temp
+*.deb
+/tmp/
+
+# Portfolio tracker
+modules/portfolio-tracker/test-portfolio.xml
+modules/portfolio-tracker/pp-cli/target/
+modules/portfolio-tracker/data/
+dependency-reduced-pom.xml

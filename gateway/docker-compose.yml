@@ -48,6 +48,34 @@ services:
       - MYR_BUDGET_FILE=${MYR_BUDGET_FILE}
     restart: unless-stopped
 
+  portfolio-tracker:
+    build:
+      context: ../modules/portfolio-tracker
+      dockerfile: docker/Dockerfile
+    ports:
+      - "127.0.0.1:8081:8081"
+    volumes:
+      - ../modules/portfolio-tracker/data:/app/data
+      - onedrive_data:/data/onedrive:ro
+    environment:
+      - PP_XML_PATH=/data/onedrive/PortfolioPerformance/portfolio.xml
+    env_file:
+      - ../modules/portfolio-tracker/.env
+    restart: unless-stopped
+    depends_on:
+      onedrive-sync:
+        condition: service_healthy
+
+  onedrive-sync:
+    image: driveone/onedrive:latest
+    volumes:
+      - ../modules/onedrive-sync/config:/onedrive/conf
+      - onedrive_data:/onedrive/data
+    environment:
+      - ONEDRIVE_SYNC_INTERVAL=300
+    restart: unless-stopped
+
 volumes:
   openclaw_data:
   openclaw_home:
+  onedrive_data:

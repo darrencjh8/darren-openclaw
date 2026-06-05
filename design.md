@@ -32,8 +32,9 @@
 ### Current Modules
 
 | Module | Purpose | Status |
-|---|---|---|---|
-| **expense-tracker** | Automated expense tracking via email → Actual Budget (Python tool backend) | Specified, Planned, Tasked — Implementation Pending |
+|---|---|---|
+| **expense-tracker** | Automated expense tracking via email → Actual Budget (Python tool backend) | Implemented |
+| **portfolio-tracker** | Investment portfolio sync: IBKR flex queries, PDF trade confirmations, Actual Budget → PP balance sync, taxonomy → Google Sheets (Python + Java CLI) | Implemented |
 | **gateway** | OpenClaw Gateway deployment with expense-tracker skill | Config + skills written, implementation pending |
 | **statement-reconciliation** | PDF credit card statement reconciliation + outlier detection | Specified, Planned, Tasked — Implementation Pending |
 
@@ -45,8 +46,8 @@
 darren-openclaw/                          # Umbrella repository root
 ├── design.md                             # ← This file (architecture audit)
 ├── modules/
-│   └── expense-tracker/                  # Python 3.12 module
-│       ├── .speckit/                     # Spec-Kit artifacts
+│   ├── expense-tracker/                  # Python 3.12 module (expense tracking agent)
+│   │   ├── .speckit/                     # Spec-Kit artifacts
 │       │   ├── constitution.md           # Non-negotiable architecture rules
 │       │   ├── agent.md                  # Agent harness (workflow state, context dump)
 │       │   └── features/
@@ -69,6 +70,24 @@ darren-openclaw/                          # Umbrella repository root
 │       ├── tests/                        # Test suite (stubs only)
 │       ├── docker/                       # Dockerfile for expense-tracker container
 │       └── db.sqlite                     # Dedup journal (runtime artifact)
+│   └── portfolio-tracker/                # Python 3.12 + Java 17 module
+│       ├── .speckit/                     # Spec-Kit artifacts (constitution, spec, plan, tasks, agent)
+│       ├── pp-cli/                       # Java CLI for PP XML read/write (Maven project)
+│       │   ├── pom.xml                   # Depends on name.abuchen.portfolio:0.84.1
+│       │   └── src/main/java/.../cli/
+│       │       ├── Main.java             # CLI dispatcher (accounts, securities, insert, balance, taxonomy, portfolio)
+│       │       └── PpClient.java         # PP model I/O via ClientFactory.load()/save()
+│       ├── src/
+│       │   ├── agent/                    # LLM orchestration (prompts.py, tools.py, orchestrator.py)
+│       │   ├── channels/                 # Telegram bot handler + IMAP email handler
+│       │   ├── extractors/               # PDF OCR (tesseract), IBKR flex query XML parser, email extractor
+│       │   ├── pp_client/                # Async subprocess bridge to Java CLI
+│       │   ├── google/                   # Google Sheets API client (taxonomy export)
+│       │   ├── client/                   # Actual Budget REST client (budget queries)
+│       │   └── utils/                    # Dedup journal, memory store, structured logging
+│       ├── tests/                        # 111 Python tests across 13 test files
+│       ├── docker/Dockerfile             # Python 3.12 + JRE 17 + Tesseract + curl
+│       └── README.md
 └── gateway/                              # OpenClaw Gateway config + skills
     ├── openclaw.json                     # Gateway configuration
     ├── docker-compose.yml                # Gateway + expense-tracker + actual-api
@@ -178,6 +197,7 @@ OpenClaw uses the **LLM Agent Pattern**: the Python host is a thin runtime that 
 | **Actual Budget** | Fly.io VM #1 (existing) | Public HTTPS for web UI; API via HTTPS (with auth) | Existing production instance |
 | **OpenClaw Gateway** | Ubuntu laptop (Docker) | Agent orchestration, channels, skills, tool calling | ~400MB RAM |
 | **Expense-tracker** | Ubuntu laptop (Docker) | 10 deterministic Python tools, IMAP IDLE | ~150MB RAM |
+| **Portfolio-tracker** | Ubuntu server (Docker) | Python agent + Java CLI subprocess; Telegram/IMAP ingress; PP XML read/write | ~256MB RAM |
 | **actual-api** | Ubuntu laptop (Docker) | Official `@actual-app/api` (Node.js), WebSocket sync | ~100MB RAM |
 | **Zoho Mail Burner** | Zoho (zoho.com) | Public IMAP (imap.zoho.com:993) | Free tier, dedicated inbox |
 | **DeepSeek API** | DeepSeek Cloud | Public HTTPS (api.deepseek.com/v1) | Pay-per-token |
