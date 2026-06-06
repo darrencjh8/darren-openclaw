@@ -321,14 +321,10 @@ public class PpClient {
                             case TRANSFER_IN:
                             case DELIVERY_INBOUND:
                                 shares += t.getShares();
-                                costBasis += t.getMonetaryAmount().getAmount();
                                 break;
                             case SELL:
                             case TRANSFER_OUT:
                             case DELIVERY_OUTBOUND:
-                                if (shares > 0) {
-                                    costBasis = Math.round((double) costBasis * (shares - t.getShares()) / shares);
-                                }
                                 shares -= t.getShares();
                                 break;
                             default:
@@ -340,13 +336,7 @@ public class PpClient {
             if (shares == 0) continue;
 
             h.put("shares_held", shares);
-            h.put("cost_basis_cents", costBasis);
-            if (shares != 0 && costBasis != 0) {
-                h.put("avg_entry_price", String.format("%.2f",
-                    Math.abs(costBasis) / 100.0 / (Math.abs(shares) / 100000000.0)));
-            } else {
-                h.put("avg_entry_price", "0.00");
-            }
+            h.put("shares_display", Math.abs(shares) / 100000000.0);
 
             var latest = security.getLatest();
             if (latest != null) {
@@ -357,9 +347,9 @@ public class PpClient {
                 double marketValue = price * shareCount;
                 h.put("latest_price", price);
                 h.put("shares_display", shareCount);
-                h.put("market_value", marketValue);
-                totalValue += marketValue;
-                equityValue += marketValue;
+            h.put("market_value", marketValue);
+            totalValue += marketValue;
+            equityValue += marketValue;
             }
 
             holdings.add(h);
@@ -406,7 +396,6 @@ public class PpClient {
         result.put("currency", found.getCurrencyCode());
 
         long shares = 0;
-        long costBasis = 0;
         for (Portfolio portfolio : client.getPortfolios()) {
             for (PortfolioTransaction t : portfolio.getTransactions()) {
                 if (found.equals(t.getSecurity())) {
@@ -415,14 +404,10 @@ public class PpClient {
                         case TRANSFER_IN:
                         case DELIVERY_INBOUND:
                             shares += t.getShares();
-                            costBasis += t.getMonetaryAmount().getAmount();
                             break;
                         case SELL:
                         case TRANSFER_OUT:
                         case DELIVERY_OUTBOUND:
-                            if (shares > 0) {
-                                costBasis = Math.round((double) costBasis * (shares - t.getShares()) / shares);
-                            }
                             shares -= t.getShares();
                             break;
                         default:
@@ -433,15 +418,7 @@ public class PpClient {
         }
 
         result.put("shares_held", shares);
-        if (shares != 0 && costBasis != 0) {
-            double dShareCount = Math.abs(shares) / (double) Values.Share.divider();
-            result.put("avg_entry_price", String.format("%.2f",
-                Math.abs(costBasis) / (double) Values.Amount.divider() / dShareCount));
-            result.put("cost_basis_raw", costBasis);
-            result.put("shares_raw", shares);
-            result.put("amount_divider", Values.Amount.divider());
-            result.put("share_divider", Values.Share.divider());
-        }
+        result.put("shares_held_display", Math.abs(shares) / 100000000.0);
 
         var latest = found.getLatest();
         if (latest != null) {
