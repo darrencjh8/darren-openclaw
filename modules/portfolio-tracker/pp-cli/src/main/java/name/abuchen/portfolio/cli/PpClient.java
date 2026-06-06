@@ -326,6 +326,9 @@ public class PpClient {
                             case SELL:
                             case TRANSFER_OUT:
                             case DELIVERY_OUTBOUND:
+                                if (shares > 0) {
+                                    costBasis = Math.round((double) costBasis * (shares - t.getShares()) / shares);
+                                }
                                 shares -= t.getShares();
                                 break;
                             default:
