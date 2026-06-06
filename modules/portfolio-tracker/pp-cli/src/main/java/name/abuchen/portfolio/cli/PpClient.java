@@ -420,6 +420,9 @@ public class PpClient {
                         case SELL:
                         case TRANSFER_OUT:
                         case DELIVERY_OUTBOUND:
+                            if (shares > 0) {
+                                costBasis = Math.round((double) costBasis * (shares - t.getShares()) / shares);
+                            }
                             shares -= t.getShares();
                             break;
                         default:
@@ -431,9 +434,13 @@ public class PpClient {
 
         result.put("shares_held", shares);
         if (shares != 0 && costBasis != 0) {
-            double dShareCount = Math.abs(shares) / 100000000.0;
+            double dShareCount = Math.abs(shares) / (double) Values.Share.divider();
             result.put("avg_entry_price", String.format("%.2f",
-                Math.abs(costBasis) / 100.0 / dShareCount));
+                Math.abs(costBasis) / (double) Values.Amount.divider() / dShareCount));
+            result.put("cost_basis_raw", costBasis);
+            result.put("shares_raw", shares);
+            result.put("amount_divider", Values.Amount.divider());
+            result.put("share_divider", Values.Share.divider());
         }
 
         var latest = found.getLatest();
