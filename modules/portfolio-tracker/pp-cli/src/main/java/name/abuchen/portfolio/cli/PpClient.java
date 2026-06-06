@@ -114,7 +114,7 @@ public class PpClient {
             entry.setDate(dateTime);
             entry.setSecurity(security);
             entry.setShares(Values.Share.factorize(shares));
-            entry.setMonetaryAmount(Money.of(currencyCode, Math.round(price * 100)));
+            entry.setMonetaryAmount(Money.of(currencyCode, Math.round(price * Math.abs(shares) * 100)));
             entry.setAccount(account);
             if (!client.getPortfolios().isEmpty()) {
                 entry.setPortfolio(client.getPortfolios().get(0));

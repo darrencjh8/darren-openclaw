@@ -68,7 +68,6 @@ async def main():
     onedrive_path = "/data/onedrive/Portfolio/Portfolio.portfolio"
 
     if os.path.exists(jar_path):
-        # Always use the OneDrive-synced path directly (two-way sync)
         if os.path.exists(onedrive_path):
             xml_path = onedrive_path
             logger.info("Using OneDrive-synced PP XML: %s", xml_path)

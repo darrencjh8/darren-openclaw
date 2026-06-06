@@ -146,4 +146,4 @@ app.post("/transactions/:id/clear", async (req, res) => {
 
 app.listen(PORT, "0.0.0.0", () => console.log(`actual-api listening on :${PORT}`));
 
-module.exports = { app, getBudgetId, buildTransaction };
+module.exports = { app, getBudgetId, buildTransaction, init, ensureBudget };

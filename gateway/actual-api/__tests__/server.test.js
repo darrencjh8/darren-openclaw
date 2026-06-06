@@ -177,3 +177,132 @@ describe("buildTransaction", () => {
     jest.useRealTimers();
   });
 });
+
+describe("Route handlers", () => {
+  const actual = require("@actual-app/api");
+
+  function findHandler(method, path) {
+    const call = mockApp[method].mock.calls.find(([p]) => p === path);
+    return call ? call[1] : null;
+  }
+
+  function mockReq(overrides = {}) {
+    return { query: {}, body: null, params: {}, ...overrides };
+  }
+
+  function mockRes() {
+    return {
+      json: jest.fn().mockReturnThis(),
+      status: jest.fn().mockReturnThis(),
+    };
+  }
+
+  beforeEach(() => {
+    actual.init.mockReset();
+    actual.getBudgets.mockReset();
+    actual.downloadBudget.mockReset();
+    actual.getTransactions.mockReset();
+    actual.updateTransaction.mockReset();
+    actual.addTransactions.mockReset();
+    actual.deleteTransaction.mockReset();
+
+    actual.init.mockResolvedValue(undefined);
+    actual.getBudgets.mockResolvedValue([{ name: "TestBudget", groupId: "g1" }]);
+    actual.downloadBudget.mockResolvedValue(undefined);
+    actual.getTransactions.mockResolvedValue([]);
+    actual.updateTransaction.mockResolvedValue(undefined);
+    actual.addTransactions.mockResolvedValue(["txn-new"]);
+    actual.deleteTransaction.mockResolvedValue(undefined);
+  });
+
+  test("GET /health returns { status: 'ok' }", () => {
+    const handler = findHandler("get", "/health");
+    const req = mockReq();
+    const res = mockRes();
+    handler(req, res);
+    expect(res.json).toHaveBeenCalledWith({ status: "ok" });
+  });
+
+  test("GET /transactions filters out cleared when cleared=false", async () => {
+    actual.getTransactions.mockResolvedValue([
+      { id: "1", cleared: false, amount: 100 },
+      { id: "2", cleared: true, amount: 200 },
+      { id: "3", cleared: false, amount: 300 },
+    ]);
+    const handler = findHandler("get", "/transactions");
+    const req = mockReq({ query: { cleared: "false", account_id: "acc1" } });
+    const res = mockRes();
+
+    await handler(req, res);
+
+    expect(res.json).toHaveBeenCalledWith([
+      { id: "1", cleared: false, amount: 100 },
+      { id: "3", cleared: false, amount: 300 },
+    ]);
+  });
+
+  test("GET /transactions returns all when cleared is not 'false'", async () => {
+    actual.getTransactions.mockResolvedValue([
+      { id: "1", cleared: false, amount: 100 },
+      { id: "2", cleared: true, amount: 200 },
+    ]);
+    const handler = findHandler("get", "/transactions");
+    const req = mockReq({ query: { account_id: "acc1" } });
+    const res = mockRes();
+
+    await handler(req, res);
+
+    expect(res.json).toHaveBeenCalledWith([
+      { id: "1", cleared: false, amount: 100 },
+      { id: "2", cleared: true, amount: 200 },
+    ]);
+  });
+
+  test("POST /transactions/:id/clear sets cleared=true without notes", async () => {
+    const handler = findHandler("post", "/transactions/:id/clear");
+    const req = mockReq({ params: { id: "txn-1" } });
+    const res = mockRes();
+
+    await handler(req, res);
+
+    expect(actual.updateTransaction).toHaveBeenCalledWith("txn-1", { cleared: true });
+    expect(res.json).toHaveBeenCalledWith({ status: "cleared", id: "txn-1" });
+  });
+
+  test("POST /transactions/:id/clear includes notes when provided", async () => {
+    const handler = findHandler("post", "/transactions/:id/clear");
+    const req = mockReq({ params: { id: "txn-2" }, body: { notes: "Reconciled with statement" } });
+    const res = mockRes();
+
+    await handler(req, res);
+
+    expect(actual.updateTransaction).toHaveBeenCalledWith("txn-2", {
+      cleared: true,
+      notes: "Reconciled with statement",
+    });
+  });
+
+  test("route error returns 500 with error.message in JSON body", async () => {
+    actual.getTransactions.mockRejectedValue(new Error("DB connection failed"));
+    const handler = findHandler("get", "/transactions");
+    const req = mockReq();
+    const res = mockRes();
+
+    await handler(req, res);
+
+    expect(res.status).toHaveBeenCalledWith(500);
+    expect(res.json).toHaveBeenCalledWith({ error: "DB connection failed" });
+  });
+
+  test("DELETE /transactions/:id deletes and returns confirmation", async () => {
+    actual.deleteTransaction.mockResolvedValue(undefined);
+    const handler = findHandler("delete", "/transactions/:id");
+    const req = mockReq({ params: { id: "del-1" } });
+    const res = mockRes();
+
+    await handler(req, res);
+
+    expect(actual.deleteTransaction).toHaveBeenCalledWith("del-1");
+    expect(res.json).toHaveBeenCalledWith({ status: "deleted", id: "del-1" });
+  });
+});

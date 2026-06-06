@@ -154,3 +154,51 @@ describe("Portfolio Tracker SKILL — no-arg functions", () => {
     global.fetch = originalFetch;
   });
 });
+
+describe("Portfolio Tracker SKILL — PORTFOLIO_TRACKER_URL env override", () => {
+  let origEnv;
+
+  beforeAll(() => {
+    origEnv = process.env.PORTFOLIO_TRACKER_URL;
+  });
+
+  afterAll(() => {
+    process.env.PORTFOLIO_TRACKER_URL = origEnv;
+  });
+
+  test("uses custom BASE when PORTFOLIO_TRACKER_URL env var is set", async () => {
+    process.env.PORTFOLIO_TRACKER_URL = "http://pt-custom:7777";
+    jest.resetModules();
+    const freshSkill = require("../SKILL");
+
+    const originalFetch = global.fetch;
+    global.fetch = jest.fn().mockResolvedValue({ ok: true, json: async () => ({}) });
+
+    await freshSkill.fetch_pp_accounts();
+
+    expect(global.fetch).toHaveBeenCalledWith(
+      "http://pt-custom:7777/tools/pp-accounts",
+      expect.any(Object),
+    );
+
+    global.fetch = originalFetch;
+  });
+
+  test("defaults to portfolio-tracker:8081 when PORTFOLIO_TRACKER_URL is not set", async () => {
+    delete process.env.PORTFOLIO_TRACKER_URL;
+    jest.resetModules();
+    const freshSkill = require("../SKILL");
+
+    const originalFetch = global.fetch;
+    global.fetch = jest.fn().mockResolvedValue({ ok: true, json: async () => ({}) });
+
+    await freshSkill.get_pp_status();
+
+    expect(global.fetch).toHaveBeenCalledWith(
+      "http://portfolio-tracker:8081/tools/pp-status",
+      expect.any(Object),
+    );
+
+    global.fetch = originalFetch;
+  });
+});

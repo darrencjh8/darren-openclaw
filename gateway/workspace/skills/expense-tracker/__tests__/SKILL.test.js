@@ -149,3 +149,51 @@ describe("Expense Tracker SKILL — exported function signatures", () => {
     global.fetch = originalFetch;
   });
 });
+
+describe("Expense Tracker SKILL — TOOLS_API_URL env override", () => {
+  let origEnv;
+
+  beforeAll(() => {
+    origEnv = process.env.TOOLS_API_URL;
+  });
+
+  afterAll(() => {
+    process.env.TOOLS_API_URL = origEnv;
+  });
+
+  test("uses custom BASE when TOOLS_API_URL env var is set", async () => {
+    process.env.TOOLS_API_URL = "http://custom-host:9999";
+    jest.resetModules();
+    const freshSkill = require("../SKILL");
+
+    const originalFetch = global.fetch;
+    global.fetch = jest.fn().mockResolvedValue({ ok: true, json: async () => ({}) });
+
+    await freshSkill.fetch_accounts({ budget_id: "sgd" });
+
+    expect(global.fetch).toHaveBeenCalledWith(
+      "http://custom-host:9999/tools/fetch-accounts",
+      expect.any(Object),
+    );
+
+    global.fetch = originalFetch;
+  });
+
+  test("defaults to expense-tracker:8080 when TOOLS_API_URL is not set", async () => {
+    delete process.env.TOOLS_API_URL;
+    jest.resetModules();
+    const freshSkill = require("../SKILL");
+
+    const originalFetch = global.fetch;
+    global.fetch = jest.fn().mockResolvedValue({ ok: true, json: async () => ({}) });
+
+    await freshSkill.fetch_payees({ budget_id: "sgd" });
+
+    expect(global.fetch).toHaveBeenCalledWith(
+      "http://expense-tracker:8080/tools/fetch-payees",
+      expect.any(Object),
+    );
+
+    global.fetch = originalFetch;
+  });
+});
