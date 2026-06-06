@@ -63,6 +63,21 @@ function getBudgetId(req) {
   return req.query.budget_id || (req.body && req.body.budget_id) || "";
 }
 
+function buildTransaction(body) {
+  const { account, account_id, date, amount, payee_name, imported_payee, notes, category } = body;
+  const txn = {
+    account: account || account_id,
+    date: date || new Date().toISOString().slice(0, 10),
+    amount: amount || 0,
+    payee_name: payee_name || imported_payee || undefined,
+    imported_payee: imported_payee || payee_name || undefined,
+    notes: notes || "",
+    cleared: false,
+  };
+  if (category) txn.category = category;
+  return txn;
+}
+
 const app = express();
 app.use(express.json());
 
@@ -86,17 +101,8 @@ app.get("/payees", async (req, res) => {
 app.post("/transactions", async (req, res) => {
   try {
     await ensureBudget(getBudgetId(req));
-    const { account, account_id, date, amount, payee_name, imported_payee, notes, category } = req.body;
-    const txn = {
-      account: account || account_id,
-      date: date || new Date().toISOString().slice(0, 10),
-      amount: amount || 0,
-      payee_name: payee_name || imported_payee || undefined,
-      imported_payee: imported_payee || payee_name || undefined,
-      notes: notes || "",
-      cleared: false,
-    };
-    if (category) txn.category = category;
+    const { account, account_id, amount } = req.body;
+    const txn = buildTransaction(req.body);
     const ids = await actual.addTransactions(account || account_id, [txn]);
     res.json({ id: ids[0], amount: amount || 0 });
   } catch(e) { res.status(500).json({error:e.message}); }
@@ -139,3 +145,5 @@ app.post("/transactions/:id/clear", async (req, res) => {
 });
 
 app.listen(PORT, "0.0.0.0", () => console.log(`actual-api listening on :${PORT}`));
+
+module.exports = { app, getBudgetId, buildTransaction };

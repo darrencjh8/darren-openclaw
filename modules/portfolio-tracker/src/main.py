@@ -65,23 +65,22 @@ async def main():
     pp_bridge = None
     jar_path = config.pp_jar_path
     xml_path = config.pp_xml_path
+    onedrive_path = "/data/onedrive/Portfolio/Portfolio.portfolio"
+
     if os.path.exists(jar_path):
-        # Ensure local copy of PP XML exists (copy from OneDrive if needed)
-        onedrive_path = "/data/onedrive/Portfolio/Portfolio.portfolio"
-        if not os.path.exists(xml_path) and os.path.exists(onedrive_path):
-            try:
-                import shutil
-                shutil.copy2(onedrive_path, xml_path)
-                os.chmod(xml_path, 0o666)
-                logger.info("Copied PP XML from OneDrive to %s", xml_path)
-            except Exception as e:
-                logger.warning("Could not copy PP XML from OneDrive: %s", e)
+        # Always use the OneDrive-synced path directly (two-way sync)
+        if os.path.exists(onedrive_path):
+            xml_path = onedrive_path
+            logger.info("Using OneDrive-synced PP XML: %s", xml_path)
+        elif not os.path.exists(xml_path):
+            logger.warning("PP XML not found at %s or %s", xml_path, onedrive_path)
+
         if os.path.exists(xml_path):
             pp_password = os.environ.get("PP_PASSWORD", "")
             pp_bridge = PpJavaBridge(jar_path, xml_path, password=pp_password)
             logger.info("PP Java bridge ready: %s → %s", jar_path, xml_path)
         else:
-            logger.warning("PP XML not found at %s (checked OneDrive: %s). Bridge disabled.", xml_path, onedrive_path)
+            logger.warning("PP XML not found. Bridge disabled.")
     else:
         logger.warning("PP Java bridge JAR not found at %s", jar_path)
 

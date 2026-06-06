@@ -12,13 +12,12 @@ services:
       - openclaw_data:/app/data
     user: node
     entrypoint: ["/app/docker-entrypoint.sh"]
+    env_file:
+      - ../modules/portfolio-tracker/.env
     environment:
       - OPENCLAW_CONFIG_PATH=/app/openclaw.json
       - OPENCLAW_HOME=/app
-      - OPENCLAW_GATEWAY_TOKEN=${OPENCLAW_GATEWAY_TOKEN}
-      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
-      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
-      - USER_NAME=${USER_NAME:-there}
+      - USER_NAME=${USER_NAME:-Darren}
       - SYSTEM_PROMPT_EXTRA=${SYSTEM_PROMPT_EXTRA:-}
     restart: unless-stopped
 
@@ -55,7 +54,7 @@ services:
       - ../modules/portfolio-tracker/data:/app/data
       - onedrive_data:/data/onedrive:rw
     environment:
-      - PP_XML_PATH=/app/data/Portfolio.portfolio
+      - PP_XML_PATH=/data/onedrive/Portfolio/Portfolio.portfolio
     env_file:
       - ../modules/portfolio-tracker/.env
     restart: unless-stopped

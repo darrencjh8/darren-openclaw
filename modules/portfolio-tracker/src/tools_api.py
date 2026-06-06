@@ -56,7 +56,10 @@ def _build_handler(config, registry, tool_name):
 
         import json
         if isinstance(result, str):
-            return web.json_response({"result": result})
+            try:
+                return web.json_response(json.loads(result))
+            except json.JSONDecodeError:
+                return web.json_response({"result": result})
         return web.json_response(result)
 
     return handler

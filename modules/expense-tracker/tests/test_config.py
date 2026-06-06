@@ -1,5 +1,11 @@
 """Tests for environment configuration loading."""
 
+import os
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+
 import pytest
 
 
@@ -123,3 +129,20 @@ class TestConfig:
         assert config.telegram_chat_id == "999999"
         assert config.dedup_db_path == "/tmp/dedup.db"
         assert config.log_level == "DEBUG"
+
+    def test_dotenv_is_directory_raises_clear_error(self):
+        """When .env is a directory, import should fail with a clear message."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            env_dir = Path(tmpdir) / ".env"
+            env_dir.mkdir()
+
+            result = subprocess.run(
+                [sys.executable, "-c", "import src.config"],
+                capture_output=True,
+                text=True,
+                cwd=tmpdir,
+                env={**os.environ, "PYTHONPATH": os.path.dirname(os.path.dirname(__file__))},
+            )
+
+            assert result.returncode != 0
+            assert "is a directory, not a file" in result.stderr or "is a directory, not a file" in str(result)

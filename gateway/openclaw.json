@@ -21,7 +21,7 @@
   },
   "gateway": {
     "port": 18789,
-    "bind": "lan",
+    "bind": "loopback",
     "mode": "local"
   },
   "channels": {

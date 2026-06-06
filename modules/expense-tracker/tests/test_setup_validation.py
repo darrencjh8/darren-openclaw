@@ -140,6 +140,16 @@ class TestDotEnvExample:
         """IMAP_HOST template is imap.zoho.com."""
         assert self.et_env["IMAP_HOST"] == "imap.zoho.com"
 
+    def test_et_env_path_is_file_not_directory(self):
+        """If .env exists, it must be a file — not a directory."""
+        env_path = EXPENSE_TRACKER_DIR / ".env"
+        if env_path.exists():
+            assert env_path.is_file(), (
+                f"{env_path} exists but is a directory, not a file. "
+                f"It may have been created by a Docker volume mount. "
+                f"Remove it and create a proper .env file (copy from .env.example)."
+            )
+
     def test_et_no_outlook_references(self):
         """No 'Outlook' anywhere in .env.example."""
         assert "Outlook" not in self.et_text, "Contains 'Outlook'"
@@ -192,9 +202,17 @@ class TestDockerCompose:
     def test_openclaw_env_vars(self):
         env = self.compose["services"]["openclaw"]["environment"]
         env_keys = [e.split("=")[0] for e in env]
-        for k in ["OPENCLAW_CONFIG_PATH", "OPENCLAW_HOME", "OPENCLAW_GATEWAY_TOKEN",
-                   "TELEGRAM_BOT_TOKEN", "DEEPSEEK_API_KEY"]:
+        required_env = ["OPENCLAW_CONFIG_PATH", "OPENCLAW_HOME"]
+        for k in required_env:
             assert k in env_keys, f"Missing env: {k}"
+
+    def test_openclaw_env_file(self):
+        """openclaw service has env_file pointing to portfolio-tracker .env."""
+        env_files = self.compose["services"]["openclaw"].get("env_file", [])
+        assert env_files, "openclaw service missing env_file"
+        assert any("portfolio-tracker" in ef for ef in env_files), (
+            f"env_file should point to portfolio-tracker, got: {env_files}"
+        )
 
     def test_openclaw_port(self):
         ports = [str(p) for p in self.compose["services"]["openclaw"]["ports"]]

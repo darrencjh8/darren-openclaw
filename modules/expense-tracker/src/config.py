@@ -6,9 +6,17 @@ Required variables must be set; optional variables have sensible defaults.
 
 import os
 from dataclasses import dataclass
+from pathlib import Path
 from dotenv import load_dotenv
 
 # Auto-load .env file if present
+_ENV_PATH = Path(".env")
+if _ENV_PATH.is_dir():
+    raise ValueError(
+        f".env at {_ENV_PATH.resolve()} is a directory, not a file. "
+        "Rename or remove the .env directory and create a .env file with your credentials "
+        "(copy .env.example as a starting point)."
+    )
 load_dotenv()
 
 

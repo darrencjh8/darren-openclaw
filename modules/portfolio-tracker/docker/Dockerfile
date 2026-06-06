@@ -19,9 +19,6 @@ COPY pp-cli/target/pp-cli.jar ./pp-cli.jar
 
 RUN mkdir -p /app/data
 
-RUN useradd --create-home --shell /bin/bash appuser && chown -R appuser:appuser /app
-USER appuser
-
 EXPOSE 8081
 
 HEALTHCHECK --interval=30s --timeout=3s \

@@ -327,7 +327,6 @@ public class PpClient {
                             case TRANSFER_OUT:
                             case DELIVERY_OUTBOUND:
                                 shares -= t.getShares();
-                                costBasis -= t.getMonetaryAmount().getAmount();
                                 break;
                             default:
                                 break;
@@ -335,7 +334,6 @@ public class PpClient {
                     }
                 }
             }
-
             if (shares == 0) continue;
 
             h.put("shares_held", shares);
