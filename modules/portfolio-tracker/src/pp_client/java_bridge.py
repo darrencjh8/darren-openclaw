@@ -16,10 +16,13 @@ class PpJavaBridge:
 
     async def _run_command(self, *args: str) -> dict:
         self._validate_jar()
-        cmd = ["java", "-jar", str(self._jar_path)] + list(args)
+        cmd = ["java", "-jar", str(self._jar_path)]
+        # Ensure command is first arg, password flags follow immediately
+        cmd.append(args[0])  # command name
         if self._password:
-            cmd.insert(3, "--password")
-            cmd.insert(4, self._password)
+            cmd.append("--password")
+            cmd.append(self._password)
+        cmd += list(args[1:])  # rest of args
         try:
             proc = await asyncio.create_subprocess_exec(
                 *cmd,
@@ -112,3 +115,7 @@ class PpJavaBridge:
             "--names", ",".join(names),
         ]
         return await self._run_command(*args)
+
+    async def get_transactions(self) -> list[dict]:
+        result = await self._run_command("transactions", "--file", self._xml_path)
+        return result if isinstance(result, list) else result.get("transactions", [])

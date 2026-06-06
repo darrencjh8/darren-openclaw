@@ -295,6 +295,50 @@ public class PpClient {
         return response;
     }
 
+    public List<Map<String, Object>> dumpTransactions() throws IOException {
+        Client client = load();
+        List<Map<String, Object>> result = new ArrayList<>();
+
+        for (Account account : client.getAccounts()) {
+            for (AccountTransaction t : account.getTransactions()) {
+                Map<String, Object> tx = new HashMap<>();
+                tx.put("date", t.getDateTime().toLocalDate().toString());
+                tx.put("amount", t.getMonetaryAmount().getAmount());
+                tx.put("amount_cents", (int) t.getMonetaryAmount().getAmount());
+                tx.put("currency", t.getCurrencyCode());
+                tx.put("account_id", account.getUUID());
+                tx.put("type", t.getType().name());
+                tx.put("uuid", t.getUUID());
+                if (t.getSecurity() != null) {
+                    tx.put("security_id", t.getSecurity().getUUID());
+                }
+                tx.put("notes", t.getNote() != null ? t.getNote() : "");
+                result.add(tx);
+            }
+        }
+
+        for (Portfolio portfolio : client.getPortfolios()) {
+            for (PortfolioTransaction t : portfolio.getTransactions()) {
+                Map<String, Object> tx = new HashMap<>();
+                tx.put("date", t.getDateTime().toLocalDate().toString());
+                tx.put("amount", t.getMonetaryAmount().getAmount());
+                tx.put("amount_cents", (int) t.getMonetaryAmount().getAmount());
+                tx.put("currency", t.getCurrencyCode());
+                tx.put("account_id", portfolio.getReferenceAccount() != null
+                        ? portfolio.getReferenceAccount().getUUID() : "");
+                tx.put("type", t.getType().name());
+                tx.put("uuid", t.getUUID());
+                if (t.getSecurity() != null) {
+                    tx.put("security_id", t.getSecurity().getUUID());
+                }
+                tx.put("notes", t.getNote() != null ? t.getNote() : "");
+                result.add(tx);
+            }
+        }
+
+        return result;
+    }
+
     private Account findAccount(Client client, String accountId) throws IOException {
         for (Account a : client.getAccounts()) {
             if (a.getUUID().equals(accountId)) return a;

@@ -9,7 +9,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from src.config import Config
 from src.utils.logging import setup_logging, get_logger
-from src.utils.dedup import DedupJournal
+from src.utils.dedup import DedupJournal, compute_hash
 from src.utils.memory import MemoryStore
 from src.client.actual_client import ActualBudgetClient
 from src.pp_client.java_bridge import PpJavaBridge
@@ -76,28 +76,51 @@ async def main():
 
     pp_bridge = None
     jar_path = config.pp_jar_path
-    if os.path.exists(jar_path) and os.path.exists(config.pp_xml_path):
-        pp_password = os.environ.get("PP_PASSWORD", "")
-        pp_bridge = PpJavaBridge(jar_path, config.pp_xml_path, password=pp_password)
-        logger.info("PP Java bridge ready: %s → %s", jar_path, config.pp_xml_path)
-    elif os.path.exists(jar_path):
-        # Try to copy from OneDrive sync directory on first start
+    xml_path = config.pp_xml_path
+    if os.path.exists(jar_path):
+        # Ensure local copy of PP XML exists (copy from OneDrive if needed)
         onedrive_path = "/data/onedrive/Portfolio/Portfolio.portfolio"
-        if os.path.exists(onedrive_path) and not os.path.exists(config.pp_xml_path):
-            import shutil
-            shutil.copy2(onedrive_path, config.pp_xml_path)
-            logger.info("Copied PP XML from OneDrive to %s", config.pp_xml_path)
-        if os.path.exists(config.pp_xml_path):
+        if not os.path.exists(xml_path) and os.path.exists(onedrive_path):
+            try:
+                import shutil
+                shutil.copy2(onedrive_path, xml_path)
+                os.chmod(xml_path, 0o666)
+                logger.info("Copied PP XML from OneDrive to %s", xml_path)
+            except Exception as e:
+                logger.warning("Could not copy PP XML from OneDrive: %s", e)
+        if os.path.exists(xml_path):
             pp_password = os.environ.get("PP_PASSWORD", "")
-            pp_bridge = PpJavaBridge(jar_path, config.pp_xml_path, password=pp_password)
-            logger.info("PP Java bridge ready: %s → %s", jar_path, config.pp_xml_path)
+            pp_bridge = PpJavaBridge(jar_path, xml_path, password=pp_password)
+            logger.info("PP Java bridge ready: %s → %s", jar_path, xml_path)
         else:
-            logger.warning("PP Java bridge not available (missing jar or xml). Some tools will be disabled.")
+            logger.warning("PP XML not found at %s (checked OneDrive: %s). Bridge disabled.", xml_path, onedrive_path)
+    else:
+        logger.warning("PP Java bridge JAR not found at %s", jar_path)
 
     ab_client = ActualBudgetClient(config.actual_budget_url, config.actual_budget_password)
     tool_registry = ToolRegistry(config, dedup_journal, memory_store, pp_bridge, ab_client=ab_client)
     deepseek_client = DeepSeekClient(config.deepseek_api_key)
     orchestrator = AgentOrchestrator(deepseek_client, tool_registry, dedup_journal, memory_store)
+
+    # Seed dedup journal from existing PP transactions (one-time, O(n))
+    if pp_bridge is not None:
+        try:
+            existing = await pp_bridge.get_transactions()
+            if existing:
+                seeded = 0
+                for tx in existing:
+                    date = tx.get("date", "")
+                    amount_cents = tx.get("amount_cents", 0)
+                    acct_id = tx.get("account_id", "")
+                    sec_id = tx.get("security_id", "")
+                    txn_type = tx.get("type", "")
+                    if date and amount_cents and acct_id:
+                        dedup_journal.record(date, amount_cents, acct_id, "seed", sec_id, txn_type)
+                        seeded += 1
+                if seeded > 0:
+                    logger.info("Seeded dedup journal with %d existing transactions", seeded)
+        except Exception as e:
+            logger.warning("Failed to seed dedup journal: %s", e)
 
     runner = await run_health_server()
     scheduler = await run_scheduled_tasks(orchestrator, config)

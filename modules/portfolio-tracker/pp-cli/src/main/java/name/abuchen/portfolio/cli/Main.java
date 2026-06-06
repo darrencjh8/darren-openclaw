@@ -66,6 +66,9 @@ public class Main {
                 case "portfolio":
                     result = ppc.dumpPortfolio();
                     break;
+                case "transactions":
+                    result = ppc.dumpTransactions();
+                    break;
                 default:
                     System.err.println(GSON.toJson(Map.of(
                             "error", "Unknown command: " + command,

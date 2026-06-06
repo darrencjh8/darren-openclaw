@@ -55,7 +55,7 @@ services:
       - ../modules/portfolio-tracker/data:/app/data
       - onedrive_data:/data/onedrive:rw
     environment:
-      - PP_XML_PATH=/data/onedrive/PortfolioPerformance/portfolio.xml
+      - PP_XML_PATH=/app/data/Portfolio.portfolio
     env_file:
       - ../modules/portfolio-tracker/.env
     restart: unless-stopped
