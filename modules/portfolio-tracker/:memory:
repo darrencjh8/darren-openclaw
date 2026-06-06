@@ -1,9 +1,0 @@
-{
-  "accounts": {},
-  "brokers": {},
-  "categories": {},
-  "securities": {
-    "aapl": "sec-uuid-1",
-    "msft": "sec-msft"
-  }
-}
