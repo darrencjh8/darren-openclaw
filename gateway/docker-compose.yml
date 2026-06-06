@@ -63,8 +63,7 @@ services:
       - ../modules/portfolio-tracker/.env
     restart: unless-stopped
     depends_on:
-      onedrive-sync:
-        condition: service_healthy
+      - onedrive-sync
 
   onedrive-sync:
     image: driveone/onedrive:latest
@@ -74,6 +73,11 @@ services:
       - onedrive_data:/onedrive/data
     environment:
       - ONEDRIVE_SYNC_INTERVAL=300
+    healthcheck:
+      test: ["CMD", "pgrep", "onedrive"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
     restart: unless-stopped
 
 volumes:
