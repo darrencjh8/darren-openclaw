@@ -237,6 +237,28 @@ TOOL_SCHEMAS: list[dict] = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_pp_status",
+            "description": "Get portfolio performance summary: total value, equity value, holdings with prices.",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "query_pp_security",
+            "description": "Query a security by ticker, ISIN, or name. Returns shares held, avg entry price, latest price, market value.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "search": {"type": "string", "description": "Ticker symbol, ISIN, or security name"},
+                },
+                "required": ["search"],
+            },
+        },
+    },
 ]
 
 
@@ -374,6 +396,16 @@ class ToolRegistry:
                 "context": args["context"],
                 "options": args.get("options", ["approve", "reject"]),
             }
+
+        elif name == "get_pp_status":
+            if self._pp_bridge is None:
+                return {"error": "PP bridge not configured"}
+            return await self._pp_bridge.get_status()
+
+        elif name == "query_pp_security":
+            if self._pp_bridge is None:
+                return {"error": "PP bridge not configured"}
+            return await self._pp_bridge.query_security(args["search"])
 
         else:
             return {"error": f"Unknown tool: {name}"}

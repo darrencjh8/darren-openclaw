@@ -27,7 +27,7 @@ def tool_registry():
 
 def test_registry_returns_all_schemas(tool_registry):
     schemas = tool_registry.get_tool_schemas()
-    assert len(schemas) == 16
+    assert len(schemas) == 18
 
 
 def test_execute_check_duplicate(tool_registry):

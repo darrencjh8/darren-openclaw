@@ -69,6 +69,12 @@ public class Main {
                 case "transactions":
                     result = ppc.dumpTransactions();
                     break;
+                case "status":
+                    result = ppc.getStatus();
+                    break;
+                case "query":
+                    result = ppc.querySecurity(require(params, "search"));
+                    break;
                 default:
                     System.err.println(GSON.toJson(Map.of(
                             "error", "Unknown command: " + command,
@@ -135,6 +141,9 @@ public class Main {
         System.out.println("              --currency <CODE> --date <YYYY-MM-DD> [--notes <text>]");
         System.out.println("  taxonomy    --file <path> --names <tax1,tax2,...>");
         System.out.println("  portfolio   --file <path>              Dump full portfolio structure");
+        System.out.println("  transactions --file <path>             Dump all transaction hashes");
+        System.out.println("  status      --file <path>              Portfolio performance summary");
+        System.out.println("  query       --file <path> --search <t> Query security by ticker/ISIN");
         System.out.println("  --help, -h                             Show this help");
     }
 }

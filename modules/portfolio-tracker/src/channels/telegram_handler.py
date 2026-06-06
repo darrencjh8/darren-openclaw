@@ -121,7 +121,14 @@ class TelegramHandler:
     async def _handle_status(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not await self._authorize(update):
             return
-        await update.message.reply_text("Status check — feature coming soon.")
+        await update.message.reply_text("Fetching portfolio status...")
+        result = await self._orchestrator.process_event(
+            "status_query",
+            "",
+            correlation_id=f"status-{update.update_id}",
+            reply_callback=self.send_message,
+        )
+        await update.message.reply_text(f"Processed status request.")
 
     async def _handle_text(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not await self._authorize(update):

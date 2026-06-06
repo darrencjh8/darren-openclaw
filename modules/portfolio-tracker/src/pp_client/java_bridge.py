@@ -119,3 +119,9 @@ class PpJavaBridge:
     async def get_transactions(self) -> list[dict]:
         result = await self._run_command("transactions", "--file", self._xml_path)
         return result if isinstance(result, list) else result.get("transactions", [])
+
+    async def get_status(self) -> dict:
+        return await self._run_command("status", "--file", self._xml_path)
+
+    async def query_security(self, search: str) -> dict:
+        return await self._run_command("query", "--file", self._xml_path, "--search", search)

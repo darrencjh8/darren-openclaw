@@ -295,6 +295,160 @@ public class PpClient {
         return response;
     }
 
+    public Map<String, Object> getStatus() throws IOException {
+        Client client = load();
+        Map<String, Object> result = new HashMap<>();
+
+        List<Map<String, Object>> holdings = new ArrayList<>();
+        double totalValue = 0;
+        double equityValue = 0;
+        Map<String, Double> currencyValues = new HashMap<>();
+
+        for (Security security : client.getSecurities()) {
+            Map<String, Object> h = new HashMap<>();
+            h.put("security_id", security.getUUID());
+            h.put("ticker", security.getTickerSymbol());
+            h.put("name", security.getName());
+            h.put("currency", security.getCurrencyCode());
+
+            long shares = 0;
+            long costBasis = 0;
+            for (Portfolio portfolio : client.getPortfolios()) {
+                for (PortfolioTransaction t : portfolio.getTransactions()) {
+                    if (security.equals(t.getSecurity())) {
+                        switch (t.getType()) {
+                            case BUY:
+                            case TRANSFER_IN:
+                            case DELIVERY_INBOUND:
+                                shares += t.getShares();
+                                costBasis += t.getMonetaryAmount().getAmount();
+                                break;
+                            case SELL:
+                            case TRANSFER_OUT:
+                            case DELIVERY_OUTBOUND:
+                                shares -= t.getShares();
+                                costBasis -= t.getMonetaryAmount().getAmount();
+                                break;
+                            default:
+                                break;
+                        }
+                    }
+                }
+            }
+
+            if (shares == 0) continue;
+
+            h.put("shares_held", shares);
+            h.put("cost_basis_cents", costBasis);
+            if (shares != 0 && costBasis != 0) {
+                h.put("avg_entry_price", String.format("%.2f",
+                    Math.abs(costBasis) / 100.0 / (Math.abs(shares) / 100000000.0)));
+            } else {
+                h.put("avg_entry_price", "0.00");
+            }
+
+            var latest = security.getLatest();
+            if (latest != null) {
+                long quote = latest.getValue();
+                long absShares = Math.abs(shares);
+                double price = quote / 100000000.0;
+                double shareCount = absShares / 100000000.0;
+                double marketValue = price * shareCount;
+                h.put("latest_price", price);
+                h.put("shares_display", shareCount);
+                h.put("market_value", marketValue);
+                totalValue += marketValue;
+                equityValue += marketValue;
+            }
+
+            holdings.add(h);
+        }
+
+        result.put("holdings", holdings);
+        result.put("securities_with_holdings", holdings.size());
+        result.put("total_securities", client.getSecurities().size());
+
+        Map<String, Object> summary = new HashMap<>();
+        summary.put("total_value_approx", String.format("%.2f", totalValue));
+        summary.put("equity_value_approx", String.format("%.2f", equityValue));
+        result.put("summary", summary);
+
+        return result;
+    }
+
+    public Map<String, Object> querySecurity(String query) throws IOException {
+        Client client = load();
+        String q = query.toLowerCase().trim();
+
+        Security found = null;
+        for (Security s : client.getSecurities()) {
+            if (s.getUUID().equals(query)
+                    || (s.getTickerSymbol() != null && s.getTickerSymbol().toLowerCase().equals(q))
+                    || (s.getIsin() != null && s.getIsin().equalsIgnoreCase(query))
+                    || s.getName().toLowerCase().contains(q)) {
+                found = s;
+                break;
+            }
+        }
+
+        if (found == null) {
+            Map<String, Object> err = new HashMap<>();
+            err.put("error", "Security not found: " + query);
+            return err;
+        }
+
+        Map<String, Object> result = new HashMap<>();
+        result.put("security_id", found.getUUID());
+        result.put("ticker", found.getTickerSymbol());
+        result.put("name", found.getName());
+        result.put("isin", found.getIsin());
+        result.put("currency", found.getCurrencyCode());
+
+        long shares = 0;
+        long costBasis = 0;
+        for (Portfolio portfolio : client.getPortfolios()) {
+            for (PortfolioTransaction t : portfolio.getTransactions()) {
+                if (found.equals(t.getSecurity())) {
+                    switch (t.getType()) {
+                        case BUY:
+                        case TRANSFER_IN:
+                        case DELIVERY_INBOUND:
+                            shares += t.getShares();
+                            costBasis += t.getMonetaryAmount().getAmount();
+                            break;
+                        case SELL:
+                        case TRANSFER_OUT:
+                        case DELIVERY_OUTBOUND:
+                            shares -= t.getShares();
+                            break;
+                        default:
+                            break;
+                    }
+                }
+            }
+        }
+
+        result.put("shares_held", shares);
+        if (shares != 0 && costBasis != 0) {
+            double dShareCount = Math.abs(shares) / 100000000.0;
+            result.put("avg_entry_price", String.format("%.2f",
+                Math.abs(costBasis) / 100.0 / dShareCount));
+        }
+
+        var latest = found.getLatest();
+        if (latest != null) {
+            long quote = latest.getValue();
+            double price = quote / 100000000.0;
+            double shareCount = Math.abs(shares) / 100000000.0;
+            double marketValue = price * shareCount;
+            result.put("latest_price", String.format("%.2f", price));
+            result.put("market_value", String.format("%.2f", marketValue));
+            result.put("shares_held_display", shareCount);
+        }
+
+        return result;
+    }
+
     public List<Map<String, Object>> dumpTransactions() throws IOException {
         Client client = load();
         List<Map<String, Object>> result = new ArrayList<>();
