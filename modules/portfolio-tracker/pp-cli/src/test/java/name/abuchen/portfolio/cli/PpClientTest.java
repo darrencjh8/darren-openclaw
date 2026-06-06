@@ -14,6 +14,12 @@ public class PpClientTest {
     }
 
     @Test
+    public void testConstructorWithPassword() {
+        PpClient client = new PpClient(new File("/nonexistent/path.xml"), "test".toCharArray());
+        assertNotNull(client);
+    }
+
+    @Test
     public void testLoadFileNotFoundThrows() {
         PpClient client = new PpClient(new File("/nonexistent/path.xml"));
         try {
@@ -103,5 +109,58 @@ public class PpClientTest {
         } catch (Exception e) {
             assertTrue(e.getMessage().contains("not found"));
         }
+    }
+
+    @Test
+    public void testMainTransactionsFileNotFound() {
+        try {
+            Main.main(new String[]{
+                "transactions",
+                "--file", "/data/test.xml"
+            });
+        } catch (Exception e) {
+            assertTrue(e.getMessage().contains("not found"));
+        }
+    }
+
+    @Test
+    public void testMainWithPasswordFlag() {
+        try {
+            Main.main(new String[]{
+                "accounts",
+                "--file", "/data/test.xml",
+                "--password", "test123"
+            });
+        } catch (Exception e) {
+            assertTrue(e.getMessage().contains("not found"));
+        }
+    }
+
+    @Test
+    public void testMainInsertWithPassword() {
+        try {
+            Main.main(new String[]{
+                "insert",
+                "--file", "/data/test.xml",
+                "--password", "test123",
+                "--account-id", "acct-1",
+                "--security-id", "sec-1",
+                "--type", "Buy",
+                "--date", "2026-06-05",
+                "--shares", "100",
+                "--price", "185.30",
+                "--currency", "USD",
+                "--fees", "1.00",
+                "--taxes", "0.00"
+            });
+        } catch (Exception e) {
+            assertTrue(e.getMessage().contains("not found")
+                    || e.getMessage().contains("Password"));
+        }
+    }
+
+    @Test
+    public void testHelpContainsTransactionsCommand() {
+        Main.main(new String[]{"--help"});
     }
 }

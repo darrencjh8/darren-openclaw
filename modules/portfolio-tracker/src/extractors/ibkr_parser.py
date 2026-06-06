@@ -26,22 +26,41 @@ def parse_ibkr_flex_query(xml_content: str) -> list[dict]:
     transactions: list[dict] = []
 
     trades_elem = root.find(".//ns:Trades", IBKR_NS)
+    if trades_elem is None:
+        trades_elem = root.find(".//Trades")
     if trades_elem is not None:
         for trade in trades_elem.findall("ns:Trade", IBKR_NS):
             txn = _parse_trade(trade)
             if txn:
                 transactions.append(txn)
+        if not transactions:
+            for trade in trades_elem.findall("Trade"):
+                txn = _parse_trade(trade)
+                if txn:
+                    transactions.append(txn)
 
     cash_elem = root.find(".//ns:CashTransactions", IBKR_NS)
+    if cash_elem is None:
+        cash_elem = root.find(".//CashTransactions")
     if cash_elem is not None:
         for ct in cash_elem.findall("ns:CashTransaction", IBKR_NS):
             txn = _parse_cash_transaction(ct)
             if txn:
                 transactions.append(txn)
+        for ct in cash_elem.findall("CashTransaction"):
+            txn = _parse_cash_transaction(ct)
+            if txn:
+                transactions.append(txn)
 
     corp_elem = root.find(".//ns:CorporateActions", IBKR_NS)
+    if corp_elem is None:
+        corp_elem = root.find(".//CorporateActions")
     if corp_elem is not None:
         for ca in corp_elem.findall("ns:CorporateAction", IBKR_NS):
+            txn = _parse_corporate_action(ca)
+            if txn:
+                transactions.append(txn)
+        for ca in corp_elem.findall("CorporateAction"):
             txn = _parse_corporate_action(ca)
             if txn:
                 transactions.append(txn)

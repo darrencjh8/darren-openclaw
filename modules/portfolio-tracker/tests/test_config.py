@@ -18,14 +18,22 @@ def test_config_loads_from_env(monkeypatch):
 def test_config_raises_on_missing_required(monkeypatch):
     for key in ("DEEPSEEK_API_KEY", "ACTUAL_BUDGET_URL", "ACTUAL_BUDGET_PASSWORD",
                 "ACTUAL_BUDGET_FILE", "MYR_BUDGET_FILE", "LOG_LEVEL",
-                "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID"):
+                "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID", "PP_XML_PATH",
+                "PP_PASSWORD", "PP_JAR_PATH", "PP_EMERGENCY_SGD_ACCOUNT",
+                "PP_EMERGENCY_MYR_ACCOUNT", "PP_WARCHEST_SGD_ACCOUNT",
+                "TAXONOMY_NAMES", "AB_EMERGENCY_SGD_CATEGORY",
+                "AB_EMERGENCY_MYR_CATEGORY", "AB_WARCHEST_CATEGORY"):
         monkeypatch.delenv(key, raising=False)
     with pytest.raises(ValueError, match="DEEPSEEK_API_KEY"):
         Config.from_env()
 
 
 def test_config_defaults(monkeypatch):
-    for key in ("LOG_LEVEL", "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID"):
+    for key in ("LOG_LEVEL", "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID", "PP_XML_PATH",
+                "PP_PASSWORD", "PP_JAR_PATH", "PP_EMERGENCY_SGD_ACCOUNT",
+                "PP_EMERGENCY_MYR_ACCOUNT", "PP_WARCHEST_SGD_ACCOUNT",
+                "TAXONOMY_NAMES", "AB_EMERGENCY_SGD_CATEGORY",
+                "AB_EMERGENCY_MYR_CATEGORY", "AB_WARCHEST_CATEGORY"):
         monkeypatch.delenv(key, raising=False)
     monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-test")
     monkeypatch.setenv("ACTUAL_BUDGET_URL", "https://ab.example.com")
