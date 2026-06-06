@@ -77,10 +77,22 @@ async def main():
     pp_bridge = None
     jar_path = config.pp_jar_path
     if os.path.exists(jar_path) and os.path.exists(config.pp_xml_path):
-        pp_bridge = PpJavaBridge(jar_path, config.pp_xml_path)
+        pp_password = os.environ.get("PP_PASSWORD", "")
+        pp_bridge = PpJavaBridge(jar_path, config.pp_xml_path, password=pp_password)
         logger.info("PP Java bridge ready: %s → %s", jar_path, config.pp_xml_path)
-    else:
-        logger.warning("PP Java bridge not available (missing jar or xml). Some tools will be disabled.")
+    elif os.path.exists(jar_path):
+        # Try to copy from OneDrive sync directory on first start
+        onedrive_path = "/data/onedrive/Portfolio/Portfolio.portfolio"
+        if os.path.exists(onedrive_path) and not os.path.exists(config.pp_xml_path):
+            import shutil
+            shutil.copy2(onedrive_path, config.pp_xml_path)
+            logger.info("Copied PP XML from OneDrive to %s", config.pp_xml_path)
+        if os.path.exists(config.pp_xml_path):
+            pp_password = os.environ.get("PP_PASSWORD", "")
+            pp_bridge = PpJavaBridge(jar_path, config.pp_xml_path, password=pp_password)
+            logger.info("PP Java bridge ready: %s → %s", jar_path, config.pp_xml_path)
+        else:
+            logger.warning("PP Java bridge not available (missing jar or xml). Some tools will be disabled.")
 
     ab_client = ActualBudgetClient(config.actual_budget_url, config.actual_budget_password)
     tool_registry = ToolRegistry(config, dedup_journal, memory_store, pp_bridge, ab_client=ab_client)

@@ -4,9 +4,10 @@ from pathlib import Path
 
 
 class PpJavaBridge:
-    def __init__(self, jar_path: str, xml_path: str, timeout: int = 30):
+    def __init__(self, jar_path: str, xml_path: str, password: str = "", timeout: int = 30):
         self._jar_path = Path(jar_path)
         self._xml_path = xml_path
+        self._password = password
         self._timeout = timeout
 
     def _validate_jar(self):
@@ -16,6 +17,9 @@ class PpJavaBridge:
     async def _run_command(self, *args: str) -> dict:
         self._validate_jar()
         cmd = ["java", "-jar", str(self._jar_path)] + list(args)
+        if self._password:
+            cmd.insert(3, "--password")
+            cmd.insert(4, self._password)
         try:
             proc = await asyncio.create_subprocess_exec(
                 *cmd,

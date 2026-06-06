@@ -41,11 +41,8 @@ services:
       dockerfile: Dockerfile
     ports:
       - "127.0.0.1:3000:3000"
-    environment:
-      - ACTUAL_BUDGET_URL=${ACTUAL_BUDGET_URL}
-      - ACTUAL_BUDGET_PASSWORD=${ACTUAL_BUDGET_PASSWORD}
-      - ACTUAL_BUDGET_FILE=${ACTUAL_BUDGET_FILE}
-      - MYR_BUDGET_FILE=${MYR_BUDGET_FILE}
+    env_file:
+      - ../modules/portfolio-tracker/.env
     restart: unless-stopped
 
   portfolio-tracker:
@@ -56,7 +53,7 @@ services:
       - "127.0.0.1:8081:8081"
     volumes:
       - ../modules/portfolio-tracker/data:/app/data
-      - onedrive_data:/data/onedrive:ro
+      - onedrive_data:/data/onedrive:rw
     environment:
       - PP_XML_PATH=/data/onedrive/PortfolioPerformance/portfolio.xml
     env_file:
@@ -69,8 +66,9 @@ services:
     image: driveone/onedrive:latest
     volumes:
       - ../modules/onedrive-sync/config/onedrive:/onedrive/conf
+      - ../modules/onedrive-sync/config/onedrive-state:/root/.config/onedrive
       - ../modules/onedrive-sync/config/sync_list:/onedrive/conf/sync_list:ro
-      - onedrive_data:/onedrive/data
+      - onedrive_data:/root/OneDrive
     environment:
       - ONEDRIVE_SYNC_INTERVAL=300
     healthcheck:

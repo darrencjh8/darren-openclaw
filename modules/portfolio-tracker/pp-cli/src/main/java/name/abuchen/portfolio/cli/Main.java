@@ -22,7 +22,10 @@ public class Main {
             Map<String, String> params = parseArgs(args);
 
             File file = new File(params.getOrDefault("file", "/data/portfolio.xml"));
-            PpClient ppc = new PpClient(file);
+            String password = params.get("password");
+            PpClient ppc = password != null
+                ? new PpClient(file, password.toCharArray())
+                : new PpClient(file);
 
             Object result;
             switch (command) {

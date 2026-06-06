@@ -1,9 +1,7 @@
 package name.abuchen.portfolio.cli;
 
 import java.io.File;
-import java.io.FileInputStream;
 import java.io.IOException;
-import java.io.InputStream;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
@@ -21,6 +19,7 @@ import name.abuchen.portfolio.model.Classification;
 import name.abuchen.portfolio.model.Classification.Assignment;
 import name.abuchen.portfolio.model.Client;
 import name.abuchen.portfolio.model.ClientFactory;
+import name.abuchen.portfolio.model.HeadlessSave;
 import name.abuchen.portfolio.model.Portfolio;
 import name.abuchen.portfolio.model.PortfolioTransaction;
 import name.abuchen.portfolio.model.Security;
@@ -28,26 +27,32 @@ import name.abuchen.portfolio.model.Taxonomy;
 import name.abuchen.portfolio.model.Transaction;
 import name.abuchen.portfolio.money.Money;
 import name.abuchen.portfolio.money.Values;
+import org.eclipse.core.runtime.NullProgressMonitor;
 
 public class PpClient {
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
     private final File clientFile;
+    private final char[] password;
 
     public PpClient(File clientFile) {
         this.clientFile = clientFile;
+        this.password = null;
+    }
+
+    public PpClient(File clientFile, char[] password) {
+        this.clientFile = clientFile;
+        this.password = password;
     }
 
     public Client load() throws IOException {
         if (!clientFile.exists()) {
             throw new IOException("PP file not found: " + clientFile.getAbsolutePath());
         }
-        try (InputStream input = new FileInputStream(clientFile)) {
-            return ClientFactory.load(input);
-        }
+        return ClientFactory.load(clientFile, password, new NullProgressMonitor());
     }
 
     public void save(Client client) throws IOException {
-        ClientFactory.save(client, clientFile);
+        HeadlessSave.save(client, clientFile, password);
     }
 
     public List<Map<String, Object>> listAccounts() throws IOException {
