@@ -93,6 +93,15 @@ app.get("/categories", async (req, res) => {
   catch(e) { res.status(500).json({error:e.message}); }
 });
 
+app.get("/budget-month", async (req, res) => {
+  try {
+    await ensureBudget(getBudgetId(req));
+    const month = req.query.month || new Date().toISOString().slice(0,7);
+    const data = await actual.getBudgetMonth(month);
+    res.json(data);
+  } catch(e) { res.status(500).json({error:e.message}); }
+});
+
 app.get("/payees", async (req, res) => {
   try { await ensureBudget(getBudgetId(req)); res.json(await actual.getPayees()); }
   catch(e) { res.status(500).json({error:e.message}); }
