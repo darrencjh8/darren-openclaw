@@ -1,0 +1,88 @@
+{
+    "skills": {
+        "load": {
+            "extraDirs": [
+                "/home/node/skills"
+            ]
+        }
+    },
+    "models": {
+        "providers": {
+            "deepseek": {
+                "apiKey": "${DEEPSEEK_API_KEY}"
+            },
+            "google": {
+                "apiKey": "${GEMINI_API_KEY}"
+            }
+        }
+    },
+    "browser": {
+        "noSandbox": true,
+        "cdpUrl": "${CDP_URL}",
+        "attachOnly": true
+    },
+    "agents": {
+        "defaults": {
+            "sandbox": {
+                "mode": "off",
+                "browser": {
+                    "enabled": true
+                }
+            },
+            "mediaGenerationAutoProviderFallback": false,
+            "model": {
+                "primary": "deepseek/deepseek-v4-flash",
+                "fallbacks": [
+                    "deepseek/deepseek-v4-pro",
+                    "google/gemini-3.1-flash-lite"
+                ]
+            },
+            "memorySearch": {
+                "provider": "gemini"
+            },
+            "compaction": {
+                "reserveTokens": 40000,
+                "reserveTokensFloor": 20000,
+                "memoryFlush": {
+                    "enabled": true,
+                    "softThresholdTokens": 4000
+                }
+            }
+        },
+        "list": [
+            {
+                "id": "default",
+                "thinkingDefault": "medium"
+            }
+        ]
+    },
+    "gateway": {
+        "port": 18789,
+        "bind": "loopback",
+        "mode": "local"
+    },
+    "messages": {
+        "tts": {
+            "auto": "tagged",
+            "provider": "microsoft",
+            "providers": {
+                "microsoft": {
+                    "speakerVoice": "en-US-AriaNeural",
+                    "lang": "en-US",
+                    "rate": "+33%",
+                    "pitch": "+6%"
+                }
+            }
+        }
+    },
+    "channels": {
+        "telegram": {
+            "enabled": true,
+            "botToken": "${TELEGRAM_BOT_TOKEN}",
+            "dmPolicy": "allowlist",
+            "allowFrom": [
+                "tg:${TELEGRAM_CHAT_ID}"
+            ]
+        }
+    }
+}

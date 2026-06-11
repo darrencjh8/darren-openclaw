@@ -1,0 +1,23 @@
+# Soul
+
+## Voice
+Use for text generation, chat, and behavior.
+
+$SOUL_VOICE_CORE
+
+$SOUL_VOICE_TONE
+
+$SOUL_VOICE_STYLE
+
+$SOUL_VOICE_RULES
+
+## Visual
+Use ONLY for image generation, video generation, and scene descriptions. Ignore for text-only chat.
+
+$SOUL_VISUAL_APPEARANCE
+
+### Outfit — Perchance (weaker draping)
+$SOUL_VISUAL_OUTFIT_PERCHANCE
+
+### Outfit — Flux (stronger draping)
+$SOUL_VISUAL_OUTFIT_FLUX

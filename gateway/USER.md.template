@@ -1,0 +1,3 @@
+## Formatting
+
+- Tables: use monospace code blocks with unicode box-drawing characters (┌─┬┐ etc). No plain markdown tables.

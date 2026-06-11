@@ -1,0 +1,145 @@
+"""Tests for environment configuration loading."""
+
+import os
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+
+import pytest
+
+_REQUIRED_ENV = {
+    "DEEPSEEK_API_KEY": "sk-test",
+    "ACTUAL_BUDGET_URL": "http://actual-budget.internal:5006",
+    "ACTUAL_BUDGET_PASSWORD": "ab-password",
+    "ACTUAL_BUDGET_FILE": "my-budget",
+    "IMAP_HOST": "outlook.office365.com",
+    "IMAP_USERNAME": "test@outlook.com",
+    "IMAP_PASSWORD": "test-pass",
+}
+
+
+class TestConfig:
+    """Tests for src/config.py"""
+
+    def test_config_loads_from_env(self, monkeypatch):
+        """Config should load values from environment variables."""
+        from src.config import Config
+
+        for k, v in _REQUIRED_ENV.items():
+            monkeypatch.setenv(k, v)
+
+        config = Config.from_env()
+        assert config is not None
+        assert config.deepseek_api_key == "sk-test"
+        assert config.imap_host == "outlook.office365.com"
+        assert config.actual_budget_password == "ab-password"
+        assert config.actual_budget_file == "my-budget"
+
+    def test_config_raises_on_missing_required_vars(self, monkeypatch):
+        """Config should raise ValueError when required variables are missing."""
+        from src.config import Config
+
+        for var in _REQUIRED_ENV:
+            monkeypatch.delenv(var, raising=False)
+
+        with pytest.raises(ValueError, match="Missing required"):
+            Config.from_env()
+
+    def test_config_uses_defaults_for_optional_vars(self, monkeypatch):
+        """Config should use defaults for optional environment variables."""
+        from src.config import Config
+
+        for k, v in _REQUIRED_ENV.items():
+            monkeypatch.setenv(k, v)
+        monkeypatch.delenv("ACTUAL_BUDGET_ENCRYPTION_PASSWORD", raising=False)
+
+        config = Config.from_env()
+        assert config.imap_port == 993
+        assert config.dedup_db_path == "data/dedup.db"
+        assert config.log_level == "INFO"
+        assert config.actual_budget_encryption_password is None
+
+    def test_config_imap_port_custom(self, monkeypatch):
+        """Config should respect custom IMAP port."""
+        from src.config import Config
+
+        for k, v in _REQUIRED_ENV.items():
+            monkeypatch.setenv(k, v)
+        monkeypatch.setenv("IMAP_PORT", "143")
+
+        config = Config.from_env()
+        assert config.imap_port == 143
+
+    def test_config_log_level_custom(self, monkeypatch):
+        """Config should respect custom LOG_LEVEL."""
+        from src.config import Config
+
+        for k, v in _REQUIRED_ENV.items():
+            monkeypatch.setenv(k, v)
+        monkeypatch.setenv("LOG_LEVEL", "DEBUG")
+
+        config = Config.from_env()
+        assert config.log_level == "DEBUG"
+
+    def test_config_gateway_url_default(self, monkeypatch):
+        """Gateway URL uses default when not set in env."""
+        from src.config import Config
+
+        for k, v in _REQUIRED_ENV.items():
+            monkeypatch.setenv(k, v)
+
+        config = Config.from_env()
+        assert config.openclaw_gateway_url == "http://openclaw:18800"
+
+    def test_config_all_fields_populated(self, monkeypatch):
+        """All config fields should be populated when valid env is set."""
+        from src.config import Config
+
+        monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-test-123")
+        monkeypatch.setenv("ACTUAL_BUDGET_URL", "http://localhost:5006")
+        monkeypatch.setenv("ACTUAL_BUDGET_PASSWORD", "my-server-password")
+        monkeypatch.setenv("ACTUAL_BUDGET_FILE", "MyBudget")
+        monkeypatch.setenv("ACTUAL_BUDGET_ENCRYPTION_PASSWORD", "enc-pass")
+        monkeypatch.setenv("IMAP_HOST", "imap.test.com")
+        monkeypatch.setenv("IMAP_PORT", "1143")
+        monkeypatch.setenv("IMAP_USERNAME", "burner@test.com")
+        monkeypatch.setenv("IMAP_PASSWORD", "imap-secret")
+        monkeypatch.setenv("OPENCLAW_GATEWAY_URL", "http://gateway:9999")
+        monkeypatch.setenv("DEDUP_DB_PATH", "/tmp/dedup.db")
+        monkeypatch.setenv("LOG_LEVEL", "DEBUG")
+
+        config = Config.from_env()
+
+        assert config.deepseek_api_key == "sk-test-123"
+        assert config.actual_budget_url == "http://localhost:5006"
+        assert config.actual_budget_password == "my-server-password"
+        assert config.actual_budget_file == "MyBudget"
+        assert config.actual_budget_encryption_password == "enc-pass"
+        assert config.imap_host == "imap.test.com"
+        assert config.imap_port == 1143
+        assert config.imap_username == "burner@test.com"
+        assert config.imap_password == "imap-secret"
+        assert config.openclaw_gateway_url == "http://gateway:9999"
+        assert config.dedup_db_path == "/tmp/dedup.db"
+        assert config.log_level == "DEBUG"
+
+    def test_dotenv_is_directory_raises_clear_error(self):
+        """When .env is a directory, import should fail with a clear message."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            env_dir = Path(tmpdir) / ".env"
+            env_dir.mkdir()
+
+            result = subprocess.run(
+                [sys.executable, "-c", "import src.config"],
+                capture_output=True,
+                text=True,
+                cwd=tmpdir,
+                env={**os.environ, "PYTHONPATH": os.path.dirname(os.path.dirname(__file__))},
+            )
+
+            assert result.returncode != 0
+            assert (
+                "is a directory, not a file" in result.stderr
+                or "is a directory, not a file" in str(result)
+            )
