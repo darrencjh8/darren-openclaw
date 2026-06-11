@@ -1,9 +1,7 @@
 {
     "skills": {
         "load": {
-            "extraDirs": [
-                "/home/node/skills"
-            ]
+            "extraDirs": ["/home/node/skills"]
         }
     },
     "models": {
@@ -34,8 +32,35 @@
                 "primary": "deepseek/deepseek-v4-flash",
                 "fallbacks": [
                     "deepseek/deepseek-v4-pro",
+                    "google/gemini-3.5-flash",
                     "google/gemini-3.1-flash-lite"
                 ]
+            },
+            "models": {
+                "deepseek/deepseek-v4-flash": {
+                    "params": {
+                        "context1m": true,
+                        "maxTokens": 384000
+                    }
+                },
+                "deepseek/deepseek-v4-pro": {
+                    "params": {
+                        "context1m": true,
+                        "maxTokens": 384000
+                    }
+                },
+                "google/gemini-3.5-flash": {
+                    "params": {
+                        "context1m": true,
+                        "maxTokens": 65536
+                    }
+                },
+                "google/gemini-3.1-flash-lite": {
+                    "params": {
+                        "context1m": true,
+                        "maxTokens": 65536
+                    }
+                }
             },
             "memorySearch": {
                 "provider": "gemini"
@@ -63,14 +88,12 @@
     },
     "messages": {
         "tts": {
-            "auto": "tagged",
+            "auto": "always",
             "provider": "microsoft",
             "providers": {
                 "microsoft": {
-                    "speakerVoice": "en-US-AriaNeural",
-                    "lang": "en-US",
-                    "rate": "+33%",
-                    "pitch": "+6%"
+                    "speakerVoice": "en-US-AnaNeural",
+                    "lang": "en-US"
                 }
             }
         }
@@ -80,9 +103,7 @@
             "enabled": true,
             "botToken": "${TELEGRAM_BOT_TOKEN}",
             "dmPolicy": "allowlist",
-            "allowFrom": [
-                "tg:${TELEGRAM_CHAT_ID}"
-            ]
+            "allowFrom": ["tg:${TELEGRAM_CHAT_ID}"]
         }
     }
 }
