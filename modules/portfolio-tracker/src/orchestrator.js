@@ -5,6 +5,7 @@
 
 import OpenAI from "openai";
 import { SYSTEM_PROMPT, FEW_SHOT_EXAMPLES } from "./prompts.js";
+import { extractEmailContent } from "./email_handler.js";
 
 const MAX_TOOL_ITERATIONS = 5;
 
@@ -62,9 +63,20 @@ export class AgentOrchestrator {
     }
 
     async processEmail(msgId, rawEmail, imapHandler) {
-        const emailText = Buffer.isBuffer(rawEmail)
-            ? rawEmail.toString("utf8")
-            : String(rawEmail);
+        // Set event context so tools can access the raw email bytes
+        const rawBytes = Buffer.isBuffer(rawEmail)
+            ? rawEmail
+            : Buffer.from(rawEmail || "");
+        this._tools.setEventContext(null, rawBytes);
+
+        // Extract clean text from the MIME email (handles HTML, PDF attachments, etc.)
+        let emailText;
+        try {
+            emailText = await extractEmailContent(rawBytes);
+        } catch {
+            emailText = rawBytes.toString("utf8");
+        }
+
         const messages = this._buildMessages(emailText);
         const toolSchemas = this._tools.getToolSchemas();
 

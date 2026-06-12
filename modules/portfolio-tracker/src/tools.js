@@ -383,13 +383,13 @@ export class ToolRegistry {
     }
 
     /** Set event context (PDF bytes and raw email for extraction). */
-    setEventContext(pdfBytes = Buffer.alloc(0), rawEmail = Buffer.alloc(0)) {
+    setEventContext(pdfBytes, rawEmail) {
         this._currentPdfBytes = Buffer.isBuffer(pdfBytes)
             ? pdfBytes
-            : Buffer.from(pdfBytes);
+            : Buffer.from(pdfBytes || Buffer.alloc(0));
         this._currentRawEmail = Buffer.isBuffer(rawEmail)
             ? rawEmail
-            : Buffer.from(rawEmail);
+            : Buffer.from(rawEmail || Buffer.alloc(0));
     }
 
     /** Get all tool schemas in OpenAI function-calling format. */

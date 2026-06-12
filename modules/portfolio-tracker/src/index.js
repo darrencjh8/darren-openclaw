@@ -12,6 +12,9 @@ import { ToolRegistry } from "./tools.js";
 import { DedupJournal } from "./dedup.js";
 import { MemoryStore } from "./memory.js";
 import { PpJavaBridge } from "./java_bridge.js";
+import { AgentOrchestrator } from "./orchestrator.js";
+import { ImapIdleHandler } from "./imap.js";
+import { dispatchEmail } from "./classify.js";
 
 async function main() {
     const cfg = Config.fromEnv();
@@ -74,8 +77,9 @@ async function main() {
         );
     }
 
-    // Create tool registry
+    // Create tool registry and orchestrator (needed for email processing)
     const registry = new ToolRegistry(cfg, dedupJournal, memoryStore, ppBridge);
+    const orchestrator = new AgentOrchestrator(cfg, registry);
 
     // Build Express app
     const app = express();
@@ -157,15 +161,58 @@ async function main() {
         JSON.stringify({ event: "routes_registered", count: routes.length }),
     );
 
+    // Start IMAP idle loop if IMAP is configured
+    const imapConfigured =
+        cfg.imapHost &&
+        cfg.imapHost !== "imap.example.com" &&
+        cfg.imapUsername &&
+        cfg.imapPassword;
+
+    if (!imapConfigured) {
+        const missing = [];
+        if (!cfg.imapHost || cfg.imapHost === "imap.example.com")
+            missing.push("IMAP_HOST (missing or default)");
+        if (!cfg.imapUsername) missing.push("IMAP_USERNAME");
+        if (!cfg.imapPassword) missing.push("IMAP_PASSWORD");
+        console.warn(
+            JSON.stringify({
+                event: "imap_disabled",
+                reason: "Missing configuration",
+                missing,
+                help: "Set IMAP_HOST, IMAP_USERNAME, and IMAP_PASSWORD in .env to enable email processing from the Trades folder.",
+            }),
+        );
+    }
+
     // Start server
     const port = parseInt(process.env.PORT || "8081", 10);
-    return new Promise((resolve, reject) => {
-        const server = app.listen(port, "0.0.0.0", () => {
+    const server = await new Promise((resolve, reject) => {
+        const s = app.listen(port, "0.0.0.0", () => {
             console.log(JSON.stringify({ event: "listening", port }));
-            resolve(server);
+            resolve(s);
         });
-        server.on("error", reject);
+        s.on("error", reject);
     });
+
+    if (imapConfigured) {
+        const imapHandler = new ImapIdleHandler(
+            cfg.imapHost,
+            cfg.imapPort,
+            cfg.imapUsername,
+            cfg.imapPassword,
+            cfg.imapFolder,
+        );
+
+        const onNewEmail = (msg) =>
+            dispatchEmail(msg, orchestrator, imapHandler);
+
+        // Start IMAP idle loop (non-blocking)
+        imapHandler.idleLoop(onNewEmail).catch((err) => {
+            console.error("IMAP idle loop error:", err);
+        });
+    }
+
+    return server;
 }
 
 main()
