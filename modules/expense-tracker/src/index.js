@@ -6,8 +6,11 @@
 import express from "express";
 import { Config } from "./config.js";
 import { MemoryStore } from "./memory.js";
-import { ToolRegistry } from "./tools.js";
+import { ToolRegistry, StatementJournal } from "./tools.js";
 import { AgentOrchestrator } from "./orchestrator.js";
+import { StatementProcessor } from "./statement/orchestrator.js";
+import { ImapIdleHandler } from "./imap.js";
+import { classifyEmail, dispatchEmail } from "./classify.js";
 import { existsSync } from "fs";
 
 async function main() {
@@ -42,6 +45,34 @@ async function main() {
 
     const registry = new ToolRegistry(cfg, memory);
     const orchestrator = new AgentOrchestrator(cfg, registry);
+
+    // Statement processing pipeline
+    const statementJournal = new StatementJournal(
+        cfg.statementDbPath || "data/statement.db",
+    );
+    registry.setStatementJournal(statementJournal);
+    const statementProcessor = new StatementProcessor(cfg, registry);
+
+    // IMAP handler with classification pre-filter
+    const imapHandler = new ImapIdleHandler(
+        cfg.imapHost,
+        cfg.imapPort,
+        cfg.imapUsername,
+        cfg.imapPassword,
+    );
+
+    const classify = (rawEmail, subject, sender) =>
+        classifyEmail(rawEmail, subject, sender, cfg.deepseekApiKey);
+
+    async function onNewEmail(msg) {
+        await dispatchEmail(
+            msg,
+            classify,
+            orchestrator,
+            imapHandler,
+            statementProcessor,
+        );
+    }
 
     const app = express();
     app.use(express.json({ limit: "10mb" }));
@@ -97,6 +128,10 @@ async function main() {
                     data: { port },
                 }),
             );
+            // Start IMAP idle loop in background (non-blocking)
+            imapHandler.idleLoop(onNewEmail).catch((err) => {
+                console.error("IMAP idle loop error:", err);
+            });
             resolve(server);
         });
         server.on("error", reject);

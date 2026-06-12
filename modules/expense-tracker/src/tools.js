@@ -45,7 +45,7 @@ export class NotificationCooldown {
 
 // ── StatementJournal ────────────────────────────────────────────
 
-class StatementJournal {
+export class StatementJournal {
     /**
      * SQLite-backed tracker for processed credit card statements.
      * Prevents double-processing of (account_id, period_start, period_end).
@@ -69,6 +69,23 @@ class StatementJournal {
         UNIQUE(account_id, period_start, period_end)
       )
     `);
+        this._db.exec(`
+      CREATE TABLE IF NOT EXISTS statement_transactions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        statement_id INTEGER NOT NULL REFERENCES statement_journal(id),
+        date TEXT NOT NULL,
+        description TEXT NOT NULL,
+        amount_cents INTEGER NOT NULL,
+        ab_transaction_id TEXT,
+        status TEXT NOT NULL CHECK(status IN ('reconciled', 'outlier')),
+        notes TEXT,
+        FOREIGN KEY(statement_id) REFERENCES statement_journal(id)
+      )
+    `);
+        this._db.exec(`
+      CREATE INDEX IF NOT EXISTS idx_stmt_journal_account
+      ON statement_journal(account_id, period_start)
+    `);
         this._stmtRecord = this._db.prepare(`
       INSERT INTO statement_journal
         (account_id, budget_id, period_start, period_end,
@@ -82,6 +99,19 @@ class StatementJournal {
              due_date, currency, processed_at
       FROM statement_journal
       WHERE account_id = ? AND period_start = ? AND period_end = ?
+    `);
+        this._stmtAddTxn = this._db.prepare(`
+      INSERT INTO statement_transactions
+        (statement_id, date, description, amount_cents,
+         ab_transaction_id, status, notes)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `);
+        this._stmtHistory = this._db.prepare(`
+      SELECT id, account_id, budget_id, period_start, period_end,
+             matched_count, outlier_count, processed_at
+      FROM statement_journal
+      WHERE account_id = ?
+      ORDER BY period_start DESC
     `);
     }
 
@@ -105,7 +135,7 @@ class StatementJournal {
             outlierCount,
             totalAmountCents ?? null,
             dueDate ?? null,
-            currency,
+            currency || "SGD",
         );
         return Number(result.lastInsertRowid);
     }
@@ -126,6 +156,41 @@ class StatementJournal {
             currency: row.currency,
             processed_at: row.processed_at,
         };
+    }
+
+    addTransaction(
+        statementId,
+        date,
+        description,
+        amountCents,
+        status,
+        abTransactionId,
+        notes,
+    ) {
+        const result = this._stmtAddTxn.run(
+            statementId,
+            date,
+            description,
+            amountCents,
+            abTransactionId ?? null,
+            status,
+            notes ?? null,
+        );
+        return Number(result.lastInsertRowid);
+    }
+
+    getHistory(accountId) {
+        const rows = this._stmtHistory.all(accountId);
+        return rows.map((r) => ({
+            id: r.id,
+            account_id: r.account_id,
+            budget_id: r.budget_id,
+            period_start: r.period_start,
+            period_end: r.period_end,
+            matched_count: r.matched_count,
+            outlier_count: r.outlier_count,
+            processed_at: r.processed_at,
+        }));
     }
 
     close() {
@@ -519,7 +584,7 @@ export class ToolRegistry {
 
     async _handle_search_memory({ query }) {
         if (!this._memory) return { results: [] };
-        return { results: this._memory.search(query) };
+        return { results: await this._memory.search(query) };
     }
 
     async _handle_learn_fact({ fact }) {
@@ -586,7 +651,7 @@ export class ToolRegistry {
         } catch {}
         // Fall back to semantic memory search if available
         if (this._memory) {
-            const results = this._memory.search(payee_name);
+            const results = await this._memory.search(payee_name);
             if (results && results.length > 0) {
                 // Extract a payee name from the top result
                 const top = results[0].text || "";

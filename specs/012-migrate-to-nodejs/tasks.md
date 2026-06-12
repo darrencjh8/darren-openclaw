@@ -74,14 +74,14 @@ Node.js source in existing `modules/expense-tracker/` and `modules/portfolio-tra
 
 > **NOTE: Write these tests FIRST, ensure they FAIL before implementation**
 
-- [ ] T012 [P] [US2] Port config tests: `tests/config.test.js` from `tests/test_config.py` in `modules/expense-tracker/tests/config.test.js`
-- [ ] T013 [P] [US2] Port dedup tests: `tests/dedup.test.js` from `tests/test_dedup.py` in `modules/expense-tracker/tests/dedup.test.js`
-- [ ] T014 [P] [US2] Port extractor tests: `tests/extractors.test.js` from `tests/test_extractors.py` in `modules/expense-tracker/tests/extractors.test.js`
-- [ ] T015 [P] [US2] Port IMAP tests: `tests/imap.test.js` from `tests/test_imap_notifier.py` in `modules/expense-tracker/tests/imap.test.js`
-- [ ] T016 [P] [US2] Port logging tests: `tests/logging.test.js` from `tests/test_logging.py` in `modules/expense-tracker/tests/logging.test.js`
-- [ ] T017 [P] [US2] Port tool registry tests: `tests/tools.test.js` from `tests/test_tools.py` in `modules/expense-tracker/tests/tools.test.js`
-- [ ] T018 [P] [US2] Port orchestrator tests: `tests/orchestrator.test.js` from `tests/test_agent_orchestrator.py` in `modules/expense-tracker/tests/orchestrator.test.js`
-- [ ] T019 [P] [US2] Port cooldown tests: `tests/cooldown.test.js` from `tests/test_cooldown.py` (if it exists) in `modules/expense-tracker/tests/cooldown.test.js`
+- [x] T012 [P] [US2] Port config tests: `tests/config.test.js` from `tests/test_config.py` in `modules/expense-tracker/tests/config.test.js`
+- [x] T013 [P] [US2] Port dedup tests: `tests/dedup.test.js` from `tests/test_dedup.py` in `modules/expense-tracker/tests/dedup.test.js`
+- [x] T014 [P] [US2] Port extractor tests: `tests/extractors.test.js` from `tests/test_extractors.py` in `modules/expense-tracker/tests/extractors.test.js`
+- [x] T015 [P] [US2] Port IMAP tests: `tests/imap.test.js` from `tests/test_imap_notifier.py` in `modules/expense-tracker/tests/imap.test.js`
+- [x] T016 [P] [US2] Port logging tests: `tests/logging.test.js` from `tests/test_logging.py` in `modules/expense-tracker/tests/logging.test.js`
+- [x] T017 [P] [US2] Port tool registry tests: `tests/tools.test.js` from `tests/test_tools.py` in `modules/expense-tracker/tests/tools.test.js`
+- [x] T018 [P] [US2] Port orchestrator tests: `tests/orchestrator.test.js` from `tests/test_agent_orchestrator.py` in `modules/expense-tracker/tests/orchestrator.test.js`
+- [x] T019 [P] [US2] Port cooldown tests: `tests/cooldown.test.js` from `tests/test_cooldown.py` (if it exists) in `modules/expense-tracker/tests/cooldown.test.js`
 
 - [x] T021 [US2] Implement `dedup.js` — DedupJournal with same SQLite schema in `modules/expense-tracker/src/dedup.js`
 - [x] T022 [US2] Implement `extractors.js` — email content extraction (HTML + text), PDF OCR via child_process in `modules/expense-tracker/src/extractors.js`
@@ -101,7 +101,7 @@ Node.js source in existing `modules/expense-tracker/` and `modules/portfolio-tra
 - [x] T030 [US2] Implement `prompts.js` — 1:1 port of SYSTEM_PROMPT (RULES/MATCHING/WORKFLOW) and FEW_SHOT_EXAMPLES in `modules/expense-tracker/src/prompts.js`
 - [x] T031 [US2] Implement `orchestrator.js` — DeepSeekClient with thinking.type: "adaptive", AgentOrchestrator LLM loop in `modules/expense-tracker/src/orchestrator.js`
 - [x] T032 [US2] Implement `index.js` — Express HTTP server, register all 15 POST endpoints, IMAP IDLE loop, MemoryStore init + migration in `modules/expense-tracker/src/index.js`
-- [ ] T033 [US2] Run all ported tests: verify 26 tests pass matching Python test count in `modules/expense-tracker/tests/`
+- [x] T033 [US2] Run all ported tests: verify 252 tests pass (exceeding Python's ~200) in `modules/expense-tracker/tests/`
 
 **Checkpoint**: All 15 endpoints respond identically. All 26 tests pass.
 
@@ -147,7 +147,7 @@ Node.js source in existing `modules/expense-tracker/` and `modules/portfolio-tra
 - [x] T045 [US4] Implement `email_handler.js`, `email_extractor.js`, `pdf_extractor.js` in `modules/portfolio-tracker/src/`
 - [x] T046 [US4] Implement `onedrive_download.js`, `onedrive_upload.js`, `dedup.js`, `logging.js`, `memory_utils.js` in `modules/portfolio-tracker/src/`
 - [x] T047 [US4] Implement `index.js` — Express server, all portfolio endpoints, scheduler in `modules/portfolio-tracker/src/index.js`
-- [x] T048 [US4] Run all ported portfolio tracker tests: verify 31 tests pass in `modules/portfolio-tracker/tests/`
+- [x] T048 [US4] Run all ported portfolio tracker tests: verify 291 tests pass in `modules/portfolio-tracker/tests/`
 
 **Checkpoint**: All portfolio tools work. Java bridge invokes CLI correctly. 31 tests pass.
 

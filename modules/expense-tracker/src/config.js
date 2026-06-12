@@ -35,6 +35,7 @@ export class Config {
         this.userName = env.USER_NAME || "there";
         this.systemPromptExtra = env.SYSTEM_PROMPT_EXTRA || "";
         this.dedupDbPath = env.DEDUP_DB_PATH || "data/dedup.db";
+        this.statementDbPath = env.STATEMENT_DB_PATH || "data/statement.db";
         this.memoryPath = env.MEMORY_PATH || "data/MEMORY.md";
         this.logLevel = env.LOG_LEVEL || "INFO";
     }
