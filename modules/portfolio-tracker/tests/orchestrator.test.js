@@ -31,6 +31,13 @@ vi.mock("../src/prompts.js", () => ({
     ],
 }));
 
+// Mock extractEmailContent to return clean text
+vi.mock("../src/email_handler.js", () => ({
+    extractEmailContent: vi.fn(),
+}));
+
+import { extractEmailContent } from "../src/email_handler.js";
+
 describe("DeepSeekClient", () => {
     let client;
 
@@ -151,7 +158,10 @@ describe("AgentOrchestrator", () => {
                     { type: "function", function: { name: "test-tool" } },
                 ]),
             executeTool: vi.fn().mockResolvedValue({ result: "ok" }),
+            setEventContext: vi.fn(),
         };
+
+        extractEmailContent.mockResolvedValue("Clean extracted email text");
 
         const config = {
             deepseekApiKey: "sk-test",
@@ -164,8 +174,7 @@ describe("AgentOrchestrator", () => {
         expect(orchestrator.tools).toBe(mockTools);
     });
 
-    it("builds messages with system prompt, few-shot examples, and user email", async () => {
-        // Create a mock response that has no tool_calls (completes immediately)
+    it("calls setEventContext and extractEmailContent before LLM", async () => {
         const mockLlm = {
             chat: vi.fn().mockResolvedValue({
                 choices: [
@@ -179,12 +188,49 @@ describe("AgentOrchestrator", () => {
             }),
         };
 
-        // Replace the LLM
         orchestrator._llm = mockLlm;
+        extractEmailContent.mockResolvedValue("Clean extracted email text");
+
+        const rawEmail = Buffer.from(
+            "From: test@test.com\r\nSubject: Test\r\n\r\nHello",
+        );
+        const result = await orchestrator.processEmail("msg-1", rawEmail, null);
+
+        expect(result.action).toBe("completed");
+
+        // Must call setEventContext with (null, rawEmail bytes)
+        expect(mockTools.setEventContext).toHaveBeenCalledWith(null, rawEmail);
+
+        // Must call extractEmailContent with raw email
+        expect(extractEmailContent).toHaveBeenCalledWith(rawEmail);
+
+        // LLM must receive the extracted text (last user message, not few-shot examples)
+        const chatMessages = mockLlm.chat.mock.calls[0][0];
+        const userMessages = chatMessages.filter((m) => m.role === "user");
+        const lastUserMessage = userMessages[userMessages.length - 1];
+        expect(lastUserMessage.content).toContain("Clean extracted email text");
+    });
+
+    it("builds messages with system prompt, few-shot examples, and user email", async () => {
+        const mockLlm = {
+            chat: vi.fn().mockResolvedValue({
+                choices: [
+                    {
+                        message: {
+                            role: "assistant",
+                            content: "Processed successfully",
+                        },
+                    },
+                ],
+            }),
+        };
+
+        orchestrator._llm = mockLlm;
+        extractEmailContent.mockResolvedValue("Extracted: Hello from IBKR");
 
         const result = await orchestrator.processEmail(
             "msg-1",
-            "From: test@test.com\r\nSubject: Test\r\n\r\nHello",
+            Buffer.from("raw email"),
             null,
         );
 
@@ -199,7 +245,7 @@ describe("AgentOrchestrator", () => {
                 (m) =>
                     m.role === "user" &&
                     typeof m.content === "string" &&
-                    m.content.includes("Hello"),
+                    m.content.includes("Extracted: Hello from IBKR"),
             ),
         ).toBe(true);
     });
@@ -248,7 +294,7 @@ describe("AgentOrchestrator", () => {
 
         const result = await orchestrator.processEmail(
             "msg-2",
-            "Test email",
+            Buffer.from("Test email"),
             null,
         );
 
@@ -301,7 +347,7 @@ describe("AgentOrchestrator", () => {
 
         orchestrator._llm = mockLlm;
 
-        await orchestrator.processEmail("msg-3", "Test", null);
+        await orchestrator.processEmail("msg-3", Buffer.from("Test"), null);
 
         expect(mockTools.executeTool).toHaveBeenCalledWith("tool-a", { a: 1 });
         expect(mockTools.executeTool).toHaveBeenCalledWith("tool-b", { b: 2 });
@@ -332,7 +378,11 @@ describe("AgentOrchestrator", () => {
 
         orchestrator._llm = mockLlm;
 
-        const result = await orchestrator.processEmail("msg-4", "Test", null);
+        const result = await orchestrator.processEmail(
+            "msg-4",
+            Buffer.from("Test"),
+            null,
+        );
 
         expect(result.action).toBe("error");
         expect(result.details).toBe("Max tool iterations exceeded");
@@ -375,7 +425,11 @@ describe("AgentOrchestrator", () => {
 
         orchestrator._llm = mockLlm;
 
-        const result = await orchestrator.processEmail("msg-5", "Test", null);
+        const result = await orchestrator.processEmail(
+            "msg-5",
+            Buffer.from("Test"),
+            null,
+        );
 
         expect(result.action).toBe("completed");
         // Tool result should be added as string
@@ -419,7 +473,7 @@ describe("AgentOrchestrator", () => {
 
         orchestrator._llm = mockLlm;
 
-        await orchestrator.processEmail("msg-6", "Test", null);
+        await orchestrator.processEmail("msg-6", Buffer.from("Test"), null);
 
         const toolMessages = mockLlm.chat.mock.calls[1][0];
         const toolMsg = toolMessages.find((m) => m.role === "tool");
