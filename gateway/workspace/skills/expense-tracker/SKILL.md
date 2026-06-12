@@ -70,7 +70,7 @@ exec: curl -s -X POST http://expense-tracker:8080/tools/<name> -H "Content-Type:
 | fetch-unreconciled-transactions | `{"account_id":"...","date_from":"YYYY-MM-DD","date_to":"YYYY-MM-DD"}` |
 | record-statement | `{"account_id":"...","period_start":"YYYY-MM-DD","period_end":"YYYY-MM-DD","matched_count":0,"outlier_count":0}` |
 | fetch-statement-history | `{"account_id":"...","period_start":"YYYY-MM-DD","period_end":"YYYY-MM-DD"}` |
-| check-statement-duplicate | `{"account_id":"...","period_start":"YYYY-MM-DD","period_end":"YYYY-MM-DD"}` |
+| check-statement-duplicate | `{"date":"YYYY-MM-DD","amount_cents":-800,"account_id":"..."}` |
 
 ## Statement Reconciliation
 

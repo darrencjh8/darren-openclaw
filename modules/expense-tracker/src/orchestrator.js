@@ -5,6 +5,7 @@
 
 import OpenAI from "openai";
 import { FEW_SHOT_EXAMPLES } from "./prompts.js";
+import { extractEmailContent } from "./extractors.js";
 
 const MAX_TOOL_ITERATIONS = 5;
 
@@ -78,12 +79,15 @@ export class AgentOrchestrator {
     async processEmail(msgId, rawEmail, imapHandler) {
         this._tools.setEmailContext(msgId, rawEmail, imapHandler);
 
-        // Simple email text extraction (full extractors port in later task)
+        // Extract email content using proper pipeline (cheerio + mailparser)
         let emailText = "";
         try {
-            emailText = Buffer.from(rawEmail).toString("utf8");
+            const raw = Buffer.isBuffer(rawEmail)
+                ? rawEmail
+                : Buffer.from(rawEmail || "");
+            emailText = extractEmailContent(raw.toString("utf8"));
         } catch {
-            emailText = String(rawEmail);
+            emailText = String(rawEmail || "");
         }
 
         const messages = this._buildMessages(emailText);
