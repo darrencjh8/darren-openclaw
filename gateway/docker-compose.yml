@@ -8,7 +8,7 @@ services:
             - "18800:18800"
         volumes:
             - ./openclaw.json:/app/openclaw.json.bk:ro
-            - ./workspace/skills:/app/.openclaw/workspace/skills
+            - ./workspace/skills:/home/node/.openclaw/workspace/skills
             - ./AGENTS.md.template:/app/AGENTS.md.template:ro
             - ./AGENTS.thinker.md.template:/app/AGENTS.thinker.md.template:ro
             - ./SOUL.md.template:/app/SOUL.md.template:ro
@@ -78,7 +78,6 @@ services:
         env_file:
             - ../modules/portfolio-tracker/.env
         restart: unless-stopped
-
 
     image-gen:
         build:
