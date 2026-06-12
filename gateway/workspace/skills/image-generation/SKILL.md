@@ -7,7 +7,7 @@ user-invocable: true
 ---
 # Image Generation
 
-**CRITICAL: For ANY image request, use ONLY the endpoints below. Do NOT use browser, fetch, web_fetch, image_generate, or any other method. image_generate is BLOCKED. These endpoints are the SOLE image generation path. No exceptions.**
+**CRITICAL: For ANY image request, use ONLY the /generate and /send endpoints below via fetch POST. Do NOT use exec, browser, web_fetch, or image_generate — those are BLOCKED. These HTTP endpoints are the SOLE image generation path.**
 
 ## How to Call
 
