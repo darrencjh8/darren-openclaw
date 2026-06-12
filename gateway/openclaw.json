@@ -12,10 +12,12 @@
                 "apiKey": "${DEEPSEEK_API_KEY}",
                 "models": [
                     {
-                        "id": "deepseek-v4-flash"
+                        "id": "deepseek-v4-flash",
+                        "name": "DeepSeek V4 Flash"
                     },
                     {
-                        "id": "deepseek-v4-pro"
+                        "id": "deepseek-v4-pro",
+                        "name": "DeepSeek V4 Pro"
                     }
                 ]
             },
@@ -23,10 +25,12 @@
                 "apiKey": "${GEMINI_API_KEY}",
                 "models": [
                     {
-                        "id": "gemini-3.5-flash"
+                        "id": "gemini-3.5-flash",
+                        "name": "Gemini 3.5 Flash"
                     },
                     {
-                        "id": "gemini-3.1-flash-lite"
+                        "id": "gemini-3.1-flash-lite",
+                        "name": "Gemini 3.1 Flash Lite"
                     }
                 ]
             }
