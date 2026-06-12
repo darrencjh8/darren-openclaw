@@ -697,7 +697,13 @@ export class ToolRegistry {
         );
         // Always journal the check so duplicates are recorded
         this._dedup.record(date, amount_cents, account_id, payee_name || "");
-        if (isDup) return true;
+        if (isDup) {
+            // Auto-mark duplicate emails as read to prevent re-processing loops
+            if (this._emailMsgId && this._imapHandler) {
+                this._imapHandler.markRead(this._emailMsgId).catch(() => {});
+            }
+            return true;
+        }
         // Fall back to AB API query for matching transactions
         return this._check_ab_duplicate(
             date,

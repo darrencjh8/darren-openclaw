@@ -52,10 +52,11 @@ RULES (constraints — what NOT to do):
        DO NOT ask again about the same email within 1 hour.
     c. CONFIRMED transaction → proceed to WORKFLOW.
 10. Duplicate detected (check_duplicate returns True) →
-    log_decision("skipped", "duplicate"), stop. No notify, no mark read.
+    log_decision("skipped", "duplicate"), mark_email_read(), stop. No notify.
 11. ONLY mark_email_read() when:
     - Successful insert (per WORKFLOW step 10)
     - Confirmed non-transactional (per Rule 9a)
+    - Duplicate detected (per Rule 10)
     NEVER mark as read in any other case.
 12. After EVERY successful insert → notify_user() with a friendly,
     one-sentence message acknowledging the email. Use emojis occasionally.
