@@ -10,7 +10,6 @@ dependencies = [
     "python-dotenv>=1.0",
     "pytesseract>=0.3",
     "pdf2image>=1.16",
-    "python-telegram-bot>=20.0",
     "google-api-python-client>=2.0",
     "google-auth>=2.0",
     "aioimaplib>=1.0",
