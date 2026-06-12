@@ -4,7 +4,7 @@
 
 **Created**: 2026-06-12
 
-**Status**: Draft
+**Status**: Done
 
 **Input**: User description: "Migrate expense-tracker and portfolio-tracker from Python to Node.js. Separate Docker containers, same HTTP hub architecture. Migrate all deterministic logic 1:1. Keep Java CLI for Portfolio Performance XML. Fix DeepSeek thinking levels: orchestrator → adaptive, thinker → max. Verified against official OpenClaw thinking docs and DeepSeek API docs."
 
