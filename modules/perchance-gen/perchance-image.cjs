@@ -137,11 +137,19 @@ async function waitForImageAndSave(embedFrame) {
     } catch (e) {
         console.error(e.message);
     } finally {
-        if (page) {
-            try {
-                await page.close();
-            } catch (e) {}
-        }
+        // Close all pages to prevent tab accumulation (keep about:blank alive)
+        try {
+            var ctx = browser ? browser.contexts()[0] : null;
+            if (ctx) {
+                for (var p of ctx.pages()) {
+                    if (!p.url().startsWith("about:")) {
+                        try {
+                            await p.close();
+                        } catch (e) {}
+                    }
+                }
+            }
+        } catch (e) {}
     }
     process.exit(exitCode);
 })();
