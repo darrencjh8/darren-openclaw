@@ -3,7 +3,7 @@ FROM node:22-slim
 RUN apt-get update && apt-get install -y --no-install-recommends \
     tesseract-ocr \
     poppler-utils \
-    openjdk-17-jre-headless \
+    openjdk-21-jre-headless \
     python3 \
     make \
     gcc \
