@@ -1,0 +1,33 @@
+{
+  "version": 1,
+  "socket": {
+    "path": "/app/.openclaw/exec-approvals.sock",
+    "token": "j3pisy2BDEZaoe34jIOM3fAUhBuCG4oQ"
+  },
+  "defaults": {
+    "security": "allowlist",
+    "ask": "on-miss",
+    "askFallback": "deny",
+    "autoAllowSkills": true
+  },
+  "agents": {
+    "orchestrator": {
+      "allowlist": [
+        { "pattern": "curl", "id": "4c829f22-66d9-4667-bae0-d0ecfe479d11" },
+        { "pattern": "qpdf", "id": "5b186139-aaf7-496a-a309-d98f10d25bf5" },
+        { "pattern": "pdftotext", "id": "c5d3b620-8a98-4ccd-a446-4e3cd66d60a5" },
+        { "pattern": "echo", "id": "ce198683-e042-47d6-9cdd-26982b82c075" },
+        { "pattern": "bash", "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890" }
+      ]
+    },
+    "thinker": {
+      "allowlist": [
+        { "pattern": "curl", "id": "2fe2f8f3-8b49-45f7-b2c9-60182bc9c3b6" },
+        { "pattern": "qpdf", "id": "5c54e2a6-f925-46a9-ad10-6d9b8e542667" },
+        { "pattern": "pdftotext", "id": "3d360ce6-cf1b-48c3-803e-f5a10598579f" },
+        { "pattern": "echo", "id": "846022bb-33fa-4b23-adc9-b3064d9966af" },
+        { "pattern": "bash", "id": "b2c3d4e5-f6a7-8901-bcde-f12345678901" }
+      ]
+    }
+  }
+}
