@@ -27,21 +27,28 @@ var guidance = parseFloat(guidanceArg) || 7.0;
 
 /** Wait for an <img> inside the embed iframe, grab it, save as PNG */
 async function waitForImageAndSave(embedFrame) {
-    // Perchance generates 6 images — grab the first one that loads
     for (var i = 0; i < 60; i++) {
         await new Promise(function (r) {
-            setTimeout(r, 2000);
+            setTimeout(r, 1000);
         });
         try {
             var b64 = await embedFrame.evaluate(async function () {
                 var imgs = document.querySelectorAll("img");
                 for (var img of imgs) {
-                    if (
-                        img.src &&
-                        img.src.startsWith("data:image") &&
-                        img.naturalWidth > 100
-                    ) {
-                        return img.src;
+                    if (img.naturalWidth > 100) {
+                        // Try data: URI first, then draw to canvas
+                        if (img.src && img.src.startsWith("data:image")) {
+                            return img.src;
+                        }
+                        // Draw cross-origin image to canvas for extraction
+                        try {
+                            var c = document.createElement("canvas");
+                            c.width = img.naturalWidth;
+                            c.height = img.naturalHeight;
+                            var ctx = c.getContext("2d");
+                            ctx.drawImage(img, 0, 0);
+                            return c.toDataURL("image/png");
+                        } catch (e) {}
                     }
                 }
                 return null;
@@ -55,12 +62,13 @@ async function waitForImageAndSave(embedFrame) {
             }
         } catch (e) {}
     }
-    throw new Error("No image found in embed iframe after 120s");
+    throw new Error("No image found in embed iframe after 60s");
 }
 
 (async function () {
     var page;
     var browser;
+    var exitCode = 1;
     try {
         browser = await chromium.connectOverCDP(HOST_CDP);
         var context =
@@ -125,14 +133,18 @@ async function waitForImageAndSave(embedFrame) {
         // Wait for image and save
         var size = await waitForImageAndSave(embedFrame);
         console.log(JSON.stringify({ path: outputPath, size: size }));
+        exitCode = 0;
     } catch (e) {
         console.error(e.message);
-        process.exit(1);
     } finally {
-        if (page) {
-            try {
-                await page.close();
-            } catch (e) {}
-        }
+        try {
+            await Promise.race([
+                page?.close(),
+                new Promise(function (r) {
+                    setTimeout(r, 3000);
+                }),
+            ]);
+        } catch (e) {}
     }
+    process.exit(exitCode);
 })();
