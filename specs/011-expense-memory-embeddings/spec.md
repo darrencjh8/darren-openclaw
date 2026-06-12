@@ -4,7 +4,7 @@
 
 **Created**: 2026-06-12
 
-**Status**: Done
+**Status**: Merged into 003
 
 **Input**: User description: "Replace the hardcoded `data/mappings.json` in the expense tracker with a configurable `MEMORY.md` file backed by embeddings-based semantic search, with self-learning, semantic dedup on write, and user feedback tools via the gateway."
 
