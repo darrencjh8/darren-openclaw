@@ -9,10 +9,26 @@
     "models": {
         "providers": {
             "deepseek": {
-                "apiKey": "${DEEPSEEK_API_KEY}"
+                "apiKey": "${DEEPSEEK_API_KEY}",
+                "models": [
+                    {
+                        "id": "deepseek-v4-flash"
+                    },
+                    {
+                        "id": "deepseek-v4-pro"
+                    }
+                ]
             },
             "google": {
-                "apiKey": "${GEMINI_API_KEY}"
+                "apiKey": "${GEMINI_API_KEY}",
+                "models": [
+                    {
+                        "id": "gemini-3.5-flash"
+                    },
+                    {
+                        "id": "gemini-3.1-flash-lite"
+                    }
+                ]
             }
         }
     },
