@@ -1,6 +1,17 @@
 import { readFileSync } from "fs";
 import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
+import { SYSTEM_PROMPT } from "./prompts.js";
+
+const REQUIRED_ENV_VARS = [
+    "DEEPSEEK_API_KEY",
+    "ACTUAL_BUDGET_URL",
+    "ACTUAL_BUDGET_PASSWORD",
+    "ACTUAL_BUDGET_FILE",
+    "IMAP_HOST",
+    "IMAP_USERNAME",
+    "IMAP_PASSWORD",
+];
 
 /**
  * Environment-based configuration for the expense tracker.
@@ -26,6 +37,14 @@ export class Config {
         this.dedupDbPath = env.DEDUP_DB_PATH || "data/dedup.db";
         this.memoryPath = env.MEMORY_PATH || "data/MEMORY.md";
         this.logLevel = env.LOG_LEVEL || "INFO";
+    }
+
+    get systemPrompt() {
+        let prompt = SYSTEM_PROMPT;
+        if (this.systemPromptExtra) {
+            prompt += "\n\n" + this.systemPromptExtra;
+        }
+        return prompt;
     }
 
     static fromEnv(envPath) {
@@ -55,6 +74,13 @@ export class Config {
                 break;
             } catch {}
         }
-        return new Config();
+        const config = new Config();
+        const missing = REQUIRED_ENV_VARS.filter((k) => !process.env[k]);
+        if (missing.length > 0) {
+            throw new Error(
+                `Missing required environment variables: ${missing.join(", ")}`,
+            );
+        }
+        return config;
     }
 }

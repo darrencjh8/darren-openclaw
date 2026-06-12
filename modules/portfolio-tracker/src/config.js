@@ -3,8 +3,25 @@
  * Ported 1:1 from src/config.py
  */
 
+const REQUIRED_ENV_VARS = [
+    "DEEPSEEK_API_KEY",
+    "ACTUAL_BUDGET_URL",
+    "ACTUAL_BUDGET_PASSWORD",
+    "ACTUAL_BUDGET_FILE",
+    "PP_XML_PATH",
+    "PP_JAR_PATH",
+];
+
 export class Config {
     constructor(env = process.env) {
+        // Validate required env vars
+        const missing = REQUIRED_ENV_VARS.filter((k) => !env[k]);
+        if (missing.length > 0) {
+            throw new Error(
+                `Missing required environment variables: ${missing.join(", ")}`,
+            );
+        }
+
         // Required
         this.deepseekApiKey = env.DEEPSEEK_API_KEY || "";
         this.actualBudgetUrl = env.ACTUAL_BUDGET_URL || "";

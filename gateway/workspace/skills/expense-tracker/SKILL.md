@@ -36,6 +36,8 @@ exec: curl -s -X POST http://expense-tracker:8080/tools/<name> -H "Content-Type:
 | Tool | Key Args |
 |---|---|
 | `extract-pdf-text` | `{"pdf_bytes_b64":"..."}` — OCR a PDF and return text |
+| `extract-email-content` | `{}` — Extract text from current email (with PDF attachment support) |
+| `mark-email-read` | `{}` — Mark the triggering email as read |
 
 ### Budget & Transactions
 
@@ -46,9 +48,9 @@ exec: curl -s -X POST http://expense-tracker:8080/tools/<name> -H "Content-Type:
 | fetch-categories | `{}` |
 | fetch-recent-transactions | `{"account_id":"..."}`  |
 | check-duplicate | `{"date":"YYYY-MM-DD","amount_cents":-800,"account_id":"...","payee_name":"Food"}` |
-| insert-transaction | `{"date":"YYYY-MM-DD","amount_cents":-800,"account_id":"...","imported_description":"Food"}` |
+| insert-transaction | `{"date":"YYYY-MM-DD","amount_cents":-800,"account_id":"...","imported_description":"Food","budget_id":"...","category_id":"...","notes":"..."}` |
 | log-decision | `{"action":"inserted","reasoning":"..."}`  |
-| notify-user | `{"subject":"...","body":"..."}` |
+| notify-user | `{"message":"..."}` |
 
 ### Memory & Learning
 
@@ -68,6 +70,7 @@ exec: curl -s -X POST http://expense-tracker:8080/tools/<name> -H "Content-Type:
 | fetch-unreconciled-transactions | `{"account_id":"...","date_from":"YYYY-MM-DD","date_to":"YYYY-MM-DD"}` |
 | record-statement | `{"account_id":"...","period_start":"YYYY-MM-DD","period_end":"YYYY-MM-DD","matched_count":0,"outlier_count":0}` |
 | fetch-statement-history | `{"account_id":"...","period_start":"YYYY-MM-DD","period_end":"YYYY-MM-DD"}` |
+| check-statement-duplicate | `{"account_id":"...","period_start":"YYYY-MM-DD","period_end":"YYYY-MM-DD"}` |
 
 ## Statement Reconciliation
 

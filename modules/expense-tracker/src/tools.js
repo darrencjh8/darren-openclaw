@@ -14,6 +14,7 @@ import {
 import { tmpdir } from "os";
 import { join, dirname } from "path";
 import Database from "better-sqlite3";
+import { simpleParser } from "mailparser";
 import { DedupJournal } from "./dedup.js";
 
 const ACTUAL_API_URL = process.env.ACTUAL_API_URL || "http://localhost:3000";
@@ -270,6 +271,7 @@ const TOOLS = [
                 amount_cents: { type: "integer" },
                 account_id: { type: "string" },
                 payee_name: { type: "string" },
+                budget_id: { type: "string", default: "" },
             },
             required: ["date", "amount_cents", "account_id", "payee_name"],
         },
@@ -447,7 +449,12 @@ const TOOLS = [
     {
         name: "extract_email_content",
         description: "Extract and clean the text content of the current email.",
-        schema: { type: "object", properties: {} },
+        schema: {
+            type: "object",
+            properties: {
+                include_headers: { type: "boolean", default: false },
+            },
+        },
     },
     {
         name: "check_statement_duplicate",
@@ -564,14 +571,44 @@ export class ToolRegistry {
         return this._get("/transactions", budget_id, params);
     }
 
+    async _validate_payee(payee_name, budget_id = "") {
+        if (!payee_name) return "Misc";
+        try {
+            const payees = await this._get("/payees", budget_id);
+            if (Array.isArray(payees)) {
+                const match = payees.find(
+                    (p) =>
+                        p.name &&
+                        p.name.toLowerCase() === payee_name.toLowerCase(),
+                );
+                if (match) return match.name;
+            }
+        } catch {}
+        // Fall back to semantic memory search if available
+        if (this._memory) {
+            const results = this._memory.search(payee_name);
+            if (results && results.length > 0) {
+                // Extract a payee name from the top result
+                const top = results[0].text || "";
+                const payeeMatch = top.match(/maps to (\S+) payee/i);
+                if (payeeMatch) return payeeMatch[1];
+            }
+        }
+        return "Misc";
+    }
+
     async _handle_insert_transaction(args) {
+        const payee_name = await this._validate_payee(
+            args.imported_description || "",
+            args.budget_id || "",
+        );
         return this._post(
             "/transactions",
             {
                 account: args.account_id || "",
                 date: args.date || new Date().toISOString().slice(0, 10),
                 amount: args.amount_cents || 0,
-                payee_name: args.imported_description || "",
+                payee_name: payee_name,
                 notes: args.notes || "",
                 cleared: false,
                 ...(args.category_id ? { category: args.category_id } : {}),
@@ -585,13 +622,41 @@ export class ToolRegistry {
         amount_cents,
         account_id,
         payee_name,
+        budget_id = "",
     }) {
-        return this._dedup.checkDuplicate(
+        const isDup = this._dedup.checkDuplicate(
             date,
             amount_cents,
             account_id,
             payee_name || "",
         );
+        // Always journal the check so duplicates are recorded
+        this._dedup.record(date, amount_cents, account_id, payee_name || "");
+        if (isDup) return true;
+        // Fall back to AB API query for matching transactions
+        return this._check_ab_duplicate(
+            date,
+            amount_cents,
+            account_id,
+            budget_id,
+        );
+    }
+
+    async _check_ab_duplicate(date, amount_cents, account_id, budget_id = "") {
+        try {
+            const transactions = await this._get("/transactions", budget_id, {
+                since_date: date,
+                until_date: date,
+                account_id: account_id,
+                cleared: "false",
+            });
+            if (!Array.isArray(transactions)) return false;
+            return transactions.some(
+                (tx) => tx.date === date && tx.amount === amount_cents,
+            );
+        } catch {
+            return false;
+        }
     }
 
     // ── PDF extraction ────────────────────────────────────────────
@@ -630,7 +695,7 @@ export class ToolRegistry {
         budget_id = "",
     }) {
         const body = {};
-        if (statement_ref) body.notes = `[Reconciled: ${statement_ref}]`;
+        if (statement_ref) body.notes = statement_ref;
         return this._post(
             `/transactions/${ab_transaction_id}/clear`,
             body,
@@ -700,15 +765,14 @@ export class ToolRegistry {
     // ── Email / notify tools ──────────────────────────────────────
 
     async _handle_mark_email_read() {
-        if (this._imapHandler && this._emailMsgId) {
-            try {
-                await this._imapHandler.markRead(this._emailMsgId);
-                return true;
-            } catch {
-                return false;
-            }
+        if (!this._emailMsgId) return true;
+        if (!this._imapHandler) return false;
+        try {
+            await this._imapHandler.markRead(this._emailMsgId);
+            return true;
+        } catch {
+            return false;
         }
-        return false;
     }
 
     async _handle_notify_user({ message }) {
@@ -745,11 +809,30 @@ export class ToolRegistry {
         return true;
     }
 
-    async _handle_extract_email_content() {
+    async _handle_extract_email_content({ include_headers = false } = {}) {
         if (!this._emailRaw) return "";
-        return Buffer.isBuffer(this._emailRaw)
-            ? this._emailRaw.toString("utf8")
-            : String(this._emailRaw);
+        const raw = Buffer.isBuffer(this._emailRaw)
+            ? this._emailRaw
+            : Buffer.from(String(this._emailRaw), "utf8");
+        try {
+            const parsed = await simpleParser(raw);
+            if (include_headers) {
+                const headers = [];
+                if (parsed.subject) headers.push(`Subject: ${parsed.subject}`);
+                if (parsed.from) headers.push(`From: ${parsed.from.text}`);
+                if (parsed.to) headers.push(`To: ${parsed.to.text}`);
+                if (parsed.date) headers.push(`Date: ${parsed.date}`);
+                const headerBlock = headers.join("\n");
+                const body = parsed.text || "";
+                return headerBlock ? `${headerBlock}\n\n${body}` : body;
+            }
+            return parsed.text || "";
+        } catch {
+            // Fall back to raw text if parsing fails
+            return Buffer.isBuffer(this._emailRaw)
+                ? this._emailRaw.toString("utf8")
+                : String(this._emailRaw);
+        }
     }
 
     async _handle_check_statement_duplicate({

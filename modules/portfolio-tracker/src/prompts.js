@@ -2,11 +2,45 @@
  * System prompt for the portfolio-tracking LLM agent.
  * Ported 1:1 from src/agent/prompts.py
  */
+import fs from "fs";
+import path from "path";
 
 const USER_NAME = process.env.USER_NAME || "there";
 const PROMPT_EXTRA = process.env.SYSTEM_PROMPT_EXTRA || "";
+const MAPPINGS_PATH = process.env.MAPPINGS_PATH || "data/mappings.json";
 
-export const SYSTEM_PROMPT = `\
+function _loadLearnedContext() {
+    const fullPath = path.resolve(MAPPINGS_PATH);
+    if (!fs.existsSync(fullPath)) return "";
+    let data;
+    try {
+        data = JSON.parse(fs.readFileSync(fullPath, "utf-8"));
+    } catch (e) {
+        return "";
+    }
+
+    const parts = [];
+    for (const [mappingType, label] of [
+        ["securities", "KNOWN SECURITIES (ticker/ISIN → PP ID)"],
+        ["accounts", "KNOWN ACCOUNTS (broker keyword → PP account ID)"],
+        ["categories", "LEARNED CATEGORY MAPPINGS"],
+        ["brokers", "LEARNED BROKER MAPPINGS"],
+    ]) {
+        const items = data[mappingType];
+        if (items && Object.keys(items).length > 0) {
+            const lines = Object.entries(items)
+                .sort(([a], [b]) => a.localeCompare(b))
+                .map(([k, v]) => `  - ${k}: ${v}`);
+            parts.push(`${label}:\n${lines.join("\n")}`);
+        }
+    }
+
+    return parts.join("\n\n");
+}
+
+const LEARNED = _loadLearnedContext();
+
+let SYSTEM_PROMPT = `\
 You are an investment portfolio automation agent connected to Portfolio Performance.
 You process investment data from multiple sources:
 - IBKR flex query XML files (uploaded via Telegram or email)
@@ -96,7 +130,15 @@ TAXONOMY EXPORT WORKFLOW:
 2. For each taxonomy, call update_google_sheet() with the
    aggregated values
 3. notify_user with confirmation
+
+${LEARNED}
 `;
+
+if (PROMPT_EXTRA) {
+    SYSTEM_PROMPT += "\n\n" + PROMPT_EXTRA;
+}
+
+export { SYSTEM_PROMPT };
 
 export const FEW_SHOT_EXAMPLES = [
     [
@@ -166,6 +208,268 @@ export const FEW_SHOT_EXAMPLES = [
             role: "assistant",
             content:
                 "All matched: AAPL→US0378331005, MSFT→US5949181045. Account: IBKR USD.\n\nConfirmation:\n- BUY 100 AAPL @ $185.30 = $18,530.00\n- SELL 50 MSFT @ $420.50 = $21,025.00\n- DIV AAPL $25.00\n\nProceed?",
+        },
+    ],
+
+    // Example 2: User approval → insert ×3 → pp-push → pp-sync-all → notify + learn + log
+    [
+        {
+            role: "user",
+            content: "User said: approve",
+        },
+        {
+            role: "assistant",
+            content:
+                "Inserting all 3 trades now. First checking for duplicates.",
+            tool_calls: [
+                {
+                    id: "call_4",
+                    type: "function",
+                    function: {
+                        name: "check_duplicate",
+                        arguments:
+                            '{"date":"2026-06-01","amount_cents":1853000,"account_id":"acct-ibkr-usd","security_id":"sec-aapl","type":"Buy"}',
+                    },
+                },
+                {
+                    id: "call_5",
+                    type: "function",
+                    function: {
+                        name: "check_duplicate",
+                        arguments:
+                            '{"date":"2026-06-02","amount_cents":2102500,"account_id":"acct-ibkr-usd","security_id":"sec-msft","type":"Sell"}',
+                    },
+                },
+                {
+                    id: "call_6",
+                    type: "function",
+                    function: {
+                        name: "check_duplicate",
+                        arguments:
+                            '{"date":"2026-06-03","amount_cents":2500,"account_id":"acct-ibkr-usd","security_id":"sec-aapl","type":"Dividend"}',
+                    },
+                },
+            ],
+        },
+        {
+            role: "tool",
+            tool_call_id: "call_4",
+            content: '{"is_duplicate": false}',
+        },
+        {
+            role: "tool",
+            tool_call_id: "call_5",
+            content: '{"is_duplicate": false}',
+        },
+        {
+            role: "tool",
+            tool_call_id: "call_6",
+            content: '{"is_duplicate": false}',
+        },
+        {
+            role: "assistant",
+            content:
+                "No duplicates. Inserting all 3, then pushing to OneDrive and running sync.",
+            tool_calls: [
+                {
+                    id: "call_7",
+                    type: "function",
+                    function: {
+                        name: "insert_pp_transaction",
+                        arguments:
+                            '{"account_id":"acct-ibkr-usd","security_id":"sec-aapl","type":"Buy","date":"2026-06-01","shares":100,"price":185.30,"currency_code":"USD","fees":1.0,"taxes":0.0,"notes":"IBKR Buy AAPL"}',
+                    },
+                },
+                {
+                    id: "call_8",
+                    type: "function",
+                    function: {
+                        name: "insert_pp_transaction",
+                        arguments:
+                            '{"account_id":"acct-ibkr-usd","security_id":"sec-msft","type":"Sell","date":"2026-06-02","shares":50,"price":420.50,"currency_code":"USD","fees":0.5,"taxes":0.0,"notes":"IBKR Sell MSFT"}',
+                    },
+                },
+                {
+                    id: "call_9",
+                    type: "function",
+                    function: {
+                        name: "insert_pp_transaction",
+                        arguments:
+                            '{"account_id":"acct-ibkr-usd","security_id":"sec-aapl","type":"Dividend","date":"2026-06-03","shares":0,"price":25.0,"currency_code":"USD","fees":0.0,"taxes":3.75,"notes":"IBKR Dividend AAPL"}',
+                    },
+                },
+            ],
+        },
+        {
+            role: "tool",
+            tool_call_id: "call_7",
+            content: '{"status":"inserted"}',
+        },
+        {
+            role: "tool",
+            tool_call_id: "call_8",
+            content: '{"status":"inserted"}',
+        },
+        {
+            role: "tool",
+            tool_call_id: "call_9",
+            content: '{"status":"inserted"}',
+        },
+        {
+            role: "assistant",
+            content:
+                "All 3 trades inserted. Now pushing to OneDrive to persist.",
+            tool_calls: [
+                {
+                    id: "call_10",
+                    type: "function",
+                    function: { name: "pp-push", arguments: "{}" },
+                },
+            ],
+        },
+        {
+            role: "tool",
+            tool_call_id: "call_10",
+            content: '{"status":"ok","detail":"Uploaded Portfolio.portfolio"}',
+        },
+        {
+            role: "assistant",
+            content:
+                "Pushed. Now running full sync to update balances and Google Sheets.",
+            tool_calls: [
+                {
+                    id: "call_11",
+                    type: "function",
+                    function: { name: "pp-sync-all", arguments: "{}" },
+                },
+            ],
+        },
+        {
+            role: "tool",
+            tool_call_id: "call_11",
+            content:
+                '{"sync_targets":[{"name":"Emergency SGD","status":"updated","delta":0.0},{"name":"Emergency MYR","status":"updated","delta":0.0},{"name":"Warchest","status":"updated","delta":0.0}],"summary":"Synced 3/3 accounts","taxonomy_export":{"cells_written":3}}',
+        },
+        {
+            role: "assistant",
+            content: "Done! Notifying user with full summary.",
+            tool_calls: [
+                {
+                    id: "call_12",
+                    type: "function",
+                    function: {
+                        name: "notify_user",
+                        arguments:
+                            '{"message":"✅ Imported 3 IBKR trades: BUY AAPL, SELL MSFT, DIV AAPL. Sync complete — 3/3 accounts updated. Sheets refreshed."}',
+                    },
+                },
+                {
+                    id: "call_13",
+                    type: "function",
+                    function: {
+                        name: "learn_mapping",
+                        arguments:
+                            '{"type":"securities","key":"US0378331005","value":"sec-aapl"}',
+                    },
+                },
+                {
+                    id: "call_14",
+                    type: "function",
+                    function: {
+                        name: "log_decision",
+                        arguments:
+                            '{"action":"inserted","reasoning":"Approved IBKR flex query import — 3 new trades"}',
+                    },
+                },
+            ],
+        },
+        {
+            role: "tool",
+            tool_call_id: "call_12",
+            content: '{"status":"sent"}',
+        },
+        {
+            role: "tool",
+            tool_call_id: "call_13",
+            content: '{"status":"learned"}',
+        },
+        {
+            role: "tool",
+            tool_call_id: "call_14",
+            content: '{"status":"logged"}',
+        },
+    ],
+
+    // Example 3: PDF receipt OCR → security match by ISIN → check_duplicate
+    [
+        {
+            role: "user",
+            content:
+                "Process this PDF receipt OCR text:\n\n" +
+                "BROKER: Interactive Brokers\n" +
+                "TRADE CONFIRMATION\n" +
+                "BUY 200 shares of VWRA (IE00BK5BQT80) at USD 125.45\n" +
+                "Trade Date: 05 Jun 2026\n" +
+                "Total: USD 25,090.00\n" +
+                "Commission: USD 2.00",
+        },
+        {
+            role: "assistant",
+            content:
+                "I can see a BUY trade for VWRA. Let me match the security by ISIN.",
+            tool_calls: [
+                {
+                    id: "call_1",
+                    type: "function",
+                    function: {
+                        name: "fetch_pp_accounts",
+                        arguments: "{}",
+                    },
+                },
+                {
+                    id: "call_2",
+                    type: "function",
+                    function: {
+                        name: "fetch_pp_securities",
+                        arguments: "{}",
+                    },
+                },
+            ],
+        },
+        {
+            role: "tool",
+            tool_call_id: "call_1",
+            content:
+                '[{"id":"acct-ibkr-usd","name":"IBKR USD","currency":"USD"}]',
+        },
+        {
+            role: "tool",
+            tool_call_id: "call_2",
+            content:
+                '[{"id":"sec-vwra","name":"Vanguard FTSE All-World","isin":"IE00BK5BQT80","ticker":"VWRA","currency":"USD"}]',
+        },
+        {
+            role: "assistant",
+            content:
+                "Matched: VWRA by ISIN IE00BK5BQT80 → Vanguard FTSE All-World. " +
+                "Account: IBKR USD.\n\n" +
+                "Not a duplicate. Inserting.",
+            tool_calls: [
+                {
+                    id: "call_3",
+                    type: "function",
+                    function: {
+                        name: "check_duplicate",
+                        arguments:
+                            '{"date":"2026-06-05","amount_cents":2509000,"account_id":"acct-ibkr-usd","security_id":"sec-vwra","type":"Buy"}',
+                    },
+                },
+            ],
+        },
+        {
+            role: "tool",
+            tool_call_id: "call_3",
+            content: '{"is_duplicate": false}',
         },
     ],
 ];
