@@ -10,6 +10,7 @@
         "providers": {
             "deepseek": {
                 "apiKey": "${DEEPSEEK_API_KEY}",
+                "baseUrl": "https://api.deepseek.com",
                 "models": [
                     {
                         "id": "deepseek-v4-flash",
