@@ -1,9 +1,13 @@
 FROM node:22-slim
 
+# Copy Java 21 JRE from Eclipse Temurin (Bookworm only ships OpenJDK 17)
+COPY --from=eclipse-temurin:21-jre /opt/java/openjdk /opt/java/openjdk
+ENV JAVA_HOME=/opt/java/openjdk
+ENV PATH="${JAVA_HOME}/bin:${PATH}"
+
 RUN apt-get update && apt-get install -y --no-install-recommends \
     tesseract-ocr \
     poppler-utils \
-    openjdk-17-jre-headless \
     python3 \
     make \
     gcc \

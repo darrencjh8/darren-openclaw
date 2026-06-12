@@ -266,6 +266,7 @@ async function doGenerate(page, userKey) {
         console.log(
             JSON.stringify({ path: outputPath, cached: !!loadCache() }),
         );
+        await page.close();
         await gb.browser.close();
     } catch (e) {
         try {
@@ -284,6 +285,7 @@ async function doGenerate(page, userKey) {
             await setupLocalStorage(page2, uk2);
             await doGenerate(page2, uk2);
             console.log(JSON.stringify({ path: outputPath, freshKey: true }));
+            await page2.close();
             await gb2.browser.close();
         } catch (e2) {
             console.error(e.message);
