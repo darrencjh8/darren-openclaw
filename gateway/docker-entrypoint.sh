@@ -82,8 +82,8 @@ if [ ! -f /app/.openclaw/exec-approvals.json ]; then
   "defaults": {
     "security": "allowlist",
     "ask": "on-miss",
-    "askFallback": "allowlist",
-    "autoAllowSkills": true
+    "askFallback": "deny",
+    "autoAllowSkills": false
   },
   "agents": {
     "orchestrator": {
@@ -91,8 +91,7 @@ if [ ! -f /app/.openclaw/exec-approvals.json ]; then
         { "pattern": "curl" },
         { "pattern": "qpdf" },
         { "pattern": "pdftotext" },
-        { "pattern": "echo" },
-        { "pattern": "bash" }
+        { "pattern": "echo" }
       ]
     },
     "thinker": {
@@ -100,8 +99,7 @@ if [ ! -f /app/.openclaw/exec-approvals.json ]; then
         { "pattern": "curl" },
         { "pattern": "qpdf" },
         { "pattern": "pdftotext" },
-        { "pattern": "echo" },
-        { "pattern": "bash" }
+        { "pattern": "echo" }
       ]
     }
   }
