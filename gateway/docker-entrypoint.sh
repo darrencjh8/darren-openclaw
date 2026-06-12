@@ -68,8 +68,8 @@ rm -rf /app/.openclaw/sandboxes
 # Remove source extensions to silence duplicate-plugin warnings
 rm -rf /app/extensions
 
-# Remove empty default .openclaw dir to avoid split-state warnings
-rm -rf /home/node/.openclaw
+# Clean default .openclaw state to avoid split-state warnings (preserve mounted skills)
+find /home/node/.openclaw -mindepth 1 -maxdepth 1 ! -name workspace -exec rm -rf {} + 2>/dev/null; true
 
 # Seed exec-approvals.json if not present (production manages this via bind-mount)
 if [ ! -f /app/.openclaw/exec-approvals.json ]; then
