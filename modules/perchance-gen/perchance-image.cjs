@@ -20,6 +20,7 @@ if (!prompt || !outputPath) {
 
 var HOST_CDP = process.env.CDP_URL || "http://172.17.0.1:9223";
 var CACHE_FILE = "/tmp/perchance-cache.json";
+var CACHE_TTL = 25 * 60 * 1000;
 var SHAPES = { portrait: "512x768", square: "768x768", landscape: "768x512" };
 var resolution = SHAPES[shapeArg] || SHAPES.square;
 var guidanceScale = parseFloat(guidanceArg) || 7.0;
@@ -46,98 +47,118 @@ function saveCache(userKey) {
     } catch (e) {}
 }
 
-async function setupLocalStorage(page, userKey) {
-    await page.evaluate(function (uk) {
-        var now = Date.now();
-        localStorage.setItem("adAccessCode", "");
-        localStorage.setItem(
-            "userKey-0",
-            "e9bed1654c08f0b726f975ea94b5c27ec9580fda1b7c67714125f90fe1c1e5b2",
-        );
-        localStorage.setItem("userKey-1", uk);
-        localStorage.setItem("subChannelName", "public");
-        localStorage.setItem("consecutiveFails", "0");
-        localStorage.setItem("lastThreadUsed", "0");
-        localStorage.setItem("threadLastActiveTime-0", String(now));
-        localStorage.setItem("threadLastActiveTime-1", String(now - 10000));
-        localStorage.setItem("recentlyVerified-0", "");
-        localStorage.setItem("recentlyVerified-1", "");
-        localStorage.setItem(
-            "lastCheckUserVerificationStatusStartTime-userKey-0",
-            String(now),
-        );
-        localStorage.setItem(
-            "lastCheckUserVerificationStatusStartTime-userKey-1",
-            String(now),
-        );
-        localStorage.setItem("okayToShowNsfwUntil", "2096094064629");
-        localStorage.setItem("anotherEmbedIsVerifying", "");
-        localStorage.setItem(
-            "anotherEmbedIsVerifying_lastActiveTime",
-            String(now - 5000),
-        );
-    }, userKey);
-}
-
-async function getBrowser() {
+/** Connect to host Chrome via CDP and clean up stale pages */
+async function connectBrowser() {
     var browser = await chromium.connectOverCDP(HOST_CDP);
-    var contexts = browser.contexts();
-    return {
-        browser: browser,
-        context: contexts[0] || contexts[Object.keys(contexts)[0]],
-    };
+    var context =
+        browser.contexts()[0] ||
+        browser.contexts()[Object.keys(browser.contexts())[0]];
+    // Close stale pages to prevent tab accumulation
+    var pages = context.pages();
+    for (var p of pages) {
+        try {
+            await p.close();
+        } catch (e) {}
+    }
+    var page = await context.newPage();
+    return { browser: browser, page: page };
 }
 
-async function getCloudflareCookie(context) {
-    var page = await context.newPage();
+/** Navigate to generator page, trigger embed iframe, return the embed frame */
+async function getEmbedFrame(page) {
+    // Navigate to the generator page (stays here — do NOT navigate to /embed)
     await page.goto("https://perchance.org/ai-character-generator", {
         waitUntil: "domcontentloaded",
         timeout: 30000,
     });
     await new Promise(function (r) {
-        setTimeout(r, 10000);
+        setTimeout(r, 3000);
     });
-    var cookies = await context.cookies();
-    var cf = cookies.find(function (c) {
-        return c.name === "cf_clearance";
-    });
-    await page.close();
-    if (!cf) throw new Error("Cloudflare clearance not obtained");
-}
 
-async function verifyAndGetKey(page) {
-    for (var t = 1; t >= 0; t--) {
-        try {
-            var url =
-                "https://image-generation.perchance.org/api/verifyUser?thread=" +
-                t +
-                "&__cacheBust=" +
-                Math.random();
-            var r = await page.evaluate(async function (u) {
-                var resp = await fetch(u, { credentials: "include" });
-                return { status: resp.status, text: await resp.text() };
-            }, url);
-            if (r.status === 200) {
-                var body = JSON.parse(r.text);
-                if (body.userKey) return body.userKey;
-            }
-        } catch (e) {}
+    // Find the generator iframe (a sub-frame of the main page)
+    var genFrame = null;
+    for (var f of page.frames()) {
+        if (
+            f.url().includes(".perchance.org/ai-character-generator") &&
+            !f.url().startsWith("https://perchance.org/ai-character-generator")
+        ) {
+            genFrame = f;
+            break;
+        }
     }
-    return (
-        process.env.PERCHANCE_USER_KEY ||
-        "f511c9f2ff76f00e68abe2d12da73d8aa003d4bd77ebbd71120316679757af30"
-    );
+    if (!genFrame) throw new Error("Generator iframe not found");
+
+    // Type a placeholder prompt and click Generate to trigger the embed iframe
+    await genFrame.locator("textarea[data-name=description]").fill("a cat");
+    await new Promise(function (r) {
+        setTimeout(r, 500);
+    });
+    await genFrame.locator("#generateButtonEl").click();
+
+    // Wait for the embed iframe to appear (loaded after clicking generate)
+    var embedFrame = null;
+    for (var i = 0; i < 15 && !embedFrame; i++) {
+        await new Promise(function (r) {
+            setTimeout(r, 2000);
+        });
+        for (var f of page.frames()) {
+            if (f.url().includes("image-generation.perchance.org/embed")) {
+                embedFrame = f;
+                break;
+            }
+        }
+    }
+    if (!embedFrame) throw new Error("Embed iframe not found after 30s");
+    return embedFrame;
 }
 
-async function doGenerate(page, userKey) {
+/** Get userKey from embed iframe via verifyUser API */
+async function getOrFetchUserKey(embedFrame) {
+    // Check cache first
+    var cache = loadCache();
+    if (cache && cache.userKey && Date.now() - cache.updatedAt < CACHE_TTL) {
+        return cache.userKey;
+    }
+
+    // Call verifyUser from embed iframe context
+    var userKey = null;
+    try {
+        var v = await embedFrame.evaluate(async function () {
+            var resp = await fetch(
+                "/api/verifyUser?thread=1&__cacheBust=" + Math.random(),
+                { credentials: "include" },
+            );
+            var text = await resp.text();
+            return { status: resp.status, text: text };
+        });
+        if (v.status === 200) {
+            var body = JSON.parse(v.text);
+            if (body.userKey) userKey = body.userKey;
+        }
+    } catch (e) {}
+
+    // Fallback
+    if (!userKey) {
+        userKey =
+            process.env.PERCHANCE_USER_KEY ||
+            "f511c9f2ff76f00e68abe2d12da73d8aa003d4bd77ebbd71120316679757af30";
+    }
+
+    saveCache(userKey);
+    return userKey;
+}
+
+/** Generate image via embed iframe API calls */
+async function generateAndDownload(embedFrame, userKey) {
+    // --- POST /api/generate ---
     var genUrl =
-        "https://image-generation.perchance.org/api/generate?userKey=" +
+        "/api/generate?userKey=" +
         userKey +
         "&requestId=" +
         Math.random().toFixed(20) +
         "&adAccessCode=&__cacheBust=" +
         Math.random();
-    var r = await page.evaluate(
+    var genResult = await embedFrame.evaluate(
         async function (p) {
             var resp = await fetch(p.url, {
                 method: "POST",
@@ -162,8 +183,9 @@ async function doGenerate(page, userKey) {
         },
     );
 
-    if (r.status !== 200) throw new Error("Generate HTTP " + r.status);
-    var resp = JSON.parse(r.text);
+    if (genResult.status !== 200)
+        throw new Error("Generate HTTP " + genResult.status);
+    var resp = JSON.parse(genResult.text);
 
     if (resp.status === "waiting_for_prev_request_to_finish") {
         for (var i = 0; i < 5; i++) {
@@ -171,13 +193,13 @@ async function doGenerate(page, userKey) {
                 setTimeout(r, 20000);
             });
             var retryUrl =
-                "https://image-generation.perchance.org/api/generate?userKey=" +
+                "/api/generate?userKey=" +
                 userKey +
                 "&requestId=" +
                 Math.random().toFixed(20) +
                 "&adAccessCode=&__cacheBust=" +
                 Math.random();
-            var rr = await page.evaluate(
+            var retryResult = await embedFrame.evaluate(
                 async function (p) {
                     var resp = await fetch(p.url, {
                         method: "POST",
@@ -201,23 +223,24 @@ async function doGenerate(page, userKey) {
                     gs: guidanceScale,
                 },
             );
-            resp = JSON.parse(rr.text);
+            resp = JSON.parse(retryResult.text);
             if (resp.status !== "waiting_for_prev_request_to_finish") break;
         }
     }
     if (resp.status !== "success") throw new Error("Generate: " + resp.status);
     if (!resp.imageDownloadUrl) throw new Error("No imageDownloadUrl");
 
+    // --- Await generation completion ---
     for (var i = 0; i < 30; i++) {
         await new Promise(function (r) {
             setTimeout(r, 2000);
         });
         var pollUrl =
-            "https://image-generation.perchance.org/api/awaitExistingGenerationRequest?userKey=" +
+            "/api/awaitExistingGenerationRequest?userKey=" +
             userKey +
             "&__cacheBust=" +
             Math.random();
-        var poll = await page.evaluate(async function (u) {
+        var poll = await embedFrame.evaluate(async function (u) {
             var resp = await fetch(u, { credentials: "include" });
             return { status: resp.status, text: await resp.text() };
         }, pollUrl);
@@ -226,70 +249,52 @@ async function doGenerate(page, userKey) {
             break;
     }
 
-    var dl = await page.evaluate(async function (url) {
-        var resp = await fetch(url, { credentials: "include" });
-        if (resp.status !== 200) return null;
-        var blob = await resp.blob();
-        return new Promise(function (resolve) {
-            var reader = new FileReader();
-            reader.onloadend = function () {
-                resolve(reader.result);
-            };
-            reader.readAsDataURL(blob);
-        });
-    }, resp.imageDownloadUrl);
-    if (!dl) throw new Error("Download failed");
-    writeFileSync(outputPath, Buffer.from(dl.split(",")[1], "base64"));
-    return true;
-}
-
-(async function () {
-    try {
-        var gb = await getBrowser();
-        await getCloudflareCookie(gb.context);
-        var page = await gb.context.newPage();
-        await page.goto("https://image-generation.perchance.org/embed", {
-            waitUntil: "domcontentloaded",
-            timeout: 30000,
-        });
+    // --- Download image ---
+    var buffer = null;
+    for (var i = 0; i < 10; i++) {
         await new Promise(function (r) {
             setTimeout(r, 2000);
         });
-
-        var userKey = loadCache() ? loadCache().userKey : null;
-        if (!userKey) {
-            userKey = await verifyAndGetKey(page);
-            saveCache(userKey);
+        var dl = await embedFrame.evaluate(async function (url) {
+            var resp = await fetch(url, { credentials: "include" });
+            if (resp.status !== 200) return { ok: false };
+            var blob = await resp.blob();
+            return new Promise(function (resolve) {
+                var reader = new FileReader();
+                reader.onloadend = function () {
+                    resolve({ ok: true, b64: reader.result });
+                };
+                reader.readAsDataURL(blob);
+            });
+        }, resp.imageDownloadUrl);
+        if (dl.ok) {
+            buffer = Buffer.from(dl.b64.split(",")[1], "base64");
+            break;
         }
-        await setupLocalStorage(page, userKey);
-        await doGenerate(page, userKey);
-        console.log(
-            JSON.stringify({ path: outputPath, cached: !!loadCache() }),
-        );
-        await page.close();
-        await gb.browser.close();
+    }
+    if (!buffer) throw new Error("Download failed");
+    writeFileSync(outputPath, buffer);
+    return buffer.length;
+}
+
+(async function () {
+    var page;
+    try {
+        var gb = await connectBrowser();
+        page = gb.page;
+        var embedFrame = await getEmbedFrame(page);
+        var userKey = await getOrFetchUserKey(embedFrame);
+        var size = await generateAndDownload(embedFrame, userKey);
+        console.log(JSON.stringify({ path: outputPath, size: size }));
     } catch (e) {
-        try {
-            var gb2 = await getBrowser();
-            await getCloudflareCookie(gb2.context);
-            var page2 = await gb2.context.newPage();
-            await page2.goto("https://image-generation.perchance.org/embed", {
-                waitUntil: "domcontentloaded",
-                timeout: 30000,
-            });
-            await new Promise(function (r) {
-                setTimeout(r, 2000);
-            });
-            var uk2 = await verifyAndGetKey(page2);
-            saveCache(uk2);
-            await setupLocalStorage(page2, uk2);
-            await doGenerate(page2, uk2);
-            console.log(JSON.stringify({ path: outputPath, freshKey: true }));
-            await page2.close();
-            await gb2.browser.close();
-        } catch (e2) {
-            console.error(e.message);
-            process.exit(1);
+        console.error(e.message);
+        process.exit(1);
+    } finally {
+        // Always close page so browser tabs don't accumulate
+        if (page) {
+            try {
+                await page.close();
+            } catch (e) {}
         }
     }
 })();
