@@ -118,19 +118,19 @@ This spec covers the gateway runtime, Telegram channel, agent persona, skill dis
 
 ---
 
-### US-7: Workspace Memory Files (Pending)
+### US-7: Workspace Memory Files (Partially Deployed)
 
 **As a** user who has taught the agent facts and preferences,  
 **I want** those facts and preferences stored in persistent files that survive container restarts,  
 **So that** the agent never re-asks questions it already knows the answer to.
 
 **Acceptance Criteria:**
-- [ ] `MEMORY.md` generated at startup from `gateway/MEMORY.md.template` with section headers (plugin-managed, read-only for agent)
-- [ ] `USER.md` generated at startup from `gateway/USER.md.template` with compact user preferences (currency, budgets, payee rules, confirmation policy)
-- [ ] Both files survive `docker compose down && docker compose up` (on `openclaw_data` named volume)
+- [x] `MEMORY.md` generated at startup from `gateway/MEMORY.md.template` with section headers (plugin-managed, read-only for agent)
+- [x] `USER.md` generated at startup from `gateway/USER.md.template` with compact user preferences (currency, budgets, payee rules, confirmation policy)
+- [x] Both files survive `docker compose down && docker compose up` (on `openclaw_home` named volume)
 - [ ] Agent reads USER.md at session start and does not re-ask currency, budget file, or payee rules
 - [ ] `memory_search` returns facts from MEMORY.md written during prior sessions
-- [ ] `AGENTS.md` includes a "Memory" section instructing the agent: MEMORY.md is plugin-managed (read, do not edit)
+- [x] `AGENTS.md` includes a "Memory" section instructing the agent: MEMORY.md is plugin-managed (read, do not edit)
 
 ---
 
@@ -182,7 +182,7 @@ Files live on the `openclaw_home` named Docker volume (`/app/.openclaw`) which p
 - **FR-002**: Gateway MUST bind to port 18789 (loopback) with Docker port publishing for host access
 - **FR-003**: Gateway MUST load `deepseek`, `google`, and `browser` plugins
 - **FR-004**: Gateway MUST use DeepSeek V4 Flash as primary model with Gemini and DeepSeek V4 Pro as fallbacks
-- **FR-005**: Gateway MUST auto-discover skills from `workspace/skills/`
+- **FR-005**: Gateway MUST auto-discover skills from `workspace/skills/` (the OpenClaw gateway standard). Additional skill paths may be configured via `skills.load.extraDirs` for modules outside the workspace.
 
 **Channels:**
 - **FR-006**: Telegram channel MUST be enabled with `dmPolicy: "allowlist"` restrict to configured chat ID
@@ -237,6 +237,11 @@ Files live on the `openclaw_home` named Docker volume (`/app/.openclaw`) which p
 - WebChat or Control UI dashboard
 - Dreaming (daily background memory consolidation) — deferred; memoryFlush on compaction is sufficient
 - Proactive heartbeat or scheduled check-ins (handled by cron in other specs)
+- Custom bootstrap file limits — OpenClaw defaults (20000/60000 chars) are sufficient for current workspace files
+- Compaction user notifications — silent compaction is the OpenClaw default and preferred for this deployment
+- `dmPolicy: "pairing"` — `"allowlist"` is simpler and equally secure for a single-user Telegram bot
+- Optional workspace files (HEARTBEAT.md, TOOLS.md, BOOT.md) — all optional per OpenClaw spec; AGENTS.md already covers tool conventions; no heartbeat/boot configured
+- Session pruning — exists for Anthropic prompt-cache cost savings; DeepSeek doesn't use prompt caching, no benefit
 
 ---
 

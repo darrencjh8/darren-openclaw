@@ -84,7 +84,7 @@ export class AgentOrchestrator {
             const raw = Buffer.isBuffer(rawEmail)
                 ? rawEmail
                 : Buffer.from(rawEmail || "");
-            emailText = extractEmailContent(raw.toString("utf8"));
+            emailText = await extractEmailContent(raw);
         } catch {
             emailText = String(rawEmail || "");
         }

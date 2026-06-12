@@ -37,7 +37,7 @@ export async function classifyEmail(rawEmail, subject, sender, apiKey) {
             : Buffer.from(rawEmail || "");
         let body;
         try {
-            body = extractEmailContent(raw.toString("utf8"));
+            body = await extractEmailContent(raw);
         } catch {
             body = String(rawEmail || "");
         }
