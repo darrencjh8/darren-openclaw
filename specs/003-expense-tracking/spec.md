@@ -2,7 +2,7 @@
 
 **Feature:** expense-tracking  
 **Spec Version:** 1.0.0  
-**Status:** Specified  
+**Status:** Done  
 **Constitution Hash:** v1.0.0  
 
 ---
