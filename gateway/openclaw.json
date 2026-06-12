@@ -1,7 +1,9 @@
 {
     "skills": {
         "load": {
-            "extraDirs": ["/home/node/skills"]
+            "extraDirs": [
+                "/home/node/skills"
+            ]
         }
     },
     "models": {
@@ -65,6 +67,9 @@
                     "enabled": true,
                     "softThresholdTokens": 4000
                 }
+            },
+            "mediaGeneration": {
+                "enabled": false
             }
         },
         "list": [
@@ -79,7 +84,9 @@
                     ]
                 },
                 "subagents": {
-                    "allowAgents": ["thinker"],
+                    "allowAgents": [
+                        "thinker"
+                    ],
                     "delegationMode": "prefer"
                 }
             },
@@ -89,7 +96,9 @@
                 "thinkingDefault": "max",
                 "model": {
                     "primary": "deepseek/deepseek-v4-pro",
-                    "fallbacks": ["deepseek/deepseek-v4-flash"]
+                    "fallbacks": [
+                        "deepseek/deepseek-v4-flash"
+                    ]
                 }
             }
         ]
@@ -97,7 +106,10 @@
     "bindings": [
         {
             "agentId": "orchestrator",
-            "match": { "channel": "telegram", "accountId": "*" }
+            "match": {
+                "channel": "telegram",
+                "accountId": "*"
+            }
         }
     ],
     "gateway": {
@@ -111,7 +123,10 @@
             "strictInlineEval": true,
             "security": "allowlist",
             "ask": "on-miss"
-        }
+        },
+        "deny": [
+            "image_generate"
+        ]
     },
     "messages": {
         "tts": {
@@ -130,7 +145,9 @@
             "enabled": true,
             "botToken": "${TELEGRAM_BOT_TOKEN}",
             "dmPolicy": "allowlist",
-            "allowFrom": ["tg:${TELEGRAM_CHAT_ID}"]
+            "allowFrom": [
+                "tg:${TELEGRAM_CHAT_ID}"
+            ]
         }
     }
 }
