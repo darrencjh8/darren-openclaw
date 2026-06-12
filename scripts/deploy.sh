@@ -239,9 +239,9 @@ cd "$GATEWAY_DIR"
 echo "Starting Cloudflare Warp (VPN for faster Docker pulls)..."
 warp-cli --accept-tos connect 2>/dev/null || true
 sleep 2
-echo "Starting Docker Compose (no-cache build)..."
+echo "Starting Docker Compose (cached build)..."
 export COMPOSE_DOCKER_CLI_BUILD=1 DOCKER_BUILDKIT=1
-docker compose build --no-cache
+docker compose build
 docker compose up -d "${DOCKER_ARGS[@]}"
 echo "Disconnecting Warp..."
 warp-cli --accept-tos disconnect 2>/dev/null || true
