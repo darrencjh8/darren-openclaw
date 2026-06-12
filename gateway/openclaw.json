@@ -122,7 +122,7 @@
             "timeoutSec": 30,
             "strictInlineEval": true,
             "security": "allowlist",
-            "ask": "on-miss"
+            "ask": "off"
         },
         "deny": [
             "image_generate"
