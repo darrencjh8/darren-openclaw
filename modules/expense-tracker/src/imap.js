@@ -84,18 +84,64 @@ export class ImapIdleHandler {
 
     async idleLoop(callback) {
         this._running = true;
+        console.log(
+            JSON.stringify({
+                event: "imap_idle_starting",
+                host: this._host,
+                port: this._port,
+            }),
+        );
         while (this._running) {
             try {
-                if (!this._client) await this.connect();
+                if (!this._client) {
+                    console.log(
+                        JSON.stringify({
+                            event: "imap_connecting",
+                            host: this._host,
+                            port: this._port,
+                        }),
+                    );
+                    await this.connect();
+                    console.log(JSON.stringify({ event: "imap_connected" }));
+                }
                 const unread = await this.fetchUnread();
+                if (unread.length > 0) {
+                    console.log(
+                        JSON.stringify({
+                            event: "imap_unread_found",
+                            count: unread.length,
+                        }),
+                    );
+                }
                 for (const msg of unread) {
                     try {
+                        console.log(
+                            JSON.stringify({
+                                event: "imap_processing",
+                                subject: msg.subject,
+                                from: msg.from,
+                            }),
+                        );
                         await callback(msg);
-                    } catch {}
+                    } catch (e) {
+                        console.error(
+                            JSON.stringify({
+                                event: "imap_callback_error",
+                                error: e.message,
+                            }),
+                        );
+                    }
                 }
                 // Wait for new mail via IDLE
                 await this._client.idle();
-            } catch {
+            } catch (e) {
+                console.warn(
+                    JSON.stringify({
+                        event: "imap_error",
+                        error: e.message,
+                        retry_in_s: this.RECONNECT_DELAY,
+                    }),
+                );
                 await new Promise((r) =>
                     setTimeout(r, this.RECONNECT_DELAY * 1000),
                 );
@@ -105,5 +151,6 @@ export class ImapIdleHandler {
                 this._client = null;
             }
         }
+        console.log(JSON.stringify({ event: "imap_idle_stopped" }));
     }
 }
