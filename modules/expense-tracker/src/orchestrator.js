@@ -4,7 +4,7 @@
  */
 
 import OpenAI from "openai";
-import { FEW_SHOT_EXAMPLES } from "./prompts.js";
+import { getFewShotExamples } from "./prompts.js";
 import { extractEmailContent } from "./extractors.js";
 
 const MAX_TOOL_ITERATIONS = 5;
@@ -160,7 +160,7 @@ export class AgentOrchestrator {
         const messages = [
             { role: "system", content: this._config.systemPrompt },
         ];
-        for (const example of FEW_SHOT_EXAMPLES) {
+        for (const example of getFewShotExamples()) {
             messages.push(...example);
         }
         messages.push({

@@ -164,11 +164,11 @@ All paths relative to repo root. Expense tracker source in `modules/expense-trac
 
 - [x] T045 [P] Run all existing tests to confirm no regressions: `cd modules/expense-tracker && uv run pytest tests/ -v`
 - [x] T046 [P] Validate prompt structure: `uv run python -c "from src.agent.prompts import SYSTEM_PROMPT; assert 'RULES:' in SYSTEM_PROMPT; assert 'search_memory' in SYSTEM_PROMPT; assert 'learn_mapping' not in SYSTEM_PROMPT"`
-- [ ] T047 [P] Rebuild Docker image and verify container starts: `cd gateway && docker compose build expense-tracker && docker compose up -d expense-tracker`
-- [ ] T048 Test new endpoint via curl: `curl -X POST http://localhost:8080/tools/search-memory -H "Content-Type: application/json" -d '{"query":"test"}'`
-- [ ] T049 Run quickstart.md validation scenarios (all 8 scenarios)
-- [ ] T050 [P] Benchmark search_memory latency with 500 synthetic facts — verify <100ms (SC-003) in `modules/expense-tracker/tests/test_memory.py`
-- [ ] T051 [P] Update constitution 2.5 (memory budget: expense-tracker 205 MB) in `.specify/memory/constitution.md`
+- [x] T047 [P] Rebuild Docker image and verify container starts: `cd gateway && docker compose build expense-tracker && docker compose up -d expense-tracker`
+- [x] T048 Test new endpoint via curl: `curl -X POST http://localhost:8080/tools/search-memory -H "Content-Type: application/json" -d '{"query":"test"}'`
+- [x] T049 Run quickstart.md validation scenarios (all 8 scenarios)
+- [x] T050 [P] Benchmark search_memory latency with 500 synthetic facts — verify <100ms (SC-003) in `modules/expense-tracker/tests/test_memory.py`
+- [x] T051 [P] Update constitution 2.5 (memory budget: expense-tracker 205 MB) in `.specify/memory/constitution.md`
 
 ---
 

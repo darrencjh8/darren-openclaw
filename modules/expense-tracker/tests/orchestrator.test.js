@@ -5,7 +5,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { AgentOrchestrator, DeepSeekClient } from "../src/orchestrator.js";
 import { Config } from "../src/config.js";
-import { SYSTEM_PROMPT } from "../src/prompts.js";
+import { getSystemPrompt } from "../src/prompts.js";
 import { dispatchEmail } from "../src/classify.js";
 
 function makeConfig(overrides = {}) {
@@ -221,7 +221,7 @@ describe("DeepSeekClient", () => {
 
 describe("SYSTEM_PROMPT", () => {
     it("mentions expense-tracking and portfolio-related skips", () => {
-        const lowered = SYSTEM_PROMPT.toLowerCase();
+        const lowered = getSystemPrompt().toLowerCase();
         const hasReference =
             lowered.includes("trade") ||
             lowered.includes("portfolio") ||
@@ -231,7 +231,7 @@ describe("SYSTEM_PROMPT", () => {
     });
 
     it("says not to notify for non-expense emails", () => {
-        const lowered = SYSTEM_PROMPT.toLowerCase();
+        const lowered = getSystemPrompt().toLowerCase();
         const hasSkipRule =
             lowered.includes("not notify") ||
             lowered.includes("do not notify") ||
@@ -397,14 +397,20 @@ describe("DeepSeekClient API format", () => {
         const config = makeConfig();
         const client = new DeepSeekClient(config);
 
-        const mockCreate = vi.fn()
+        const mockCreate = vi
+            .fn()
             .mockRejectedValueOnce(new Error("Network error"))
             .mockResolvedValue({
-                choices: [{ finish_reason: "stop", message: { content: "ok" } }],
+                choices: [
+                    { finish_reason: "stop", message: { content: "ok" } },
+                ],
             });
         client._client.chat.completions.create = mockCreate;
 
-        const result = await client.chat([{ role: "user", content: "hi" }], null);
+        const result = await client.chat(
+            [{ role: "user", content: "hi" }],
+            null,
+        );
         expect(mockCreate).toHaveBeenCalledTimes(2);
         expect(result.choices[0].message.content).toBe("ok");
     });

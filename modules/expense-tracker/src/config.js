@@ -1,7 +1,7 @@
 import { readFileSync } from "fs";
 import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
-import { SYSTEM_PROMPT } from "./prompts.js";
+import { getSystemPrompt } from "./prompts.js";
 
 const REQUIRED_ENV_VARS = [
     "DEEPSEEK_API_KEY",
@@ -41,7 +41,7 @@ export class Config {
     }
 
     get systemPrompt() {
-        let prompt = SYSTEM_PROMPT;
+        let prompt = getSystemPrompt();
         if (this.systemPromptExtra) {
             prompt += "\n\n" + this.systemPromptExtra;
         }

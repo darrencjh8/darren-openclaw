@@ -1,36 +1,158 @@
 /**
  * Tests for prompt structure — ported from test setup validation
  */
-import { describe, it, expect } from 'vitest';
-import { SYSTEM_PROMPT } from '../src/prompts.js';
+import { describe, it, expect, beforeEach } from "vitest";
+import { getSystemPrompt, getFewShotExamples } from "../src/prompts.js";
 
-describe('System Prompt', () => {
-  it('contains RULES section', () => {
-    expect(SYSTEM_PROMPT).toContain('RULES');
-  });
+describe("getSystemPrompt", () => {
+    let prompt;
 
-  it('contains MATCHING section', () => {
-    expect(SYSTEM_PROMPT).toContain('ACCOUNT MATCHING');
-    expect(SYSTEM_PROMPT).toContain('PAYEE MATCHING');
-  });
+    beforeEach(() => {
+        prompt = getSystemPrompt();
+    });
 
-  it('contains WORKFLOW section', () => {
-    expect(SYSTEM_PROMPT).toContain('WORKFLOW');
-  });
+    it("contains RULES section", () => {
+        expect(prompt).toContain("RULES");
+    });
 
-  it('references search_memory', () => {
-    expect(SYSTEM_PROMPT).toContain('search_memory');
-  });
+    it("contains MATCHING section", () => {
+        expect(prompt).toContain("ACCOUNT MATCHING");
+        expect(prompt).toContain("PAYEE MATCHING");
+    });
 
-  it('references learn_fact', () => {
-    expect(SYSTEM_PROMPT).toContain('learn_fact');
-  });
+    it("contains WORKFLOW section", () => {
+        expect(prompt).toContain("WORKFLOW");
+    });
 
-  it('does not reference learn_mapping (removed)', () => {
-    expect(SYSTEM_PROMPT).not.toContain('learn_mapping');
-  });
+    it("references search_memory", () => {
+        expect(prompt).toContain("search_memory");
+    });
 
-  it('references MEMORY.md', () => {
-    expect(SYSTEM_PROMPT).toContain('MEMORY.md');
-  });
+    it("references learn_fact", () => {
+        expect(prompt).toContain("learn_fact");
+    });
+
+    it("does not reference learn_mapping (removed)", () => {
+        expect(prompt).not.toContain("learn_mapping");
+    });
+
+    it("references MEMORY.md", () => {
+        expect(prompt).toContain("MEMORY.md");
+    });
+
+    it("injects SGD budget name from env", () => {
+        expect(prompt).toContain('budget "My Budget"');
+    });
+
+    it("injects MYR budget name from env", () => {
+        expect(prompt).toContain('"My MYR Budget"');
+    });
+
+    it("injects USER_NAME from env", () => {
+        expect(prompt).toContain("You communicate with there via Telegram");
+    });
+});
+
+describe("getFewShotExamples", () => {
+    let examples;
+
+    beforeEach(() => {
+        examples = getFewShotExamples();
+    });
+
+    it("returns array of examples", () => {
+        expect(Array.isArray(examples)).toBe(true);
+        expect(examples.length).toBeGreaterThanOrEqual(3);
+    });
+
+    it("each example is an array of messages", () => {
+        for (const example of examples) {
+            expect(Array.isArray(example)).toBe(true);
+            expect(example.length).toBeGreaterThan(0);
+            expect(example[0].role).toBe("user");
+        }
+    });
+
+    it("first example uses the correct budget name in tool calls", () => {
+        const ex1 = examples[0];
+        const fetchAcctsCall = ex1.find(
+            (m) =>
+                m.role === "assistant" &&
+                m.tool_calls?.some(
+                    (tc) => tc.function?.name === "fetch_accounts",
+                ),
+        );
+        expect(fetchAcctsCall).toBeDefined();
+        const args = fetchAcctsCall.tool_calls.find(
+            (tc) => tc.function?.name === "fetch_accounts",
+        ).function.arguments;
+        // Default when no env vars set: "My Budget"
+        expect(args).toContain('"My Budget"');
+    });
+
+    it("injects budget name into insert_transaction call", () => {
+        const ex1 = examples[0];
+        const insertCall = ex1.find(
+            (m) =>
+                m.role === "assistant" &&
+                m.tool_calls?.some(
+                    (tc) => tc.function?.name === "insert_transaction",
+                ),
+        );
+        expect(insertCall).toBeDefined();
+        const args = insertCall.tool_calls.find(
+            (tc) => tc.function?.name === "insert_transaction",
+        ).function.arguments;
+        expect(args).toContain('"budget_id": "My Budget"');
+    });
+});
+
+describe("prompt budget name resolution", () => {
+    const originalEnv = { ...process.env };
+
+    afterEach(() => {
+        // Restore original env
+        for (const key of Object.keys(process.env)) {
+            if (!(key in originalEnv)) delete process.env[key];
+        }
+        for (const key of Object.keys(originalEnv)) {
+            process.env[key] = originalEnv[key];
+        }
+    });
+
+    it("picks up ACTUAL_BUDGET_FILE from process.env set after module load", () => {
+        // Simulate what Config.fromEnv() does — set env vars after imports
+        process.env.ACTUAL_BUDGET_FILE = "Darren SGD";
+        process.env.MYR_BUDGET_FILE = "Darren MYR";
+
+        const prompt = getSystemPrompt();
+        expect(prompt).toContain('budget "Darren SGD"');
+        expect(prompt).toContain('"Darren MYR"');
+
+        const examples = getFewShotExamples();
+        const ex1 = examples[0];
+        const fetchAcctsArgs = ex1
+            .find((m) => m.role === "assistant" && m.tool_calls)
+            ?.tool_calls?.find((tc) => tc.function?.name === "fetch_accounts")
+            ?.function?.arguments;
+        expect(fetchAcctsArgs).toContain('"Darren SGD"');
+    });
+
+    it("falls back to defaults when env vars are not set", () => {
+        // Ensure env vars are cleared
+        delete process.env.ACTUAL_BUDGET_FILE;
+        delete process.env.MYR_BUDGET_FILE;
+
+        const prompt = getSystemPrompt();
+        expect(prompt).toContain('budget "My Budget"');
+        expect(prompt).toContain('"My MYR Budget"');
+
+        const examples = getFewShotExamples();
+        const ex1 = examples[0];
+        const fetchAcctsArgs = ex1
+            .find((m) => m.role === "assistant" && m.tool_calls)
+            ?.tool_calls?.find((tc) => tc.function?.name === "fetch_accounts")
+            ?.function?.arguments;
+        expect(fetchAcctsArgs).toContain('"My Budget"');
+    });
 });
