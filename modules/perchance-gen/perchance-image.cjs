@@ -180,7 +180,10 @@ async function generateAndDownload(embedFrame, userKey) {
         throw new Error("Generate HTTP " + genResult.status);
     var resp = JSON.parse(genResult.text);
 
-    if (resp.status === "waiting_for_prev_request_to_finish") {
+    if (
+        resp.status === "waiting_for_prev_request_to_finish" ||
+        resp.status === "invalid_key"
+    ) {
         for (var i = 0; i < 5; i++) {
             await new Promise(function (r) {
                 setTimeout(r, 20000);
