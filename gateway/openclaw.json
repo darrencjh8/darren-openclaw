@@ -162,7 +162,7 @@
             "botToken": "${TELEGRAM_BOT_TOKEN}",
             "dmPolicy": "allowlist",
             "allowFrom": [
-                "tg:${TELEGRAM_CHAT_ID}"
+                "tg:488065038"
             ]
         }
     },
