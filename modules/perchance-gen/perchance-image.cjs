@@ -53,14 +53,17 @@ async function connectBrowser() {
     var context =
         browser.contexts()[0] ||
         browser.contexts()[Object.keys(browser.contexts())[0]];
-    // Close stale pages to prevent tab accumulation
+    // Close stale pages (keep one to avoid killing the context)
     var pages = context.pages();
-    for (var p of pages) {
-        try {
-            await p.close();
-        } catch (e) {}
+    if (pages.length > 1) {
+        for (var i = 0; i < pages.length - 1; i++) {
+            try {
+                await pages[i].close();
+            } catch (e) {}
+        }
     }
-    var page = await context.newPage();
+    var page =
+        pages.length > 0 ? pages[pages.length - 1] : await context.newPage();
     return { browser: browser, page: page };
 }
 
