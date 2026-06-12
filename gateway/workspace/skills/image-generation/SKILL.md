@@ -1,60 +1,49 @@
 ---
 name: image-generation
 description: Generate images via HTTP API. This is the ONLY image generation method available.
-metadata:
-  api_base: http://image-gen:8083
 user-invocable: true
 ---
 # Image Generation
 
-**CRITICAL: For ANY image request, use ONLY the /generate and /send endpoints below via fetch POST. Do NOT use exec, browser, web_fetch, or image_generate — those are BLOCKED. These HTTP endpoints are the SOLE image generation path.**
+**CRITICAL: Use ONLY exec: curl to the image-gen service. Do NOT use browser, web_fetch, or bash scripts. image_generate is BLOCKED.**
 
-## How to Call
-
-Use `fetch` for ALL calls:
+## How to Generate
 
 ```
-fetch: POST http://image-gen:8083/generate {"prompt":"...", "shape":"portrait|square|landscape", "systemPrefix":"...", "negativePrompt":"...", "guidance":"7"}
+exec: curl -s -X POST http://image-gen:8083/generate -H "Content-Type: application/json" -d '{"prompt":"PROMPT","shape":"square","systemPrefix":"...","guidance":"7"}'
 ```
 
-When done:
+## How to Send Result
+
 ```
-fetch: POST http://image-gen:8083/send {"path":"<from generate response>", "caption":"optional"}
+exec: curl -s -X POST http://image-gen:8083/send -H "Content-Type: application/json" -d '{"path":"OUTPUT_PATH","caption":"optional caption"}'
 ```
-
-## Scripts (internal — for reference only)
-
-| Script | Purpose |
-|--------|---------|
-| `gen-perchance.sh` | Tier 1 — Perchance (free) |
-| `gen-pollinations.sh` | Tier 2 — flux |
-| `send-telegram-photo.sh` | Send result to Telegram |
-
-## Routing
-
-All subjects → Tier 1 first, fall back to Tier 2. Stop on first success.
 
 ## Presets
 
-**Human portrait** — for people/characters. For the persona (self-photos only): copy the prompt verbatim from SOUL.md `## Visual` section (appearance + outfit). DO NOT summarize, rephrase, or condense — send as-is.
-- Outfit can be adapted when context demands it (e.g., different pose, setting, action, weather). Face, body, cybernetic arm, and pendant must never change.
+**Human portrait** — for people/characters. Self-photos: copy prompt verbatim from SOUL.md `## Visual`.
 ```
 systemPrefix: "High-fidelity raw analog photo, hyper-detailed skin pores, imperfections, strong organic film grain, retro film simulation, low-contrast faded shadows, korean aesthetic."
 ```
-
-**Living subjects** (animals, creatures, pets, wildlife):
+**Living subjects** (animals, creatures):
 ```
 systemPrefix: "Professional wildlife photography, hyper-realistic, fine fur/feather/scale texture, natural lighting, sharp focus, detailed eyes, breathtaking, strong organic film grain, retro film simulation, low-contrast faded shadows"
 ```
-
-**Non-living subjects** (objects, products, food, landscapes, architecture, vehicles):
+**Non-living subjects** (objects, food, landscapes):
 ```
 systemPrefix: "Professional product photography, hyper-realistic, fine texture detail, studio lighting, sharp focus, high resolution, strong organic film grain, retro film simulation, low-contrast faded shadows"
 ```
 
-For stylized/anime/cartoon requests, omit the systemPrefix and negativePrompt entirely.
+For stylized/anime, omit systemPrefix and negativePrompt.
 
-## Strict Rules
+## Shape options
 
-- Always use the correct preset: human for people, living for animals, non-living for objects/places.
-- **System prefix is mandatory and verbatim.** NEVER soften, rephrase, or omit the system prefix preset.
+`portrait` (9:16), `square` (1:1), `landscape` (16:9). Default: `square`.
+
+## Rules
+
+- Tier 1 (Perchance, free) runs automatically. Falls back to Tier 2 (Pollinations/flux).
+- Always use the correct preset. System prefix is mandatory and verbatim.
+- NEVER use browser, web_fetch, image_generate, or bash scripts. Only exec: curl to image-gen:8083.
+- After generation, always call /send to deliver via Telegram.
+- `guidance`: 1-20, default 7.
