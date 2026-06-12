@@ -17,7 +17,7 @@ services:
             - ./MEMORY.md.template:/app/MEMORY.md.template:ro
             - ./docker-entrypoint.sh:/app/docker-entrypoint.sh:ro
             - ../modules/perchance-gen:/app/modules/perchance-gen:ro
-            - ../modules/ktmb-booking/skills:/home/node/skills/ktmb-booking:ro
+            - ../modules/ktmb/skills:/home/node/skills/ktmb-booking:ro
             - openclaw_home:/app/.openclaw
             - openclaw_data:/app/data
         user: node
@@ -79,12 +79,12 @@ services:
 
     ktmb-booking:
         build:
-            context: ../modules/ktmb-booking
+            context: ../modules/ktmb
             dockerfile: docker/Dockerfile
         ports:
             - "127.0.0.1:8082:8082"
         volumes:
-            - ../modules/ktmb-booking/.env:/app/.env:ro
+            - ../modules/ktmb/.env:/app/.env:ro
         environment:
             - KTMB_NOTIFY_URL=http://openclaw:18800/api/notify
         restart: unless-stopped

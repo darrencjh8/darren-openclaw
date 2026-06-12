@@ -366,3 +366,71 @@ Phase 3: Integration
 | Agent | 2 | 1h 50m |
 | Integration | 3 | 1h 50m |
 | **Total** | **13** | **~7.8 hours** |
+
+---
+
+## Node.js Pre-Built Components (from migration spec 012)
+
+The following Node.js files were created during the Python→Node.js migration but are
+currently **uninvoked**. They need to be wired in as part of this spec:
+
+### Already Implemented (ready to wire)
+
+| File | Python Equivalent | Status |
+|------|------------------|--------|
+|  | N/A (was in ) | StatementJournal class with SQLite tables |
+|  |  | Fuzzy matching (amount/date/Jaccard) |
+|  |  | STATEMENT_PROMPT + FEW_SHOT |
+|  |  | StatementProcessor + DeepSeekClient |
+|  (StatementJournal) |  | recordStatement, checkProcessed, addTxn, getHistory |
+| Statement tools in  TOOLS array |  | reconcile_transaction, record_statement, fetch_statement_history, fetch_unreconciled_transactions, check_statement_duplicate |
+
+### What Needs Wiring
+
+1. ****: Create StatementJournal, set via , create StatementProcessor, pass to 
+2. ****: Already supports optional  parameter — just needs it passed in
+3. **SKILL.md**: Statement reconciliation instructions removed (was in migration SKILL.md) — needs to be re-added once wired
+
+### Recommended Improvements (from migration audit)
+
+- **Merge  + ** into single  tool for atomic processing
+- **Scope tools per orchestrator**: Transaction orchestrator shouldn't see statement tools
+
+
+---
+
+## Node.js Pre-Built Components (from migration spec 012)
+
+The following Node.js files were created during the Python-to-Node.js migration but are
+currently **uninvoked**. They need to be wired in as part of this spec:
+
+### Already Implemented (ready to wire)
+
+| File | Python Equivalent | Status |
+|------|------------------|--------|
+| modules/expense-tracker/src/statement/journal.js | N/A (was in tools.js) | StatementJournal class with SQLite tables |
+| modules/expense-tracker/src/statement/matcher.js | src/statement/matcher.py | Fuzzy matching (amount/date/Jaccard) |
+| modules/expense-tracker/src/statement/prompts.js | src/statement/prompts.py | STATEMENT_PROMPT + FEW_SHOT |
+| modules/expense-tracker/src/statement/orchestrator.js | src/statement/orchestrator.py | StatementProcessor + DeepSeekClient |
+| StatementJournal in tools.js | src/statement/journal.py | recordStatement, checkProcessed, addTxn, getHistory |
+| Statement tools in TOOLS array | src/agent/tools.py | reconcile-transaction, record-statement, fetch-statement-history, fetch-unreconciled-transactions, check-statement-duplicate |
+
+### Tests Already Written
+
+| File | Tests |
+|------|-------|
+| modules/expense-tracker/tests/statement/journal.test.js | 20 tests |
+| modules/expense-tracker/tests/statement/matcher.test.js | 30 tests |
+| modules/expense-tracker/tests/statement/orchestrator.test.js | 22 tests |
+| modules/expense-tracker/tests/statement/prompts.test.js | 39 tests |
+
+### What Needs Wiring
+
+1. **index.js**: Create StatementJournal, set via registry.setStatementJournal(), create StatementProcessor, pass to dispatchEmail
+2. **classify.js**: Already supports optional statementProcessor parameter - just needs it passed in
+3. **SKILL.md**: Statement reconciliation instructions removed (was in migration SKILL.md) - needs to be re-added
+
+### Recommended Improvements
+
+- **Merge reconcile_transaction + record_statement** into single reconcile_statement tool for atomic processing
+- **Scope tools per orchestrator**: Transaction orchestrator should not see statement tools (see spec 012 audit)

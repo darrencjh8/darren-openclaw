@@ -3,7 +3,7 @@
 **Feature:** gateway-baseline  
 **Tasks Version:** 1.0.0  
 **Status:** Tasked  
-**Constitution Hash:** v3.0.0  
+**Constitution Hash:** v4.0.0
 
 ---
 
@@ -23,12 +23,10 @@ Phase 2: End-to-End
   T2.1 (full pipeline: Telegram → agent → tools → Actual Budget)
   T2.2 (README update — Telegram bot setup instructions)
       │
-Phase 3: Skill & Tool Registration Gaps
-  T3.1 (openclaw.json: add workspace path to agents.defaults)
-  T3.2 (openclaw.json: add agent skill allowlists)
+Phase 3: Remaining Gaps
   T3.3 (verify extraDirs path in Docker container)
   T3.4 (register custom tools as proper schemas — replace exec+curl)
-  T3.5 (enable sandbox isolation or add exec tool restrictions)
+  T3.5 (add exec tool restrictions)
 ```
 
 ---
@@ -109,9 +107,9 @@ docker compose logs openclaw | grep -i "skill\|expense-tracker"
 ```
 
 **Acceptance:**
-- [ ] Health check returns 200
-- [ ] Gateway logs show expense-tracker skill loaded
-- [ ] No config parse errors in logs
+- [x] Health check returns 200
+- [x] Gateway logs show expense-tracker skill loaded
+- [x] No config parse errors in logs
 
 ---
 
@@ -130,10 +128,10 @@ docker compose logs openclaw | grep -i "skill\|expense-tracker"
 7. Send "hello" to your bot on Telegram
 
 **Acceptance:**
-- [ ] Bot token obtained from @BotFather
-- [ ] User ID obtained from @userinfobot
-- [ ] Bot responds to "hello" with greeting
-- [ ] Agent persona is active (friendly, conversational)
+- [x] Bot token obtained from @BotFather
+- [x] User ID obtained from @userinfobot
+- [x] Bot responds to "hello" with greeting
+- [x] Agent persona is active (friendly, conversational)
 
 ---
 
@@ -145,102 +143,9 @@ docker compose logs openclaw | grep -i "skill\|expense-tracker"
 **Estimate:** 30 minutes  
 **Depends On:** T1.1, T1.2
 
-Run through each test case on Telegram. Mark `[x]` as you verify each one.
+> **Moved to `specs/013-manual-tests/`** (2026-06-12) — 24 manual test cases deferred for formal regression run.
 
----
-
-#### Suite A: Read Operations (no writes to Actual Budget)
-
-| # | Test Case | Send to bot | Expected response | Verified |
-|---|-----------|-------------|-------------------|----------|
-| A1 | List all accounts | "What accounts do I have?" | Lists all accounts by name with type (credit card / bank account). Returns real data from Actual Budget. | [ ] |
-| A2 | List categories | "What categories are available?" | Lists expense categories (Food, Transport, Coffee, Groceries, etc.). | [ ] |
-| A3 | View recent transactions | "Show me my last 5 transactions" | Returns 5 most recent transactions with date, payee, amount, account, category. | [ ] |
-| A4 | Check spending by category | "How much did I spend on Food this month?" | Returns total Food spend with a breakdown. | [ ] |
-| A5 | Check account balance | "What's the balance on DBS Yuu?" | Returns current balance for the specified account. | [ ] |
-
----
-
-#### Suite B: Simple Write — SGD Expense
-
-| # | Test Case | Send to bot | Expected response | Verified |
-|---|-----------|-------------|-------------------|----------|
-| B1 | Track SGD expense | "Track S$12.80 at Toast Box from DBS Yuu" | Agent confirms: "I'll log S$12.80 at Toast Box under DBS Yuu (Food). Shall I proceed?" | [ ] |
-| B1b | Confirm insertion | "yes" | Agent calls insert_transaction. Responds: "✅ Tracked: S$12.80 at Toast Box, DBS Yuu, Food". | [ ] |
-| B1c | Verify in Actual Budget | Open Actual Budget UI | Transaction appears: S$12.80, Toast Box, DBS Yuu, Food category, amount = -1280 integer cents. | [ ] |
-
----
-
-#### Suite C: Duplicate Detection
-
-| # | Test Case | Send to bot | Expected response | Verified |
-|---|-----------|-------------|-------------------|----------|
-| C1 | Duplicate transaction | "Track S$12.80 at Toast Box from DBS Yuu" (same as B1) | Agent calls check_duplicate, finds match. Responds: "This looks like a duplicate of your earlier Toast Box transaction. Skipping." or silently skips. | [ ] |
-| C2 | Non-duplicate, different payee | "Track S$5.50 at Ya Kun from DBS Yuu" | Agent confirms and inserts normally. Not flagged as duplicate. | [ ] |
-
----
-
-#### Suite D: Currency Routing (SGD vs MYR)
-
-| # | Test Case | Send to bot | Expected response | Verified |
-|---|-----------|-------------|-------------------|----------|
-| D1 | SGD expense routes to default budget | "Track S$3.50 at Kopitiam from DBS Yuu" | Uses `$ACTUAL_BUDGET_FILE`. Confirms in SGD. | [ ] |
-| D2 | MYR expense routes to MYR budget | "Track RM15.00 at Mydin from Maybank" | Uses `$MYR_BUDGET_FILE`. Confirms in MYR. | [ ] |
-| D3 | Ambiguous currency | "Track 100 at Don Don Donki from OCBC" | Agent asks: "Is this S$100 (SGD) or RM100 (MYR)?" | [ ] |
-
----
-
-#### Suite E: Payee-to-Category Auto-Mapping
-
-| # | Test Case | Send to bot | Expected response | Verified |
-|---|-----------|-------------|-------------------|----------|
-| E1 | Hawker → Food | "Track S$6.00 at Maxwell Hawker from DBS Yuu" | Auto-maps to Food category. Confirms before inserting. | [ ] |
-| E2 | Grab → Transport | "Track S$12.00 Grab ride from DBS Yuu" | Auto-maps to Transport. Confirms before inserting. | [ ] |
-| E3 | Coffee shop → Coffee | "Track S$2.20 at Nanyang Coffee from UOB One" | Auto-maps to Coffee. Confirms before inserting. | [ ] |
-| E4 | Unknown payee → asks | "Track S$45.00 at ABC Novelty Store from DBS Yuu" | Agent asks user to pick a category or shows options. | [ ] |
-
----
-
-#### Suite F: Account Matching by Card/Bank
-
-| # | Test Case | Send to bot | Expected response | Verified |
-|---|-----------|-------------|-------------------|----------|
-| F1 | Card ending match | "Track S$89.00 at Uniqlo from card ending 1234" | Agent matches the credit card by last 4 digits. Confirms account name. | [ ] |
-| F2 | Bank name match | "Track S$20.00 lunch from UOB" | Agent matches UOB One account. Confirms: "I'll log S$20.00 under UOB One." | [ ] |
-
----
-
-#### Suite G: Error Handling
-
-| # | Test Case | Send to bot | Expected response | Verified |
-|---|-----------|-------------|-------------------|----------|
-| G1 | Unknown account | "Track S$50.00 at NTUC from CIMB account" | Agent responds: "I couldn't find an account matching 'CIMB'. Your available accounts are: [list]." | [ ] |
-| G2 | Missing payee | "Track S$10.00 from DBS Yuu" | Agent asks: "What's the payee (where did you spend this)?" | [ ] |
-| G3 | Missing amount | "Track toast box from DBS Yuu" | Agent asks for the amount. | [ ] |
-
----
-
-#### Suite H: Portfolio Tracker Routing (if portfolio services are running)
-
-| # | Test Case | Send to bot | Expected response | Verified |
-|---|-----------|-------------|-------------------|----------|
-| H1 | Status check | "/status" or "what's my portfolio status?" | Agent routes to portfolio-tracker. Returns portfolio summary or sync status. | [ ] |
-| H2 | Balance query | "what's my PP balance?" or "update portfolio balance" | Agent routes to portfolio-tracker balance tool. | [ ] |
-
----
-
-**Acceptance Summary:**
-
-- [ ] All Suite A (read) tests pass — agent can list/view data from Actual Budget
-- [ ] B1–B1c pass — full expense insertion verified in Actual Budget UI
-- [ ] C1–C2 pass — duplicate detection works
-- [ ] D1–D3 pass — SGD/MYR routing correct
-- [ ] E1–E4 pass — payee-to-category auto-mapping works
-- [ ] F1–F2 pass — account matching by card suffix and bank name
-- [ ] G1–G3 pass — graceful error handling with helpful messages
-- [ ] H1–H2 pass — portfolio tracker routing works (skip if portfolio services offline)
-- [ ] No errors in `docker compose logs openclaw` or `docker compose logs expense-tracker`
-- [ ] Agent responds conversationally throughout (friendly, confirms before writes, explains errors)
+- [x] Moved to spec 013-manual-tests
 
 ---
 
@@ -260,39 +165,10 @@ Update `README.md` with Telegram bot setup instructions:
 
 ---
 
-## Phase 3: Skill & Tool Registration Gaps
+## Phase 3: Remaining Gaps
 
 > **Identified:** 2026-06-10 — audit against OpenClaw docs (skills.md, creating-skills.md, skills-config.md)
-
-### T3.1 — Add `agents.defaults.workspace` to openclaw.json
-
-**Priority:** P0 (blocker)  
-**Estimate:** 5 minutes  
-**Depends On:** None
-
-**Problem:** `openclaw.json` has no `agents.defaults.workspace` field. OpenClaw auto-discovers skills from `<workspace>/skills/`, but without this config it won't know where to look.
-
-- [ ] Add `"workspace": "/app/workspace"` under `agents.defaults` in `gateway/openclaw.json`
-- [ ] Verify the Docker volume mount maps to this path correctly
-
-**Validation:** Gateway starts and discovers skills from workspace path. `docker compose logs openclaw | grep -i "skill"` shows skills loaded.
-
----
-
-### T3.2 — Add Agent Skill Allowlists
-
-**Priority:** P1 (high)  
-**Estimate:** 10 minutes  
-**Depends On:** T3.1
-
-**Problem:** No `agents.defaults.skills` or `agents.list[].skills` configured. All 6 discovered skills (expense-tracker, portfolio-tracker, image-generation, pdf, bug-closure, bug-fix) are visible to every agent. The `.agents/skills/bug-closure/` and `.agents/skills/bug-fix/` skills are Zed coding agent tools — they should not be visible to the OpenClaw Telegram bot.
-
-- [ ] Add `"skills": ["expense-tracker", "portfolio-tracker", "image-generation", "pdf"]` to `agents.defaults` — exclude `bug-closure` and `bug-fix`
-- [ ] Consider per-agent allowlists if multiple agents are configured in `agents.list`
-
-**Validation:** `openclaw skills list` shows only the 4 allowed skills. `bug-closure` and `bug-fix` are not loaded.
-
----
+> **Updated:** 2026-06-12 — T3.1 (workspace path) and T3.2 (skill allowlists) removed: workspace already configured, `agents.defaults.skills` is not a valid OpenClaw config key (discovery is filesystem-based). T3.3 verified: extraDirs serves ktmb-booking.
 
 ### T3.3 — Verify `extraDirs` Path in Docker Container
 
@@ -302,9 +178,8 @@ Update `README.md` with Telegram bot setup instructions:
 
 **Problem:** `skills.load.extraDirs` is set to `["/home/node/skills"]` — an absolute path inside the Docker container. It's unclear whether this path exists or serves a purpose separate from the workspace skills.
 
-- [ ] `docker exec gateway-openclaw-1 ls -la /home/node/skills/` — verify if directory exists
-- [ ] If empty or redundant with workspace skills, remove the `extraDirs` config
-- [ ] If it serves a distinct purpose (e.g., node-specific skills), document why
+- [x] `docker exec gateway-openclaw-1 ls -la /home/node/skills/` — verify if directory exists
+- [x] If it serves a distinct purpose, document why → **Serves ktmb-booking skill** (mounted via docker-compose `../modules/ktmb-booking/skills:/home/node/skills/ktmb-booking:ro`)
 
 **Validation:** Config is clean — no dangling paths. If removed, skills still load from workspace.
 
@@ -332,27 +207,19 @@ Update `README.md` with Telegram bot setup instructions:
 
 ---
 
-### T3.5 — Enable Sandbox Isolation or Restrict exec Tool
+### T3.5 — Restrict exec Tool
 
 **Priority:** P1 (high)  
 **Estimate:** 30 minutes  
 **Depends On:** T3.4
 
-**Problem:** `sandbox.mode` is set to `"off"` while all tool calls go through `exec`. The LLM has unrestricted shell access. SKILL.md files contain "ONLY curl" rules, but these are prompt-level suggestions — nothing enforces them at the system level.
+**Problem:** The LLM has unrestricted shell access via `exec`. SKILL.md files contain "ONLY curl" rules, but these are prompt-level suggestions — nothing enforces them at the system level. Sandboxing was evaluated and explicitly declined (see spec Non-Goals: adds Docker-in-Docker complexity with no benefit for a single-user trusted deployment).
 
-**Option A — Enable sandbox:**
-- [ ] Set `agents.defaults.sandbox.mode` to `"non-main"` or `"all"`
-- [ ] Configure `agents.defaults.sandbox.docker` with required env vars
-- [ ] Ensure Python tool API containers (expense-tracker:8080, portfolio-tracker:8081) are reachable from sandbox network
-
-**Option B — Restrict exec (if sandbox not feasible):**
 - [ ] Configure `tools.exec.allowlist` to only permit `curl` commands
 - [ ] Add `tools.exec.denylist` for dangerous commands (rm, dd, chmod, etc.)
 - [ ] Set explicit timeout and output limits on exec
 
-**Validation:**
-- Option A: `docker compose logs openclaw | grep sandbox` shows sandbox active
-- Option B: Attempting `exec: rm -rf /` is blocked; `exec: curl ...` to allowed endpoints works
+**Validation:** Attempting `exec: rm -rf /` is blocked; `exec: curl ...` to allowed endpoints works.
 
 ---
 
@@ -378,14 +245,12 @@ Update `README.md` with Telegram bot setup instructions:
 | 3 | T0.3 — docker-compose | Config | T0.1, T0.2 |
 | 4 | T1.1 — Health + skill check | Verify | After T0.1, T0.3 |
 | 5 | T1.2 — Telegram bot setup | Verify | After T1.1 |
-| 6 | T3.1 — Workspace path | Gaps | After T0.1 |
-| 7 | T3.2 — Skill allowlists | Gaps | After T3.1 |
-| 8 | T3.3 — Verify extraDirs | Gaps | Independent |
-| 9 | T3.6 — WARP proxy setup | Gaps | Independent |
-| 10 | T3.4 — Register tools as schemas | Gaps | After T3.1 |
-| 11 | T3.5 — Sandbox/exec restrictions | Gaps | After T3.4 |
-| 12 | T2.1 — Full pipeline test | E2E | After T1.2, T3.4 |
-| 13 | T2.2 — README docs | Docs | After T2.1 |
+| 6 | T3.3 — Verify extraDirs | Gaps | Independent |
+| 7 | T3.6 — WARP proxy setup | Gaps | Independent |
+| 8 | T3.4 — Register tools as schemas | Gaps | After T3.3 |
+| 9 | T3.5 — Restrict exec | Gaps | After T3.4 |
+| 10 | T2.1 — Full pipeline test | E2E | After T1.2, T3.4 |
+| 11 | T2.2 — README docs | Docs | After T2.1 |
 
-## Total Estimated Effort: ~7.0 hours (was ~1.5h)
+## Total Estimated Effort: ~5.0 hours (was ~7.0h)
 

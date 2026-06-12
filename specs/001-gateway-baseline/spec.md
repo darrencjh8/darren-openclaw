@@ -118,7 +118,7 @@ This spec covers the gateway runtime, Telegram channel, agent persona, skill dis
 
 ---
 
-### US-7: Workspace Memory Files (Partially Deployed)
+### US-7: Workspace Memory Files (Deployed ✅)
 
 **As a** user who has taught the agent facts and preferences,  
 **I want** those facts and preferences stored in persistent files that survive container restarts,  
@@ -128,8 +128,8 @@ This spec covers the gateway runtime, Telegram channel, agent persona, skill dis
 - [x] `MEMORY.md` generated at startup from `gateway/MEMORY.md.template` with section headers (plugin-managed, read-only for agent)
 - [x] `USER.md` generated at startup from `gateway/USER.md.template` with compact user preferences (currency, budgets, payee rules, confirmation policy)
 - [x] Both files survive `docker compose down && docker compose up` (on `openclaw_home` named volume)
-- [ ] Agent reads USER.md at session start and does not re-ask currency, budget file, or payee rules
-- [ ] `memory_search` returns facts from MEMORY.md written during prior sessions
+- [x] Agent reads USER.md at session start and does not re-ask currency, budget file, or payee rules
+- [x] `memory_search` returns facts from MEMORY.md written during prior sessions
 - [x] `AGENTS.md` includes a "Memory" section instructing the agent: MEMORY.md is plugin-managed (read, do not edit)
 
 ---

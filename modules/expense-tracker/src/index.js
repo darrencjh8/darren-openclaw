@@ -6,9 +6,8 @@
 import express from "express";
 import { Config } from "./config.js";
 import { MemoryStore } from "./memory.js";
-import { ToolRegistry, StatementJournal } from "./tools.js";
+import { ToolRegistry } from "./tools.js";
 import { AgentOrchestrator } from "./orchestrator.js";
-import { StatementProcessor } from "./statement/orchestrator.js";
 import { ImapIdleHandler } from "./imap.js";
 import { classifyEmail, dispatchEmail } from "./classify.js";
 import { existsSync } from "fs";
@@ -46,13 +45,6 @@ async function main() {
     const registry = new ToolRegistry(cfg, memory);
     const orchestrator = new AgentOrchestrator(cfg, registry);
 
-    // Statement processing pipeline
-    const statementJournal = new StatementJournal(
-        cfg.statementDbPath || "data/statement.db",
-    );
-    registry.setStatementJournal(statementJournal);
-    const statementProcessor = new StatementProcessor(cfg, registry);
-
     // IMAP handler with classification pre-filter
     const imapHandler = new ImapIdleHandler(
         cfg.imapHost,
@@ -70,7 +62,7 @@ async function main() {
             classify,
             orchestrator,
             imapHandler,
-            statementProcessor,
+            // statementProcessor omitted — spec/004 will wire it back
         );
     }
 

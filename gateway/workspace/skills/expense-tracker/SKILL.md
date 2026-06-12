@@ -62,34 +62,6 @@ exec: curl -s -X POST http://expense-tracker:8080/tools/<name> -H "Content-Type:
 | update-fact | `{"old_text":"...","new_text":"..."}` — correct wrong fact |
 | delete-fact | `{"match_text":"..."}` — remove stale fact |
 
-### Statement Tools
-
-| Tool | Key Args |
-|---|---|
-| reconcile-transaction | `{"ab_transaction_id":"...","statement_ref":"Statement May 2026"}` |
-| fetch-unreconciled-transactions | `{"account_id":"...","date_from":"YYYY-MM-DD","date_to":"YYYY-MM-DD"}` |
-| record-statement | `{"account_id":"...","period_start":"YYYY-MM-DD","period_end":"YYYY-MM-DD","matched_count":0,"outlier_count":0}` |
-| fetch-statement-history | `{"account_id":"...","period_start":"YYYY-MM-DD","period_end":"YYYY-MM-DD"}` |
-| check-statement-duplicate | `{"date":"YYYY-MM-DD","amount_cents":-800,"account_id":"..."}` |
-
-## Statement Reconciliation
-
-When processing a bank/credit card STATEMENT (multiple transactions, PDF or text):
-
-1. STATEMENTS ARE AUTHORITATIVE — the bank's final record for a billing cycle
-2. Extract ALL transactions + statement period from the text
-3. `fetch-accounts` + `fetch-categories` + `fetch-statement-history` in parallel
-4. If `fetch-statement-history` returns a record → already processed, notify and stop
-5. `fetch-unreconciled-transactions(account_id, date_from, date_to)` — get uncleared AB txns
-6. For EACH statement line item:
-   - If matched (same amount ±20c, same date ±2d, similar merchant):
-     `reconcile-transaction(ab_transaction_id, "Statement [period]")` — marks cleared
-   - If NO match:
-     `insert-transaction` with `notes="OUTLIER | Statement [period]"` — NOT cleared
-7. `record-statement(account_id, period_start, period_end, matched_count, outlier_count)`
-8. `notify-user` with summary: "✅ X reconciled, ⚠️ Y outliers"
-9. `mark-email-read` after processing (always, even on failure)
-
 ## Workflow
 
 1. Extract: amount, currency (default SGD), date, account name, description

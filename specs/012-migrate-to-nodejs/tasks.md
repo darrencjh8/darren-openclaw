@@ -56,9 +56,9 @@ Node.js source in existing `modules/expense-tracker/` and `modules/portfolio-tra
 
 ### Implementation for User Story 1
 
-- [ ] T009 [US1] Verify `docker compose build expense-tracker --no-cache` completes in under 2 minutes on test machine (record build time)
-- [ ] T010 [US1] Verify `docker compose build expense-tracker` (cached) completes in under 10 seconds
-- [ ] T011 [US1] Verify WASM model is pre-downloaded at build (container starts without network, embeddings work)
+- [x] T009 [US1] Verify `docker compose build expense-tracker --no-cache` completes in under 2 minutes on test machine (record build time)
+- [x] T010 [US1] Verify `docker compose build expense-tracker` (cached) completes in under 10 seconds
+- [x] T011 [US1] Verify WASM model is pre-downloaded at build (container starts without network, embeddings work)
 
 **Checkpoint**: Build speed validated. Container starts with embeddings.
 
@@ -181,7 +181,7 @@ Node.js source in existing `modules/expense-tracker/` and `modules/portfolio-tra
 - [x] T057 [P] Update constitution 2.5: expense-tracker 205 MB → <150 MB, total system ~800 MB in `.specify/memory/constitution.md`
 - [x] T058 [P] Update `design.md` Section 5 — technology stack from Python to Node.js, tool count unchanged
 - [x] T059 Run quickstart.md validation scenarios (all 10 scenarios)
-- [ ] T060 Docker rebuild and integration test: `docker compose build && docker compose up -d && curl localhost:8080/health && curl localhost:8081/health`
+- [x] T060 Docker rebuild and integration test: `docker compose build && docker compose up -d && curl localhost:8080/health && curl localhost:8081/health`
 
 ---
 
