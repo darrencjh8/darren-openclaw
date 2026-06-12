@@ -49,6 +49,21 @@ exec: curl -s -X POST http://expense-tracker:8080/tools/<name> -H "Content-Type:
 | insert-transaction | `{"date":"YYYY-MM-DD","amount_cents":-800,"account_id":"...","imported_description":"Food"}` |
 | log-decision | `{"action":"inserted","reasoning":"..."}`  |
 | notify-user | `{"subject":"...","body":"..."}` |
+
+### Memory & Learning
+
+| Tool | Key Args |
+|---|---|
+| search-memory | `{"query":"card ending 4605"}` — semantic search over learned facts |
+| learn-fact | `{"fact":"Toast Box merchant maps to Food payee"}` — record a learned mapping |
+| list-facts | `{}` — show all learned facts |
+| update-fact | `{"old_text":"...","new_text":"..."}` — correct wrong fact |
+| delete-fact | `{"match_text":"..."}` — remove stale fact |
+
+### Statement Tools
+
+| Tool | Key Args |
+|---|---|
 | reconcile-transaction | `{"ab_transaction_id":"...","statement_ref":"Statement May 2026"}` |
 | fetch-unreconciled-transactions | `{"account_id":"...","date_from":"YYYY-MM-DD","date_to":"YYYY-MM-DD"}` |
 | record-statement | `{"account_id":"...","period_start":"YYYY-MM-DD","period_end":"YYYY-MM-DD","matched_count":0,"outlier_count":0}` |
@@ -75,11 +90,20 @@ When processing a bank/credit card STATEMENT (multiple transactions, PDF or text
 ## Workflow
 
 1. Extract: amount, currency (default SGD), date, account name, description
-2. Call `fetch-accounts` + `fetch-payees` in parallel
-3. Match account by name substring; match payee by keyword (see below)
-4. Call `check-duplicate`
-5. Confirm: "I'll log S$X.XX as [Payee] under [Account]. OK?"
-6. If yes → `insert-transaction` with `account_id`, `date`, `amount_cents`, `imported_description`
+2. Call `search-memory` for learned facts about the sender, card, merchant
+3. Call `fetch-accounts` + `fetch-payees` in parallel
+4. Match account by name substring; match payee by keyword (see below)
+5. Call `check-duplicate`
+6. Confirm: "I'll log S$X.XX as [Payee] under [Account]. OK?"
+7. If yes → `insert-transaction` with `account_id`, `date`, `amount_cents`, `imported_description`
+8. After every successful insert → call `learn-fact` 3 times (account type, payee, category)
+
+## Memory Corrections
+
+When the user asks to fix a learned mapping:
+- "X should be Y" or "change X to Y" → `search-memory` to find → `update-fact`
+- "forget X" or "remove X" → `search-memory` to find → `delete-fact`
+- "show learned facts" → `list-facts`
 
 ## Email Classification
 
