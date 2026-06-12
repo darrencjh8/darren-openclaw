@@ -3,12 +3,12 @@
  * Ported 1:1 from src/agent/prompts.py
  */
 
-const USER_NAME = process.env.USER_NAME || 'there';
-const MYR_BUDGET_FILE = process.env.MYR_BUDGET_FILE || '';
-const BUDGET_FILE = process.env.ACTUAL_BUDGET_FILE || '';
+const USER_NAME = process.env.USER_NAME || "there";
+const MYR_BUDGET_FILE = process.env.MYR_BUDGET_FILE || "";
+const BUDGET_FILE = process.env.ACTUAL_BUDGET_FILE || "";
 
-const sgdBudget = BUDGET_FILE || 'My Budget';
-const myrBudget = MYR_BUDGET_FILE || 'My MYR Budget';
+const sgdBudget = BUDGET_FILE || "My Budget";
+const myrBudget = MYR_BUDGET_FILE || "My MYR Budget";
 
 export const SYSTEM_PROMPT = `\
 You are an expense-tracking agent connected to Actual Budget. Your job is to
@@ -117,4 +117,239 @@ WORKFLOW (follow in EXACT order):
 13. log_decision("inserted").
 `;
 
-export const FEW_SHOT_EXAMPLES = [/* see Python prompts.py for full examples */];
+export const FEW_SHOT_EXAMPLES = [
+    // Example 1: Happy path — DBS SGD alert with memory lookup
+    [
+        {
+            role: "user",
+            content:
+                "Process this email:\n\nFrom: alerts@dbs.com\nSubject: Transaction Alert\nDear Customer, a transaction of SGD 12.80 was made at TOAST BOX on 04/06/2026 from your DBS Yuu account ending 1234.",
+        },
+        {
+            role: "assistant",
+            content:
+                "Classifying: confirmed transaction (currency SGD, amount $12.80, merchant Toast Box, date clear). Let me search memory and fetch data.",
+            tool_calls: [
+                {
+                    id: "call_search",
+                    type: "function",
+                    function: {
+                        name: "search_memory",
+                        arguments: '{"query": "DBS Yuu Toast Box"}',
+                    },
+                },
+                {
+                    id: "call_1",
+                    type: "function",
+                    function: {
+                        name: "fetch_accounts",
+                        arguments: '{"budget_id": "' + sgdBudget + '"}',
+                    },
+                },
+                {
+                    id: "call_2",
+                    type: "function",
+                    function: {
+                        name: "fetch_categories",
+                        arguments: '{"budget_id": "' + sgdBudget + '"}',
+                    },
+                },
+                {
+                    id: "call_3",
+                    type: "function",
+                    function: {
+                        name: "fetch_payees",
+                        arguments: '{"budget_id": "' + sgdBudget + '"}',
+                    },
+                },
+            ],
+        },
+        {
+            role: "tool",
+            tool_call_id: "call_search",
+            content:
+                '{"results":[{"text":"DBS Yuu is a debit card account","score":0.95},{"text":"Toast Box merchant maps to Food payee","score":0.88}]}',
+        },
+        {
+            role: "tool",
+            tool_call_id: "call_1",
+            content: '[{"id": "acct-dbs-yuu", "name": "DBS Yuu"}]',
+        },
+        {
+            role: "tool",
+            tool_call_id: "call_2",
+            content: '[{"id": "cat-food", "name": "Food"}]',
+        },
+        {
+            role: "tool",
+            tool_call_id: "call_3",
+            content: '[{"id": "payee-food", "name": "Food"}]',
+        },
+        {
+            role: "assistant",
+            content:
+                "Memory confirms: DBS Yuu is debit card, Toast Box → Food. Checking duplicate.",
+            tool_calls: [
+                {
+                    id: "call_4",
+                    type: "function",
+                    function: {
+                        name: "check_duplicate",
+                        arguments:
+                            '{"date": "2026-06-04", "amount_cents": -1280, "account_id": "acct-dbs-yuu", "payee_name": "Food"}',
+                    },
+                },
+            ],
+        },
+        { role: "tool", tool_call_id: "call_4", content: "false" },
+        {
+            role: "assistant",
+            content: "Not a duplicate. Inserting.",
+            tool_calls: [
+                {
+                    id: "call_5",
+                    type: "function",
+                    function: {
+                        name: "insert_transaction",
+                        arguments:
+                            '{"budget_id": "' +
+                            sgdBudget +
+                            '", "account_id": "acct-dbs-yuu", "date": "2026-06-04", "amount_cents": -1280, "imported_description": "Food", "category_id": "cat-food", "notes": "Toast Box | DBS alert SGD"}',
+                    },
+                },
+                {
+                    id: "call_6",
+                    type: "function",
+                    function: { name: "mark_email_read", arguments: "{}" },
+                },
+            ],
+        },
+        {
+            role: "tool",
+            tool_call_id: "call_5",
+            content: '{"id": "txn-new", "amount": -1280}',
+        },
+        { role: "tool", tool_call_id: "call_6", content: "true" },
+        {
+            role: "assistant",
+            content: "Done. Learning facts and notifying.",
+            tool_calls: [
+                {
+                    id: "call_7",
+                    type: "function",
+                    function: {
+                        name: "learn_fact",
+                        arguments:
+                            '{"fact": "DBS Yuu is a debit card account"}',
+                    },
+                },
+                {
+                    id: "call_8",
+                    type: "function",
+                    function: {
+                        name: "learn_fact",
+                        arguments:
+                            '{"fact": "Toast Box merchant maps to Food payee"}',
+                    },
+                },
+                {
+                    id: "call_9",
+                    type: "function",
+                    function: {
+                        name: "learn_fact",
+                        arguments: '{"fact": "Food maps to Food category"}',
+                    },
+                },
+                {
+                    id: "call_10",
+                    type: "function",
+                    function: {
+                        name: "notify_user",
+                        arguments:
+                            '{"message": "Just caught a DBS Yuu alert — S$12.80 at Toast Box. Logged! 🍜"}',
+                    },
+                },
+                {
+                    id: "call_11",
+                    type: "function",
+                    function: {
+                        name: "log_decision",
+                        arguments:
+                            '{"action": "inserted", "reasoning": "S$12.80 Toast Box → Food, DBS Yuu"}',
+                    },
+                },
+            ],
+        },
+        { role: "tool", tool_call_id: "call_7", content: "true" },
+        { role: "tool", tool_call_id: "call_8", content: "true" },
+        { role: "tool", tool_call_id: "call_9", content: "true" },
+        { role: "tool", tool_call_id: "call_10", content: "true" },
+        { role: "tool", tool_call_id: "call_11", content: "true" },
+    ],
+    // Example 2: Skip promotional
+    [
+        {
+            role: "user",
+            content:
+                "Process this email:\n\nFrom: noreply@dbs.com\nSubject: New credit card promotion!\nApply now for 5% cashback on dining.",
+        },
+        {
+            role: "assistant",
+            content:
+                "Classifying per Rule 9a: this is promotional — no transaction amount, date, or merchant. Skipping.",
+            tool_calls: [
+                {
+                    id: "call_1",
+                    type: "function",
+                    function: {
+                        name: "log_decision",
+                        arguments:
+                            '{"action": "skipped", "reasoning": "Promotional email, no transaction"}',
+                    },
+                },
+                {
+                    id: "call_2",
+                    type: "function",
+                    function: { name: "mark_email_read", arguments: "{}" },
+                },
+            ],
+        },
+        { role: "tool", tool_call_id: "call_1", content: "true" },
+        { role: "tool", tool_call_id: "call_2", content: "true" },
+    ],
+    // Example 3: Uncertain — unknown currency
+    [
+        {
+            role: "user",
+            content:
+                "Process this email:\n\nFrom: bank@unknown.com\nSubject: Transaction Alert\nA transaction of THB 500 was made at Bangkok Cafe.",
+        },
+        {
+            role: "assistant",
+            content:
+                "Classifying per Rule 9b: unsure — currency is THB (not SGD or MYR). Per Rule 3, notify and stop. NOT marking as read.",
+            tool_calls: [
+                {
+                    id: "call_1",
+                    type: "function",
+                    function: {
+                        name: "notify_user",
+                        arguments:
+                            '{"message": "Got THB 500 at Bangkok Cafe — only SGD and MYR supported. Skipping this one."}',
+                    },
+                },
+                {
+                    id: "call_2",
+                    type: "function",
+                    function: {
+                        name: "log_decision",
+                        arguments:
+                            '{"action": "notified", "reasoning": "Unknown currency THB"}',
+                    },
+                },
+            ],
+        },
+        { role: "tool", tool_call_id: "call_1", content: "true" },
+        { role: "tool", tool_call_id: "call_2", content: "true" },
+    ],
+];

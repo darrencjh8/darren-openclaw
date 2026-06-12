@@ -41,6 +41,16 @@ export class DedupJournal {
         return !!this._stmtCheck.get(hash);
     }
 
+    /** Check by exact date+amount+account match (ignoring payee) */
+    checkExact(date, amountCents, accountId) {
+        const row = this._db
+            .prepare(
+                "SELECT 1 FROM dedup WHERE date = ? AND amount_cents = ? AND account_id = ? LIMIT 1",
+            )
+            .get(date, amountCents, accountId);
+        return !!row;
+    }
+
     record(date, amountCents, accountId, payeeName) {
         const hash = this._makeHash(date, amountCents, accountId, payeeName);
         this._stmtInsert.run(hash, date, amountCents, accountId, payeeName);

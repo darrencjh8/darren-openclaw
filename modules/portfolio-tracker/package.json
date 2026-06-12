@@ -1,22 +1,27 @@
 {
-  "name": "portfolio-tracker",
-  "version": "1.0.0",
-  "type": "module",
-  "private": true,
-  "scripts": {
-    "start": "node src/index.js",
-    "test": "vitest run",
-    "test:watch": "vitest"
-  },
-  "dependencies": {
-    "openai": "^4.89.0",
-    "better-sqlite3": "^11.8.0",
-    "cheerio": "^1.1.0",
-    "pino": "^9.10.0",
-    "express": "^5.1.0",
-    "googleapis": "^148.0.0"
-  },
-  "devDependencies": {
-    "vitest": "^3.1.0"
-  }
+    "name": "portfolio-tracker",
+    "version": "1.0.0",
+    "type": "module",
+    "private": true,
+    "scripts": {
+        "start": "node src/index.js",
+        "test": "vitest run",
+        "test:watch": "vitest"
+    },
+    "dependencies": {
+        "openai": "^4.89.0",
+        "better-sqlite3": "^11.8.0",
+        "cheerio": "^1.1.0",
+        "mailparser": "^3.7.2",
+        "pino": "^9.10.0",
+        "express": "^5.1.0",
+        "googleapis": "^148.0.0"
+    },
+    "optionalDependencies": {
+        "pdf2pic": "^3.1.2",
+        "tesseract.js": "^5.1.4"
+    },
+    "devDependencies": {
+        "vitest": "^3.1.0"
+    }
 }
