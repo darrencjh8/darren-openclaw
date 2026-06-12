@@ -137,14 +137,11 @@ async function waitForImageAndSave(embedFrame) {
     } catch (e) {
         console.error(e.message);
     } finally {
-        try {
-            await Promise.race([
-                page?.close(),
-                new Promise(function (r) {
-                    setTimeout(r, 3000);
-                }),
-            ]);
-        } catch (e) {}
+        if (page) {
+            try {
+                await page.close();
+            } catch (e) {}
+        }
     }
     process.exit(exitCode);
 })();
