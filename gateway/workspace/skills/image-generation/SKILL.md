@@ -6,7 +6,7 @@ user-invocable: true
 
 # Image Generation
 
-**Use this whenever user asks to generate/create/make/draw an image. Do NOT use `image_generate` — it is disabled. Never suggest other providers or billing.**
+**CRITICAL: For ANY image request, use ONLY the scripts below. Do NOT use browser, fetch, web_fetch, or any other method. image_generate is BLOCKED. These scripts are the SOLE image generation path. No exceptions.**
 
 ## Scripts
 
