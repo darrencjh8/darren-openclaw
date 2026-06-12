@@ -2,7 +2,8 @@
     "skills": {
         "load": {
             "extraDirs": [
-                "/home/node/skills"
+                "/home/node/skills",
+                "/home/node/.openclaw/workspace/skills"
             ]
         }
     },
