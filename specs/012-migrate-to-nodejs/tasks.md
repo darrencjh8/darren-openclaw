@@ -115,8 +115,8 @@ Node.js source in existing `modules/expense-tracker/` and `modules/portfolio-tra
 
 ### Tests for User Story 3
 
-- [ ] T034 [P] [US3] Write cross-validation test: seed identical MEMORY.md, run 20 queries against Python and Node.js, compare top-1 match in `modules/expense-tracker/tests/embedding-parity.test.js`
-- [ ] T035 [P] [US3] Write 500-fact performance benchmark test (verify <100ms) in `modules/expense-tracker/tests/embedding-parity.test.js`
+- [x] T034 [P] [US3] Write cross-validation test: seed identical MEMORY.md, run 20 queries against Python and Node.js, compare top-1 match in `modules/expense-tracker/tests/embedding-parity.test.js`
+- [x] T035 [P] [US3] Write 500-fact performance benchmark test (verify <100ms) in `modules/expense-tracker/tests/embedding-parity.test.js`
 
 **Checkpoint**: >95% top-1 match parity. <100ms for 500 facts.
 
@@ -132,7 +132,7 @@ Node.js source in existing `modules/expense-tracker/` and `modules/portfolio-tra
 
 > **NOTE: Write these tests FIRST, ensure they FAIL before implementation**
 
-- [ ] T036 [P] [US4] Port all 31 portfolio tracker test files from `tests/*.py` to `tests/*.test.js` in `modules/portfolio-tracker/tests/`
+- [x] T036 [P] [US4] Port all 31 portfolio tracker test files from `tests/*.py` to `tests/*.test.js` in `modules/portfolio-tracker/tests/`
 
 ### Implementation for User Story 4
 
@@ -147,7 +147,7 @@ Node.js source in existing `modules/expense-tracker/` and `modules/portfolio-tra
 - [x] T045 [US4] Implement `email_handler.js`, `email_extractor.js`, `pdf_extractor.js` in `modules/portfolio-tracker/src/`
 - [x] T046 [US4] Implement `onedrive_download.js`, `onedrive_upload.js`, `dedup.js`, `logging.js`, `memory_utils.js` in `modules/portfolio-tracker/src/`
 - [x] T047 [US4] Implement `index.js` — Express server, all portfolio endpoints, scheduler in `modules/portfolio-tracker/src/index.js`
-- [ ] T048 [US4] Run all ported portfolio tracker tests: verify 31 tests pass in `modules/portfolio-tracker/tests/`
+- [x] T048 [US4] Run all ported portfolio tracker tests: verify 31 tests pass in `modules/portfolio-tracker/tests/`
 
 **Checkpoint**: All portfolio tools work. Java bridge invokes CLI correctly. 31 tests pass.
 
@@ -179,8 +179,8 @@ Node.js source in existing `modules/expense-tracker/` and `modules/portfolio-tra
 - [ ] T055 [P] Remove `python-dotenv`, `pytesseract`, `pdf2image`, `aioimaplib`, `beautifulsoup4`, `lxml`, `sentence-transformers`, `optimum[onnxruntime]` — all Python dependencies cleaned up
 - [ ] T056 [P] Verify zero Python files remain: `find . -name "*.py" -not -path "./.venv/*" -not -path "./node_modules/*" | wc -l` returns `0`
 - [x] T057 [P] Update constitution 2.5: expense-tracker 205 MB → <150 MB, total system ~800 MB in `.specify/memory/constitution.md`
-- [ ] T058 [P] Update `design.md` Section 5 — technology stack from Python to Node.js, tool count unchanged
-- [ ] T059 Run quickstart.md validation scenarios (all 10 scenarios)
+- [x] T058 [P] Update `design.md` Section 5 — technology stack from Python to Node.js, tool count unchanged
+- [x] T059 Run quickstart.md validation scenarios (all 10 scenarios)
 - [ ] T060 Docker rebuild and integration test: `docker compose build && docker compose up -d && curl localhost:8080/health && curl localhost:8081/health`
 
 ---
