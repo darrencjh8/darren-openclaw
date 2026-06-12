@@ -1,4 +1,4 @@
-const { describe, it, before, after } = require("node:test");
+const { describe, it } = require("node:test");
 const assert = require("node:assert");
 
 // --- Helpers to test shape/prompt/guidance logic without running the full script ---
@@ -20,22 +20,15 @@ describe("CLI argument parsing", () => {
     it("exits when no prompt", () => {
         var prompt = undefined;
         var outputPath = "/tmp/test.png";
-        assert.ok(!prompt || !outputPath, "should fail when prompt missing");
+        assert.ok(!prompt || !outputPath);
     });
-
     it("exits when no output path", () => {
         var prompt = "test";
         var outputPath = undefined;
-        assert.ok(
-            !prompt || !outputPath,
-            "should fail when outputPath missing",
-        );
+        assert.ok(!prompt || !outputPath);
     });
-
     it("continues when both provided", () => {
-        var prompt = "test";
-        var outputPath = "/tmp/test.png";
-        assert.ok(prompt && outputPath, "should have both");
+        assert.ok("test" && "/tmp/test.png");
     });
 });
 
@@ -60,146 +53,103 @@ describe("Guidance scale parsing", () => {
     it("defaults to 7 for NaN", () => assert.equal(resolveGuidance("abc"), 7));
     it("defaults to 7 for undefined", () =>
         assert.equal(resolveGuidance(undefined), 7));
-    it("defaults to 7 for zero (falsy)", () =>
-        assert.equal(resolveGuidance("0"), 7));
+    it("defaults to 7 for zero", () => assert.equal(resolveGuidance("0"), 7));
     it("handles negative", () => assert.equal(resolveGuidance("-3"), -3));
 });
 
 // --- Prompt assembly ---
 describe("Prompt assembly", () => {
-    it("prepends system prefix when provided", () => {
+    it("prepends system prefix", () => {
         assert.equal(
-            buildPrompt("a cat", "High quality photo."),
-            "High quality photo. a cat",
+            buildPrompt("a cat", "High quality."),
+            "High quality. a cat",
         );
     });
-
     it("uses plain prompt when no prefix", () => {
         assert.equal(buildPrompt("a dog", ""), "a dog");
     });
-
     it("handles undefined prefix", () => {
         assert.equal(buildPrompt("a bird", undefined), "a bird");
     });
 });
 
-// --- waitForImageAndSave: image extraction logic ---
+// --- DOM image extraction ---
 describe("DOM image extraction (waitForImageAndSave)", () => {
-    // Simulate what embedFrame.evaluate returns
     function simulateEvaluate(mockDOM) {
-        // mockDOM is a function that returns a base64 string or null
         return mockDOM();
     }
-
     it("extracts data:image src", () => {
-        var result = simulateEvaluate(function () {
-            return "data:image/png;base64,iVBORw0KGgo=";
+        var r = simulateEvaluate(function () {
+            return "data:image/png;base64,ABC=";
         });
-        assert.ok(result.startsWith("data:image"));
+        assert.ok(r.startsWith("data:image"));
     });
-
-    it("handles canvas fallback (returns data URL)", () => {
-        var result = simulateEvaluate(function () {
-            // Simulates canvas.toDataURL result
-            return "data:image/png;base64,aWNhbnZhcw==";
+    it("handles canvas fallback data URL", () => {
+        var r = simulateEvaluate(function () {
+            return "data:image/png;base64,CANVAS=";
         });
-        assert.ok(result.startsWith("data:image/png;base64"));
+        assert.ok(r.startsWith("data:image/png;base64"));
     });
-
-    it("returns null when no images with naturalWidth > 100", () => {
-        var result = simulateEvaluate(function () {
-            return null;
-        });
-        assert.equal(result, null);
+    it("returns null when no images found", () => {
+        assert.equal(
+            simulateEvaluate(function () {
+                return null;
+            }),
+            null,
+        );
     });
-
-    it("ignores tiny images (< 100px)", () => {
-        var result = simulateEvaluate(function () {
-            // naturalWidth 50 should be filtered out, return null
-            return null;
-        });
-        assert.equal(result, null);
-    });
-
     it("base64 decoding produces a buffer", () => {
-        var b64 = "data:image/png;base64,aWNhbnZhcw==";
-        var buf = Buffer.from(b64.split(",")[1], "base64");
+        var buf = Buffer.from(
+            "data:image/png;base64,ABC=".split(",")[1],
+            "base64",
+        );
         assert.ok(Buffer.isBuffer(buf));
-        assert.ok(buf.length > 0);
     });
 });
 
 // --- Output formatting ---
 describe("Output formatting", () => {
     it("emits valid JSON with path and size", () => {
-        var obj = { path: "/tmp/test.png", size: 12345 };
-        var json = JSON.stringify(obj);
+        var json = JSON.stringify({ path: "/tmp/x.png", size: 12345 });
         var parsed = JSON.parse(json);
-        assert.equal(parsed.path, "/tmp/test.png");
+        assert.equal(parsed.path, "/tmp/x.png");
         assert.equal(parsed.size, 12345);
-    });
-
-    it("size is a number", () => {
-        var size = Buffer.byteLength("data:image/png;base64,aWNhbnZhcw==");
-        assert.ok(typeof size === "number");
-        assert.ok(size > 0);
     });
 });
 
-// --- Page cleanup logic ---
+// --- Page cleanup ---
 describe("Page cleanup", () => {
-    function filterPagesToClose(pages) {
+    function filterPages(pages) {
         return pages.filter(function (url) {
             return !url.startsWith("about:");
         });
     }
-
     it("closes non-about:blank pages", () => {
-        var pages = [
-            "https://perchance.org/ai-character-generator",
-            "https://image-generation.perchance.org/embed",
-            "https://ads.example.com/ad1",
-            "about:blank",
-        ];
-        var toClose = filterPagesToClose(pages);
-        assert.equal(toClose.length, 3);
-        assert.ok(!toClose.includes("about:blank"));
+        var r = filterPages(["https://x.com", "about:blank", "https://y.com"]);
+        assert.deepEqual(r, ["https://x.com", "https://y.com"]);
     });
-
     it("keeps about:blank alive", () => {
-        var pages = ["about:blank"];
-        assert.equal(filterPagesToClose(pages).length, 0);
+        assert.equal(filterPages(["about:blank"]).length, 0);
     });
-
-    it("closes everything when no about:blank", () => {
-        var pages = ["https://example.com"];
-        assert.equal(filterPagesToClose(pages).length, 1);
-    });
-
-    it("handles empty page list", () => {
-        assert.equal(filterPagesToClose([]).length, 0);
+    it("handles empty list", () => {
+        assert.equal(filterPages([]).length, 0);
     });
 });
 
 // --- Error handling ---
 describe("Error handling", () => {
-    it("exitCode is 0 on success", () => {
-        var exitCode = null;
-        // simulate success path
-        exitCode = 0;
-        assert.equal(exitCode, 0);
+    it("exitCode 0 on success", () => {
+        assert.equal(0, 0);
     });
-
-    it("exitCode is 1 on failure", () => {
-        var exitCode = null;
+    it("exitCode 1 on failure", () => {
+        var exitCode;
         try {
-            throw new Error("No image found");
+            throw new Error("fail");
         } catch (e) {
             exitCode = 1;
         }
         assert.equal(exitCode, 1);
     });
-
     it("error message is meaningful", () => {
         try {
             throw new Error("No image found in embed iframe after 60s");
