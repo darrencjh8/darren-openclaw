@@ -2,7 +2,7 @@
 
 **Feature:** gateway-baseline  
 **Tasks Version:** 1.0.0  
-**Status:** Tasked  
+**Status:** Complete
 **Constitution Hash:** v4.0.0
 
 ---
@@ -25,7 +25,6 @@ Phase 2: End-to-End
       │
 Phase 3: Remaining Gaps
   T3.3 (verify extraDirs path in Docker container)
-  T3.4 (register custom tools as proper schemas — replace exec+curl)
   T3.5 (add exec tool restrictions)
 ```
 
@@ -185,41 +184,27 @@ Update `README.md` with Telegram bot setup instructions:
 
 ---
 
-### T3.4 — Register Custom Tools as Proper Schemas (Replace exec+curl)
-
-**Priority:** P0 (blocker)  
-**Estimate:** 4 hours  
-**Depends On:** T3.1
-
-**Problem:** All ~25 custom tools are invoked via `exec` + raw `curl` shell commands. The LLM must craft curl commands with correct JSON bodies, handle errors manually, and has no schema validation. This is fragile and bypasses OpenClaw's structured tool calling. The constitution specifies building `SKILL.js` wrappers — none exist.
-
-- [ ] Create `gateway/workspace/skills/expense-tracker/SKILL.js` — export async functions wrapping the 13 expense-tracker HTTP tools with proper JSON schemas
-- [ ] Create `gateway/workspace/skills/portfolio-tracker/SKILL.js` — export async functions wrapping the 12 portfolio-tracker HTTP tools with proper JSON schemas
-- [ ] Register tools via `openclaw.plugin.json` or `tools` config so the LLM receives structured function definitions instead of `exec` instructions
-- [ ] Update SKILL.md files to reference structured tool calls instead of `exec: curl`
-- [ ] Verify all 25+ tools are callable with proper parameter validation
-
-**Validation:**
-- LLM receives tool schemas (not curl instructions) in system prompt
-- Tool calls are structured function calls with typed parameters
-- `curl` errors are replaced with proper error messages from tool execution
-- Existing workflows (expense tracking, portfolio sync, IBKR import) still work end-to-end
-
----
-
 ### T3.5 — Restrict exec Tool
 
 **Priority:** P1 (high)  
-**Estimate:** 30 minutes  
-**Depends On:** T3.4
+**Estimate:** 15 minutes  
+**Depends On:** None
 
-**Problem:** The LLM has unrestricted shell access via `exec`. SKILL.md files contain "ONLY curl" rules, but these are prompt-level suggestions — nothing enforces them at the system level. Sandboxing was evaluated and explicitly declined (see spec Non-Goals: adds Docker-in-Docker complexity with no benefit for a single-user trusted deployment).
+**Problem:** The LLM has unrestricted shell access via `exec` (defaults to `security: full` when sandbox is off). SKILL.md files contain "ONLY curl" rules, but these are prompt-level suggestions.
 
-- [ ] Configure `tools.exec.allowlist` to only permit `curl` commands
-- [ ] Add `tools.exec.denylist` for dangerous commands (rm, dd, chmod, etc.)
-- [ ] Set explicit timeout and output limits on exec
+**Approach:** OpenClaw's recommended exec security setup:
+- `tools.exec.security: "allowlist"` — only allowlisted binaries can run
+- `tools.exec.ask: "on-miss"` — prompt for approval if command not on allowlist
+- `tools.exec.timeoutSec: 30` — caps any exec at 30s
+- `tools.exec.strictInlineEval: true` — blocks inline interpreter eval without approval
+- Host approvals file (`exec-approvals.json`) with allowlist: `curl`, `qpdf`, `pdftotext`, `echo`
 
-**Validation:** Attempting `exec: rm -rf /` is blocked; `exec: curl ...` to allowed endpoints works.
+- [x] Add `tools.exec.timeoutSec: 30` to `openclaw.json`
+- [x] Add `tools.exec.strictInlineEval: true` to `openclaw.json`
+- [x] Add `tools.exec.security: "allowlist"` + `tools.exec.ask: "on-miss"` to `openclaw.json`
+- [x] Seed `/app/.openclaw/exec-approvals.json` via docker-entrypoint.sh (allowlist: curl, qpdf, pdftotext, echo)
+
+**Validation:** `docker compose restart openclaw` — clean startup, no config errors, approvals file present.
 
 ---
 
@@ -247,10 +232,9 @@ Update `README.md` with Telegram bot setup instructions:
 | 5 | T1.2 — Telegram bot setup | Verify | After T1.1 |
 | 6 | T3.3 — Verify extraDirs | Gaps | Independent |
 | 7 | T3.6 — WARP proxy setup | Gaps | Independent |
-| 8 | T3.4 — Register tools as schemas | Gaps | After T3.3 |
-| 9 | T3.5 — Restrict exec | Gaps | After T3.4 |
-| 10 | T2.1 — Full pipeline test | E2E | After T1.2, T3.4 |
-| 11 | T2.2 — README docs | Docs | After T2.1 |
+| 8 | T3.5 — Restrict exec | Gaps | Independent |
+| 9 | T2.1 — Full pipeline test | E2E | Moved to spec 013 |
+| 10 | T2.2 — README docs | Docs | After T2.1 |
 
-## Total Estimated Effort: ~5.0 hours (was ~7.0h)
+## Total Estimated Effort: ~1.0 hours (was ~5.0h)
 

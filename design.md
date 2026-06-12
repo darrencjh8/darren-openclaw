@@ -34,10 +34,11 @@
 
 | Module | Purpose | Status |
 |---|---|---|
-| **expense-tracker** | Automated expense tracking via email → Actual Budget (Python tool backend) | Implemented |
-| **portfolio-tracker** | Investment portfolio sync: IBKR flex queries, PDF trade confirmations, AB → PP balance sync, taxonomy → Google Sheets. Notifications via Gateway webhook (Python + Java CLI) | Implemented |
-| **gateway** | OpenClaw Gateway deployment with expense-tracker + portfolio-tracker skills, Telegram channel, CDP browser relay, memory persistence | Implemented & Deployed |
+| **expense-tracker** | Automated expense tracking via email → Actual Budget (Node.js tool backend) | Implemented |
+| **portfolio-tracker** | Investment portfolio sync: IBKR flex queries, PDF trade confirmations, AB → PP balance sync, taxonomy → Google Sheets. Notifications via Gateway webhook (Node.js + Java CLI) | Implemented |
+| **gateway** | OpenClaw Gateway deployment with expense-tracker + portfolio-tracker + ktmb-booking skills, Telegram channel, CDP browser relay, memory persistence | Implemented & Deployed |
 | **statement-reconciliation** | PDF credit card statement reconciliation + outlier detection | Specified, Planned, Tasked — Implementation Pending |
+| **ktmb-booking** | KTMB Shuttle Tebrau train booking + seat watcher (Python, Docker container) | Implemented |
 
 ---
 
@@ -47,7 +48,7 @@
 darren-openclaw/                          # Umbrella repository root
 ├── design.md                             # ← This file (architecture audit)
 ├── modules/
-│   ├── expense-tracker/                  # Python 3.12 module (expense tracking agent)
+│   ├── expense-tracker/                  # Node.js module (expense tracking agent)
 │   │   ├── .speckit/                     # Spec-Kit artifacts
 │       │   ├── constitution.md           # Non-negotiable architecture rules
 │       │   ├── agent.md                  # Agent harness (workflow state, context dump)
@@ -70,7 +71,7 @@ darren-openclaw/                          # Umbrella repository root
 │       ├── tests/                        # Test suite (stubs only)
 │       ├── docker/                       # Dockerfile for expense-tracker container
 │       └── db.sqlite                     # Dedup journal (runtime artifact)
-│   └── portfolio-tracker/                # Python 3.12 + Java 17 module
+│   └── portfolio-tracker/                # Node.js + Java 17 module
 │       ├── .speckit/                     # Spec-Kit artifacts (constitution, spec, plan, tasks, agent)
 │       ├── pp-cli/                       # Java CLI for PP XML read/write (Maven project)
 │       │   ├── pom.xml                   # Depends on name.abuchen.portfolio:0.84.1
@@ -129,7 +130,7 @@ graph TB
          AB["Actual Budget<br/>Server<br/>(production host)"]
     end
 
-    subgraph OpenClaw["Ubuntu Laptop (Docker Compose): expense-tracker (Python 3.12-slim, ~150MB RAM)"]
+    subgraph OpenClaw["Ubuntu Laptop (Docker Compose): expense-tracker (Node.js, ~150MB RAM)"]
         subgraph Main["main.py"]
             IMAP["IMAP IDLE Loop<br/>imap/idle_handler.py"]
             Orch["Agent Orchestrator<br/>agent/orchestrator.py"]
@@ -208,9 +209,10 @@ OpenClaw uses the **LLM Agent Pattern**: the Python host is a thin runtime that 
 |---|---|---|---|
 | **Actual Budget** | Server #1 (existing) | Public HTTPS for web UI; API via HTTPS (with auth) | Existing production instance |
 | **OpenClaw Gateway** | Ubuntu laptop (Docker) | Agent orchestration, channels, skills, tool calling | ~400MB RAM |
-| **Expense-tracker** | Ubuntu laptop (Docker) | 10 deterministic Python tools, IMAP IDLE | ~150MB RAM |
-| **Portfolio-tracker** | Ubuntu server (Docker) | Python agent + Java CLI subprocess; IMAP ingress (Trades folder); PP XML read/write; notifications via Gateway webhook | ~256MB RAM |
+| **Expense-tracker** | Ubuntu laptop (Docker) | ~12 deterministic Node.js tools, IMAP IDLE | ~150MB RAM |
+| **Portfolio-tracker** | Ubuntu server (Docker) | Node.js agent + Java CLI subprocess; IMAP ingress (Trades folder); PP XML read/write; notifications via Gateway webhook | ~256MB RAM |
 | **actual-api** | Ubuntu laptop (Docker) | Official `@actual-app/api` (Node.js), WebSocket sync | ~100MB RAM |
+| **ktmb-booking** | Ubuntu laptop (Docker) | Python aiohttp API server + seat watcher worker; SQLite job store | ~150MB RAM |
 | **Email Burner** | Any IMAP provider | Public IMAP (imap.example.com:993) | Free tier, dedicated inbox |
 | **DeepSeek API** | DeepSeek Cloud | Public HTTPS (api.deepseek.com/v1) | Pay-per-token |
 | **Windows Node** (future) | Windows laptop | Canvas, camera, screen, voice — connects via WebSocket | Any modern Windows PC |
@@ -665,8 +667,8 @@ graph TB
         end
 
         GW -->|"tool calls"| Skills
-        EXP -->|"HTTP :8080"| ET["expense-tracker<br/>Python 3.12"]
-        POR -->|"HTTP :8081"| PT["portfolio-tracker<br/>Python + Java"]
+        EXP -->|"HTTP :8080"| ET["expense-tracker<br/>Node.js"]
+        POR -->|"HTTP :8081"| PT["portfolio-tracker<br/>Node.js + Java"]
     end
 
     DS["DeepSeek API"] -->|"LLM"| GW
@@ -717,11 +719,10 @@ We configure `openclaw.json` — we do not build a custom server.
 
 | File | Language | Purpose |
 |---|---|---|
-| `SKILL.md` (per skill) | Markdown | LLM instructions: expense-tracking, portfolio-sync, image-generation, PDF extraction |
-| `SKILL.js` (per skill) | Node.js | Async functions → HTTP calls to Python tool APIs |
-| `tools_api.py` (per module) | Python | HTTP endpoints for deterministic tools |
-| `openclaw.json` | JSON5 | Gateway config (models, providers, channels, agents, memory, compaction, browser) |
-| `docker-compose.yml` | YAML | Four containers: gateway + expense-tracker + portfolio-tracker + actual-api |
+| `SKILL.md` (per skill) | Markdown | LLM instructions: expense-tracking, portfolio-sync, image-generation, PDF extraction, KTMB booking |
+| `tools_api.py` (ktmb-booking only) | Python | HTTP endpoints for deterministic tools |
+| `openclaw.json` | JSON5 | Gateway config (models, providers, channels, agents, memory, compaction, browser, tools) |
+| `docker-compose.yml` | YAML | Five containers: gateway + expense-tracker + portfolio-tracker + actual-api + ktmb-booking |
 | `*.md.template` | Markdown | Workspace file templates (AGENTS, SOUL, USER, IDENTITY, MEMORY) |
 
 ### 6.5 WhatsApp/Telegram — Zero Code Required
@@ -818,15 +819,15 @@ An LLM-powered agent that manages investment portfolio data in Portfolio Perform
 
 | Layer | Choice | Rationale |
 |---|---|---|
-| Runtime | Python 3.12 + Java 17 | Python for async I/O and LLM orchestration; Java for PP CLI (XML read/write) |
+| Runtime | Node.js 22 + Java 17 | Node.js for async I/O and LLM orchestration; Java for PP CLI (XML read/write) |
 | LLM | DeepSeek v4-flash / v4-pro | Flash for fast processing; Pro for complex balance sync |
 | LLM Client | openai SDK | DeepSeek is OpenAI-API-compatible |
-| IMAP | aioimaplib | Async IMAP IDLE for email ingestion |
+| IMAP | node-imap | IMAP IDLE for email ingestion |
 | Telegram | OpenClaw Gateway | Gateway handles Telegram channel; portfolio-tracker sends notifications via gateway webhook |
 | OneDrive | Microsoft Graph API | Source of truth for PP file |
 | PP CLI | Java JAR (pp-cli.jar) | Deterministic XML read/write for Portfolio Performance |
-| Google Sheets | google-api-python-client | Service account auth for taxonomy export |
-| Scheduler | apscheduler (AsyncIOScheduler) | Daily pp-sync-all cron at 3 AM SGT |
+| Google Sheets | googleapis (Node.js) | Service account auth for taxonomy export |
+| Scheduler | node-cron | Daily pp-sync-all cron at 3 AM SGT |
 
 ### 5B.3 Notification Architecture
 

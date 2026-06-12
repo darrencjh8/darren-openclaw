@@ -58,6 +58,8 @@ services:
             - "127.0.0.1:3000:3000"
         env_file:
             - ../modules/portfolio-tracker/.env
+        environment:
+            - BUDGET_SWITCH_DELAY_MS=5000
         restart: unless-stopped
 
     portfolio-tracker:

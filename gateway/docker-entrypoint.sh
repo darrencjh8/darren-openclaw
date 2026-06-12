@@ -62,4 +62,37 @@ rm -rf /home/node/.openclaw
 # Start notify webhook sidecar for portfolio-tracker notifications
 nohup python3 /app/notify-webhook.py > /dev/null 2>&1 &
 
+# Seed exec-approvals.json with allowlist (curl, qpdf, pdftotext, echo) if not present
+if [ ! -f /app/.openclaw/exec-approvals.json ]; then
+  cat > /app/.openclaw/exec-approvals.json << 'APPROVALS'
+{
+  "version": 1,
+  "defaults": {
+    "security": "allowlist",
+    "ask": "on-miss",
+    "askFallback": "deny",
+    "autoAllowSkills": false
+  },
+  "agents": {
+    "orchestrator": {
+      "allowlist": [
+        { "pattern": "curl" },
+        { "pattern": "qpdf" },
+        { "pattern": "pdftotext" },
+        { "pattern": "echo" }
+      ]
+    },
+    "thinker": {
+      "allowlist": [
+        { "pattern": "curl" },
+        { "pattern": "qpdf" },
+        { "pattern": "pdftotext" },
+        { "pattern": "echo" }
+      ]
+    }
+  }
+}
+APPROVALS
+fi
+
 exec tini -s -- node openclaw.mjs gateway

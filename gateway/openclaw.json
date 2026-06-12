@@ -105,6 +105,14 @@
         "bind": "loopback",
         "mode": "local"
     },
+    "tools": {
+        "exec": {
+            "timeoutSec": 30,
+            "strictInlineEval": true,
+            "security": "allowlist",
+            "ask": "on-miss"
+        }
+    },
     "messages": {
         "tts": {
             "auto": "tagged",

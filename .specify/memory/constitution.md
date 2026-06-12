@@ -80,7 +80,7 @@ Everything runs in containers. The same `docker-compose.yml` works on any Ubuntu
 
 ### 2.6 Security
 
-- **Gateway security:** OpenClaw's built-in DM pairing (`dmPolicy="pairing"`), sandboxing (`non-main` sessions), and channel allowlists.
+- **Gateway security:** OpenClaw's built-in DM pairing (`dmPolicy="allowlist"`), sandboxing (`non-main` sessions), and channel allowlists.
 - **Docker network isolation:** Containers only accessible within the Docker Compose internal network — not exposed to host.
 - **Secrets management:** All credentials via environment variables in `.env` (excluded from git). Never committed to source control.
 - **No database exposure:** SQLite dedup journals are local to each container. Actual Budget's database is never accessed directly — only via its REST API.

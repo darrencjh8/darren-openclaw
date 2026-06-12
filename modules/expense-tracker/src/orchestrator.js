@@ -133,13 +133,22 @@ export class AgentOrchestrator {
                 } catch {}
 
                 const result = await this._tools.executeTool(name, args);
+                const resultStr =
+                    typeof result === "string"
+                        ? result
+                        : JSON.stringify(result);
+                console.log(
+                    JSON.stringify({
+                        event: "tool_call",
+                        tool: name,
+                        args,
+                        result_snippet: resultStr.slice(0, 300),
+                    }),
+                );
                 messages.push({
                     role: "tool",
                     tool_call_id: tc.id || "",
-                    content:
-                        typeof result === "string"
-                            ? result
-                            : JSON.stringify(result),
+                    content: resultStr,
                 });
             }
         }

@@ -2,7 +2,7 @@
 
 **Feature:** gateway-baseline  
 **Spec Version:** 2.0.0  
-**Status:** Specified  
+**Status:** Closed
 **Constitution Hash:** v4.0.0  
 
 ---

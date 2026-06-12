@@ -2,7 +2,7 @@
 
 **Feature:** gateway-baseline  
 **Plan Version:** 1.0.0  
-**Status:** Planned  
+**Status:** Implemented
 **Constitution Hash:** v4.0.0
 
 ---

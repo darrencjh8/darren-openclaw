@@ -174,10 +174,10 @@ Node.js source in existing `modules/expense-tracker/` and `modules/portfolio-tra
 
 **Purpose**: Cleanup Python, final validation, constitution update
 
-- [ ] T053 [P] Delete all 105 Python files after all Node.js tests pass: `modules/expense-tracker/src/*.py`, `modules/expense-tracker/tests/*.py`, `modules/portfolio-tracker/src/*.py`, `modules/portfolio-tracker/tests/*.py`
-- [ ] T054 [P] Delete `requirements.txt`, `pyproject.toml`, `uv.lock`, `.venv/` from both modules
-- [ ] T055 [P] Remove `python-dotenv`, `pytesseract`, `pdf2image`, `aioimaplib`, `beautifulsoup4`, `lxml`, `sentence-transformers`, `optimum[onnxruntime]` — all Python dependencies cleaned up
-- [ ] T056 [P] Verify zero Python files remain: `find . -name "*.py" -not -path "./.venv/*" -not -path "./node_modules/*" | wc -l` returns `0`
+- [x] T053 [P] Delete all 105 Python files after all Node.js tests pass: `modules/expense-tracker/src/*.py`, `modules/expense-tracker/tests/*.py`, `modules/portfolio-tracker/src/*.py`, `modules/portfolio-tracker/tests/*.py`
+- [x] T054 [P] Delete `requirements.txt`, `pyproject.toml`, `uv.lock`, `.venv/` from both modules
+- [x] T055 [P] Remove `python-dotenv`, `pytesseract`, `pdf2image`, `aioimaplib`, `beautifulsoup4`, `lxml`, `sentence-transformers`, `optimum[onnxruntime]` — all Python dependencies cleaned up
+- [x] T056 [P] Verify zero Python files remain: `find . -name "*.py" -not -path "./.venv/*" -not -path "./node_modules/*" | wc -l` returns `0`
 - [x] T057 [P] Update constitution 2.5: expense-tracker 205 MB → <150 MB, total system ~800 MB in `.specify/memory/constitution.md`
 - [x] T058 [P] Update `design.md` Section 5 — technology stack from Python to Node.js, tool count unchanged
 - [x] T059 Run quickstart.md validation scenarios (all 10 scenarios)
