@@ -84,14 +84,35 @@ export class AgentOrchestrator {
             const response = await this._llm.chat(messages, toolSchemas);
             const choice = (response.choices || [{}])[0];
             const message = choice.message || {};
+            const finishReason = choice.finish_reason || "";
 
             if (message.content)
                 messages.push({ role: "assistant", content: message.content });
 
             const toolCalls = message.tool_calls;
             if (!toolCalls) {
+                console.log(
+                    JSON.stringify({
+                        event: "orchestrator_completed",
+                        iteration: i,
+                        finish_reason: finishReason,
+                        content_snippet: (message.content || "").slice(0, 300),
+                    }),
+                );
                 return { action: "completed", details: message.content || "" };
             }
+
+            console.log(
+                JSON.stringify({
+                    event: "orchestrator_tool_calls",
+                    iteration: i,
+                    finish_reason: finishReason,
+                    tool_count: toolCalls.length,
+                    tools: toolCalls.map(
+                        (tc) => tc.function?.name || "unknown",
+                    ),
+                }),
+            );
 
             const amsg = {
                 role: "assistant",

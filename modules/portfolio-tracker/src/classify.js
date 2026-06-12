@@ -34,10 +34,14 @@ export async function dispatchEmail(msg, orchestrator, imapHandler) {
             }),
         );
 
-        await orchestrator.processEmail(
-            msg.msg_id,
-            msg.raw_email,
-            imapHandler,
+        await orchestrator.processEmail(msg.msg_id, msg.raw_email, imapHandler);
+
+        console.log(
+            JSON.stringify({
+                event: "portfolio_email_done",
+                msg_id: msg.msg_id || "",
+                subject: msg.subject || "",
+            }),
         );
     } catch (e) {
         console.error(
