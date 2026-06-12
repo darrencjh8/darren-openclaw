@@ -28,14 +28,6 @@
                 }
             },
             "mediaGenerationAutoProviderFallback": false,
-            "model": {
-                "primary": "deepseek/deepseek-v4-flash",
-                "fallbacks": [
-                    "deepseek/deepseek-v4-pro",
-                    "google/gemini-3.5-flash",
-                    "google/gemini-3.1-flash-lite"
-                ]
-            },
             "models": {
                 "deepseek/deepseek-v4-flash": {
                     "params": {
@@ -76,11 +68,37 @@
         },
         "list": [
             {
-                "id": "default",
-                "thinkingDefault": "medium"
+                "id": "orchestrator",
+                "thinkingDefault": "off",
+                "model": {
+                    "primary": "deepseek/deepseek-v4-flash",
+                    "fallbacks": [
+                        "google/gemini-3.5-flash",
+                        "google/gemini-3.1-flash-lite"
+                    ]
+                },
+                "subagents": {
+                    "allowAgents": ["thinker"],
+                    "delegationMode": "prefer"
+                }
+            },
+            {
+                "id": "thinker",
+                "workspace": "/app/.openclaw/workspace-thinker",
+                "thinkingDefault": "max",
+                "model": {
+                    "primary": "deepseek/deepseek-v4-pro",
+                    "fallbacks": ["deepseek/deepseek-v4-flash"]
+                }
             }
         ]
     },
+    "bindings": [
+        {
+            "agentId": "orchestrator",
+            "match": { "channel": "telegram", "accountId": "*" }
+        }
+    ],
     "gateway": {
         "port": 18789,
         "bind": "loopback",

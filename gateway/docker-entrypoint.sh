@@ -25,6 +25,20 @@ for (const name of files) {
   }
 }
 try { fs.unlinkSync('$WS/BOOTSTRAP.md'); console.log('BOOTSTRAP.md removed'); } catch(e) {}
+// Generate thinker workspace
+const thinkerWs = '/app/.openclaw/workspace-thinker';
+fs.mkdirSync(thinkerWs, { recursive: true });
+try {
+  let tt = fs.readFileSync('/app/AGENTS.thinker.md.template', 'utf8');
+  for (const k of vars) {
+    const re = new RegExp('\\\\\\$' + k + '(?![a-zA-Z0-9_])', 'g');
+    tt = tt.replace(re, process.env[k] || '');
+  }
+  fs.writeFileSync(thinkerWs + '/AGENTS.md', tt);
+  console.log('thinker AGENTS.md generated');
+} catch(e) {
+  console.log('thinker AGENTS.md skipped: ' + e.message);
+}
 "
 # Start Xvfb and dbus for headless browser support (Perchance, etc.)
 rm -f /tmp/.X99-lock 2>/dev/null

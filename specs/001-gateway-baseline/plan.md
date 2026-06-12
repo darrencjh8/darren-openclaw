@@ -45,26 +45,49 @@ graph TB
 
 ---
 
-## 2. openclaw.json — Gateway Configuration
+## 2. openclaw.json — Gateway Configuration (with Model Tiering)
 
 ```json5
 {
   "agents": {
     "defaults": {
-      "workspace": "/app/workspace",
-      "model": {
-        "primary": "deepseek/deepseek-chat"
+      "workspace": "/app/.openclaw/workspace",
+      "models": {
+        "deepseek/deepseek-v4-flash":   { "params": { "context1m": true, "maxTokens": 384000 } },
+        "deepseek/deepseek-v4-pro":     { "params": { "context1m": true, "maxTokens": 384000 } },
+        "google/gemini-3.5-flash":      { "params": { "context1m": true, "maxTokens": 65536 } },
+        "google/gemini-3.1-flash-lite": { "params": { "context1m": true, "maxTokens": 65536 } }
       },
-      "skills": ["expense-tracker"],
-      "session": {
-        "dmScope": "per-channel-peer"
+      "memorySearch": { "provider": "gemini" }
+    },
+    "list": [
+      {
+        "id": "orchestrator",
+        "thinkingDefault": "minimal",
+        "model": {
+          "primary": "deepseek/deepseek-v4-flash",
+          "fallbacks": ["google/gemini-3.5-flash", "google/gemini-3.1-flash-lite"]
+        },
+        "subagents": {
+          "allowAgents": ["thinker"],
+          "delegationMode": "prefer"
+        }
+      },
+      {
+        "id": "thinker",
+        "workspace": "/app/.openclaw/workspace-thinker",
+        "thinkingDefault": "max",
+        "model": {
+          "primary": "deepseek/deepseek-v4-pro",
+          "fallbacks": ["deepseek/deepseek-v4-flash"]
+        }
       }
-    }
+    ]
   },
-  "gateway": {
-    "port": 18789,
-    "bind": "0.0.0.0"
-  },
+  "bindings": [
+    { "agentId": "orchestrator", "match": { "channel": "telegram", "accountId": "*" } }
+  ],
+  "gateway": { "port": 18789, "bind": "loopback", "mode": "local" },
   "channels": {
     "telegram": {
       "enabled": true,
@@ -78,13 +101,14 @@ graph TB
 
 ### Design Rationale
 
-| Field | Value | Why |
-|---|---|---|
-| `skills` | `["expense-tracker"]` | Explicit allowlist. Only expense-tracker tools load into agent context. |
-| `dmScope` | `per-channel-peer` | Each Telegram user gets isolated session. Safe for future multi-user. |
-| `dmPolicy` | `allowlist` | Only pre-approved Telegram user IDs can talk. No pairing step needed. |
-| `botToken` | `${TELEGRAM_BOT_TOKEN}` | Env var substitution. Token never committed to git. |
-| `allowFrom` | `["tg:YOUR_ID"]` | Replace with your Telegram numeric user ID (from @userinfobot). Format: `tg:123456789` |
+Multi-agent model tiering routes tasks by complexity:
+
+| Agent | Model | Thinking | Purpose |
+|---|---|---|---|
+| orchestrator | `deepseek-v4-flash` | `off` | Classification, simple queries, delegation. 80% of messages. |
+| thinker | `deepseek-v4-pro` | `max` | Complex reasoning, multi-step analysis. Spawned via `sessions_spawn`. |
+
+The orchestrator's AGENTS.md includes tiering rules to classify tasks and delegate to thinker when needed. The thinker's AGENTS.md is a lean subset (tools + rules only — no tiering or persona). Per the [Sub-agents docs](https://docs.openclaw.ai/tools/subagents), sub-agents only receive `AGENTS.md` (no SOUL/USER/IDENTITY/MEMORY).
 
 ---
 

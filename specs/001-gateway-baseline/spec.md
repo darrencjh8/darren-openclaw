@@ -65,6 +65,8 @@ This spec covers the gateway runtime, Telegram channel, agent persona, skill dis
 - [x] Agent confirms before inserting transactions
 - [x] Agent understands dual-currency context (SGD and MYR)
 - [x] Agent routing rules defined for expense-tracker vs portfolio-tracker tools
+- [x] Multi-agent model tiering: orchestrator (v4-flash) delegates complex tasks to thinker (v4-pro)
+- [x] Bindings route Telegram messages to orchestrator agent
 
 ---
 
