@@ -91,6 +91,10 @@ services:
             - ../modules/perchance-gen:/app/modules/perchance-gen:ro
         env_file:
             - ../modules/portfolio-tracker/.env
+        environment:
+            - CDP_URL=http://host.docker.internal:9223
+        extra_hosts:
+            - "host.docker.internal:host-gateway"
         restart: unless-stopped
 
     ktmb-booking:
