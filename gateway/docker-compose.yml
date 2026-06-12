@@ -33,7 +33,7 @@ services:
             - DBUS_SESSION_BUS_ADDRESS=unix:path=/tmp/dbus-session
             - NODE_COMPILE_CACHE=/app/.openclaw/compile-cache
             - OPENCLAW_NO_RESPAWN=1
-            - CDP_URL=http://host.docker.internal:9223
+            - CDP_URL=http://172.17.0.1:9223
             - TZ=Asia/Kuala_Lumpur
         restart: unless-stopped
 
@@ -77,6 +77,24 @@ services:
             - PP_XML_PATH=/data/onedrive/Portfolio/Portfolio.portfolio
         env_file:
             - ../modules/portfolio-tracker/.env
+        restart: unless-stopped
+
+
+    image-gen:
+        build:
+            context: ../modules/image-gen
+            dockerfile: Dockerfile
+        ports:
+            - "127.0.0.1:8083:8083"
+        volumes:
+            - ../gateway/workspace/skills/image-generation:/app/scripts:ro
+            - ../modules/perchance-gen:/app/modules/perchance-gen:ro
+        env_file:
+            - ../modules/portfolio-tracker/.env
+        environment:
+            - CDP_URL=http://172.17.0.1:9223
+        extra_hosts:
+            - "host.docker.internal:host-gateway"
         restart: unless-stopped
 
     ktmb-booking:

@@ -1,0 +1,46 @@
+{
+  "version": 1,
+  "socket": {
+    "path": "/app/.openclaw/exec-approvals.sock"
+  },
+  "defaults": {
+    "security": "allowlist",
+    "ask": "on-miss",
+    "askFallback": "deny",
+    "autoAllowSkills": false
+  },
+  "agents": {
+    "orchestrator": {
+      "allowlist": [
+        {
+          "pattern": "curl"
+        },
+        {
+          "pattern": "qpdf"
+        },
+        {
+          "pattern": "pdftotext"
+        },
+        {
+          "pattern": "echo"
+        }
+      ]
+    },
+    "thinker": {
+      "allowlist": [
+        {
+          "pattern": "curl"
+        },
+        {
+          "pattern": "qpdf"
+        },
+        {
+          "pattern": "pdftotext"
+        },
+        {
+          "pattern": "echo"
+        }
+      ]
+    }
+  }
+}

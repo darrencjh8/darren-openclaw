@@ -848,10 +848,15 @@ export class ToolRegistry {
             return true;
         }
         const url = `${this._config.openclawGatewayUrl}/api/notify`;
+        const headers = { "Content-Type": "application/json" };
+        if (this._config.openclawGatewayToken) {
+            headers["Authorization"] =
+                `Bearer ${this._config.openclawGatewayToken}`;
+        }
         try {
             const r = await fetch(url, {
                 method: "POST",
-                headers: { "Content-Type": "application/json" },
+                headers,
                 body: JSON.stringify({ message }),
             });
             if (!r.ok) return false;
