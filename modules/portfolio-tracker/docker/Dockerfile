@@ -15,6 +15,7 @@ COPY package.json .
 RUN npm install --production
 
 COPY src/ ./src/
+COPY pp-cli/target/pp-cli.jar /app/pp-cli.jar
 
 RUN mkdir -p /app/data
 
