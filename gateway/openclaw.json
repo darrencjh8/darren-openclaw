@@ -86,7 +86,8 @@
                     "enabled": true,
                     "softThresholdTokens": 4000
                 }
-            }
+            },
+            "mediaGenerationAutoProviderFallback": false
         },
         "list": [
             {
@@ -130,7 +131,7 @@
     ],
     "gateway": {
         "port": 18789,
-        "bind": "lan",
+        "bind": "loopback",
         "mode": "local"
     },
     "tools": {
