@@ -79,6 +79,20 @@ services:
             - ../modules/portfolio-tracker/.env
         restart: unless-stopped
 
+
+    image-gen:
+        build:
+            context: ../modules/image-gen
+            dockerfile: Dockerfile
+        ports:
+            - "127.0.0.1:8083:8083"
+        volumes:
+            - ../gateway/workspace/skills/image-generation:/app/scripts:ro
+            - ../modules/perchance-gen:/app/modules/perchance-gen:ro
+        env_file:
+            - ../modules/portfolio-tracker/.env
+        restart: unless-stopped
+
     ktmb-booking:
         build:
             context: ../modules/ktmb
