@@ -588,11 +588,16 @@ export class ToolRegistry {
     async _notifyUser(message) {
         const gatewayUrl =
             process.env.OPENCLAW_GATEWAY_URL || "http://openclaw:18800";
+        const gatewayToken = process.env.OPENCLAW_GATEWAY_TOKEN || "";
         const url = `${gatewayUrl}/api/notify`;
+        const headers = { "Content-Type": "application/json" };
+        if (gatewayToken) {
+            headers["Authorization"] = `Bearer ${gatewayToken}`;
+        }
         try {
             const r = await fetch(url, {
                 method: "POST",
-                headers: { "Content-Type": "application/json" },
+                headers,
                 body: JSON.stringify({ message }),
                 signal: AbortSignal.timeout(10000),
             });

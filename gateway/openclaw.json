@@ -30,7 +30,6 @@
                     "enabled": true
                 }
             },
-            "mediaGenerationAutoProviderFallback": false,
             "models": {
                 "deepseek/deepseek-v4-flash": {
                     "params": {
@@ -67,9 +66,6 @@
                     "enabled": true,
                     "softThresholdTokens": 4000
                 }
-            },
-            "mediaGeneration": {
-                "enabled": false
             }
         },
         "list": [
@@ -114,7 +110,7 @@
     ],
     "gateway": {
         "port": 18789,
-        "bind": "loopback",
+        "bind": "lan",
         "mode": "local"
     },
     "tools": {
@@ -149,5 +145,23 @@
                 "tg:${TELEGRAM_CHAT_ID}"
             ]
         }
+    },
+    "hooks": {
+        "enabled": true,
+        "token": "7e97ba7091f76f0191ff3e48308f5244d1a4a071e14413089ac1cd80f77aae42",
+        "path": "/api",
+        "allowRequestSessionKey": false,
+        "mappings": [
+            {
+                "match": {
+                    "path": "notify"
+                },
+                "action": "agent",
+                "agentId": "orchestrator",
+                "wakeMode": "now",
+                "messageTemplate": "{{message}}",
+                "deliver": true
+            }
+        ]
     }
 }

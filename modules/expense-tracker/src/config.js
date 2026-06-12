@@ -32,6 +32,7 @@ export class Config {
         this.imapPassword = env.IMAP_PASSWORD || "";
         this.openclawGatewayUrl =
             env.OPENCLAW_GATEWAY_URL || "http://openclaw:18800";
+        this.openclawGatewayToken = env.OPENCLAW_GATEWAY_TOKEN || "";
         this.userName = env.USER_NAME || "there";
         this.systemPromptExtra = env.SYSTEM_PROMPT_EXTRA || "";
         this.dedupDbPath = env.DEDUP_DB_PATH || "data/dedup.db";
