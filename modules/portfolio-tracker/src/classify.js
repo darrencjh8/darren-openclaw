@@ -34,15 +34,28 @@ export async function dispatchEmail(msg, orchestrator, imapHandler) {
             }),
         );
 
-        await orchestrator.processEmail(msg.msg_id, msg.raw_email, imapHandler);
+        const result = await orchestrator.processEmail(
+            msg.msg_id,
+            msg.raw_email,
+            imapHandler,
+        );
 
         console.log(
             JSON.stringify({
                 event: "portfolio_email_done",
                 msg_id: msg.msg_id || "",
                 subject: msg.subject || "",
+                action: result?.action || "unknown",
+                details: (result?.details || "").slice(0, 200),
             }),
         );
+
+        // Safety net: if the LLM returned an error, notify the user directly
+        if (result?.action === "error") {
+            await orchestrator.tools.executeTool("notify_user", {
+                message: `⚠️ Failed to process email "${msg.subject || "(no subject)"}": ${result.details || "unknown error"}`,
+            });
+        }
     } catch (e) {
         console.error(
             JSON.stringify({
@@ -51,6 +64,14 @@ export async function dispatchEmail(msg, orchestrator, imapHandler) {
                 msg_id: msg.msg_id || "",
             }),
         );
+        // Notify user about unexpected failures
+        try {
+            await orchestrator?.tools?.executeTool("notify_user", {
+                message: `❌ Unexpected error processing email: ${e.message}`,
+            });
+        } catch {
+            /* can't notify */
+        }
     } finally {
         // Always mark as read to prevent re-processing
         if (imapHandler?.markRead) {
