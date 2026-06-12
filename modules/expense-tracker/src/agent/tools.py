@@ -5,6 +5,7 @@ import datetime
 import json
 import logging
 import os
+import time
 from pathlib import Path
 
 from aiohttp import ClientSession, ClientTimeout
@@ -13,33 +14,57 @@ from src.config import Config
 
 logger = logging.getLogger(__name__)
 ACTUAL_API_URL = os.environ.get("ACTUAL_API_URL", "http://localhost:3000")
-MAPPINGS_PATH = Path("data/mappings.json")
+
+
+class NotificationCooldown:
+    """Suppress repeat notifications for the same email within a 1-hour window."""
+
+    COOLDOWN_SECONDS = 3600  # 1 hour
+
+    def __init__(self):
+        self._entries: dict[str, float] = {}
+
+    def should_suppress(self, msg_id: str) -> bool:
+        """Return True if this msg_id was notified within the cooldown window."""
+        last = self._entries.get(msg_id)
+        if last is None:
+            return False
+        if time.time() - last < self.COOLDOWN_SECONDS:
+            return True
+        del self._entries[msg_id]
+        return False
+
+    def record(self, msg_id: str) -> None:
+        """Mark msg_id as having been notified now."""
+        self._entries[msg_id] = time.time()
+
+    def clear(self) -> None:
+        """Clear all cooldown entries (called on fact correction)."""
+        self._entries.clear()
 
 
 def load_mappings() -> dict:
-    if MAPPINGS_PATH.exists():
-        try:
-            return json.loads(MAPPINGS_PATH.read_text())
-        except (json.JSONDecodeError, OSError):
-            pass
+    """Deprecated — use MemoryStore.search() instead. Returns empty dict for backward compat."""
     return {"accounts": {}, "payees": {}, "categories": {}}
 
 
 def save_mappings(data: dict):
-    MAPPINGS_PATH.parent.mkdir(parents=True, exist_ok=True)
-    MAPPINGS_PATH.write_text(json.dumps(data, indent=2, ensure_ascii=False))
+    """Deprecated — use MemoryStore.add() instead. No-op for backward compat."""
+    pass
 
 
 class ToolRegistry:
-    """Registry of 11 deterministic tools the LLM can call.
+    """Registry of deterministic tools the LLM can call.
 
     Each tool has a JSON schema (OpenAI function-calling format) and
     an async implementation. The LLM chooses which tools to call
     and in what order.
     """
 
-    def __init__(self, config: Config):
+    def __init__(self, config: Config, memory=None):
         self._config = config
+        self._memory = memory
+        self._cooldown = NotificationCooldown()
         from src.utils.dedup import DedupJournal
 
         self._dedup = DedupJournal(config.dedup_db_path)
@@ -179,10 +204,10 @@ class ToolRegistry:
             return payee_name
         if payee_name.lower() in payee_names:
             return payee_name
-        learned = load_mappings().get("payees", {})
-        learned_names = {v.lower() for v in learned.values()}
-        if payee_name.lower() in learned_names:
-            return payee_name
+        if self._memory:
+            results = self._memory.search(payee_name, top_k=1)
+            if results and results[0]["score"] > 0.7:
+                return payee_name  # semantically matched in learned facts
         logger.warning(
             "_validate_payee: '%s' not in AB payees list, falling back to 'Misc'", payee_name
         )
@@ -239,6 +264,10 @@ class ToolRegistry:
         return True
 
     async def _handle_notify_user(self, message: str) -> bool:
+        # Suppress repeat notifications for the same email (1h cooldown)
+        if self._email_msg_id and self._cooldown.should_suppress(self._email_msg_id):
+            logger.info("Suppressing duplicate notify for msg %s", self._email_msg_id)
+            return True  # Report success so LLM doesn't retry
         url = f"{self._config.openclaw_gateway_url}/api/notify"
         try:
             async with self._session().post(url, json={"message": message}) as r:
@@ -246,20 +275,49 @@ class ToolRegistry:
                     text = await r.text()
                     logger.error("Gateway notify failed: %s", text[:200])
                     return False
+                if self._email_msg_id:
+                    self._cooldown.record(self._email_msg_id)
                 return True
         except Exception as e:
             logger.error("Gateway notify unreachable: %s", e)
             return False
 
-    async def _handle_learn_mapping(self, type: str, key: str, value: str) -> bool:
-        """types: accounts | payees | categories"""
-        data = load_mappings()
-        if type not in data:
-            data[type] = {}
-        data[type][key] = value
-        save_mappings(data)
-        logger.info("Learned: %s[%s] = %s", type, key, value)
-        return True
+    async def _handle_search_memory(self, query: str) -> dict:
+        """Semantic search over learned facts in MEMORY.md."""
+        if self._memory is None:
+            return {"results": []}
+        results = self._memory.search(query)
+        return {"results": results}
+
+    async def _handle_learn_fact(self, fact: str) -> dict:
+        """Append a learned fact to MEMORY.md with semantic dedup."""
+        if self._memory is None:
+            return {"added": False, "skipped": False, "reason": "no memory store"}
+        return self._memory.add(fact)
+
+    async def _handle_list_facts(self) -> dict:
+        """Return all learned facts from MEMORY.md."""
+        if self._memory is None:
+            return {"facts": []}
+        return {"facts": self._memory.list_facts()}
+
+    async def _handle_update_fact(self, old_text: str, new_text: str) -> dict:
+        """Replace a learned fact in MEMORY.md."""
+        if self._memory is None:
+            return {"updated": False, "found": False}
+        result = self._memory.update(old_text, new_text)
+        if result.get("updated"):
+            self._cooldown.clear()
+        return result
+
+    async def _handle_delete_fact(self, match_text: str) -> dict:
+        """Remove learned facts matching text from MEMORY.md."""
+        if self._memory is None:
+            return {"deleted": False, "count": 0}
+        result = self._memory.remove(match_text)
+        if result.get("deleted"):
+            self._cooldown.clear()
+        return result
 
     async def _handle_extract_email_content(self, include_headers: bool = True) -> str:
         if self._email_raw is None:
@@ -506,22 +564,68 @@ _TOOLS = [
         },
     },
     {
-        "name": "learn_mapping",
-        "description": "Record a learned mapping so future matching is more accurate. Types: accounts (what is this account), payees (keyword→payee_name), categories (keyword→category_name).",
+        "name": "search_memory",
+        "description": "Search learned facts in MEMORY.md using semantic similarity. Returns the most relevant facts for a query string — handles spelling variations and partial matches.",
         "schema": {
             "type": "object",
             "properties": {
-                "type": {"type": "string", "enum": ["accounts", "payees", "categories"]},
-                "key": {
+                "query": {
                     "type": "string",
-                    "description": "Account name, merchant keyword, or payee keyword",
-                },
-                "value": {
-                    "type": "string",
-                    "description": "The learned fact, e.g. 'credit card', 'Food', 'Transport'",
+                    "description": "What to search for, e.g. 'card ending 4605' or 'what payee for toast box'",
                 },
             },
-            "required": ["type", "key", "value"],
+            "required": ["query"],
+        },
+    },
+    {
+        "name": "learn_fact",
+        "description": "Record a learned fact in MEMORY.md for future memory search. The fact should be a complete sentence, e.g. 'Card ending 4605 belongs to UOB Ladies credit card' or 'Toast Box merchant maps to Food payee'. Duplicate or near-identical facts are automatically skipped.",
+        "schema": {
+            "type": "object",
+            "properties": {
+                "fact": {
+                    "type": "string",
+                    "description": "The fact to learn, as a complete natural-language sentence",
+                },
+            },
+            "required": ["fact"],
+        },
+    },
+    {
+        "name": "list_facts",
+        "description": "Return all learned facts currently stored in MEMORY.md.",
+        "schema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "update_fact",
+        "description": "Replace a learned fact in MEMORY.md. Finds the fact by matching old_text as a substring, then replaces it with new_text.",
+        "schema": {
+            "type": "object",
+            "properties": {
+                "old_text": {
+                    "type": "string",
+                    "description": "Text to search for (substring match) in existing facts",
+                },
+                "new_text": {
+                    "type": "string",
+                    "description": "Replacement fact text",
+                },
+            },
+            "required": ["old_text", "new_text"],
+        },
+    },
+    {
+        "name": "delete_fact",
+        "description": "Remove learned facts from MEMORY.md whose text contains the given match string (case-insensitive substring).",
+        "schema": {
+            "type": "object",
+            "properties": {
+                "match_text": {
+                    "type": "string",
+                    "description": "Substring to match against existing facts",
+                },
+            },
+            "required": ["match_text"],
         },
     },
     {

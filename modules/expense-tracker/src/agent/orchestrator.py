@@ -1,15 +1,15 @@
 """Agent Orchestrator — LLM conversation loop with tool calling."""
 
-import json
 import asyncio
+import json
 import logging
 from typing import Callable
 
 from openai import AsyncOpenAI
 
-from src.config import Config
-from src.agent.prompts import SYSTEM_PROMPT, FEW_SHOT_EXAMPLES
+from src.agent.prompts import FEW_SHOT_EXAMPLES, SYSTEM_PROMPT
 from src.agent.tools import ToolRegistry
+from src.config import Config
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +37,7 @@ class DeepSeekClient:
             "model": self._model,
             "messages": messages,
             "temperature": 0.1,
+            "extra_body": {"thinking": {"type": "medium"}},
         }
         if tools:
             kwargs["tools"] = tools
@@ -89,8 +90,9 @@ class AgentOrchestrator:
         Returns:
             dict with keys: action (inserted|skipped|notified|error), details
         """
-        from src.extractors import extract_email_content
         import email as em
+
+        from src.extractors import extract_email_content
 
         self._tools.set_email_context(msg_id, raw_email, imap_handler)
 
@@ -137,11 +139,15 @@ class AgentOrchestrator:
                             arguments = {}
 
                     result = await self._tools.execute_tool(name, arguments)
-                    messages.append({
-                        "role": "tool",
-                        "tool_call_id": tc.get("id", ""),
-                        "content": json.dumps(result) if not isinstance(result, str) else result,
-                    })
+                    messages.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": tc.get("id", ""),
+                            "content": json.dumps(result)
+                            if not isinstance(result, str)
+                            else result,
+                        }
+                    )
                     logger.info("Tool %s(%s) → %s", name, arguments, str(result)[:200])
 
         return {"action": "error", "details": "Max tool iterations exceeded"}
@@ -150,8 +156,10 @@ class AgentOrchestrator:
         messages = [{"role": "system", "content": SYSTEM_PROMPT}]
         for example in FEW_SHOT_EXAMPLES:
             messages.extend(example)
-        messages.append({
-            "role": "user",
-            "content": f"Process this email:\n\n{email_content}",
-        })
+        messages.append(
+            {
+                "role": "user",
+                "content": f"Process this email:\n\n{email_content}",
+            }
+        )
         return messages

@@ -1,6 +1,7 @@
 <!-- SPECKIT START -->
 For additional context about technologies to be used, project structure,
-shell commands, and other important information, read the current plan
+shell commands, and other important information, read the current plan:
+`specs/011-expense-memory-embeddings/plan.md`
 <!-- SPECKIT END -->
 
 ## Production Server
@@ -20,7 +21,9 @@ shell commands, and other important information, read the current plan
 
 ## Configuration
 
-- Verify `openclaw.json` changes against: https://github.com/openclaw/openclaw/tree/main/docs
+- Verify any changes against official docs: 
+  - https://docs.openclaw.ai/start/hubs
+  - https://github.com/openclaw/openclaw/tree/main/docs
 - Do not guess schema.
 
 ## Planning

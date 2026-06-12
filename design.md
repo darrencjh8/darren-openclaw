@@ -311,6 +311,8 @@ An LLM-powered agent that monitors a dedicated Email burner inbox via IMAP IDLE.
 | HTML Parsing | `beautifulsoup4` + `lxml` | Extract plain text from HTML email bodies |
 | PDF OCR | `pytesseract` + `pdf2image` | Optional; Tesseract binary in Docker image |
 | Dedup | `sqlite3` (stdlib) | Zero-dependency single-file journal |
+| Embeddings | `sentence-transformers` + `optimum[onnxruntime]` | all-MiniLM-L6-v2 ONNX quantized (~55MB) for semantic memory search |
+| Memory | `MEMORY.md` (Markdown) | Human-readable learned facts file, volume-mounted |
 | Logging | `logging` + `json` (stdlib) | JSON-line structured logs to stdout |
 | Container | Docker Compose | `Dockerfile` + `docker-compose.yml` |
 
@@ -327,9 +329,9 @@ An LLM-powered agent that monitors a dedicated Email burner inbox via IMAP IDLE.
 | US-7 | Notification for Ambiguous Emails | Unknown currency, missing amount, unmatched account → SMTP notification, email left unread |
 | US-8 | Idempotent Processing | Emails marked `\Seen` only after successful insert; safe to restart at any time |
 
-### 5.4 The 10 LLM Tools
+### 5.4 The 16 LLM Tools
 
-The LLM is given 10 function definitions (OpenAI-compatible JSON schema). It chooses which tools to call and in what order:
+The LLM is given 16 function definitions (OpenAI-compatible JSON schema). It chooses which tools to call and in what order:
 
 | # | Tool | Type | Description |
 |---|---|---|---|
@@ -341,8 +343,14 @@ The LLM is given 10 function definitions (OpenAI-compatible JSON schema). It cho
 | 6 | `insert_transaction` | Write | POST transaction to Actual Budget |
 | 7 | `check_duplicate` | Read | SHA-256 lookup in SQLite dedup journal |
 | 8 | `mark_email_read` | Write | Set IMAP `\Seen` flag |
-| 9 | `notify_user` | Write | Send SMTP notification to user's main inbox |
+| 9 | `notify_user` | Write | Send notification via gateway webhook (cooldown: 1h) |
 | 10 | `log_decision` | Write | Structured JSON log entry |
+| 11 | `search_memory` | Read | Semantic search over learned facts in MEMORY.md |
+| 12 | `learn_fact` | Write | Append fact to MEMORY.md with cosine-similarity dedup (≥0.95) |
+| 13 | `list_facts` | Read | Return all learned facts |
+| 14 | `update_fact` | Write | Replace a fact by substring match; clears notification cooldown |
+| 15 | `delete_fact` | Write | Remove facts by substring match; clears notification cooldown |
+| 16 | `reconcile_transaction` | Write | Mark AB transaction as cleared against statement |
 
 ### 5.5 Agent Orchestration (Mermaid Sequence)
 
@@ -429,6 +437,7 @@ CREATE TABLE dedup_journal (
 | `NOTIFICATION_EMAIL` | ✅ | User's main email for notifications |
 | `NOTIFICATION_EMAIL_PASSWORD` | ✅ | SMTP password (defaults to IMAP_PASSWORD if not set) |
 | `DEDUP_DB_PATH` | ❌ | Default: `data/dedup.db` |
+| `MEMORY_PATH` | ❌ | Default: `data/MEMORY.md`; path to learned facts file |
 | `LOG_LEVEL` | ❌ | Default: `INFO` |
 
 ### 5.8 Email Configuration
@@ -445,7 +454,23 @@ CREATE TABLE dedup_journal (
 | SMTP Port | 587 (STARTTLS) |
 | Architectural Impact | **Hostname-only configuration change** from any other IMAP provider |
 
-### 5.9 Implementation Status
+### 5.10 Memory System (Embeddings + MEMORY.md)
+
+The expense tracker learns from every processed email using a local semantic memory system:
+
+**Storage**: `MEMORY.md` — human-readable Markdown file with `## Facts` section. Each fact is a natural-language sentence (e.g., "Card ending 4605 belongs to UOB Ladies credit card"). Volume-mounted at `data/MEMORY.md`.
+
+**Embeddings**: `all-MiniLM-L6-v2` via ONNX runtime (~55 MB RAM, quantized int8). Loaded at startup, baked into Docker image at build time (no runtime download).
+
+**Semantic Search**: `search_memory(query)` — cosine similarity over 384-dim embeddings. Handles spelling variations ("TOASTBOX" matches "Toast Box") and partial matches ("card 4605" matches "Card ending 4605").
+
+**Self-Learning**: After each successful insert, `learn_fact()` appends 3 facts (account, payee, category). Dedup: cosine ≥ 0.95 → skip. Periodic rewrite every 50 facts cross-deduplicates the file.
+
+**User Feedback**: Gateway routes Telegram corrections ("X should be Y") to `update-fact`/`delete-fact`. Corrections clear the notification cooldown so pending emails re-process immediately.
+
+**Notification Cooldown**: Ambiguous emails trigger `notify_user()` once per hour per msg_id. Set cleared on any fact correction — unread emails re-process on next IDLE cycle.
+
+### 5.11 Implementation Status
 
 | Phase | Artifacts | Status |
 |---|---|---|
@@ -607,12 +632,23 @@ graph TB
         subgraph Startup["Container Startup"]
             TPL["*.md.template files"]
             ENT["docker-entrypoint.sh"]
-            WS["Workspace Files<br/>AGENTS, SOUL, USER, IDENTITY, MEMORY"]
+            WS["Orchestrator Workspace<br/>AGENTS, SOUL, USER, IDENTITY, MEMORY"]
+            TWS["Thinker Workspace<br/>AGENTS only"]
             TPL --> ENT --> WS
+            TPL --> ENT --> TWS
+        end
+
+        subgraph Agents["Multi-Agent Tiering"]
+            ORCH["orchestrator agent<br/>deepseek-v4-flash · thinking:off<br/>classifies + handles simple tasks"]
+            THINK["thinker agent<br/>deepseek-v4-pro · thinking:max<br/>spawned for complex reasoning"]
+            ORCH -->|"sessions_spawn"| THINK
         end
 
         GW["OpenClaw Gateway<br/>Custom Dockerfile<br/>Port 18789"]
-        WS -->|"system prompt"| GW
+        WS -->|"system prompt"| ORCH
+        TWS -->|"system prompt"| THINK
+        ORCH --> GW
+        THINK --> GW
 
         subgraph Memory["Memory System"]
             MC["memory-core plugin<br/>Gemini embeddings"]
@@ -642,6 +678,29 @@ graph TB
     PT --> PP["PP XML"]
     PT --> GS["Google Sheets"]
 ```
+
+**Model Tiering Flow:**
+
+```
+Telegram → bindings → orchestrator (v4-flash, thinking:off)
+                          │
+                  ┌───────┼────────┐
+                  │       │        │
+             Simple    Medium    Complex
+             (direct)  (direct)  (sessions_spawn → thinker)
+                                       │
+                                  thinker (v4-pro, thinking:max)
+                                  loads minimal AGENTS.md
+                                  calls tools, composes result
+                                  announces back to orchestrator
+```
+
+| Agent | Model | thinkingDefault | Fallbacks | Purpose |
+|---|---|---|---|---|
+| orchestrator | `deepseek-v4-flash` | `off` | gemini-3.5-flash → gemini-3.1-flash-lite | Classification, simple queries, delegation |
+| thinker | `deepseek-v4-pro` | `max` | deepseek-v4-flash | Complex reasoning, multi-step analysis, reconciliation |
+
+The orchestrator runs `delegationMode: "prefer"` with `allowAgents: ["thinker"]`. Per the [Thinking Levels doc](https://docs.openclaw.ai/tools/thinking), `off` disables reasoning entirely and `max` maps to `reasoning_effort: "max"` on DeepSeek V4. Sub-agents only receive `AGENTS.md` (no SOUL/IDENTITY/USER/MEMORY per the [Sub-agents doc](https://docs.openclaw.ai/tools/subagents)), so the thinker workspace is lean.
 
 ### 6.3 We Do NOT Build HTTP Endpoints
 
@@ -694,10 +753,12 @@ The node exposes device capabilities (`nodes.camera`, `nodes.screen`, `nodes.can
 |---|---|
 | Gateway container + Dockerfile | Implemented |
 | openclaw.json (models, providers, channels, agents, memory, compaction) | Deployed |
+| Multi-agent model tiering (orchestrator + thinker) | Deployed |
 | Workspace template files (AGENTS.md, SOUL.md, USER.md, IDENTITY.md) | Deployed |
-| MEMORY.md template (plugin-managed seed) | Specified |
-| USER.md template rewrite (compact user profile) | Specified |
-| docker-entrypoint.sh (template generation + Xvfb) | Deployed |
+| Thinker workspace template (AGENTS.thinker.md.template) | Deployed |
+| MEMORY.md template (plugin-managed seed) | Deployed |
+| USER.md template rewrite (compact user profile) | Deployed |
+| docker-entrypoint.sh (template generation + Xvfb + thinker ws) | Deployed |
 | Skills (expense-tracker, portfolio-tracker, image-gen, pdf) | Deployed |
 | Telegram channel + DM allowlist | Deployed |
 | Browser CDP relay (chrome-daemon.service) | Deployed |
@@ -710,14 +771,15 @@ Files live on the `openclaw_home` named Docker volume (`/app/.openclaw`), persis
 
 #### Template Pipeline
 
-At startup, `docker-entrypoint.sh` reads each `*.md.template`, substitutes `$ENV_VAR` placeholders (longest keys first), and writes to `/app/.openclaw/workspace/<NAME>.md`:
+At startup, `docker-entrypoint.sh` reads each `*.md.template`, substitutes `$ENV_VAR` placeholders (longest keys first), and writes to the appropriate workspace:
 
 ```
-AGENTS.md.template    →  AGENTS.md     (tool routing, rules, memory policy)
-SOUL.md.template      →  SOUL.md       (voice, tone, visual appearance)
-USER.md.template      →  USER.md       (currency, budgets, payees, accounts)
-IDENTITY.md.template  →  IDENTITY.md   (name, vibe, emoji)
-MEMORY.md.template    →  MEMORY.md     (section headers only — plugin-managed)
+AGENTS.md.template         →  /app/.openclaw/workspace/AGENTS.md            (orchestrator: tool routing, rules, model tiering, memory policy)
+AGENTS.thinker.md.template →  /app/.openclaw/workspace-thinker/AGENTS.md    (thinker: tool routing, rules — no tiering/persona)
+SOUL.md.template           →  /app/.openclaw/workspace/SOUL.md              (voice, tone, visual appearance)
+USER.md.template           →  /app/.openclaw/workspace/USER.md              (currency, budgets, payees, accounts)
+IDENTITY.md.template       →  /app/.openclaw/workspace/IDENTITY.md          (name, vibe, emoji)
+MEMORY.md.template         →  /app/.openclaw/workspace/MEMORY.md            (section headers only — plugin-managed)
 ```
 
 #### File Roles
@@ -995,11 +1057,19 @@ The expense-tracker container exposes an HTTP health check on port 8080 (returns
 |---|---|
 | Server #1 (Actual Budget, existing) | $0.00 (free tier) |
 | Ubuntu laptop (Docker, self-hosted) | $0.00 (existing hardware) |
-| DeepSeek API (~100 emails/month) | ~$0.10 |
+| DeepSeek API (~100 emails/month, expense-tracker internal LLM) | ~$0.10 |
+| DeepSeek API (Telegram chat — orchestrator v4-flash) | ~$0.05 |
+| DeepSeek API (Telegram chat — thinker v4-pro, ~20% of messages) | ~$0.05 |
+| Gemini API (embeddings + fallback, free tier) | $0.00 |
 | Email burner inbox | $0.00 (free tier) |
-| **Total incremental cost** | **~$0.10/month** |
+| **Total incremental cost** | **~$0.20/month** |
 
-Token economics per email: ~2000 input tokens (system prompt + email content + tool results) + ~200 output tokens = ~$0.001 per email.
+Token economics per email (expense-tracker internal): ~2000 input tokens + ~200 output tokens = ~$0.001 per email.
+
+Token economics per Telegram message: 
+- 80% simple (orchestrator v4-flash): ~500 tokens = ~$0.0001
+- 20% complex (thinker v4-pro): ~2000 tokens = ~$0.001
+- Weighted average per message: ~$0.0003
 
 ---
   <!-- trufflehog:ignore -->
@@ -1099,9 +1169,10 @@ gantt
 ```
 
 | Phase | Milestone | Status |
-|---|---|---|---|
+|---|---|---|
 | **Current** | expense-tracker (alert pipeline): Spec, Plan, Tasks complete | ✅ |
 | **Current** | statement-reconciliation: Spec, Plan, Tasks complete | ✅ |
+| **Current** | Gateway model tiering (orchestrator + thinker): Deployed | ✅ |
 | **Next** | expense-tracker: `/implement` — Phase 0 (Foundation) | ⬜ |
 | | statement-reconciliation: `/implement` — Phase 0 (Foundation) | ⬜ |
 | | expense-tracker: `/validate` — Test suite + Docker build | ⬜ |

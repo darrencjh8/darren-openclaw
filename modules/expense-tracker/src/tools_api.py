@@ -9,7 +9,7 @@ logger = logging.getLogger(__name__)
 
 
 def register_tools_api(app: web.Application, config, registry):
-    """Register all 12 tool endpoints on the given aiohttp app."""
+    """Register all tool endpoints on the given aiohttp app."""
     _make_handler = functools.partial(_build_handler, config=config, registry=registry)
 
     routes = [
@@ -24,7 +24,11 @@ def register_tools_api(app: web.Application, config, registry):
         ("/tools/mark-email-read", "mark_email_read"),
         ("/tools/notify-user", "notify_user"),
         ("/tools/log-decision", "log_decision"),
-        ("/tools/learn-mapping", "learn_mapping"),
+        ("/tools/search-memory", "search_memory"),
+        ("/tools/learn-fact", "learn_fact"),
+        ("/tools/list-facts", "list_facts"),
+        ("/tools/update-fact", "update_fact"),
+        ("/tools/delete-fact", "delete_fact"),
         ("/tools/reconcile-transaction", "reconcile_transaction"),
         ("/tools/fetch-unreconciled-transactions", "fetch_unreconciled_transactions"),
         ("/tools/record-statement", "record_statement"),

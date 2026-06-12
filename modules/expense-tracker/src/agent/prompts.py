@@ -8,84 +8,68 @@ USER_NAME = os.environ.get("USER_NAME", "there")
 MYR_BUDGET_FILE = os.environ.get("MYR_BUDGET_FILE", "")
 BUDGET_FILE = os.environ.get("ACTUAL_BUDGET_FILE", "")
 PROMPT_EXTRA = os.environ.get("SYSTEM_PROMPT_EXTRA", "")
-MAPPINGS_PATH = Path("data/mappings.json")
 
 _sgd_budget = BUDGET_FILE or "My Budget"
 _myr_budget = MYR_BUDGET_FILE or "My MYR Budget"
 
-
-def _load_learned_context() -> str:
-    """Load learned mappings and format as prompt context."""
-    if not MAPPINGS_PATH.exists():
-        return ""
-    try:
-        data = json.loads(MAPPINGS_PATH.read_text())
-    except (json.JSONDecodeError, OSError):
-        return ""
-
-    parts = []
-    accts = data.get("accounts", {})
-    if accts:
-        lines = [f"  - {k}: {v}" for k, v in sorted(accts.items())]
-        parts.append("KNOWN ACCOUNTS (from previous learnings):\n" + "\n".join(lines))
-
-    payees = data.get("payees", {})
-    if payees:
-        lines = [f"  - {k} → {v}" for k, v in sorted(payees.items())]
-        parts.append("LEARNED PAYEE MAPPINGS:\n" + "\n".join(lines))
-
-    cats = data.get("categories", {})
-    if cats:
-        lines = [f"  - {k} → {v}" for k, v in sorted(cats.items())]
-        parts.append("LEARNED CATEGORY MAPPINGS:\n" + "\n".join(lines))
-
-    return "\n\n".join(parts)
-
-
-LEARNED = _load_learned_context()
 
 SYSTEM_PROMPT = f"""\
 You are an expense-tracking agent connected to Actual Budget. Your job is to
 process receipt and transaction alert emails forwarded to a burner inbox.
 You communicate with {USER_NAME} via Telegram.
 
-RULES:
-1. NEVER insert a transaction unless you are confident in ALL of: amount,
-   currency, date, merchant, and account.
-2. If currency is not SGD or MYR → call notify_user(), do NOT insert.
-3. If you cannot extract an amount → call notify_user(), do NOT insert.
-4. If you cannot match an account → call notify_user(), do NOT insert.
-5. Always call fetch_accounts() + fetch_categories() + fetch_payees() in parallel.
-6. Always call check_duplicate() before insert_transaction().
-7. Amounts are in INTEGER CENTS. S$12.80 = -1280. MYR 45.50 = -4550. Negative for spending.
-8. Convert all dates to YYYY-MM-DD before calling insert_transaction().
- 9. If the email is promotional, a notification, a trade confirmation, an IBKR
-    Activity Flex statement, a portfolio report, or NOT a single spending transaction
-    → log_decision("skipped"), mark_email_read(). Do NOT notify user.
-    Do NOT call notify_user() for skipped items — only for actual transactions.
-    Trade/IBKR/portfolio emails are handled by a separate system — ignore them.
-10. If check_duplicate() returns True → log_decision("skipped", "duplicate").
-    Do NOT notify — duplicates are silent.
-11. Only call mark_email_read() after a successful insert_transaction().
-12. After EVERY successful insert → call notify_user() with a friendly, human-like
-    message. Always acknowledge the email that was just received. Example:
-    "Just caught a DBS Yuu alert — S$12.80 at Toast Box. Logged! 🍜"
-    or "Got an email from UOB Ladies: S$2.00 at Happy Hawker. Done! 🏃"
-    Keep it warm, brief, and conversational. Use emojis occasionally.
-13. After every ambiguous/error case → call notify_user() explaining what went
-    wrong in plain English. Example:
-    "Couldn't figure out which account 'UOB Card ending 4605' maps to.
-    Candidates: UOB One, UOB One Card, UOB Ladies. Can you help?"
-14. Always explain your reasoning before making tool calls.
+RULES (constraints — what NOT to do):
+ 1. NEVER insert unless you are confident in ALL of:
+    amount, currency, date, merchant, AND account.
+ 2. Both payee_name AND category_id are required for insert_transaction().
+    If you CAN match both → insert normally.
+    If you CANNOT match a payee → fallback to "Misc", insert WITHOUT
+    category_id, then notify_user() explaining the fallback.
+    If you CANNOT match an account → notify_user(), DO NOT insert.
+ 3. Currency not SGD or MYR → notify_user(), DO NOT insert.
+ 4. Cannot extract amount → notify_user(), DO NOT insert.
+ 5. Always call fetch_accounts() + fetch_categories() + fetch_payees()
+    in parallel (live AB data). This is separate from search_memory()
+    (learned facts) — you need BOTH.
+ 6. Always call check_duplicate() before insert_transaction().
+ 7. Amounts: INTEGER CENTS. S$12.80 = -1280. MYR 45.50 = -4550.
+    Negative for spending.
+ 8. Dates: YYYY-MM-DD format for ALL tool calls.
+ 9. Classify the email FIRST:
+    a. Clearly NOT a transaction (promo, trade confirmation, IBKR,
+       portfolio report, no amount) →
+       log_decision("skipped"), mark_email_read(), stop. No notify.
+    b. UNSURE (might be a transaction but can't extract details) →
+       notify_user() explaining the ambiguity. DO NOT mark as read.
+       DO NOT ask again about the same email within 1 hour.
+    c. CONFIRMED transaction → proceed to WORKFLOW.
+10. Duplicate detected (check_duplicate returns True) →
+    log_decision("skipped", "duplicate"), stop. No notify, no mark read.
+11. ONLY mark_email_read() when:
+    - Successful insert (per WORKFLOW step 10)
+    - Confirmed non-transactional (per Rule 9a)
+    NEVER mark as read in any other case.
+12. After EVERY successful insert → notify_user() with a friendly,
+    one-sentence message acknowledging the email. Use emojis occasionally.
+    Example: "Just caught a DBS Yuu alert — S$12.80 at Toast Box. Logged! 🍜"
+13. After EVERY ambiguous/error case → notify_user() explaining what
+    went wrong in plain English.
+14. After EVERY successful insert → call learn_fact() THREE times:
+    - Account: what type (debit card, credit card, bank)
+    - Payee: merchant keyword → payee name
+    - Category: payee name → category name
+    This builds the MEMORY.md file for future search_memory() calls.
 
 ACCOUNT MATCHING:
-- "Card ending 1234" → CARD account. "Account ending 1234" → BANK account.
-- Bank accounts: names with Account, Multiplier, 360, Bonus Saver, Advance, EGA, XL
-- Credit cards: names with Card, Cashback, Platinum, Revolution, Altitude, Journeys,
-  Ladies, Evol, Absolute, Reward, Visa
-- After matching → learn_mapping(type="accounts", key=name, value=type)
+- "Card ending 1234" → CARD. "Account ending 1234" → BANK.
+- Bank accounts: names with Account, Multiplier, 360, Bonus Saver,
+  Advance, EGA, XL
+- Credit cards: names with Card, Cashback, Platinum, Revolution,
+  Altitude, Journeys, Ladies, Evol, Absolute, Reward, Visa
+- Use search_memory() FIRST — learned facts override heuristics.
+- If still no match after memory + heuristics → notify_user(), stop.
 
-PAYEE MATCHING — match merchant keywords to EXISTING payees from fetch_payees():
+PAYEE MATCHING:
   hawker, food, restaurant, cafe, kitchen, eatery, dining, kopitiam → Food
   petrol, shell, caltex, spc, esso → Transport
   grocery, ntuc, fairprice, supermarket, cold storage → Groceries
@@ -94,51 +78,52 @@ PAYEE MATCHING — match merchant keywords to EXISTING payees from fetch_payees(
   coffee, starbucks, bubble tea → Coffee
   shopping, clothes, mall, retail → Shopping
   doctor, medical, pharmacy, clinic, watson, guardian → Healthcare
-- Set imported_description to the matched payee NAME.
-- CRITICAL: NEVER use a raw merchant name as a payee. Only use payees returned by fetch_payees().
-- If no keyword matches any existing payee, fallback to "Misc" or the closest generic payee.
-- Never insert a transaction with a payee that wasn't returned by fetch_payees().
-- After matching → learn_mapping(type="payees", key="<keyword>", value="<payee_name>")
+- Only use payee NAMES from fetch_payees().
+- No keyword match + no memory fact → "Misc" (still insert, notify).
 
-CATEGORY MATCHING — match to categories from fetch_categories() by name:
-  Food payee → Food category (find UUID by name)
-  Transport payee → Transport category
-  Groceries payee → Groceries category
-  etc.
-- Pass category_id (UUID) to insert_transaction().
-- After matching → learn_mapping(type="categories", key="<keyword>", value="<category_name>")
+CATEGORY MATCHING:
+- Payee name → category name → UUID from fetch_categories().
+  Food → Food UUID, Transport → Transport UUID, etc.
+- If payee is "Misc" → skip category_id.
 
 CURRENCY ROUTING:
 - SGD → budget "{_sgd_budget}" by name
 - MYR → budget "{_myr_budget}" by name
-- Pass budget_id as the budget FILE NAME when calling tools (e.g. "{_sgd_budget}" or "{_myr_budget}").
-- For MYR emails: use the MYR budget for ALL tool calls (fetch_accounts, insert_transaction, etc.).
-- Test scenario: "RM 45.50 at KFC from Maybank" → budget "{_myr_budget}", Maybank Visa account, Food payee, -4550 cents.
+- Pass budget_id as the budget FILE NAME when calling tools
+  (e.g. "{_sgd_budget}" or "{_myr_budget}").
+- For MYR emails: use the MYR budget for ALL tool calls.
 
-AUTO-LEARNING: After every successful match, call learn_mapping() to record it.
-This builds the knowledge base and improves future accuracy.
+USER CORRECTIONS (via Telegram → Gateway):
+- When the user sends a correction ("X should be Y", "forget X"),
+  the Gateway LLM handles it by calling update-fact() or delete-fact()
+  on the expense tracker. The expense tracker LLM is NOT involved.
+- After correction, the original email (still unread in IMAP)
+  re-processes on the next IDLE cycle with the corrected memory.
 
-WORKFLOW:
-1. Identify: currency, amount, merchant, date, card vs account number
-2. If currency is not SGD or MYR → notify_user() and stop
-3. fetch_accounts + fetch_categories + fetch_payees (parallel)
-4. Match account (prefer CARD if "card ending" mentioned)
-5. Match payee by keyword → find in payee list
-6. Match category by name → find UUID in category list
-7. check_duplicate → if True, skip silently (log_decision only, no notify)
-8. insert_transaction(account_id, date, amount_cents, imported_description=PAYEE, category_id=UUID)
-9. mark_email_read()
-10. notify_user() — friendly, human-like message
-11. learn_mapping() for account, payee, category
-12. log_decision()
-
-{LEARNED}
+WORKFLOW (follow in EXACT order):
+ 1. Classify the email per Rule 9.
+    - Non-transactional? → mark read, log, stop.
+    - Unsure? → notify, stop (cooldown handles re-asks).
+    - Confirmed transaction? → continue.
+ 2. search_memory() — learned facts for sender, merchant, card.
+ 3. Identify: currency, amount, merchant, date, card vs account number.
+ 4. fetch_accounts + fetch_categories + fetch_payees (parallel).
+ 5. Match account (memory first, then heuristics).
+ 6. Match payee (keyword table + memory → payee list). Misc if unmatched.
+ 7. Match category (payee name → UUID). Skip if Misc.
+ 8. check_duplicate(). If True → skip per Rule 10.
+ 9. insert_transaction(account_id, date, amount_cents,
+    imported_description=PAYEE, category_id=UUID).
+10. mark_email_read().
+11. notify_user() — friendly message.
+12. learn_fact() × 3 — account, payee, category.
+13. log_decision("inserted").
 """
 if PROMPT_EXTRA:
     SYSTEM_PROMPT += "\n\n" + PROMPT_EXTRA
 
 FEW_SHOT_EXAMPLES: list[list[dict]] = [
-    # Example 1: Happy path — DBS SGD alert
+    # Example 1: Happy path — DBS SGD alert with memory lookup
     [
         {
             "role": "user",
@@ -150,18 +135,16 @@ FEW_SHOT_EXAMPLES: list[list[dict]] = [
         },
         {
             "role": "assistant",
-            "content": "I can see this is a DBS transaction alert. Let me process it:\n"
-            "- Currency: SGD\n"
-            "- Amount: S$12.80 → -1280 cents\n"
-            "- Merchant: Toast Box\n"
-            "- Date: 04/06/2026 → 2026-06-04\n"
-            "- Potential account: DBS Yuu\n\n"
-            "Let me fetch the accounts, categories, and payees in parallel.",
-        },
-        {
-            "role": "assistant",
-            "content": None,
+            "content": "Classifying: confirmed transaction (currency SGD, amount $12.80, merchant Toast Box, date clear). Let me search memory and fetch data.",
             "tool_calls": [
+                {
+                    "id": "call_search",
+                    "type": "function",
+                    "function": {
+                        "name": "search_memory",
+                        "arguments": '{"query": "DBS Yuu Toast Box"}',
+                    },
+                },
                 {
                     "id": "call_1",
                     "type": "function",
@@ -190,6 +173,11 @@ FEW_SHOT_EXAMPLES: list[list[dict]] = [
         },
         {
             "role": "tool",
+            "tool_call_id": "call_search",
+            "content": '{"results":[{"text":"DBS Yuu is a debit card account","score":0.95},{"text":"Toast Box merchant maps to Food payee","score":0.88}]}',
+        },
+        {
+            "role": "tool",
             "tool_call_id": "call_1",
             "content": '[{"id": "acct-dbs-yuu", "name": "DBS Yuu"}]',
         },
@@ -205,7 +193,7 @@ FEW_SHOT_EXAMPLES: list[list[dict]] = [
         },
         {
             "role": "assistant",
-            "content": "Account: DBS Yuu. Payee: 'toast box' → Food (keyword match). Category: Food.",
+            "content": "Memory confirms: DBS Yuu is debit card, Toast Box → Food. Account matched, payee matched, category Food UUID found. Checking duplicate.",
             "tool_calls": [
                 {
                     "id": "call_4",
@@ -225,7 +213,7 @@ FEW_SHOT_EXAMPLES: list[list[dict]] = [
         },
         {
             "role": "assistant",
-            "content": "Not a duplicate. Inserting transaction.",
+            "content": "Not a duplicate. Inserting.",
             "tool_calls": [
                 {
                     "id": "call_5",
@@ -262,30 +250,30 @@ FEW_SHOT_EXAMPLES: list[list[dict]] = [
         },
         {
             "role": "assistant",
-            "content": "Done. Learning mappings and notifying user.",
+            "content": "Done. Learning facts and notifying.",
             "tool_calls": [
                 {
                     "id": "call_7",
                     "type": "function",
                     "function": {
-                        "name": "learn_mapping",
-                        "arguments": '{"type": "accounts", "key": "DBS Yuu", "value": "debit card"}',
+                        "name": "learn_fact",
+                        "arguments": '{"fact": "DBS Yuu is a debit card account"}',
                     },
                 },
                 {
                     "id": "call_8",
                     "type": "function",
                     "function": {
-                        "name": "learn_mapping",
-                        "arguments": '{"type": "payees", "key": "toast box", "value": "Food"}',
+                        "name": "learn_fact",
+                        "arguments": '{"fact": "Toast Box merchant maps to Food payee"}',
                     },
                 },
                 {
                     "id": "call_9",
                     "type": "function",
                     "function": {
-                        "name": "learn_mapping",
-                        "arguments": '{"type": "categories", "key": "food", "value": "Food"}',
+                        "name": "learn_fact",
+                        "arguments": '{"fact": "Food maps to Food category"}',
                     },
                 },
                 {
@@ -293,7 +281,7 @@ FEW_SHOT_EXAMPLES: list[list[dict]] = [
                     "type": "function",
                     "function": {
                         "name": "notify_user",
-                        "arguments": '{"message": "Hey there! Logged S$12.80 at Food under DBS Yuu — Toast Box 🍞"}',
+                        "arguments": '{"message": "Just caught a DBS Yuu alert — S$12.80 at Toast Box. Logged! 🍜"}',
                     },
                 },
                 {
@@ -302,8 +290,7 @@ FEW_SHOT_EXAMPLES: list[list[dict]] = [
                     "function": {
                         "name": "log_decision",
                         "arguments": '{"action": "inserted", '
-                        '"reasoning": "S$12.80 Toast Box → Food, DBS Yuu", '
-                        '"transaction_id": "txn-new"}',
+                        '"reasoning": "S$12.80 Toast Box → Food, DBS Yuu"}',
                     },
                 },
             ],
@@ -345,22 +332,22 @@ FEW_SHOT_EXAMPLES: list[list[dict]] = [
         },
         {
             "role": "assistant",
-            "content": "Promotional email — skipping and notifying.",
+            "content": "Classifying per Rule 9a: this is promotional — no transaction amount, date, or merchant. Skipping.",
             "tool_calls": [
                 {
                     "id": "call_1",
                     "type": "function",
                     "function": {
                         "name": "log_decision",
-                        "arguments": '{"action": "skipped", "reasoning": "Promotional email"}',
+                        "arguments": '{"action": "skipped", "reasoning": "Promotional email, no transaction"}',
                     },
                 },
                 {
                     "id": "call_2",
                     "type": "function",
                     "function": {
-                        "name": "notify_user",
-                        "arguments": '{"message": "Skipped a DBS promo email — not a transaction 📧"}',
+                        "name": "mark_email_read",
+                        "arguments": "{}",
                     },
                 },
             ],
@@ -387,7 +374,7 @@ FEW_SHOT_EXAMPLES: list[list[dict]] = [
         },
         {
             "role": "assistant",
-            "content": "Unknown currency THB — only SGD and MYR supported.",
+            "content": "Classifying per Rule 9b: unsure — currency is THB (not SGD or MYR). Per Rule 3, notify and stop. NOT marking as read.",
             "tool_calls": [
                 {
                     "id": "call_1",
@@ -402,8 +389,7 @@ FEW_SHOT_EXAMPLES: list[list[dict]] = [
                     "type": "function",
                     "function": {
                         "name": "log_decision",
-                        "arguments": '{"action": "notified", '
-                        '"reasoning": "Unknown currency THB"}',
+                        "arguments": '{"action": "notified", "reasoning": "Unknown currency THB"}',
                     },
                 },
             ],

@@ -10,14 +10,15 @@ import os
 import signal
 from pathlib import Path
 
-from src.config import Config
-from src.utils.logging import setup_logging, get_logger
-from src.utils.dedup import DedupJournal
-from src.agent.tools import ToolRegistry
+from src.agent.memory import MemoryStore
 from src.agent.orchestrator import AgentOrchestrator
-from src.statement.orchestrator import StatementProcessor
-from src.statement.journal import StatementJournal
+from src.agent.tools import ToolRegistry
+from src.config import Config
 from src.imap.idle_handler import ImapIdleHandler
+from src.statement.journal import StatementJournal
+from src.statement.orchestrator import StatementProcessor
+from src.utils.dedup import DedupJournal
+from src.utils.logging import get_logger, setup_logging
 
 
 async def _classify_email(raw_email: bytes, subject: str, sender: str) -> str:
@@ -27,9 +28,10 @@ async def _classify_email(raw_email: bytes, subject: str, sender: str) -> str:
     Defaults to 'transaction' on any error.
     """
     try:
+        from openai import AsyncOpenAI
+
         from src.extractors import extract_email_content
         from src.statement.prompts import CLASSIFICATION_PROMPT
-        from openai import AsyncOpenAI
 
         msg = em.message_from_bytes(raw_email)
         body = extract_email_content(msg)
@@ -63,7 +65,9 @@ async def _classify_email(raw_email: bytes, subject: str, sender: str) -> str:
         return "transaction"
 
 
-async def dispatch_email(msg: dict, classify_fn, orchestrator, statement_processor, imap_handler) -> None:
+async def dispatch_email(
+    msg: dict, classify_fn, orchestrator, statement_processor, imap_handler
+) -> None:
     """Dispatch an email to the correct pipeline based on classification.
 
     Public for testability — called from on_new_email inside main().
@@ -74,13 +78,17 @@ async def dispatch_email(msg: dict, classify_fn, orchestrator, statement_process
         msg.get("raw_email", b""), msg.get("subject", ""), msg.get("from", "")
     )
     if classification == "skip":
-        logger.info("skipping_non_expense_email", extra={
-            "correlation_id": "", "data": {
-                "subject": msg.get("subject", ""),
-                "from": msg.get("from", ""),
-                "msg_id": msg.get("msg_id", ""),
-            }
-        })
+        logger.info(
+            "skipping_non_expense_email",
+            extra={
+                "correlation_id": "",
+                "data": {
+                    "subject": msg.get("subject", ""),
+                    "from": msg.get("from", ""),
+                    "msg_id": msg.get("msg_id", ""),
+                },
+            },
+        )
         await imap_handler.mark_read(msg["msg_id"])
         return
     if classification == "statement":
@@ -98,9 +106,24 @@ async def main() -> None:
     dedup_path = Path(cfg.dedup_db_path)
     dedup_path.parent.mkdir(parents=True, exist_ok=True)
     dedup = DedupJournal(db_path=str(dedup_path))
-    logger.info("dedup_initialized", extra={"correlation_id": "", "data": {"path": cfg.dedup_db_path}})
+    logger.info(
+        "dedup_initialized", extra={"correlation_id": "", "data": {"path": cfg.dedup_db_path}}
+    )
 
-    registry = ToolRegistry(cfg)
+    # Initialize memory — migrate from mappings.json if MEMORY.md doesn't exist yet
+    memory = MemoryStore(path=cfg.memory_path)
+    if not memory.list_facts():
+        mappings_path = Path("data/mappings.json")
+        if mappings_path.exists():
+            logger.info("migrating_mappings_to_memory", extra={"correlation_id": "", "data": {}})
+            MemoryStore.migrate_from_mappings(str(mappings_path), cfg.memory_path)
+            memory = MemoryStore(path=cfg.memory_path)  # reload after migration
+    logger.info(
+        "memory_initialized",
+        extra={"correlation_id": "", "data": {"facts": len(memory.list_facts())}},
+    )
+
+    registry = ToolRegistry(cfg, memory=memory)
     orchestrator = AgentOrchestrator(cfg, tools=registry)
 
     stmt_db_path = os.environ.get("STATEMENT_DB_PATH", "data/statement.db")
@@ -108,7 +131,10 @@ async def main() -> None:
     statement_journal = StatementJournal(db_path=stmt_db_path)
     registry.set_statement_journal(statement_journal)
     statement_processor = StatementProcessor(cfg, tools=registry)
-    logger.info("statement_processor_initialized", extra={"correlation_id": "", "data": {"db": stmt_db_path}})
+    logger.info(
+        "statement_processor_initialized",
+        extra={"correlation_id": "", "data": {"db": stmt_db_path}},
+    )
 
     from aiohttp import web
 
@@ -119,6 +145,7 @@ async def main() -> None:
     app.router.add_get("/health", health)
 
     from src.tools_api import register_tools_api
+
     register_tools_api(app, cfg, registry)
     logger.info("tools_api_registered", extra={"correlation_id": "", "data": {"tools": 16}})
     runner = web.AppRunner(app)
@@ -128,13 +155,13 @@ async def main() -> None:
     logger.info("health_check_started", extra={"correlation_id": "", "data": {"port": 8080}})
 
     async def on_new_email(msg: dict) -> None:
-        await dispatch_email(
-            msg, _classify_email, orchestrator, statement_processor, imap_handler
-        )
+        await dispatch_email(msg, _classify_email, orchestrator, statement_processor, imap_handler)
 
     imap_handler = ImapIdleHandler(
-        cfg.imap_host, cfg.imap_port,
-        cfg.imap_username, cfg.imap_password,
+        cfg.imap_host,
+        cfg.imap_port,
+        cfg.imap_username,
+        cfg.imap_password,
     )
 
     idle_task = asyncio.create_task(imap_handler.idle_loop(on_new_email))

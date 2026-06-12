@@ -10,6 +10,9 @@ WORKDIR /app
 COPY requirements.txt .
 RUN --mount=type=cache,target=/root/.cache/pip pip install -r requirements.txt
 
+# Pre-download the embeddings model at build time (avoids runtime download)
+RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('all-MiniLM-L6-v2', backend='onnx')"
+
 COPY src/ ./src/
 COPY config/ ./config/
 

@@ -61,6 +61,9 @@ class Config:
     # Dedup
     dedup_db_path: str
 
+    # Memory
+    memory_path: str
+
     # Logging
     log_level: str
 
@@ -91,5 +94,6 @@ class Config:
             user_name=os.environ.get("USER_NAME", "there"),
             system_prompt_extra=os.environ.get("SYSTEM_PROMPT_EXTRA", ""),
             dedup_db_path=os.environ.get("DEDUP_DB_PATH", "data/dedup.db"),
+            memory_path=os.environ.get("MEMORY_PATH", "data/MEMORY.md"),
             log_level=os.environ.get("LOG_LEVEL", "INFO"),
         )

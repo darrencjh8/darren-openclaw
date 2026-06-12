@@ -22,6 +22,7 @@ def make_config(**overrides):
         "user_name": "TestUser",
         "system_prompt_extra": "",
         "dedup_db_path": ":memory:",
+        "memory_path": "data/MEMORY.md",
         "log_level": "INFO",
     }
     defaults.update(overrides)

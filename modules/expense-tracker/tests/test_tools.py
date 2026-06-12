@@ -22,6 +22,7 @@ def make_config(**overrides):
         "user_name": "TestUser",
         "system_prompt_extra": "",
         "dedup_db_path": ":memory:",
+        "memory_path": "data/MEMORY.md",
         "log_level": "INFO",
     }
     defaults.update(overrides)
@@ -32,17 +33,19 @@ def make_config(**overrides):
 class TestToolRegistry:
     """Tests for tool registry and tool execution."""
 
-    async def test_registry_returns_17_schemas(self):
+    async def test_registry_returns_21_schemas(self):
         from src.agent.tools import ToolRegistry
 
         registry = ToolRegistry(config=make_config())
         schemas = registry.get_tool_schemas()
-        assert len(schemas) == 17
+        assert len(schemas) == 21
         names = [s["function"]["name"] for s in schemas]
         assert "fetch_accounts" in names
         assert "insert_transaction" in names
         assert "check_duplicate" in names
-        assert "learn_mapping" in names
+        assert "search_memory" in names
+        assert "learn_fact" in names
+        assert "learn_mapping" not in names
 
     async def test_execute_tool_dispatches_correctly(self):
         """execute_tool dispatches to the correct tool function."""
