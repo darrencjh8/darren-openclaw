@@ -7,7 +7,7 @@
   "defaults": {
     "security": "allowlist",
     "ask": "on-miss",
-    "askFallback": "deny",
+    "askFallback": "allowlist",
     "autoAllowSkills": true
   },
   "agents": {
