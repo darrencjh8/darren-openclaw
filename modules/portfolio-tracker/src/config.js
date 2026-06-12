@@ -3,6 +3,8 @@
  * Ported 1:1 from src/config.py
  */
 
+import { readFileSync } from "fs";
+
 const REQUIRED_ENV_VARS = [
     "DEEPSEEK_API_KEY",
     "ACTUAL_BUDGET_URL",
@@ -29,8 +31,17 @@ export class Config {
         this.actualBudgetFile = env.ACTUAL_BUDGET_FILE || "";
         this.myrBudgetFile = env.MYR_BUDGET_FILE || "";
 
-        // Google Sheets
-        this.googleServiceAccountJson = env.GOOGLE_SERVICE_ACCOUNT_JSON || "";
+        // Google Sheets — supports both file path and inline JSON
+        const raw = env.GOOGLE_SERVICE_ACCOUNT_JSON || "";
+        if (raw && (raw.startsWith("/") || raw.startsWith("./"))) {
+            try {
+                this.googleServiceAccountJson = readFileSync(raw, "utf8");
+            } catch {
+                this.googleServiceAccountJson = raw;
+            }
+        } else {
+            this.googleServiceAccountJson = raw;
+        }
         this.googleSheetId = env.GOOGLE_SHEET_ID || "";
 
         // Taxonomy
