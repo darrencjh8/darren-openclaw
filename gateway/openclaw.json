@@ -115,10 +115,9 @@
     },
     "tools": {
         "exec": {
+            "mode": "auto",
             "timeoutSec": 30,
-            "strictInlineEval": true,
-            "security": "allowlist",
-            "ask": "off"
+            "strictInlineEval": true
         },
         "deny": [
             "image_generate"
