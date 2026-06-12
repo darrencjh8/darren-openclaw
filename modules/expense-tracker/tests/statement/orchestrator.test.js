@@ -453,3 +453,60 @@ describe("STATEMENT_PROMPT", () => {
         expect(STATEMENT_PROMPT).toContain("AUTHORITATIVE");
     });
 });
+
+// --- DeepSeek API call format regression tests (bug: body override) ---
+describe("DeepSeekClient API format", () => {
+    it("passes thinking in kwargs body, not as RequestOptions override", async () => {
+        const config = makeConfig();
+        const client = new DeepSeekClient(config);
+
+        const mockCreate = vi.fn().mockResolvedValue({
+            choices: [{ finish_reason: "stop", message: { content: "ok" } }],
+        });
+        client._client.chat.completions.create = mockCreate;
+
+        await client.chat([{ role: "user", content: "hello" }], null);
+
+        const callArgs = mockCreate.mock.calls[0];
+        expect(callArgs).toHaveLength(1);
+        const kwargs = callArgs[0];
+        expect(kwargs.messages).toBeDefined();
+        expect(kwargs.messages[0].content).toBe("hello");
+        expect(kwargs.thinking).toEqual({ type: "adaptive" });
+        expect(kwargs.model).toBe("deepseek-chat");
+    });
+
+    it("includes tools in kwargs with tool_choice auto", async () => {
+        const config = makeConfig();
+        const client = new DeepSeekClient(config);
+
+        const mockCreate = vi.fn().mockResolvedValue({
+            choices: [{ finish_reason: "stop", message: { content: "ok" } }],
+        });
+        client._client.chat.completions.create = mockCreate;
+
+        const tools = [{ type: "function", function: { name: "test_tool" } }];
+        await client.chat([{ role: "user", content: "hi" }], tools);
+
+        const kwargs = mockCreate.mock.calls[0][0];
+        expect(kwargs.tools).toEqual(tools);
+        expect(kwargs.tool_choice).toBe("auto");
+        expect(kwargs.thinking).toEqual({ type: "adaptive" });
+    });
+
+    it("retries on failure then succeeds on second attempt", async () => {
+        const config = makeConfig();
+        const client = new DeepSeekClient(config);
+
+        const mockCreate = vi.fn()
+            .mockRejectedValueOnce(new Error("Network error"))
+            .mockResolvedValue({
+                choices: [{ finish_reason: "stop", message: { content: "ok" } }],
+            });
+        client._client.chat.completions.create = mockCreate;
+
+        const result = await client.chat([{ role: "user", content: "hi" }], null);
+        expect(mockCreate).toHaveBeenCalledTimes(2);
+        expect(result.choices[0].message.content).toBe("ok");
+    });
+});

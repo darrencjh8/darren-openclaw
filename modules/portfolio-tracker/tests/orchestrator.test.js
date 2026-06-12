@@ -61,9 +61,7 @@ describe("DeepSeekClient", () => {
                 model: "deepseek-chat",
                 messages,
                 temperature: 0.1,
-            }),
-            expect.objectContaining({
-                body: { thinking: { type: "adaptive" } },
+                thinking: { type: "adaptive" },
             }),
         );
         expect(response).toBe(mockResponse);
@@ -87,7 +85,6 @@ describe("DeepSeekClient", () => {
                 tools,
                 tool_choice: "auto",
             }),
-            expect.anything(),
         );
     });
 

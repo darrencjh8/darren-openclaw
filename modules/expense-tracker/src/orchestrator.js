@@ -32,6 +32,7 @@ export class DeepSeekClient {
             model: this._model,
             messages,
             temperature: 0.1,
+            thinking: { type: "adaptive" },
         };
         if (tools) {
             kwargs.tools = tools;
@@ -42,9 +43,7 @@ export class DeepSeekClient {
         for (let attempt = 0; attempt < 3; attempt++) {
             try {
                 const response = await Promise.race([
-                    this._client.chat.completions.create(kwargs, {
-                        body: { thinking: { type: "adaptive" } },
-                    }),
+                    this._client.chat.completions.create(kwargs),
                     new Promise((_, reject) =>
                         setTimeout(() => reject(new Error("timeout")), 60000),
                     ),
