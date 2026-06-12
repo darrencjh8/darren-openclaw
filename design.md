@@ -303,18 +303,18 @@ An LLM-powered agent that monitors a dedicated Email burner inbox via IMAP IDLE.
 
 | Layer | Choice | Rationale |
 |---|---|---|
-| Runtime | Python 3.12-slim | Lightweight (~80MB), async I/O, mature IMAP/HTTP libraries |
+| Runtime | Node.js 22-slim | Fast builds (no PyTorch), unified JS stack with gateway |
 | LLM | DeepSeek `deepseek-chat` | $0.14/1M input, $0.28/1M output; strong at structured extraction |
-| LLM Client | `openai` SDK | DeepSeek is OpenAI-API-compatible |
-| IMAP | `aioimaplib` | Async IMAP IDLE support, lightweight |
-| HTTP | `aiohttp` | Async HTTP for Actual Budget REST API |
-| HTML Parsing | `beautifulsoup4` + `lxml` | Extract plain text from HTML email bodies |
-| PDF OCR | `pytesseract` + `pdf2image` | Optional; Tesseract binary in Docker image |
-| Dedup | `sqlite3` (stdlib) | Zero-dependency single-file journal |
-| Embeddings | `sentence-transformers` + `optimum[onnxruntime]` | all-MiniLM-L6-v2 ONNX quantized (~55MB) for semantic memory search |
-| Memory | `MEMORY.md` (Markdown) | Human-readable learned facts file, volume-mounted |
-| Logging | `logging` + `json` (stdlib) | JSON-line structured logs to stdout |
-| Container | Docker Compose | `Dockerfile` + `docker-compose.yml` |
+| LLM Client | `openai` npm | DeepSeek is OpenAI-API-compatible |
+| IMAP | `imapflow` + `mailparser` | Async IMAP IDLE support, modern API |
+| HTTP | `express` | Lightweight HTTP server for tool endpoints |
+| HTML Parsing | `cheerio` | jQuery-like API, fast |
+| PDF OCR | child_process `pdftotext` | Tesseract binary in Docker image |
+| Dedup | `better-sqlite3` | Native SQLite, reads same dedup.db |
+| Embeddings | `@xenova/transformers` (WASM) | all-MiniLM-L6-v2, ~50MB, no native deps |
+| Memory | `MEMORY.md` (Markdown) | Human-readable learned facts file, volume-mounted — unchanged |
+| Logging | `pino` | Fast JSON-line structured logs |
+| Container | Docker Compose | `Dockerfile` + `docker-compose.yml` — unchanged |
 
 ### 5.3 User Stories (from spec.md)
 
