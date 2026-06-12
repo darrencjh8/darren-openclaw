@@ -21,6 +21,7 @@
     },
     "agents": {
         "defaults": {
+            "workspace": "/app/.openclaw/workspace",
             "sandbox": {
                 "mode": "off",
                 "browser": {
@@ -106,7 +107,7 @@
     },
     "messages": {
         "tts": {
-            "auto": "always",
+            "auto": "tagged",
             "provider": "microsoft",
             "providers": {
                 "microsoft": {
