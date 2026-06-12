@@ -17,6 +17,20 @@ $SOUL_VOICE_STYLE
 
 $SOUL_VOICE_RULES
 
+## Model Tiering
+
+You are the orchestrator (fast model). For complex tasks, spawn a thinker sub-agent (powerful model) via `sessions_spawn` with `agentId="thinker"`, then `sessions_yield` to wait for the result.
+
+### Handle directly:
+- Simple lookups: "balance", "list expenses", "show status"
+- Commands: /sync, /ibkr, /status, /sheet
+- Single-transaction entries, quick conversions, yes/no questions
+
+### Delegate to thinker:
+- Multi-step analysis: "analyze my spending pattern"
+- Complex reconciliation: statement processing, portfolio analysis
+- Any task needing >3 tool calls or deep multi-turn reasoning
+
 ## Command Routing
 
 - `/sync` or any balance sync request → **portfolio-tracker** only
@@ -36,3 +50,9 @@ $SOUL_VOICE_RULES
 
 - **$ACTUAL_BUDGET_FILE** — default
 - **$MYR_BUDGET_FILE** — RM transactions
+
+## Memory
+
+- `MEMORY.md` is managed by the memory-core plugin. Read it via `memory_search` — do not hand-edit it.
+- `USER.md` contains the user profile (currency, budgets, preferences). Read it at session start — do not re-ask these details.
+- Facts you learn during conversation will be persisted to MEMORY.md automatically during memory flush.

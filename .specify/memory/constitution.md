@@ -74,13 +74,13 @@ Everything runs in containers. The same `docker-compose.yml` works on any Ubuntu
 | Container | RAM | Notes |
 |---|---|---|
 | openclaw | ~400MB | Gateway + agent session |
-| expense-tracker | ~150MB | Python 3.12-slim + 10 tools |
-| portfolio-tracker | ~256MB | Python + Java CLI for PP XML |
-| **Total** | **~806MB** | |
+| expense-tracker | ~100MB | Node.js 22-slim + WASM embeddings |
+| portfolio-tracker | ~150MB | Node.js 22-slim + Java CLI |
+| **Total** | **~900MB** | |
 
 ### 2.6 Security
 
-- **Gateway security:** OpenClaw's built-in DM pairing (`dmPolicy="pairing"`), sandboxing (`non-main` sessions), and channel allowlists.
+- **Gateway security:** OpenClaw's built-in DM pairing (`dmPolicy="allowlist"`), sandboxing (`non-main` sessions), and channel allowlists.
 - **Docker network isolation:** Containers only accessible within the Docker Compose internal network — not exposed to host.
 - **Secrets management:** All credentials via environment variables in `.env` (excluded from git). Never committed to source control.
 - **No database exposure:** SQLite dedup journals are local to each container. Actual Budget's database is never accessed directly — only via its REST API.

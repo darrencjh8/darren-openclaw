@@ -2,7 +2,7 @@
 
 **Feature:** portfolio-sync-export
 **Spec Version:** 3.0.0
-**Status:** Implemented
+**Status:** Done
 **Constitution Hash:** v1.0.0
 
 ---

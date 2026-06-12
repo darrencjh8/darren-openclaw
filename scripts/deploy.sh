@@ -118,28 +118,29 @@ else
   echo "  (portfolio-tracker/.env not found — cannot validate actual-api vars)"
 fi
 
-# ---- pluggable modules (docker-compose.override.env) ----
+# ---- pluggable modules (auto-discover from modules/*/module.env) ----
 
-OVERRIDE_ENV="$GATEWAY_DIR/docker-compose.override.env"
-if [ -f "$OVERRIDE_ENV" ]; then
-  echo ""
-  echo "--- Pluggable Modules ---"
-  source "$OVERRIDE_ENV"
-  if [ -n "${MODULE_NAME:-}" ]; then
-    echo "  ✓ Found: $MODULE_NAME"
-    if [ -f "${MODULE_ENV_FILE:-}" ]; then
-      for v in "${MODULE_REQUIRED_VARS[@]}"; do
-        check_var "$v" "$MODULE_ENV_FILE"
-      done
-    else
-      echo "  ✗ Module .env not found at ${MODULE_ENV_FILE:-}"
-      missing=$((missing + 1))
-    fi
+echo ""
+echo "--- Pluggable Modules ---"
+MODULE_COUNT=0
+for mod_env in "$ROOT"/modules/*/module.env; do
+  [ -f "$mod_env" ] || continue
+  MODULE_COUNT=$((MODULE_COUNT + 1))
+  source "$mod_env"
+  mod_dir="$(dirname "$mod_env")"
+  echo "  ✓ Found: ${MODULE_NAME:-unknown} ($mod_dir)"
+  mod_env_file="${mod_dir}/${MODULE_ENV_FILE:-.env}"
+  if [ -f "$mod_env_file" ]; then
+    for v in "${MODULE_REQUIRED_VARS[@]}"; do
+      check_var "$v" "$mod_env_file"
+    done
+  else
+    echo "  ✗ Module .env not found at $mod_env_file"
+    missing=$((missing + 1))
   fi
-else
-  echo ""
-  echo "--- Pluggable Modules ---"
-  echo "  (none — docker-compose.override.env not found)"
+done
+if [ "$MODULE_COUNT" -eq 0 ]; then
+  echo "  (none — no modules/*/module.env found)"
 fi
 
 # ---- result ----
@@ -239,9 +240,9 @@ cd "$GATEWAY_DIR"
 echo "Starting Cloudflare Warp (VPN for faster Docker pulls)..."
 warp-cli --accept-tos connect 2>/dev/null || true
 sleep 2
-echo "Starting Docker Compose (no-cache build)..."
+echo "Starting Docker Compose (cached build)..."
 export COMPOSE_DOCKER_CLI_BUILD=1 DOCKER_BUILDKIT=1
-docker compose build --no-cache
+docker compose build
 docker compose up -d "${DOCKER_ARGS[@]}"
 echo "Disconnecting Warp..."
 warp-cli --accept-tos disconnect 2>/dev/null || true
@@ -274,12 +275,14 @@ health_ok "actual-api"       "http://localhost:3000/health" || failed=$((failed 
 health_ok "expense-tracker"   "http://localhost:8080/health" || failed=$((failed + 1))
 health_ok "portfolio-tracker" "http://localhost:8081/health" || failed=$((failed + 1))
 
-# Pluggable module health checks (from docker-compose.override.env)
-if [ -f "$OVERRIDE_ENV" ] && [ -n "${MODULE_NAME:-}" ]; then
+# Pluggable module health checks (auto-discovered)
+for mod_env in "$ROOT"/modules/*/module.env; do
+  [ -f "$mod_env" ] || continue
+  source "$mod_env"
   for port in "${MODULE_HEALTH_PORTS[@]}"; do
-    health_ok "$MODULE_NAME" "http://localhost:$port/health" || failed=$((failed + 1))
+    health_ok "${MODULE_NAME:-unknown}" "http://localhost:$port/health" || failed=$((failed + 1))
   done
-fi
+done
 
 echo ""
 echo "========================================"

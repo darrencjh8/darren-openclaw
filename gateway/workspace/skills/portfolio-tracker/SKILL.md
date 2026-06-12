@@ -41,6 +41,8 @@ exec: curl -s -X POST http://portfolio-tracker:8081/tools/<name> -H "Content-Typ
 | `pp-taxonomies` | `{taxonomy_names:["Regions (Liquid)"]}` | Query holdings by taxonomy — returns per-currency native values |
 | `pp-status` | `{}` | Portfolio performance: holdings with prices, total value |
 | `pp-query-security` | `{search:"NVDA"}` | Query security by ticker/ISIN/name: shares, avg entry, price, value |
+| `pp-pull` | `{}` | Pull latest PP file from OneDrive |
+| `pp-push` | `{}` | Push PP file to OneDrive |
 
 ### IBKR & Documents
 
@@ -65,6 +67,7 @@ exec: curl -s -X POST http://portfolio-tracker:8081/tools/<name> -H "Content-Typ
 | `check-duplicate` | `{date, amount_cents, account_id, security_id?, type}` | Check if transaction exists |
 | `learn-mapping` | `{type, key, value}` | Record a learned association |
 | `log-decision` | `{action, reasoning, transaction_id?}` | Audit log entry |
+| `ask-user-confirmation` | `{question:"Proceed with 3 trades?", options:["Approve","Reject"]}` | Ask user a yes/no question via Telegram |
 
 ## Taxonomy Export (/sheet)
 

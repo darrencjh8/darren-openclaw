@@ -1,9 +1,9 @@
 # OpenClaw — Architecture Design Document
 
 **Project:** darren-openclaw
-**Version:** 2.0.0
-**Last Updated:** 2026-06-05
-**Status:** Specified & Planned — Implementation Pending (alert pipeline) + Statement Reconciliation (specified)
+**Version:** 2.1.0
+**Last Updated:** 2026-06-12
+**Status:** Gateway implemented & deployed. Workspace memory files specified. Statement Reconciliation specified.
 
 ---
 
@@ -15,6 +15,7 @@
 4. [Hosting Topology](#4-hosting-topology)
 5. [Module: expense-tracker](#5-module-expense-tracker)
 6. [Module: gateway](#6-module-gateway)
+   - [6.8 Workspace File Templates](#68-workspace-file-templates)
 7. [Data Flow](#7-data-flow)
 8. [Security Design](#8-security-design)
 9. [Observability](#9-observability)
@@ -33,10 +34,11 @@
 
 | Module | Purpose | Status |
 |---|---|---|
-| **expense-tracker** | Automated expense tracking via email → Actual Budget (Python tool backend) | Implemented |
-| **portfolio-tracker** | Investment portfolio sync: IBKR flex queries, PDF trade confirmations, AB → PP balance sync, taxonomy → Google Sheets. Notifications via Gateway webhook (Python + Java CLI) | Implemented |
-| **gateway** | OpenClaw Gateway deployment with expense-tracker skill | Config + skills written, implementation pending |
+| **expense-tracker** | Automated expense tracking via email → Actual Budget (Node.js tool backend) | Implemented |
+| **portfolio-tracker** | Investment portfolio sync: IBKR flex queries, PDF trade confirmations, AB → PP balance sync, taxonomy → Google Sheets. Notifications via Gateway webhook (Node.js + Java CLI) | Implemented |
+| **gateway** | OpenClaw Gateway deployment with expense-tracker + portfolio-tracker + ktmb-booking skills, Telegram channel, CDP browser relay, memory persistence | Implemented & Deployed |
 | **statement-reconciliation** | PDF credit card statement reconciliation + outlier detection | Specified, Planned, Tasked — Implementation Pending |
+| **ktmb-booking** | KTMB Shuttle Tebrau train booking + seat watcher (Python, Docker container) | Implemented |
 
 ---
 
@@ -46,7 +48,7 @@
 darren-openclaw/                          # Umbrella repository root
 ├── design.md                             # ← This file (architecture audit)
 ├── modules/
-│   ├── expense-tracker/                  # Python 3.12 module (expense tracking agent)
+│   ├── expense-tracker/                  # Node.js module (expense tracking agent)
 │   │   ├── .speckit/                     # Spec-Kit artifacts
 │       │   ├── constitution.md           # Non-negotiable architecture rules
 │       │   ├── agent.md                  # Agent harness (workflow state, context dump)
@@ -69,7 +71,7 @@ darren-openclaw/                          # Umbrella repository root
 │       ├── tests/                        # Test suite (stubs only)
 │       ├── docker/                       # Dockerfile for expense-tracker container
 │       └── db.sqlite                     # Dedup journal (runtime artifact)
-│   └── portfolio-tracker/                # Python 3.12 + Java 17 module
+│   └── portfolio-tracker/                # Node.js + Java 17 module
 │       ├── .speckit/                     # Spec-Kit artifacts (constitution, spec, plan, tasks, agent)
 │       ├── pp-cli/                       # Java CLI for PP XML read/write (Maven project)
 │       │   ├── pom.xml                   # Depends on name.abuchen.portfolio:0.84.1
@@ -88,17 +90,29 @@ darren-openclaw/                          # Umbrella repository root
 │       ├── docker/Dockerfile             # Python 3.12 + JRE 17 + Tesseract + curl
 │       └── README.md
 └── gateway/                              # OpenClaw Gateway config + skills
-    ├── openclaw.json                     # Gateway configuration
-    ├── docker-compose.yml                # Gateway + expense-tracker + actual-api
-    ├── workspace/                        # Agent workspace (persisted)
+    ├── openclaw.json                     # Gateway configuration (JSON5)
+    ├── docker-compose.yml                # Gateway + expense-tracker + actual-api + portfolio-tracker
+    ├── Dockerfile                        # Custom image extending openclaw:latest-browser
+    ├── docker-entrypoint.sh              # Template → workspace file generation + Xvfb/DBus startup
+    ├── .env                              # Secrets (TELEGRAM_BOT_TOKEN, GEMINI_API_KEY, etc.)
+    ├── AGENTS.md.template                # Agent instructions template (env-var substituted)
+    ├── SOUL.md.template                  # Agent persona template (voice, visual appearance)
+    ├── USER.md.template                  # User profile template (currency, budgets, rules)
+    ├── IDENTITY.md.template              # Agent identity template (name, vibe, emoji)
+    ├── MEMORY.md.template                # Memory seed template (plugin-managed, section headers only)
+    ├── workspace/                        # Agent workspace (persisted on openclaw_home volume)
     │   └── skills/                       # Skills loaded by the gateway
-    │       └── expense-tracker/          # Expense tracker skill
-    │           ├── SKILL.md              # LLM instructions for expense tracking
-    │           └── SKILL.js              # Tool wrappers (HTTP → Python tools)
+    │       ├── expense-tracker/          # Expense tracker skill
+    │       │   ├── SKILL.md              # LLM instructions for expense tracking
+    │       │   └── SKILL.js              # Tool wrappers (HTTP → Python tools)
+    │       ├── portfolio-tracker/        # Portfolio tracker skill
+    │       ├── image-generation/         # Image generation skill (Perchance + Pollinations)
+    │       └── pdf/                      # PDF decryption + extraction skill
     ├── actual-api/                       # Official Actual Budget API (Node.js)
     │   ├── server.js                     # Express.js wrapper around @actual-app/api
     │   ├── package.json                  # @actual-app/api@^26.6.0
     │   └── Dockerfile                    # Node.js container
+    ├── notify-webhook.py                 # Portfolio-tracker notification webhook → Telegram
     └── .speckit/                         # Spec-Kit artifacts (gateway + skill)
 ```
 
@@ -116,7 +130,7 @@ graph TB
          AB["Actual Budget<br/>Server<br/>(production host)"]
     end
 
-    subgraph OpenClaw["Ubuntu Laptop (Docker Compose): expense-tracker (Python 3.12-slim, ~150MB RAM)"]
+    subgraph OpenClaw["Ubuntu Laptop (Docker Compose): expense-tracker (Node.js, ~150MB RAM)"]
         subgraph Main["main.py"]
             IMAP["IMAP IDLE Loop<br/>imap/idle_handler.py"]
             Orch["Agent Orchestrator<br/>agent/orchestrator.py"]
@@ -195,9 +209,10 @@ OpenClaw uses the **LLM Agent Pattern**: the Python host is a thin runtime that 
 |---|---|---|---|
 | **Actual Budget** | Server #1 (existing) | Public HTTPS for web UI; API via HTTPS (with auth) | Existing production instance |
 | **OpenClaw Gateway** | Ubuntu laptop (Docker) | Agent orchestration, channels, skills, tool calling | ~400MB RAM |
-| **Expense-tracker** | Ubuntu laptop (Docker) | 10 deterministic Python tools, IMAP IDLE | ~150MB RAM |
-| **Portfolio-tracker** | Ubuntu server (Docker) | Python agent + Java CLI subprocess; IMAP ingress (Trades folder); PP XML read/write; notifications via Gateway webhook | ~256MB RAM |
+| **Expense-tracker** | Ubuntu laptop (Docker) | ~12 deterministic Node.js tools, IMAP IDLE | ~150MB RAM |
+| **Portfolio-tracker** | Ubuntu server (Docker) | Node.js agent + Java CLI subprocess; IMAP ingress (Trades folder); PP XML read/write; notifications via Gateway webhook | ~256MB RAM |
 | **actual-api** | Ubuntu laptop (Docker) | Official `@actual-app/api` (Node.js), WebSocket sync | ~100MB RAM |
+| **ktmb-booking** | Ubuntu laptop (Docker) | Python aiohttp API server + seat watcher worker; SQLite job store | ~150MB RAM |
 | **Email Burner** | Any IMAP provider | Public IMAP (imap.example.com:993) | Free tier, dedicated inbox |
 | **DeepSeek API** | DeepSeek Cloud | Public HTTPS (api.deepseek.com/v1) | Pay-per-token |
 | **Windows Node** (future) | Windows laptop | Canvas, camera, screen, voice — connects via WebSocket | Any modern Windows PC |
@@ -290,16 +305,18 @@ An LLM-powered agent that monitors a dedicated Email burner inbox via IMAP IDLE.
 
 | Layer | Choice | Rationale |
 |---|---|---|
-| Runtime | Python 3.12-slim | Lightweight (~80MB), async I/O, mature IMAP/HTTP libraries |
+| Runtime | Node.js 22-slim | Fast builds (no PyTorch), unified JS stack with gateway |
 | LLM | DeepSeek `deepseek-chat` | $0.14/1M input, $0.28/1M output; strong at structured extraction |
-| LLM Client | `openai` SDK | DeepSeek is OpenAI-API-compatible |
-| IMAP | `aioimaplib` | Async IMAP IDLE support, lightweight |
-| HTTP | `aiohttp` | Async HTTP for Actual Budget REST API |
-| HTML Parsing | `beautifulsoup4` + `lxml` | Extract plain text from HTML email bodies |
-| PDF OCR | `pytesseract` + `pdf2image` | Optional; Tesseract binary in Docker image |
-| Dedup | `sqlite3` (stdlib) | Zero-dependency single-file journal |
-| Logging | `logging` + `json` (stdlib) | JSON-line structured logs to stdout |
-| Container | Docker Compose | `Dockerfile` + `docker-compose.yml` |
+| LLM Client | `openai` npm | DeepSeek is OpenAI-API-compatible |
+| IMAP | `imapflow` + `mailparser` | Async IMAP IDLE support, modern API |
+| HTTP | `express` | Lightweight HTTP server for tool endpoints |
+| HTML Parsing | `cheerio` | jQuery-like API, fast |
+| PDF OCR | child_process `pdftotext` | Tesseract binary in Docker image |
+| Dedup | `better-sqlite3` | Native SQLite, reads same dedup.db |
+| Embeddings | `@xenova/transformers` (WASM) | all-MiniLM-L6-v2, ~50MB, no native deps |
+| Memory | `MEMORY.md` (Markdown) | Human-readable learned facts file, volume-mounted — unchanged |
+| Logging | `pino` | Fast JSON-line structured logs |
+| Container | Docker Compose | `Dockerfile` + `docker-compose.yml` — unchanged |
 
 ### 5.3 User Stories (from spec.md)
 
@@ -314,9 +331,9 @@ An LLM-powered agent that monitors a dedicated Email burner inbox via IMAP IDLE.
 | US-7 | Notification for Ambiguous Emails | Unknown currency, missing amount, unmatched account → SMTP notification, email left unread |
 | US-8 | Idempotent Processing | Emails marked `\Seen` only after successful insert; safe to restart at any time |
 
-### 5.4 The 10 LLM Tools
+### 5.4 The 16 LLM Tools
 
-The LLM is given 10 function definitions (OpenAI-compatible JSON schema). It chooses which tools to call and in what order:
+The LLM is given 16 function definitions (OpenAI-compatible JSON schema). It chooses which tools to call and in what order:
 
 | # | Tool | Type | Description |
 |---|---|---|---|
@@ -328,8 +345,14 @@ The LLM is given 10 function definitions (OpenAI-compatible JSON schema). It cho
 | 6 | `insert_transaction` | Write | POST transaction to Actual Budget |
 | 7 | `check_duplicate` | Read | SHA-256 lookup in SQLite dedup journal |
 | 8 | `mark_email_read` | Write | Set IMAP `\Seen` flag |
-| 9 | `notify_user` | Write | Send SMTP notification to user's main inbox |
+| 9 | `notify_user` | Write | Send notification via gateway webhook (cooldown: 1h) |
 | 10 | `log_decision` | Write | Structured JSON log entry |
+| 11 | `search_memory` | Read | Semantic search over learned facts in MEMORY.md |
+| 12 | `learn_fact` | Write | Append fact to MEMORY.md with cosine-similarity dedup (≥0.95) |
+| 13 | `list_facts` | Read | Return all learned facts |
+| 14 | `update_fact` | Write | Replace a fact by substring match; clears notification cooldown |
+| 15 | `delete_fact` | Write | Remove facts by substring match; clears notification cooldown |
+| 16 | `reconcile_transaction` | Write | Mark AB transaction as cleared against statement |
 
 ### 5.5 Agent Orchestration (Mermaid Sequence)
 
@@ -416,6 +439,7 @@ CREATE TABLE dedup_journal (
 | `NOTIFICATION_EMAIL` | ✅ | User's main email for notifications |
 | `NOTIFICATION_EMAIL_PASSWORD` | ✅ | SMTP password (defaults to IMAP_PASSWORD if not set) |
 | `DEDUP_DB_PATH` | ❌ | Default: `data/dedup.db` |
+| `MEMORY_PATH` | ❌ | Default: `data/MEMORY.md`; path to learned facts file |
 | `LOG_LEVEL` | ❌ | Default: `INFO` |
 
 ### 5.8 Email Configuration
@@ -432,7 +456,23 @@ CREATE TABLE dedup_journal (
 | SMTP Port | 587 (STARTTLS) |
 | Architectural Impact | **Hostname-only configuration change** from any other IMAP provider |
 
-### 5.9 Implementation Status
+### 5.10 Memory System (Embeddings + MEMORY.md)
+
+The expense tracker learns from every processed email using a local semantic memory system:
+
+**Storage**: `MEMORY.md` — human-readable Markdown file with `## Facts` section. Each fact is a natural-language sentence (e.g., "Card ending 4605 belongs to UOB Ladies credit card"). Volume-mounted at `data/MEMORY.md`.
+
+**Embeddings**: `all-MiniLM-L6-v2` via ONNX runtime (~55 MB RAM, quantized int8). Loaded at startup, baked into Docker image at build time (no runtime download).
+
+**Semantic Search**: `search_memory(query)` — cosine similarity over 384-dim embeddings. Handles spelling variations ("TOASTBOX" matches "Toast Box") and partial matches ("card 4605" matches "Card ending 4605").
+
+**Self-Learning**: After each successful insert, `learn_fact()` appends 3 facts (account, payee, category). Dedup: cosine ≥ 0.95 → skip. Periodic rewrite every 50 facts cross-deduplicates the file.
+
+**User Feedback**: Gateway routes Telegram corrections ("X should be Y") to `update-fact`/`delete-fact`. Corrections clear the notification cooldown so pending emails re-process immediately.
+
+**Notification Cooldown**: Ambiguous emails trigger `notify_user()` once per hour per msg_id. Set cleared on any fact correction — unread emails re-process on next IDLE cycle.
+
+### 5.11 Implementation Status
 
 | Phase | Artifacts | Status |
 |---|---|---|
@@ -591,28 +631,78 @@ The gateway can be joined by **OpenClaw nodes** — separate machines (Windows/m
 ```mermaid
 graph TB
     subgraph Local["Ubuntu Laptop — Docker Compose"]
-        GW["OpenClaw Gateway<br/>ghcr.io/openclaw/openclaw:latest<br/>Port 18789"]
-        
-        subgraph Skill["expense-tracker Skill"]
-            MD["SKILL.md — LLM instructions"]
-            JS["SKILL.js — 10 tool wrappers"]
+        subgraph Startup["Container Startup"]
+            TPL["*.md.template files"]
+            ENT["docker-entrypoint.sh"]
+            WS["Orchestrator Workspace<br/>AGENTS, SOUL, USER, IDENTITY, MEMORY"]
+            TWS["Thinker Workspace<br/>AGENTS only"]
+            TPL --> ENT --> WS
+            TPL --> ENT --> TWS
         end
-        
-        ET["expense-tracker<br/>Python 3.12-slim<br/>Port 8080<br/>10 tool endpoints + IMAP IDLE"]
-        
-        GW -->|"calls tool functions"| JS
-        JS -->|"HTTP POST /tools/*"| ET
+
+        subgraph Agents["Multi-Agent Tiering"]
+            ORCH["orchestrator agent<br/>deepseek-v4-flash · thinking:off<br/>classifies + handles simple tasks"]
+            THINK["thinker agent<br/>deepseek-v4-pro · thinking:max<br/>spawned for complex reasoning"]
+            ORCH -->|"sessions_spawn"| THINK
+        end
+
+        GW["OpenClaw Gateway<br/>Custom Dockerfile<br/>Port 18789"]
+        WS -->|"system prompt"| ORCH
+        TWS -->|"system prompt"| THINK
+        ORCH --> GW
+        THINK --> GW
+
+        subgraph Memory["Memory System"]
+            MC["memory-core plugin<br/>Gemini embeddings"]
+            MEM["MEMORY.md<br/>plugin-managed"]
+            MC -->|"memoryFlush"| MEM
+            MEM -->|"memory_search"| GW
+        end
+
+        subgraph Skills["Skills"]
+            EXP["expense-tracker"]
+            POR["portfolio-tracker"]
+            IMG["image-generation"]
+            PDF["pdf"]
+        end
+
+        GW -->|"tool calls"| Skills
+        EXP -->|"HTTP :8080"| ET["expense-tracker<br/>Node.js"]
+        POR -->|"HTTP :8081"| PT["portfolio-tracker<br/>Node.js + Java"]
     end
 
-    DS["DeepSeek API"] --> GW
-    ET --> AB["Actual Budget (Server)"]
-    ET --> Email["Email (IMAP IDLE)"]
-
-    subgraph Nodes["OpenClaw Nodes (future)"]
-        WIN["Windows Node<br/>canvas, camera, screen, voice"]
-    end
-    WIN -->|"WebSocket"| GW
+    DS["DeepSeek API"] -->|"LLM"| GW
+    GM["Gemini API"] -->|"embeddings"| MC
+    TG["Telegram API"] <-->|"Bot API"| GW
+    CH["Chrome CDP<br/>:9223"] <-->|"browser plugin"| GW
+    ET --> AB["Actual Budget"]
+    ET --> Email["IMAP Email"]
+    PT --> PP["PP XML"]
+    PT --> GS["Google Sheets"]
 ```
+
+**Model Tiering Flow:**
+
+```
+Telegram → bindings → orchestrator (v4-flash, thinking:off)
+                          │
+                  ┌───────┼────────┐
+                  │       │        │
+             Simple    Medium    Complex
+             (direct)  (direct)  (sessions_spawn → thinker)
+                                       │
+                                  thinker (v4-pro, thinking:max)
+                                  loads minimal AGENTS.md
+                                  calls tools, composes result
+                                  announces back to orchestrator
+```
+
+| Agent | Model | thinkingDefault | Fallbacks | Purpose |
+|---|---|---|---|---|
+| orchestrator | `deepseek-v4-flash` | `off` | gemini-3.5-flash → gemini-3.1-flash-lite | Classification, simple queries, delegation |
+| thinker | `deepseek-v4-pro` | `max` | deepseek-v4-flash | Complex reasoning, multi-step analysis, reconciliation |
+
+The orchestrator runs `delegationMode: "prefer"` with `allowAgents: ["thinker"]`. Per the [Thinking Levels doc](https://docs.openclaw.ai/tools/thinking), `off` disables reasoning entirely and `max` maps to `reasoning_effort: "max"` on DeepSeek V4. Sub-agents only receive `AGENTS.md` (no SOUL/IDENTITY/USER/MEMORY per the [Sub-agents doc](https://docs.openclaw.ai/tools/subagents)), so the thinker workspace is lean.
 
 ### 6.3 We Do NOT Build HTTP Endpoints
 
@@ -629,11 +719,11 @@ We configure `openclaw.json` — we do not build a custom server.
 
 | File | Language | Purpose |
 |---|---|---|
-| `SKILL.md` | Markdown | LLM instructions for expense tracking (in `workspace/skills/expense-tracker/`) |
-| `SKILL.js` | Node.js | 10 async functions → HTTP calls to Python tool API |
-| `tools_api.py` | Python | HTTP endpoints for each deterministic tool (in `modules/expense-tracker/src/`) |
-| `openclaw.json` | JSON5 | Gateway config (agent model, workspace, channels) |
-| `docker-compose.yml` | YAML | Two containers: gateway + expense-tracker |
+| `SKILL.md` (per skill) | Markdown | LLM instructions: expense-tracking, portfolio-sync, image-generation, PDF extraction, KTMB booking |
+| `tools_api.py` (ktmb-booking only) | Python | HTTP endpoints for deterministic tools |
+| `openclaw.json` | JSON5 | Gateway config (models, providers, channels, agents, memory, compaction, browser, tools) |
+| `docker-compose.yml` | YAML | Five containers: gateway + expense-tracker + portfolio-tracker + actual-api + ktmb-booking |
+| `*.md.template` | Markdown | Workspace file templates (AGENTS, SOUL, USER, IDENTITY, MEMORY) |
 
 ### 6.5 WhatsApp/Telegram — Zero Code Required
 
@@ -661,6 +751,62 @@ The node exposes device capabilities (`nodes.camera`, `nodes.screen`, `nodes.can
 ### 6.7 Status
 
 | Artifact | Status |
+|---|---|
+| Gateway container + Dockerfile | Implemented |
+| openclaw.json (models, providers, channels, agents, memory, compaction) | Deployed |
+| Multi-agent model tiering (orchestrator + thinker) | Deployed |
+| Workspace template files (AGENTS.md, SOUL.md, USER.md, IDENTITY.md) | Deployed |
+| Thinker workspace template (AGENTS.thinker.md.template) | Deployed |
+| MEMORY.md template (plugin-managed seed) | Deployed |
+| USER.md template rewrite (compact user profile) | Deployed |
+| docker-entrypoint.sh (template generation + Xvfb + thinker ws) | Deployed |
+| Skills (expense-tracker, portfolio-tracker, image-gen, pdf) | Deployed |
+| Telegram channel + DM allowlist | Deployed |
+| Browser CDP relay (chrome-daemon.service) | Deployed |
+| Memory search (Gemini embeddings) | Deployed |
+| Session compaction + memoryFlush | Deployed |
+
+### 6.8 Workspace File Templates
+
+Files live on the `openclaw_home` named Docker volume (`/app/.openclaw`), persisting across container restarts and image rebuilds.
+
+#### Template Pipeline
+
+At startup, `docker-entrypoint.sh` reads each `*.md.template`, substitutes `$ENV_VAR` placeholders (longest keys first), and writes to the appropriate workspace:
+
+```
+AGENTS.md.template         →  /app/.openclaw/workspace/AGENTS.md            (orchestrator: tool routing, rules, model tiering, memory policy)
+AGENTS.thinker.md.template →  /app/.openclaw/workspace-thinker/AGENTS.md    (thinker: tool routing, rules — no tiering/persona)
+SOUL.md.template           →  /app/.openclaw/workspace/SOUL.md              (voice, tone, visual appearance)
+USER.md.template           →  /app/.openclaw/workspace/USER.md              (currency, budgets, payees, accounts)
+IDENTITY.md.template       →  /app/.openclaw/workspace/IDENTITY.md          (name, vibe, emoji)
+MEMORY.md.template         →  /app/.openclaw/workspace/MEMORY.md            (section headers only — plugin-managed)
+```
+
+#### File Roles
+
+| File | Manager | Read/Write |
+|---|---|---|
+| `MEMORY.md` | memory-core plugin | Plugin writes (memoryFlush), agent reads (memory_search) |
+| `USER.md` | Human (template) | Agent reads at session start — never re-asks currency/budget/rules |
+| `SOUL.md` | Human (template) | Agent reads for persona, image-gen reads for appearance/outfit |
+| `AGENTS.md` | Human (template) | Agent reads for routing, rules, deployment, memory policy |
+| `IDENTITY.md` | Human (template) | Agent reads for name/vibe |
+
+#### Design: Compact Files
+
+Long-winded files give the LLM more surface to confabulate. Every line must earn its place:
+- **MEMORY.md**: Section headers only (`## Facts`, `## Preferences`, `## Decisions`). No example content that could be mistaken for real memories.
+- **USER.md**: Terse key-value. No narrative prose. Only facts the agent would otherwise re-ask.
+
+#### Memory Flow
+
+1. Agent learns a durable fact during conversation (e.g., "UOB 4605 = Ladies card")
+2. Session approaches `reserveTokens: 40000` → compaction triggered
+3. `memoryFlush` runs silent model turn → extracts key facts → appends to MEMORY.md
+4. Compaction summarizes old context; facts now safe in MEMORY.md
+5. Next session: `memory_search` retrieves facts from MEMORY.md via Gemini embeddings
+
 ---
 
 ## 5.B Module: portfolio-tracker
@@ -673,15 +819,15 @@ An LLM-powered agent that manages investment portfolio data in Portfolio Perform
 
 | Layer | Choice | Rationale |
 |---|---|---|
-| Runtime | Python 3.12 + Java 17 | Python for async I/O and LLM orchestration; Java for PP CLI (XML read/write) |
+| Runtime | Node.js 22 + Java 17 | Node.js for async I/O and LLM orchestration; Java for PP CLI (XML read/write) |
 | LLM | DeepSeek v4-flash / v4-pro | Flash for fast processing; Pro for complex balance sync |
 | LLM Client | openai SDK | DeepSeek is OpenAI-API-compatible |
-| IMAP | aioimaplib | Async IMAP IDLE for email ingestion |
+| IMAP | node-imap | IMAP IDLE for email ingestion |
 | Telegram | OpenClaw Gateway | Gateway handles Telegram channel; portfolio-tracker sends notifications via gateway webhook |
 | OneDrive | Microsoft Graph API | Source of truth for PP file |
 | PP CLI | Java JAR (pp-cli.jar) | Deterministic XML read/write for Portfolio Performance |
-| Google Sheets | google-api-python-client | Service account auth for taxonomy export |
-| Scheduler | apscheduler (AsyncIOScheduler) | Daily pp-sync-all cron at 3 AM SGT |
+| Google Sheets | googleapis (Node.js) | Service account auth for taxonomy export |
+| Scheduler | node-cron | Daily pp-sync-all cron at 3 AM SGT |
 
 ### 5B.3 Notification Architecture
 
@@ -912,11 +1058,19 @@ The expense-tracker container exposes an HTTP health check on port 8080 (returns
 |---|---|
 | Server #1 (Actual Budget, existing) | $0.00 (free tier) |
 | Ubuntu laptop (Docker, self-hosted) | $0.00 (existing hardware) |
-| DeepSeek API (~100 emails/month) | ~$0.10 |
+| DeepSeek API (~100 emails/month, expense-tracker internal LLM) | ~$0.10 |
+| DeepSeek API (Telegram chat — orchestrator v4-flash) | ~$0.05 |
+| DeepSeek API (Telegram chat — thinker v4-pro, ~20% of messages) | ~$0.05 |
+| Gemini API (embeddings + fallback, free tier) | $0.00 |
 | Email burner inbox | $0.00 (free tier) |
-| **Total incremental cost** | **~$0.10/month** |
+| **Total incremental cost** | **~$0.20/month** |
 
-Token economics per email: ~2000 input tokens (system prompt + email content + tool results) + ~200 output tokens = ~$0.001 per email.
+Token economics per email (expense-tracker internal): ~2000 input tokens + ~200 output tokens = ~$0.001 per email.
+
+Token economics per Telegram message: 
+- 80% simple (orchestrator v4-flash): ~500 tokens = ~$0.0001
+- 20% complex (thinker v4-pro): ~2000 tokens = ~$0.001
+- Weighted average per message: ~$0.0003
 
 ---
   <!-- trufflehog:ignore -->
@@ -1016,9 +1170,10 @@ gantt
 ```
 
 | Phase | Milestone | Status |
-|---|---|---|---|
+|---|---|---|
 | **Current** | expense-tracker (alert pipeline): Spec, Plan, Tasks complete | ✅ |
 | **Current** | statement-reconciliation: Spec, Plan, Tasks complete | ✅ |
+| **Current** | Gateway model tiering (orchestrator + thinker): Deployed | ✅ |
 | **Next** | expense-tracker: `/implement` — Phase 0 (Foundation) | ⬜ |
 | | statement-reconciliation: `/implement` — Phase 0 (Foundation) | ⬜ |
 | | expense-tracker: `/validate` — Test suite + Docker build | ⬜ |

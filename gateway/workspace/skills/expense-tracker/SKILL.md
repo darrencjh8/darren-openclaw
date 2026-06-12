@@ -36,6 +36,8 @@ exec: curl -s -X POST http://expense-tracker:8080/tools/<name> -H "Content-Type:
 | Tool | Key Args |
 |---|---|
 | `extract-pdf-text` | `{"pdf_bytes_b64":"..."}` — OCR a PDF and return text |
+| `extract-email-content` | `{}` — Extract text from current email (with PDF attachment support) |
+| `mark-email-read` | `{}` — Mark the triggering email as read |
 
 ### Budget & Transactions
 
@@ -46,40 +48,37 @@ exec: curl -s -X POST http://expense-tracker:8080/tools/<name> -H "Content-Type:
 | fetch-categories | `{}` |
 | fetch-recent-transactions | `{"account_id":"..."}`  |
 | check-duplicate | `{"date":"YYYY-MM-DD","amount_cents":-800,"account_id":"...","payee_name":"Food"}` |
-| insert-transaction | `{"date":"YYYY-MM-DD","amount_cents":-800,"account_id":"...","imported_description":"Food"}` |
+| insert-transaction | `{"date":"YYYY-MM-DD","amount_cents":-800,"account_id":"...","imported_description":"Food","budget_id":"...","category_id":"...","notes":"..."}` |
 | log-decision | `{"action":"inserted","reasoning":"..."}`  |
-| notify-user | `{"subject":"...","body":"..."}` |
-| reconcile-transaction | `{"ab_transaction_id":"...","statement_ref":"Statement May 2026"}` |
-| fetch-unreconciled-transactions | `{"account_id":"...","date_from":"YYYY-MM-DD","date_to":"YYYY-MM-DD"}` |
-| record-statement | `{"account_id":"...","period_start":"YYYY-MM-DD","period_end":"YYYY-MM-DD","matched_count":0,"outlier_count":0}` |
-| fetch-statement-history | `{"account_id":"...","period_start":"YYYY-MM-DD","period_end":"YYYY-MM-DD"}` |
+| notify-user | `{"message":"..."}` |
 
-## Statement Reconciliation
+### Memory & Learning
 
-When processing a bank/credit card STATEMENT (multiple transactions, PDF or text):
-
-1. STATEMENTS ARE AUTHORITATIVE — the bank's final record for a billing cycle
-2. Extract ALL transactions + statement period from the text
-3. `fetch-accounts` + `fetch-categories` + `fetch-statement-history` in parallel
-4. If `fetch-statement-history` returns a record → already processed, notify and stop
-5. `fetch-unreconciled-transactions(account_id, date_from, date_to)` — get uncleared AB txns
-6. For EACH statement line item:
-   - If matched (same amount ±20c, same date ±2d, similar merchant):
-     `reconcile-transaction(ab_transaction_id, "Statement [period]")` — marks cleared
-   - If NO match:
-     `insert-transaction` with `notes="OUTLIER | Statement [period]"` — NOT cleared
-7. `record-statement(account_id, period_start, period_end, matched_count, outlier_count)`
-8. `notify-user` with summary: "✅ X reconciled, ⚠️ Y outliers"
-9. `mark-email-read` after processing (always, even on failure)
+| Tool | Key Args |
+|---|---|
+| search-memory | `{"query":"card ending 4605"}` — semantic search over learned facts |
+| learn-fact | `{"fact":"Toast Box merchant maps to Food payee"}` — record a learned mapping |
+| list-facts | `{}` — show all learned facts |
+| update-fact | `{"old_text":"...","new_text":"..."}` — correct wrong fact |
+| delete-fact | `{"match_text":"..."}` — remove stale fact |
 
 ## Workflow
 
 1. Extract: amount, currency (default SGD), date, account name, description
-2. Call `fetch-accounts` + `fetch-payees` in parallel
-3. Match account by name substring; match payee by keyword (see below)
-4. Call `check-duplicate`
-5. Confirm: "I'll log S$X.XX as [Payee] under [Account]. OK?"
-6. If yes → `insert-transaction` with `account_id`, `date`, `amount_cents`, `imported_description`
+2. Call `search-memory` for learned facts about the sender, card, merchant
+3. Call `fetch-accounts` + `fetch-payees` in parallel
+4. Match account by name substring; match payee by keyword (see below)
+5. Call `check-duplicate`
+6. Confirm: "I'll log S$X.XX as [Payee] under [Account]. OK?"
+7. If yes → `insert-transaction` with `account_id`, `date`, `amount_cents`, `imported_description`
+8. After every successful insert → call `learn-fact` 3 times (account type, payee, category)
+
+## Memory Corrections
+
+When the user asks to fix a learned mapping:
+- "X should be Y" or "change X to Y" → `search-memory` to find → `update-fact`
+- "forget X" or "remove X" → `search-memory` to find → `delete-fact`
+- "show learned facts" → `list-facts`
 
 ## Email Classification
 

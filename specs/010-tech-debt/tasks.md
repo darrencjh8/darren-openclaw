@@ -1,7 +1,7 @@
 # Tech Debt Tasks
 
 **Status:** Open
-**Migrated from:** 006-balance-sync, 008-cron-automation, 009-ibkr-import, 014-portfolio-tracker-fixes
+**Migrated from:** 006-balance-sync, 008-cron-automation, 009-ibkr-import, 014-portfolio-tracker-fixes, 005-portfolio-balance-sync-cron
 
 ---
 
@@ -89,6 +89,15 @@
 
 ---
 
+## From 005 — Portfolio Balance Sync Cron
+
+### T1.1 — Move Cron Scheduling to OpenClaw Gateway
+- [ ] Migrate cron scheduling from internal apscheduler to OpenClaw gateway managed scheduling
+- Gateway should invoke respective module APIs on a configurable schedule
+- **Why tech debt:** Architectural improvement — centralized scheduling reduces per-module complexity and avoids duplicate scheduler instances
+
+---
+
 ## Summary
 
 | Source Spec | Items | Type |
@@ -97,4 +106,5 @@
 | 008-cron-automation | 1 | Missing integration test |
 | 009-ibkr-import | 1 | Missing integration test |
 | 014-portfolio-tracker-fixes | 8 | Spec drift + workflow fix + test gap + noise |
-| **Total** | **19** | |
+| 005-portfolio-balance-sync-cron | 1 | Architecture — move cron to gateway |
+| **Total** | **20** | |

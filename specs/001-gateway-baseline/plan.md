@@ -2,8 +2,8 @@
 
 **Feature:** gateway-baseline  
 **Plan Version:** 1.0.0  
-**Status:** Planned  
-**Constitution Hash:** v3.0.0  
+**Status:** Implemented
+**Constitution Hash:** v4.0.0
 
 ---
 
@@ -45,32 +45,77 @@ graph TB
 
 ---
 
-## 2. openclaw.json — Gateway Configuration
+## 2. openclaw.json — Gateway Configuration (with Model Tiering)
+
+See `gateway/openclaw.json` for the authoritative config. Key sections:
 
 ```json5
 {
-  "agents": {
-    "defaults": {
-      "workspace": "/app/workspace",
-      "model": {
-        "primary": "deepseek/deepseek-chat"
-      },
-      "skills": ["expense-tracker"],
-      "session": {
-        "dmScope": "per-channel-peer"
-      }
+  // Skill discovery: workspace/skills/ (auto) + extraDirs (explicit)
+  "skills": { "load": { "extraDirs": ["/home/node/skills"] } },
+  // Model providers (API keys via env var substitution)
+  "models": {
+    "providers": {
+      "deepseek": { "apiKey": "${DEEPSEEK_API_KEY}" },
+      "google":    { "apiKey": "${GEMINI_API_KEY}" }
     }
   },
-  "gateway": {
-    "port": 18789,
-    "bind": "0.0.0.0"
+  // Browser CDP relay to Docker host Chrome
+  "browser": {
+    "noSandbox": true,
+    "cdpUrl": "${CDP_URL}",
+    "attachOnly": true
   },
+  "agents": {
+    "defaults": {
+      "workspace": "/app/.openclaw/workspace",
+      "sandbox": { "mode": "off", "browser": { "enabled": true } },
+      "mediaGenerationAutoProviderFallback": false,
+      "models": {
+        "deepseek/deepseek-v4-flash":   { "params": { "context1m": true, "maxTokens": 384000 } },
+        "deepseek/deepseek-v4-pro":     { "params": { "context1m": true, "maxTokens": 384000 } },
+        "google/gemini-3.5-flash":      { "params": { "context1m": true, "maxTokens": 65536 } },
+        "google/gemini-3.1-flash-lite": { "params": { "context1m": true, "maxTokens": 65536 } }
+      },
+      "memorySearch": { "provider": "gemini" },
+      "compaction": {
+        "reserveTokens": 40000,
+        "reserveTokensFloor": 20000,
+        "memoryFlush": { "enabled": true, "softThresholdTokens": 4000 }
+      }
+    },
+    "list": [
+      {
+        "id": "orchestrator",
+        "thinkingDefault": "adaptive",
+        "model": {
+          "primary": "deepseek/deepseek-v4-flash",
+          "fallbacks": ["google/gemini-3.5-flash", "google/gemini-3.1-flash-lite"]
+        },
+        "subagents": { "allowAgents": ["thinker"], "delegationMode": "prefer" }
+      },
+      {
+        "id": "thinker",
+        "workspace": "/app/.openclaw/workspace-thinker",
+        "thinkingDefault": "max",
+        "model": {
+          "primary": "deepseek/deepseek-v4-pro",
+          "fallbacks": ["deepseek/deepseek-v4-flash"]
+        }
+      }
+    ]
+  },
+  "bindings": [
+    { "agentId": "orchestrator", "match": { "channel": "telegram", "accountId": "*" } }
+  ],
+  "gateway": { "port": 18789, "bind": "loopback", "mode": "local" },
+  "messages": { "tts": { "auto": "tagged", "provider": "microsoft" } },
   "channels": {
     "telegram": {
       "enabled": true,
       "botToken": "${TELEGRAM_BOT_TOKEN}",
       "dmPolicy": "allowlist",
-      "allowFrom": ["tg:YOUR_TELEGRAM_USER_ID"]
+      "allowFrom": ["tg:${TELEGRAM_CHAT_ID}"]
     }
   }
 }
@@ -78,106 +123,71 @@ graph TB
 
 ### Design Rationale
 
-| Field | Value | Why |
-|---|---|---|
-| `skills` | `["expense-tracker"]` | Explicit allowlist. Only expense-tracker tools load into agent context. |
-| `dmScope` | `per-channel-peer` | Each Telegram user gets isolated session. Safe for future multi-user. |
-| `dmPolicy` | `allowlist` | Only pre-approved Telegram user IDs can talk. No pairing step needed. |
-| `botToken` | `${TELEGRAM_BOT_TOKEN}` | Env var substitution. Token never committed to git. |
-| `allowFrom` | `["tg:YOUR_ID"]` | Replace with your Telegram numeric user ID (from @userinfobot). Format: `tg:123456789` |
+Multi-agent model tiering routes tasks by complexity:
+
+| Agent | Model | Thinking | Purpose |
+|---|---|---|---|
+| orchestrator | `deepseek-v4-flash` | `adaptive` | Classification, simple queries, delegation. 80% of messages. |
+| thinker | `deepseek-v4-pro` | `max` | Complex reasoning, multi-step analysis. Spawned via `sessions_spawn`. |
+
+The orchestrator's AGENTS.md includes tiering rules to classify tasks and delegate to thinker when needed. The thinker's AGENTS.md is a lean subset (tools + rules only — no tiering or persona). Per the [Sub-agents docs](https://docs.openclaw.ai/tools/subagents), sub-agents only receive `AGENTS.md` (no SOUL/USER/IDENTITY/MEMORY).
 
 ---
 
 ## 3. Agent Persona — workspace/AGENTS.md
 
-The persona file lives in the workspace so users can customize it without touching config:
+Generated at startup from `gateway/AGENTS.md.template` with env-var substitution (`$USER_NAME`, `$ACTUAL_BUDGET_FILE`, `$MYR_BUDGET_FILE`, `$SYSTEM_PROMPT_EXTRA`, etc.). The template covers:
 
-```markdown
-# AGENTS.md
+- **Two tool servers**: expense-tracker (Actual Budget) + portfolio-tracker (PP, IBKR, Google Sheets)
+- **Model tiering**: orchestrator handles simple queries; complex tasks delegated to thinker via `sessions_spawn`
+- **Command routing**: `/sync`, `/ibkr`, `/status`, `/sheet` → portfolio-tracker; expense queries → expense-tracker
+- **Memory policy**: MEMORY.md is plugin-managed (read-only for agent), USER.md loaded at session start
+- **Rules**: confirm before inserting, dual-currency (SGD/MYR), amounts in cents, duplicates skipped silently
+- **`$SYSTEM_PROMPT_EXTRA`**: injected from env var for extended instructions (routing details, PDF workflow, deployment context)
 
-You are a personal finance assistant with access to Actual Budget. You help the
-user track expenses, check accounts, and review spending. You are friendly,
-conversational, and always explain what you're doing.
-
-## Your Tools
-
-- fetch_accounts — look up available accounts
-- fetch_categories — look up spending categories
-- fetch_payees — look up payees/merchants
-- fetch_recent_transactions — check recent spending
-- insert_transaction — log a new expense
-- check_duplicate — verify a transaction isn't a repeat
-- notify_user — alert the user if something needs attention
-
-## Rules
-
-1. Always confirm before inserting. Tell the user: "I'll log S$X.XX at [merchant]
-   under [account] ([category]). Shall I proceed?"
-2. The user's budgets are in SGD and MYR. Detect the currency from the amount
-   (S$, SGD, RM, MYR). Ask if unsure.
-3. If you can't match an account or category, show the user their options — don't
-   guess.
-4. Always check for duplicates before inserting.
-5. Be conversational but efficient. Don't over-explain simple confirmations.
-6. If the user just says "track" or gives an amount without context, ask for
-   the missing details (merchant, account).
-7. When the user asks about their spending, summarize clearly with amounts and
-   categories.
-```
+The thinker agent has a separate lean `AGENTS.thinker.md.template` (tools + rules only — no persona, tiering, or memory policy).
 
 ---
 
-## 4. Docker Compose — Environment Variables
+## 4. Docker Compose — Service Topology
 
-```yaml
-services:
-  openclaw:
-    image: ghcr.io/openclaw/openclaw:latest
-    ports:
-      - "18789:18789"
-    volumes:
-      - ./openclaw.json:/app/openclaw.json:ro
-      - ./workspace:/app/workspace
-      - openclaw_data:/app/data
-    environment:
-      - OPENCLAW_CONFIG_PATH=/app/openclaw.json
-      - OPENCLAW_HOME=/app
-      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
-    restart: unless-stopped
+See `gateway/docker-compose.yml` for the authoritative definition. Summary:
 
-  expense-tracker:
-    build:
-      context: ../modules/expense-tracker
-      dockerfile: docker/Dockerfile
-    ports:
-      - "127.0.0.1:8080:8080"
-    volumes:
-      - ../modules/expense-tracker/data:/app/data
-      - ../modules/expense-tracker/.env:/app/.env:ro
-    restart: unless-stopped
+| Service | Port | Source | Role |
+|---|---|---|---|
+| **openclaw** | 18789, 18800 | Custom Dockerfile (`gateway/Dockerfile`) extending `openclaw:latest-browser` | Gateway runtime, Telegram channel, agent orchestration, notify webhook |
+| **expense-tracker** | 8080 | `modules/expense-tracker/` | Expense tracking tools (Actual Budget) |
+| **actual-api** | 3000 | `gateway/actual-api/` | Actual Budget REST API bridge |
+| **portfolio-tracker** | 8081 | `modules/portfolio-tracker/` | Portfolio sync, IBKR, PP, Google Sheets |
+| **ktmb-booking** | 8082 | `modules/ktmb-booking/` | KTMB train booking + seat watcher |
 
-volumes:
-  openclaw_data:
-```
-
-`TELEGRAM_BOT_TOKEN` is set in the host environment or a `.env` file next to `docker-compose.yml`.
+Key details:
+- Gateway uses a **custom entrypoint** (`docker-entrypoint.sh`) that generates workspace files from templates before starting OpenClaw
+- Skills are **bind-mounted** at `/app/.openclaw/workspace/skills/` (expense-tracker, portfolio-tracker, image-generation, pdf)
+- External ktmb-booking skill mounted via `skills.load.extraDirs` at `/home/node/skills/ktmb-booking`
+- `openclaw_home` named volume persists workspace files; `openclaw_data` persists sessions and memory indexes
+- `host.docker.internal` extra_host for Chrome CDP browser relay
+- All inter-service communication over the internal Docker compose network
 
 ---
 
-## 5. Skill Registration Flow
+## 5. Skill Discovery
+
+Skills are discovered through two complementary OpenClaw mechanisms:
+
+1. **Workspace auto-discovery** (`workspace/skills/`): Any `SKILL.md` under the workspace skills directory is auto-loaded. Used for expense-tracker, portfolio-tracker, image-generation, and pdf skills.
+2. **Explicit extra directories** (`skills.load.extraDirs`): Additional skill paths listed in `openclaw.json`. Used for ktmb-booking (`/home/node/skills/ktmb-booking`).
+
+Both mechanisms are standard OpenClaw features. Workspace skills take precedence over extraDirs when names collide. No config-level skill allowlist is needed — discovery is purely filesystem-based.
 
 ```
 Gateway starts
     → Reads openclaw.json
-    → agents.defaults.skills = ["expense-tracker"]
-    → Searches workspace/skills/ for matching SKILL.md files
-    → Finds workspace/skills/expense-tracker/SKILL.md
-    → Loads SKILL.md instructions into agent system prompt
-    → Loads SKILL.js tool functions
-    → Agent is now ready to process expense-tracking requests
+    → Auto-discovers SKILL.md files from workspace/skills/
+    → Loads additional skills from skills.load.extraDirs
+    → Injects SKILL.md instructions into agent system prompt
+    → Agent can invoke tools from all discovered skill servers
 ```
-
-No manual registration. The `skills` allowlist + workspace directory structure is all that's needed.
 
 ---
 
@@ -225,3 +235,22 @@ No manual registration. The `skills` allowlist + workspace directory structure i
 | Bot scope | Telegram Bot API — bot only sees messages sent to it. No access to chats, contacts, or groups |
 | Gateway exposed | Bound to `0.0.0.0` within Docker network only. Host maps `18789` if needed |
 | Expense-tracker exposed | Bound to `127.0.0.1:8080` — only gateway on same host can reach it |
+
+### dmPolicy Rationale
+
+`allowlist` is preferred over `pairing` for this single-user deployment:
+- One known Telegram user — no need for a pairing code flow
+- Simpler config: just the user ID in `allowFrom`
+- Equally secure: the bot only responds to the configured ID regardless of mechanism
+
+---
+
+## 8. Explicit Non-Goals (Decisions)
+
+| Decision | Rationale |
+|---|---|
+| No custom bootstrap limits | OpenClaw defaults (20000/60000 chars) sufficient for current workspace files |
+| No sandboxing (`mode: "off"`) | `off` is a documented OpenClaw sandbox mode; sandboxing adds Docker-in-Docker complexity with no benefit for a single-user trusted deployment |
+| No compaction user notifications | Silent compaction is the OpenClaw default; user doesn't need to see housekeeping |
+| No session pruning | Pruning exists for Anthropic prompt-cache cost savings; DeepSeek doesn't use prompt caching, so pruning has no benefit |
+| No HEARTBEAT.md, TOOLS.md, BOOT.md | All optional per OpenClaw workspace spec. AGENTS.md already covers tool conventions; no heartbeat configured; boot handled by entrypoint |

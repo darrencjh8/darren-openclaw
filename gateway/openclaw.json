@@ -1,9 +1,7 @@
 {
     "skills": {
         "load": {
-            "extraDirs": [
-                "/home/node/skills"
-            ]
+            "extraDirs": ["/home/node/skills"]
         }
     },
     "models": {
@@ -23,6 +21,7 @@
     },
     "agents": {
         "defaults": {
+            "workspace": "/app/.openclaw/workspace",
             "sandbox": {
                 "mode": "off",
                 "browser": {
@@ -30,12 +29,31 @@
                 }
             },
             "mediaGenerationAutoProviderFallback": false,
-            "model": {
-                "primary": "deepseek/deepseek-v4-flash",
-                "fallbacks": [
-                    "deepseek/deepseek-v4-pro",
-                    "google/gemini-3.1-flash-lite"
-                ]
+            "models": {
+                "deepseek/deepseek-v4-flash": {
+                    "params": {
+                        "context1m": true,
+                        "maxTokens": 384000
+                    }
+                },
+                "deepseek/deepseek-v4-pro": {
+                    "params": {
+                        "context1m": true,
+                        "maxTokens": 384000
+                    }
+                },
+                "google/gemini-3.5-flash": {
+                    "params": {
+                        "context1m": true,
+                        "maxTokens": 65536
+                    }
+                },
+                "google/gemini-3.1-flash-lite": {
+                    "params": {
+                        "context1m": true,
+                        "maxTokens": 65536
+                    }
+                }
             },
             "memorySearch": {
                 "provider": "gemini"
@@ -51,15 +69,49 @@
         },
         "list": [
             {
-                "id": "default",
-                "thinkingDefault": "medium"
+                "id": "orchestrator",
+                "thinkingDefault": "adaptive",
+                "model": {
+                    "primary": "deepseek/deepseek-v4-flash",
+                    "fallbacks": [
+                        "google/gemini-3.5-flash",
+                        "google/gemini-3.1-flash-lite"
+                    ]
+                },
+                "subagents": {
+                    "allowAgents": ["thinker"],
+                    "delegationMode": "prefer"
+                }
+            },
+            {
+                "id": "thinker",
+                "workspace": "/app/.openclaw/workspace-thinker",
+                "thinkingDefault": "max",
+                "model": {
+                    "primary": "deepseek/deepseek-v4-pro",
+                    "fallbacks": ["deepseek/deepseek-v4-flash"]
+                }
             }
         ]
     },
+    "bindings": [
+        {
+            "agentId": "orchestrator",
+            "match": { "channel": "telegram", "accountId": "*" }
+        }
+    ],
     "gateway": {
         "port": 18789,
         "bind": "loopback",
         "mode": "local"
+    },
+    "tools": {
+        "exec": {
+            "timeoutSec": 30,
+            "strictInlineEval": true,
+            "security": "allowlist",
+            "ask": "on-miss"
+        }
     },
     "messages": {
         "tts": {
@@ -67,10 +119,8 @@
             "provider": "microsoft",
             "providers": {
                 "microsoft": {
-                    "speakerVoice": "en-US-AriaNeural",
-                    "lang": "en-US",
-                    "rate": "+33%",
-                    "pitch": "+6%"
+                    "speakerVoice": "en-US-AnaNeural",
+                    "lang": "en-US"
                 }
             }
         }
@@ -80,9 +130,7 @@
             "enabled": true,
             "botToken": "${TELEGRAM_BOT_TOKEN}",
             "dmPolicy": "allowlist",
-            "allowFrom": [
-                "tg:${TELEGRAM_CHAT_ID}"
-            ]
+            "allowFrom": ["tg:${TELEGRAM_CHAT_ID}"]
         }
     }
 }

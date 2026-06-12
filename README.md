@@ -15,17 +15,21 @@ graph TB
         subgraph Skills["Auto-discovered Skills"]
             SKILL_ET["expense-tracker<br/>SKILL.md"]
             SKILL_PT["portfolio-tracker<br/>SKILL.md"]
+            SKILL_KT["ktmb-booking<br/>SKILL.md"]
         end
 
         GW -->|"loads"| SKILL_ET
         GW -->|"loads"| SKILL_PT
 
-        ET["expense-tracker<br/>Python :8080<br/>16 tools"]
-        PT["portfolio-tracker<br/>Python :8081<br/>20 tools"]
+        ET["expense-tracker<br/>Node.js :8080<br/>~18 tools"]
+        PT["portfolio-tracker<br/>Node.js :8081<br/>~18 tools"]
+        KT["ktmb-booking<br/>Python :8082<br/>~13 tools"]
         API["actual-api<br/>Node.js :3000"]
 
         SKILL_ET -->|"HTTP /tools/*"| ET
         SKILL_PT -->|"HTTP /tools/*"| PT
+        GW -->|"loads"| KT
+        SKILL_KT -->|"HTTP /tools/*"| KT
         ET -->|"HTTP"| API
         PT -->|"HTTP"| API
     end
@@ -49,14 +53,14 @@ graph TB
 **Expense tracking:**
 1. **You message the Telegram bot** → "Track S$12.80 at Toast Box from DBS Yuu"
 2. **Gateway routes to expense-tracker skill** → LLM calls `fetch_accounts`, `check_duplicate`, `insert_transaction`
-3. **Python tools execute** → calls actual-api → WebSocket sync to Actual Budget, hash lookup in dedup SQLite
+3. **Node.js tools execute** → calls actual-api → WebSocket sync to Actual Budget
 4. **Agent replies on Telegram** → "✅ Done! S$12.80 at Toast Box under DBS Yuu (Food)"
 5. **Bonus:** IMAP IDLE listener auto-ingests bank alert emails forwarded to a burner inbox
 
 **Portfolio tracking:**
 1. **You message** → `/ibkr` or forward a Flex Query, `/sync` to pull OneDrive updates, `/status` for snapshot
 2. **Gateway routes to portfolio-tracker skill** → LLM calls `parse_ibkr_flex_query`, `pp-sync-all`, `update_pp_balance`
-3. **Java CLI parses PP XML** → Python orchestrates pull→update→push via OneDrive
+3. **Java CLI parses PP XML** → Node.js orchestrates pull→update→push via OneDrive
 4. **Agent replies** → "📊 Synced: SGD Emergency $12,345 | MYR Emergency RM 5,678 | Warchest $89,012"
 
 ### Repository Structure
@@ -65,7 +69,7 @@ graph TB
 darren-openclaw/
 ├── gateway/                         # OpenClaw Gateway
 │   ├── openclaw.json                # Gateway config (channels, model, skills)
-│   ├── docker-compose.yml           # All 4 containers
+│   ├── docker-compose.yml           # All 5 containers
 │   ├── actual-api/                  # Node.js Actual Budget API proxy
 │   ├── workspace/                   # Agent state (sessions, skills, persona)
 │   │   ├── AGENTS.md                # Agent personality and behavioral rules
@@ -74,16 +78,21 @@ darren-openclaw/
 │   │       └── portfolio-tracker/   # SKILL.md
 │   └── .speckit/                    # Spec-Kit artifacts
 ├── modules/
-│   ├── expense-tracker/             # Python tool backend for expenses
+│   ├── expense-tracker/             # Node.js tool backend for expenses
 │   │   ├── src/                     # agent, client, imap, statement, extractors
 │   │   ├── tests/                   # 25 test files, ~280 tests
 │   │   ├── config/                  # Static config (non-secret)
 │   │   ├── docker/Dockerfile
 │   │   └── .env.example
-│   ├── portfolio-tracker/           # Python tool backend for portfolio
+│   ├── portfolio-tracker/           # Node.js tool backend for portfolio
 │   │   ├── src/                     # agent, client, extractors, pp_client, google
 │   │   ├── pp-cli/                  # Java CLI for Portfolio Performance XML
 │   │   ├── tests/                   # 27 test files, ~185 tests
+│   │   ├── docker/Dockerfile
+│   │   └── .env.example
+│   ├── ktmb-booking/                 # Python tool backend for KTMB train booking
+│   │   ├── src/                     # API server, seat watcher worker
+│   │   ├── tests/
 │   │   ├── docker/Dockerfile
 │   │   └── .env.example
 │   └── onedrive-sync/               # rclone config for OneDrive sync
@@ -135,7 +144,7 @@ The script validates all required environment variables across all modules, then
 
 ```bash
 docker compose -f gateway/docker-compose.yml ps
-# All 4 containers should be "Up"
+# All 5 containers should be "Up"
 ```
 
 ### Step 4: Chat with your agent

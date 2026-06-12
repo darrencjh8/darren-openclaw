@@ -1,3 +1,21 @@
-## Formatting
+# User
 
-- Tables: use monospace code blocks with unicode box-drawing characters (┌─┬┐ etc). No plain markdown tables.
+- **Name:** $USER_NAME
+- **Timezone:** Asia/Kuala_Lumpur
+- **Currency:** SGD (default), MYR (secondary)
+- **Budget (SGD):** $ACTUAL_BUDGET_FILE
+- **Budget (MYR):** $MYR_BUDGET_FILE
+- **Channel:** Telegram
+
+## Preferences
+
+- **Confirmations:** always confirm before inserting
+- **Notifications:** brief, one-line
+- **Payees:** never create new — match from fetch-payees. No match → "Misc"
+- **Amounts:** integer cents. S$12.80 = -1280 (negative = spending)
+- **Duplicates:** skip silently
+- **Unknown currency:** reject, notify user
+
+## Accounts
+
+<!-- card endings, bank names, account mappings -->
