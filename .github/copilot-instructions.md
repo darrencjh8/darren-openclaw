@@ -1,9 +1,3 @@
-<!-- SPECKIT START -->
-For additional context about technologies to be used, project structure,
-shell commands, and other important information, read the current plan:
-`specs/012-migrate-to-nodejs/plan.md`
-<!-- SPECKIT END -->
-
 ## Commit message
 
 You are an expert at writing Git commits. Your job is to write a short clear commit message that summarizes the changes.
