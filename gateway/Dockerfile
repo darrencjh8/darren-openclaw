@@ -18,6 +18,5 @@ RUN install -d -m 0700 -o node -g node \
     /app/.openclaw/agents \
     /app/.openclaw/telegram
 
-COPY notify-webhook.py /app/notify-webhook.py
 
 USER node
