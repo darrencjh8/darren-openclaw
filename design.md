@@ -1,9 +1,9 @@
 # OpenClaw — Architecture Design Document
 
 **Project:** darren-openclaw
-**Version:** 2.0.0
-**Last Updated:** 2026-06-05
-**Status:** Specified & Planned — Implementation Pending (alert pipeline) + Statement Reconciliation (specified)
+**Version:** 2.1.0
+**Last Updated:** 2026-06-12
+**Status:** Gateway implemented & deployed. Workspace memory files specified. Statement Reconciliation specified.
 
 ---
 
@@ -15,6 +15,7 @@
 4. [Hosting Topology](#4-hosting-topology)
 5. [Module: expense-tracker](#5-module-expense-tracker)
 6. [Module: gateway](#6-module-gateway)
+   - [6.8 Workspace File Templates](#68-workspace-file-templates)
 7. [Data Flow](#7-data-flow)
 8. [Security Design](#8-security-design)
 9. [Observability](#9-observability)
@@ -35,7 +36,7 @@
 |---|---|---|
 | **expense-tracker** | Automated expense tracking via email → Actual Budget (Python tool backend) | Implemented |
 | **portfolio-tracker** | Investment portfolio sync: IBKR flex queries, PDF trade confirmations, AB → PP balance sync, taxonomy → Google Sheets. Notifications via Gateway webhook (Python + Java CLI) | Implemented |
-| **gateway** | OpenClaw Gateway deployment with expense-tracker skill | Config + skills written, implementation pending |
+| **gateway** | OpenClaw Gateway deployment with expense-tracker + portfolio-tracker skills, Telegram channel, CDP browser relay, memory persistence | Implemented & Deployed |
 | **statement-reconciliation** | PDF credit card statement reconciliation + outlier detection | Specified, Planned, Tasked — Implementation Pending |
 
 ---
@@ -88,17 +89,29 @@ darren-openclaw/                          # Umbrella repository root
 │       ├── docker/Dockerfile             # Python 3.12 + JRE 17 + Tesseract + curl
 │       └── README.md
 └── gateway/                              # OpenClaw Gateway config + skills
-    ├── openclaw.json                     # Gateway configuration
-    ├── docker-compose.yml                # Gateway + expense-tracker + actual-api
-    ├── workspace/                        # Agent workspace (persisted)
+    ├── openclaw.json                     # Gateway configuration (JSON5)
+    ├── docker-compose.yml                # Gateway + expense-tracker + actual-api + portfolio-tracker
+    ├── Dockerfile                        # Custom image extending openclaw:latest-browser
+    ├── docker-entrypoint.sh              # Template → workspace file generation + Xvfb/DBus startup
+    ├── .env                              # Secrets (TELEGRAM_BOT_TOKEN, GEMINI_API_KEY, etc.)
+    ├── AGENTS.md.template                # Agent instructions template (env-var substituted)
+    ├── SOUL.md.template                  # Agent persona template (voice, visual appearance)
+    ├── USER.md.template                  # User profile template (currency, budgets, rules)
+    ├── IDENTITY.md.template              # Agent identity template (name, vibe, emoji)
+    ├── MEMORY.md.template                # Memory seed template (plugin-managed, section headers only)
+    ├── workspace/                        # Agent workspace (persisted on openclaw_home volume)
     │   └── skills/                       # Skills loaded by the gateway
-    │       └── expense-tracker/          # Expense tracker skill
-    │           ├── SKILL.md              # LLM instructions for expense tracking
-    │           └── SKILL.js              # Tool wrappers (HTTP → Python tools)
+    │       ├── expense-tracker/          # Expense tracker skill
+    │       │   ├── SKILL.md              # LLM instructions for expense tracking
+    │       │   └── SKILL.js              # Tool wrappers (HTTP → Python tools)
+    │       ├── portfolio-tracker/        # Portfolio tracker skill
+    │       ├── image-generation/         # Image generation skill (Perchance + Pollinations)
+    │       └── pdf/                      # PDF decryption + extraction skill
     ├── actual-api/                       # Official Actual Budget API (Node.js)
     │   ├── server.js                     # Express.js wrapper around @actual-app/api
     │   ├── package.json                  # @actual-app/api@^26.6.0
     │   └── Dockerfile                    # Node.js container
+    ├── notify-webhook.py                 # Portfolio-tracker notification webhook → Telegram
     └── .speckit/                         # Spec-Kit artifacts (gateway + skill)
 ```
 
@@ -591,27 +604,43 @@ The gateway can be joined by **OpenClaw nodes** — separate machines (Windows/m
 ```mermaid
 graph TB
     subgraph Local["Ubuntu Laptop — Docker Compose"]
-        GW["OpenClaw Gateway<br/>ghcr.io/openclaw/openclaw:latest<br/>Port 18789"]
-        
-        subgraph Skill["expense-tracker Skill"]
-            MD["SKILL.md — LLM instructions"]
-            JS["SKILL.js — 10 tool wrappers"]
+        subgraph Startup["Container Startup"]
+            TPL["*.md.template files"]
+            ENT["docker-entrypoint.sh"]
+            WS["Workspace Files<br/>AGENTS, SOUL, USER, IDENTITY, MEMORY"]
+            TPL --> ENT --> WS
         end
-        
-        ET["expense-tracker<br/>Python 3.12-slim<br/>Port 8080<br/>10 tool endpoints + IMAP IDLE"]
-        
-        GW -->|"calls tool functions"| JS
-        JS -->|"HTTP POST /tools/*"| ET
+
+        GW["OpenClaw Gateway<br/>Custom Dockerfile<br/>Port 18789"]
+        WS -->|"system prompt"| GW
+
+        subgraph Memory["Memory System"]
+            MC["memory-core plugin<br/>Gemini embeddings"]
+            MEM["MEMORY.md<br/>plugin-managed"]
+            MC -->|"memoryFlush"| MEM
+            MEM -->|"memory_search"| GW
+        end
+
+        subgraph Skills["Skills"]
+            EXP["expense-tracker"]
+            POR["portfolio-tracker"]
+            IMG["image-generation"]
+            PDF["pdf"]
+        end
+
+        GW -->|"tool calls"| Skills
+        EXP -->|"HTTP :8080"| ET["expense-tracker<br/>Python 3.12"]
+        POR -->|"HTTP :8081"| PT["portfolio-tracker<br/>Python + Java"]
     end
 
-    DS["DeepSeek API"] --> GW
-    ET --> AB["Actual Budget (Server)"]
-    ET --> Email["Email (IMAP IDLE)"]
-
-    subgraph Nodes["OpenClaw Nodes (future)"]
-        WIN["Windows Node<br/>canvas, camera, screen, voice"]
-    end
-    WIN -->|"WebSocket"| GW
+    DS["DeepSeek API"] -->|"LLM"| GW
+    GM["Gemini API"] -->|"embeddings"| MC
+    TG["Telegram API"] <-->|"Bot API"| GW
+    CH["Chrome CDP<br/>:9223"] <-->|"browser plugin"| GW
+    ET --> AB["Actual Budget"]
+    ET --> Email["IMAP Email"]
+    PT --> PP["PP XML"]
+    PT --> GS["Google Sheets"]
 ```
 
 ### 6.3 We Do NOT Build HTTP Endpoints
@@ -629,11 +658,12 @@ We configure `openclaw.json` — we do not build a custom server.
 
 | File | Language | Purpose |
 |---|---|---|
-| `SKILL.md` | Markdown | LLM instructions for expense tracking (in `workspace/skills/expense-tracker/`) |
-| `SKILL.js` | Node.js | 10 async functions → HTTP calls to Python tool API |
-| `tools_api.py` | Python | HTTP endpoints for each deterministic tool (in `modules/expense-tracker/src/`) |
-| `openclaw.json` | JSON5 | Gateway config (agent model, workspace, channels) |
-| `docker-compose.yml` | YAML | Two containers: gateway + expense-tracker |
+| `SKILL.md` (per skill) | Markdown | LLM instructions: expense-tracking, portfolio-sync, image-generation, PDF extraction |
+| `SKILL.js` (per skill) | Node.js | Async functions → HTTP calls to Python tool APIs |
+| `tools_api.py` (per module) | Python | HTTP endpoints for deterministic tools |
+| `openclaw.json` | JSON5 | Gateway config (models, providers, channels, agents, memory, compaction, browser) |
+| `docker-compose.yml` | YAML | Four containers: gateway + expense-tracker + portfolio-tracker + actual-api |
+| `*.md.template` | Markdown | Workspace file templates (AGENTS, SOUL, USER, IDENTITY, MEMORY) |
 
 ### 6.5 WhatsApp/Telegram — Zero Code Required
 
@@ -661,6 +691,59 @@ The node exposes device capabilities (`nodes.camera`, `nodes.screen`, `nodes.can
 ### 6.7 Status
 
 | Artifact | Status |
+|---|---|
+| Gateway container + Dockerfile | Implemented |
+| openclaw.json (models, providers, channels, agents, memory, compaction) | Deployed |
+| Workspace template files (AGENTS.md, SOUL.md, USER.md, IDENTITY.md) | Deployed |
+| MEMORY.md template (plugin-managed seed) | Specified |
+| USER.md template rewrite (compact user profile) | Specified |
+| docker-entrypoint.sh (template generation + Xvfb) | Deployed |
+| Skills (expense-tracker, portfolio-tracker, image-gen, pdf) | Deployed |
+| Telegram channel + DM allowlist | Deployed |
+| Browser CDP relay (chrome-daemon.service) | Deployed |
+| Memory search (Gemini embeddings) | Deployed |
+| Session compaction + memoryFlush | Deployed |
+
+### 6.8 Workspace File Templates
+
+Files live on the `openclaw_home` named Docker volume (`/app/.openclaw`), persisting across container restarts and image rebuilds.
+
+#### Template Pipeline
+
+At startup, `docker-entrypoint.sh` reads each `*.md.template`, substitutes `$ENV_VAR` placeholders (longest keys first), and writes to `/app/.openclaw/workspace/<NAME>.md`:
+
+```
+AGENTS.md.template    →  AGENTS.md     (tool routing, rules, memory policy)
+SOUL.md.template      →  SOUL.md       (voice, tone, visual appearance)
+USER.md.template      →  USER.md       (currency, budgets, payees, accounts)
+IDENTITY.md.template  →  IDENTITY.md   (name, vibe, emoji)
+MEMORY.md.template    →  MEMORY.md     (section headers only — plugin-managed)
+```
+
+#### File Roles
+
+| File | Manager | Read/Write |
+|---|---|---|
+| `MEMORY.md` | memory-core plugin | Plugin writes (memoryFlush), agent reads (memory_search) |
+| `USER.md` | Human (template) | Agent reads at session start — never re-asks currency/budget/rules |
+| `SOUL.md` | Human (template) | Agent reads for persona, image-gen reads for appearance/outfit |
+| `AGENTS.md` | Human (template) | Agent reads for routing, rules, deployment, memory policy |
+| `IDENTITY.md` | Human (template) | Agent reads for name/vibe |
+
+#### Design: Compact Files
+
+Long-winded files give the LLM more surface to confabulate. Every line must earn its place:
+- **MEMORY.md**: Section headers only (`## Facts`, `## Preferences`, `## Decisions`). No example content that could be mistaken for real memories.
+- **USER.md**: Terse key-value. No narrative prose. Only facts the agent would otherwise re-ask.
+
+#### Memory Flow
+
+1. Agent learns a durable fact during conversation (e.g., "UOB 4605 = Ladies card")
+2. Session approaches `reserveTokens: 40000` → compaction triggered
+3. `memoryFlush` runs silent model turn → extracts key facts → appends to MEMORY.md
+4. Compaction summarizes old context; facts now safe in MEMORY.md
+5. Next session: `memory_search` retrieves facts from MEMORY.md via Gemini embeddings
+
 ---
 
 ## 5.B Module: portfolio-tracker

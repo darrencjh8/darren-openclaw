@@ -1,11 +1,14 @@
 #!/bin/sh
 # Generate prompt files from templates with env var substitution, then start OpenClaw
 WS=/app/.openclaw/workspace
-mkdir -p "$WS"
+mkdir -p "$WS" /app/.openclaw/compile-cache
+
+# Copy config from bind-mount to writable volume (default path: OPENCLAW_HOME/.openclaw/openclaw.json)
+cp /app/openclaw.json.bk /app/.openclaw/openclaw.json
 
 node -e "
 const fs = require('fs');
-const files = ['AGENTS', 'SOUL', 'USER', 'IDENTITY'];
+const files = ['AGENTS', 'SOUL', 'USER', 'IDENTITY', 'MEMORY'];
 const vars = Object.keys(process.env).filter(k => !k.includes('PATH') && !k.includes('HOME') && !k.includes('SHLVL') && !k.includes('PWD'));
 vars.sort((a, b) => b.length - a.length);
 for (const name of files) {
@@ -35,6 +38,12 @@ HOST_GATEWAY=$(getent hosts host.docker.internal | awk '{print $1; exit}')
 [ -n "$HOST_GATEWAY" ] && export CDP_URL="http://${HOST_GATEWAY}:9223"
 
 rm -rf /app/.openclaw/sandboxes
+
+# Remove source extensions to silence duplicate-plugin warnings (bundled /app/dist/extensions are used instead)
+rm -rf /app/extensions
+
+# Remove empty default .openclaw dir to avoid split-state warnings (real state is /app/.openclaw)
+rm -rf /home/node/.openclaw
 
 # Start notify webhook sidecar for portfolio-tracker notifications
 nohup python3 /app/notify-webhook.py > /dev/null 2>&1 &

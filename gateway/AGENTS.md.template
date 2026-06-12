@@ -36,3 +36,9 @@ $SOUL_VOICE_RULES
 
 - **$ACTUAL_BUDGET_FILE** — default
 - **$MYR_BUDGET_FILE** — RM transactions
+
+## Memory
+
+- `MEMORY.md` is managed by the memory-core plugin. Read it via `memory_search` — do not hand-edit it.
+- `USER.md` contains the user profile (currency, budgets, preferences). Read it at session start — do not re-ask these details.
+- Facts you learn during conversation will be persisted to MEMORY.md automatically during memory flush.
