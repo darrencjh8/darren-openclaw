@@ -74,9 +74,9 @@ Everything runs in containers. The same `docker-compose.yml` works on any Ubuntu
 | Container | RAM | Notes |
 |---|---|---|
 | openclaw | ~400MB | Gateway + agent session |
-| expense-tracker | ~205MB | Python 3.12-slim + ONNX embeddings + 10 tools |
-| portfolio-tracker | ~256MB | Python + Java CLI for PP XML |
-| **Total** | **~861MB** | |
+| expense-tracker | ~100MB | Node.js 22-slim + WASM embeddings |
+| portfolio-tracker | ~150MB | Node.js 22-slim + Java CLI |
+| **Total** | **~900MB** | |
 
 ### 2.6 Security
 

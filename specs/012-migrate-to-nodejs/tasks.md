@@ -83,11 +83,10 @@ Node.js source in existing `modules/expense-tracker/` and `modules/portfolio-tra
 - [ ] T018 [P] [US2] Port orchestrator tests: `tests/orchestrator.test.js` from `tests/test_agent_orchestrator.py` in `modules/expense-tracker/tests/orchestrator.test.js`
 - [ ] T019 [P] [US2] Port cooldown tests: `tests/cooldown.test.js` from `tests/test_cooldown.py` (if it exists) in `modules/expense-tracker/tests/cooldown.test.js`
 
-- [x] T020 [US2] Implement `config.js` — env var loading, Config class, MEMORY_PATH in `modules/expense-tracker/src/config.js`
-- [ ] T021 [US2] Implement `dedup.js` — DedupJournal with same SQLite schema in `modules/expense-tracker/src/dedup.js`
-- [ ] T022 [US2] Implement `extractors.js` — email content extraction (HTML + text), PDF OCR via child_process in `modules/expense-tracker/src/extractors.js`
-- [ ] T023 [US2] Implement `imap.js` — IMAP IDLE handler with imapflow in `modules/expense-tracker/src/imap.js`
-- [ ] T024 [US2] Implement `logging.js` — pino JSON-line logger wrapper in `modules/expense-tracker/src/logging.js`
+- [x] T021 [US2] Implement `dedup.js` — DedupJournal with same SQLite schema in `modules/expense-tracker/src/dedup.js`
+- [x] T022 [US2] Implement `extractors.js` — email content extraction (HTML + text), PDF OCR via child_process in `modules/expense-tracker/src/extractors.js`
+- [x] T023 [US2] Implement `imap.js` — IMAP IDLE handler with imapflow in `modules/expense-tracker/src/imap.js`
+- [x] T024 [US2] Implement `logging.js` — pino JSON-line logger wrapper in `modules/expense-tracker/src/logging.js`
 
 ### Implementation for User Story 2 — Tool Registry
 
@@ -137,17 +136,17 @@ Node.js source in existing `modules/expense-tracker/` and `modules/portfolio-tra
 
 ### Implementation for User Story 4
 
-- [ ] T037 [P] [US4] Implement `config.js` — env var loading, Config class in `modules/portfolio-tracker/src/config.js`
-- [ ] T038 [P] [US4] Implement `tools.js` — ToolRegistry with all portfolio tool schemas and handlers in `modules/portfolio-tracker/src/tools.js`
-- [ ] T039 [P] [US4] Implement `prompts.js` — system prompt port in `modules/portfolio-tracker/src/prompts.js`
-- [ ] T040 [P] [US4] Implement `orchestrator.js` — DeepSeekClient + AgentOrchestrator in `modules/portfolio-tracker/src/orchestrator.js`
-- [ ] T041 [P] [US4] Implement `ibkr_parser.js` — IBKR flex query XML parser in `modules/portfolio-tracker/src/ibkr_parser.js`
-- [ ] T042 [P] [US4] Implement `sheets_client.js` — Google Sheets API client in `modules/portfolio-tracker/src/sheets_client.js`
-- [ ] T043 [P] [US4] Implement `actual_client.js` — Actual Budget API client in `modules/portfolio-tracker/src/actual_client.js`
-- [ ] T044 [US4] Implement `java_bridge.js` — child_process.execFile('java', ['-jar', 'pp-cli.jar', ...]) in `modules/portfolio-tracker/src/java_bridge.js`
-- [ ] T045 [US4] Implement `email_handler.js`, `email_extractor.js`, `pdf_extractor.js` in `modules/portfolio-tracker/src/`
-- [ ] T046 [US4] Implement `onedrive_download.js`, `onedrive_upload.js`, `dedup.js`, `logging.js`, `memory_utils.js` in `modules/portfolio-tracker/src/`
-- [ ] T047 [US4] Implement `index.js` — Express server, all portfolio endpoints, scheduler in `modules/portfolio-tracker/src/index.js`
+- [x] T037 [P] [US4] Implement `config.js` — env var loading, Config class in `modules/portfolio-tracker/src/config.js`
+- [x] T038 [P] [US4] Implement `tools.js` — ToolRegistry with all portfolio tool schemas and handlers in `modules/portfolio-tracker/src/tools.js`
+- [x] T039 [P] [US4] Implement `prompts.js` — system prompt port in `modules/portfolio-tracker/src/prompts.js`
+- [x] T040 [P] [US4] Implement `orchestrator.js` — DeepSeekClient + AgentOrchestrator in `modules/portfolio-tracker/src/orchestrator.js`
+- [x] T041 [P] [US4] Implement `ibkr_parser.js` — IBKR flex query XML parser in `modules/portfolio-tracker/src/ibkr_parser.js`
+- [x] T042 [P] [US4] Implement `sheets_client.js` — Google Sheets API client in `modules/portfolio-tracker/src/sheets_client.js`
+- [x] T043 [P] [US4] Implement `actual_client.js` — Actual Budget API client in `modules/portfolio-tracker/src/actual_client.js`
+- [x] T044 [US4] Implement `java_bridge.js` — child_process.execFile('java', ['-jar', 'pp-cli.jar', ...]) in `modules/portfolio-tracker/src/java_bridge.js`
+- [x] T045 [US4] Implement `email_handler.js`, `email_extractor.js`, `pdf_extractor.js` in `modules/portfolio-tracker/src/`
+- [x] T046 [US4] Implement `onedrive_download.js`, `onedrive_upload.js`, `dedup.js`, `logging.js`, `memory_utils.js` in `modules/portfolio-tracker/src/`
+- [x] T047 [US4] Implement `index.js` — Express server, all portfolio endpoints, scheduler in `modules/portfolio-tracker/src/index.js`
 - [ ] T048 [US4] Run all ported portfolio tracker tests: verify 31 tests pass in `modules/portfolio-tracker/tests/`
 
 **Checkpoint**: All portfolio tools work. Java bridge invokes CLI correctly. 31 tests pass.
@@ -163,9 +162,9 @@ Node.js source in existing `modules/expense-tracker/` and `modules/portfolio-tra
 ### Implementation for User Story 5
 
 - [x] T049 [US5] Change orchestrator `thinkingDefault` from "medium" to "adaptive" in `gateway/openclaw.json`
-- [ ] T050 [US5] Verify thinker `thinkingDefault: "max"` is unchanged in `gateway/openclaw.json`
-- [ ] T051 [US5] Verify expense tracker orchestrator passes `body: { thinking: { type: "adaptive" } }` in `modules/expense-tracker/src/orchestrator.js` (confirmed in T031)
-- [ ] T052 [US5] Validate config: run `openclaw doctor` (or equivalent validation) — no thinking level errors
+- [x] T050 [US5] Verify thinker `thinkingDefault: "max"` is unchanged in `gateway/openclaw.json`
+- [x] T051 [US5] Verify expense tracker orchestrator passes `body: { thinking: { type: "adaptive" } }` in `modules/expense-tracker/src/orchestrator.js` (confirmed in T031)
+- [x] T052 [US5] Validate config: run `openclaw doctor` (or equivalent validation) — no thinking level errors
 
 **Checkpoint**: Config validates. Adaptive thinking active everywhere except thinker.
 
@@ -179,7 +178,7 @@ Node.js source in existing `modules/expense-tracker/` and `modules/portfolio-tra
 - [ ] T054 [P] Delete `requirements.txt`, `pyproject.toml`, `uv.lock`, `.venv/` from both modules
 - [ ] T055 [P] Remove `python-dotenv`, `pytesseract`, `pdf2image`, `aioimaplib`, `beautifulsoup4`, `lxml`, `sentence-transformers`, `optimum[onnxruntime]` — all Python dependencies cleaned up
 - [ ] T056 [P] Verify zero Python files remain: `find . -name "*.py" -not -path "./.venv/*" -not -path "./node_modules/*" | wc -l` returns `0`
-- [ ] T057 [P] Update constitution 2.5: expense-tracker 205 MB → <150 MB, total system ~800 MB in `.specify/memory/constitution.md`
+- [x] T057 [P] Update constitution 2.5: expense-tracker 205 MB → <150 MB, total system ~800 MB in `.specify/memory/constitution.md`
 - [ ] T058 [P] Update `design.md` Section 5 — technology stack from Python to Node.js, tool count unchanged
 - [ ] T059 Run quickstart.md validation scenarios (all 10 scenarios)
 - [ ] T060 Docker rebuild and integration test: `docker compose build && docker compose up -d && curl localhost:8080/health && curl localhost:8081/health`

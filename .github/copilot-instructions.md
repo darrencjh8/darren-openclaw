@@ -1,7 +1,7 @@
 <!-- SPECKIT START -->
 For additional context about technologies to be used, project structure,
 shell commands, and other important information, read the current plan:
-`specs/011-expense-memory-embeddings/plan.md`
+`specs/012-migrate-to-nodejs/plan.md`
 <!-- SPECKIT END -->
 
 ## Production Server
