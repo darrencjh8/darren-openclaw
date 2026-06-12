@@ -1,0 +1,3 @@
+[submodule "modules/ktmb"]
+	path = modules/ktmb
+	url = https://github.com/darrencjh8/openclaw-module-ktmb.git
