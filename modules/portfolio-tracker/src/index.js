@@ -123,6 +123,7 @@ async function main() {
         ["/tools/check-duplicate", "check_duplicate"],
         ["/tools/learn-mapping", "learn_mapping"],
         ["/tools/log-decision", "log_decision"],
+        ["/tools/ask-user-confirmation", "ask_user_confirmation"],
     ];
 
     for (const [path, toolName] of routes) {
