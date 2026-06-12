@@ -1,23 +1,24 @@
 {
-  "name": "expense-tracker",
-  "version": "1.0.0",
-  "type": "module",
-  "private": true,
-  "scripts": {
-    "start": "node src/index.js",
-    "test": "vitest run",
-    "test:watch": "vitest"
-  },
-  "dependencies": {
-    "@xenova/transformers": "^2.17.2",
-    "openai": "^4.89.0",
-    "better-sqlite3": "^11.8.0",
-    "imapflow": "^1.0.168",
-    "cheerio": "^1.1.0",
-    "pino": "^9.10.0",
-    "express": "^5.1.0"
-  },
-  "devDependencies": {
-    "vitest": "^3.1.0"
-  }
+    "name": "expense-tracker",
+    "version": "1.0.0",
+    "type": "module",
+    "private": true,
+    "scripts": {
+        "start": "node src/index.js",
+        "test": "vitest run",
+        "test:watch": "vitest"
+    },
+    "dependencies": {
+        "@xenova/transformers": "^2.17.2",
+        "openai": "^4.89.0",
+        "better-sqlite3": "^11.8.0",
+        "imapflow": "^1.0.168",
+        "mailparser": "^3.7.0",
+        "cheerio": "^1.1.0",
+        "pino": "^9.10.0",
+        "express": "^5.1.0"
+    },
+    "devDependencies": {
+        "vitest": "^3.1.0"
+    }
 }
