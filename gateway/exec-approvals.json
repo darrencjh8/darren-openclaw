@@ -1,46 +1,38 @@
 {
-  "version": 1,
-  "socket": {
-    "path": "/app/.openclaw/exec-approvals.sock"
-  },
-  "defaults": {
-    "security": "allowlist",
-    "ask": "on-miss",
-    "askFallback": "deny",
-    "autoAllowSkills": false
-  },
-  "agents": {
-    "orchestrator": {
-      "allowlist": [
-        {
-          "pattern": "curl"
-        },
-        {
-          "pattern": "qpdf"
-        },
-        {
-          "pattern": "pdftotext"
-        },
-        {
-          "pattern": "echo"
-        }
-      ]
+    "version": 1,
+    "socket": {
+        "path": "/app/.openclaw/exec-approvals.sock"
     },
-    "thinker": {
-      "allowlist": [
-        {
-          "pattern": "curl"
+    "defaults": {
+        "security": "allowlist",
+        "ask": "on-miss",
+        "askFallback": "allowlist",
+        "autoAllowSkills": true
+    },
+    "agents": {
+        "orchestrator": {
+            "allowlist": [
+                {
+                    "pattern": "curl",
+                    "argPattern": "expense-tracker:8080|portfolio-tracker:8081|image-gen:8083|ktmb-booking:8082"
+                },
+                { "pattern": "qpdf" },
+                { "pattern": "pdftotext" },
+                { "pattern": "sleep" },
+                { "pattern": "echo" }
+            ]
         },
-        {
-          "pattern": "qpdf"
-        },
-        {
-          "pattern": "pdftotext"
-        },
-        {
-          "pattern": "echo"
+        "thinker": {
+            "allowlist": [
+                {
+                    "pattern": "curl",
+                    "argPattern": "expense-tracker:8080|portfolio-tracker:8081|image-gen:8083|ktmb-booking:8082"
+                },
+                { "pattern": "qpdf" },
+                { "pattern": "pdftotext" },
+                { "pattern": "sleep" },
+                { "pattern": "echo" }
+            ]
         }
-      ]
     }
-  }
 }

@@ -163,6 +163,7 @@ See `gateway/docker-compose.yml` for the authoritative definition. Summary:
 
 Key details:
 - Gateway uses a **custom entrypoint** (`docker-entrypoint.sh`) that generates workspace files from templates before starting OpenClaw
+- `openclaw.json` and `exec-approvals.json` are bind-mounted and copied into the writable named volume on every start (always overwrites — runtime UI changes are lost on restart; permanent changes must be made in the repo)
 - Skills are **bind-mounted** at `/app/.openclaw/workspace/skills/` (expense-tracker, portfolio-tracker, image-generation, pdf)
 - External ktmb-booking skill mounted via `skills.load.extraDirs` at `/home/node/skills/ktmb-booking`
 - `openclaw_home` named volume persists workspace files; `openclaw_data` persists sessions and memory indexes

@@ -8,6 +8,7 @@ services:
             - "127.0.0.1:18800:18800"
         volumes:
             - ./openclaw.json:/app/openclaw.json.bk:ro
+            - ./exec-approvals.json:/app/exec-approvals.json:ro
             - ./workspace/skills:/home/node/.openclaw/workspace/skills:ro
             - ./AGENTS.md.template:/app/AGENTS.md.template:ro
             - ./AGENTS.thinker.md.template:/app/AGENTS.thinker.md.template:ro

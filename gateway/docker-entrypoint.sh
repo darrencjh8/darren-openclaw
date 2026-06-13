@@ -71,40 +71,10 @@ rm -rf /app/extensions
 # Clean default .openclaw state to avoid split-state warnings (preserve mounted skills)
 find /home/node/.openclaw -mindepth 1 -maxdepth 1 ! -name workspace -exec rm -rf {} + 2>/dev/null; true
 
-# Seed exec-approvals.json if not present (production manages this via bind-mount)
-if [ ! -f /app/.openclaw/exec-approvals.json ]; then
-  cat > /app/.openclaw/exec-approvals.json << 'APPROVALS'
-{
-  "version": 1,
-  "socket": {
-    "path": "/app/.openclaw/exec-approvals.sock"
-  },
-  "defaults": {
-    "security": "allowlist",
-    "ask": "on-miss",
-    "askFallback": "allowlist",
-    "autoAllowSkills": true
-  },
-  "agents": {
-    "orchestrator": {
-      "allowlist": [
-        { "pattern": "curl", "argPattern": "expense-tracker:8080|portfolio-tracker:8081|image-gen:8083|ktmb-booking:8082" },
-        { "pattern": "qpdf" },
-        { "pattern": "pdftotext" },
-        { "pattern": "echo" }
-      ]
-    },
-    "thinker": {
-      "allowlist": [
-        { "pattern": "curl", "argPattern": "expense-tracker:8080|portfolio-tracker:8081|image-gen:8083|ktmb-booking:8082" },
-        { "pattern": "qpdf" },
-        { "pattern": "pdftotext" },
-        { "pattern": "echo" }
-      ]
-    }
-  }
-}
-APPROVALS
-fi
+# Copy exec-approvals.json from bind-mount to writable volume (always overwrites).
+# NOTE: Runtime allow-always entries via OpenClaw Control UI will be lost on restart.
+#       Permanent changes MUST be made to gateway/exec-approvals.json in the repo.
+cp /app/exec-approvals.json /app/.openclaw/exec-approvals.json
+
 
 exec tini -s -- node openclaw.mjs gateway
