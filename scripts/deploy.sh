@@ -327,12 +327,23 @@ if [ -d "$GATEWAY_DIR" ]; then
   echo "  ✓ Chrome binary: $CHROME_BIN"
 
   # Install socat
-  command -v socat &>/dev/null || apt-get install -y -qq socat 2>/dev/null || true
+  if command -v socat &>/dev/null; then
+    :
+  elif sudo -n true 2>/dev/null; then
+    sudo apt-get install -y -qq socat 2>/dev/null || true
+  else
+    echo "  ! socat not found and sudo unavailable — install manually"
+  fi
+
+  # Check if we can manage systemd services
+  HAS_SUDO=false
+  sudo -n true 2>/dev/null && HAS_SUDO=true
 
   # Create chrome-daemon service on first run
   CHROME_SVC="/etc/systemd/system/chrome-daemon.service"
   if [ ! -f "$CHROME_SVC" ] && [ -n "$CHROME_BIN" ] && [ -f "$CHROME_BIN" ]; then
-    cat > "$CHROME_SVC" << UNIT
+    if $HAS_SUDO; then
+      cat > "$CHROME_SVC" << UNIT
 [Unit]
 Description=Chrome Headless Daemon (CDP :9222)
 After=network.target
@@ -361,15 +372,19 @@ StandardError=journal
 [Install]
 WantedBy=multi-user.target
 UNIT
-    systemctl daemon-reload 2>/dev/null || true
-    systemctl enable chrome-daemon 2>/dev/null || true
-    echo "  ✓ chrome-daemon.service created"
+      systemctl daemon-reload 2>/dev/null || true
+      systemctl enable chrome-daemon 2>/dev/null || true
+      echo "  ✓ chrome-daemon.service created"
+    else
+      echo "  ! sudo unavailable — chrome-daemon.service not created"
+    fi
   fi
 
   # Create cdp-forward service on first run
   CDP_SVC="/etc/systemd/system/cdp-forward.service"
   if [ ! -f "$CDP_SVC" ] && command -v socat &>/dev/null; then
-    cat > "$CDP_SVC" << UNIT2
+    if $HAS_SUDO; then
+      cat > "$CDP_SVC" << UNIT2
 [Unit]
 Description=CDP Forward (9223→9222)
 After=chrome-daemon.service
@@ -384,15 +399,22 @@ RestartSec=5
 [Install]
 WantedBy=multi-user.target
 UNIT2
-    systemctl daemon-reload 2>/dev/null || true
-    systemctl enable cdp-forward 2>/dev/null || true
-    echo "  ✓ cdp-forward.service created"
+      systemctl daemon-reload 2>/dev/null || true
+      systemctl enable cdp-forward 2>/dev/null || true
+      echo "  ✓ cdp-forward.service created"
+    else
+      echo "  ! sudo unavailable — cdp-forward.service not created"
+    fi
   fi
 
-  # Restart services
-  systemctl restart chrome-daemon 2>/dev/null || true
-  systemctl restart cdp-forward 2>/dev/null || true
-  sleep 2
+  # Restart services (skip if sudo unavailable)
+  if $HAS_SUDO; then
+    systemctl restart chrome-daemon 2>/dev/null || true
+    systemctl restart cdp-forward 2>/dev/null || true
+    sleep 2
+  else
+    echo "  ! Skipping service restart (sudo unavailable)"
+  fi
   ss -tlnp 2>/dev/null | grep -q 9222 && echo "  ✓ Chrome daemon :9222" || echo "  ! Chrome daemon not running"
   ss -tlnp 2>/dev/null | grep -q 9223 && echo "  ✓ CDP forward :9223"
 fi
