@@ -94,7 +94,7 @@
         "list": [
             {
                 "id": "orchestrator",
-                "thinkingDefault": "adaptive",
+                "thinkingDefault": "low",
                 "model": {
                     "primary": "deepseek/deepseek-v4-flash",
                     "fallbacks": [
@@ -110,7 +110,7 @@
             {
                 "id": "thinker",
                 "workspace": "/app/.openclaw/workspace-thinker",
-                "thinkingDefault": "max",
+                "thinkingDefault": "xhigh",
                 "model": {
                     "primary": "deepseek/deepseek-v4-pro",
                     "fallbacks": ["deepseek/deepseek-v4-flash"]

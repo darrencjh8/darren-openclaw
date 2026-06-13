@@ -197,12 +197,13 @@ Update `README.md` with Telegram bot setup instructions:
 - `tools.exec.ask: "on-miss"` — prompt for approval if command not on allowlist
 - `tools.exec.timeoutSec: 30` — caps any exec at 30s
 - `tools.exec.strictInlineEval: true` — blocks inline interpreter eval without approval
-- Host approvals file (`exec-approvals.json`) with allowlist: `curl`, `qpdf`, `pdftotext`, `echo`
+- Host approvals file (`gateway/exec-approvals.json`) bind-mounted and copied into container on every start
+- Allowlist: `curl` (scoped to `expense-tracker:8080|portfolio-tracker:8081|image-gen:8083|ktmb-booking:8082` via `argPattern`), `qpdf`, `pdftotext`, `sleep`, `echo`
 
 - [x] Add `tools.exec.timeoutSec: 30` to `openclaw.json`
 - [x] Add `tools.exec.strictInlineEval: true` to `openclaw.json`
 - [x] Add `tools.exec.security: "allowlist"` + `tools.exec.ask: "on-miss"` to `openclaw.json`
-- [x] Seed `/app/.openclaw/exec-approvals.json` via docker-entrypoint.sh (allowlist: curl, qpdf, pdftotext, echo)
+- [x] Bind-mount `exec-approvals.json` in `docker-compose.yml`, copy to writable volume via `docker-entrypoint.sh` (allowlist: curl+argPattern, qpdf, pdftotext, sleep, echo)
 
 **Validation:** `docker compose restart openclaw` — clean startup, no config errors, approvals file present.
 
