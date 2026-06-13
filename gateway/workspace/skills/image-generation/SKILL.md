@@ -15,9 +15,14 @@ exec: curl -s -X POST http://image-gen:8083/generate -H "Content-Type: applicati
 
 ## How to Send Result
 
+The generated image is saved to a shared volume accessible by the gateway.
+After generation, use the `message` tool to deliver it to Telegram:
+
 ```
-exec: curl -s -X POST http://image-gen:8083/send -H "Content-Type: application/json" -d '{"path":"OUTPUT_PATH","caption":"optional caption"}'
+message(action=send, message="optional caption", media="/app/.openclaw/workspace/media/FILENAME")
 ```
+
+Do NOT use curl /send — the image-gen service generates only. The gateway handles delivery.
 
 ## Presets
 
@@ -45,5 +50,5 @@ For stylized/anime, omit systemPrefix and negativePrompt.
 - Tier 1 (Perchance, free) runs automatically. Falls back to Tier 2 (Pollinations/flux).
 - Always use the correct preset. System prefix is mandatory and verbatim.
 - NEVER use browser, web_fetch, image_generate, or bash scripts. Only exec: curl to image-gen:8083.
-- After generation, always call /send to deliver via Telegram.
+- After generation, always use the message tool to deliver via Telegram (see "How to Send Result").
 - `guidance`: 1-20, default 7.

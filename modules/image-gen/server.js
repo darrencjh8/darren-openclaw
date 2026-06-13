@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, unlinkSync } from "fs";
 import { join } from "path";
 
 const SCRIPTS_DIR = "/app/scripts";
-const OUTPUT_DIR = "/tmp/images";
+const OUTPUT_DIR = "/app/.openclaw/workspace/media";
 
 const app = express();
 app.use(express.json());
@@ -61,27 +61,6 @@ app.post("/generate", async (req, res) => {
     }
 
     res.status(500).json({ error: "All tiers failed" });
-});
-
-/** POST /send — Send image to Telegram (wraps send-telegram-photo.sh) */
-app.post("/send", async (req, res) => {
-    const { path: imagePath, caption = "" } = req.body || {};
-    if (!imagePath || !existsSync(imagePath))
-        return res.status(400).json({ error: "image not found" });
-
-    try {
-        await run(
-            "bash",
-            [join(SCRIPTS_DIR, "send-telegram-photo.sh"), imagePath, caption],
-            30000,
-        );
-        try {
-            unlinkSync(imagePath);
-        } catch {}
-        res.json({ sent: true });
-    } catch (e) {
-        res.status(500).json({ error: e.message });
-    }
 });
 
 function run(cmd, args, timeout) {

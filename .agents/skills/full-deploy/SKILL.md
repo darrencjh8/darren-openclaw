@@ -38,6 +38,8 @@ Run all 4 `scp` commands in parallel.
 
 ## Phase 2 — Backup (production host only)
 
+Back up all persistent data: KTMB booking DB, OneDrive token, expense-tracker state (memory, dedup, statements), and portfolio-tracker state (dedup, learned mappings).
+
 **IMPORTANT**: Compute the timestamp LOCALLY first. Do NOT embed `$(date ...)` inside a remote single-quoted command.
 
 The `refresh_token` file is owned by `root:root` (created by the Docker container). Use `docker run` to read it since `cp` as darren will fail with Permission denied.
@@ -68,7 +70,19 @@ ssh <user>@<server> "mkdir -p /home/darren/backups/full-deploy-$TS && cp /home/d
 ssh <user>@<server> "docker run --rm -v /home/darren/darren-openclaw/modules/onedrive-sync/config/onedrive:/conf:ro alpine cat /conf/refresh_token > /home/darren/backups/full-deploy-$TS/refresh_token && echo 'refresh_token backed up'"
 ```
 
-### 2d. Verify backup
+### 2d. Backup expense-tracker data (MEMORY.md, dedup.db, statement.db)
+
+```bash
+ssh <user>@<server> "cp /home/darren/darren-openclaw/modules/expense-tracker/data/MEMORY.md /home/darren/backups/full-deploy-$TS/ && cp /home/darren/darren-openclaw/modules/expense-tracker/data/dedup.db /home/darren/backups/full-deploy-$TS/expense-dedup.db && cp /home/darren/darren-openclaw/modules/expense-tracker/data/statement.db /home/darren/backups/full-deploy-$TS/expense-statement.db && echo 'expense-tracker data backed up'"
+```
+
+### 2e. Backup portfolio-tracker data (dedup.db, mappings.json)
+
+```bash
+ssh <user>@<server> "cp /home/darren/darren-openclaw/modules/portfolio-tracker/data/dedup.db /home/darren/backups/full-deploy-$TS/portfolio-dedup.db 2>/dev/null; cp /home/darren/darren-openclaw/modules/portfolio-tracker/data/mappings.json /home/darren/backups/full-deploy-$TS/portfolio-mappings.json 2>/dev/null; echo 'portfolio-tracker data backed up'"
+```
+
+### 2f. Verify backup
 
 ```bash
 ssh <user>@<server> "ls -la /home/darren/backups/full-deploy-$TS/"
@@ -302,6 +316,8 @@ Summarize everything in a structured report:
 - Path: /home/darren/backups/full-deploy-<TIMESTAMP>/
 - ktmb_jobs.db: <size>
 - refresh_token: <size>
+- Expense tracker: MEMORY.md <size>, dedup.db <size>, statement.db <size>
+- Portfolio tracker: dedup.db <size>, mappings.json <size>
 
 ### Git
 - Branch: main
