@@ -45,7 +45,15 @@ The `refresh_token` file is owned by `root:root` (created by the Docker containe
 ### 2a. Compute timestamp
 
 ```bash
-TS=$(date +%Y%m%d-%H%M) && echo "Backup timestamp: $TS"
+TS=`date +%Y%m%d-%H%M` && echo "Backup timestamp: $TS"
+```
+
+If `$TS` is empty (shell issue), use epoch seconds instead:
+
+```bash
+TS=`date -u +%s 2>/dev/null` && echo "Backup timestamp: $TS"
+# If still empty, fabricate one:
+[ -z "$TS" ] && TS="manual-$$"
 ```
 
 ### 2b. Create backup dir and copy ktmb_jobs.db

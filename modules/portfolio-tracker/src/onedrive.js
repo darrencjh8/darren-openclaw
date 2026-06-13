@@ -125,8 +125,8 @@ export async function pullFromOneDrive(localPath) {
         const content = Buffer.from(await dlResp.arrayBuffer());
 
         // Ensure parent directory exists
-        const { mkdirSync, dirname } = await import("path");
-        const { existsSync: fsExists } = await import("fs");
+        const { dirname } = await import("path");
+        const { mkdirSync, existsSync: fsExists } = await import("fs");
         const dir = dirname(ppXmlPath);
         if (!fsExists(dir)) mkdirSync(dir, { recursive: true });
 
