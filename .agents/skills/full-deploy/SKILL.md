@@ -38,15 +38,35 @@ Run all 4 `scp` commands in parallel.
 
 ## Phase 2 — Backup (production host only)
 
-**IMPORTANT**: Compute the timestamp LOCALLY first, then pass it to SSH. Do NOT embed `$(date ...)` inside the remote command — it will expand on the wrong machine.
+**IMPORTANT**: Compute the timestamp LOCALLY first. Do NOT embed `$(date ...)` inside a remote single-quoted command.
+
+The `refresh_token` file is owned by `root:root` (created by the Docker container). Use `docker run` to read it since `cp` as darren will fail with Permission denied.
+
+### 2a. Compute timestamp
 
 ```bash
-TS=$(date +%Y%m%d-%H%M) && ssh <user>@<server> "mkdir -p /home/darren/backups/full-deploy-$TS && cp /home/darren/darren-openclaw/modules/ktmb/data/ktmb_jobs.db /home/darren/backups/full-deploy-$TS/ && cp /home/darren/darren-openclaw/modules/onedrive-sync/config/onedrive/refresh_token /home/darren/backups/full-deploy-$TS/ && echo 'Backed up to full-deploy-$TS' && ls -la /home/darren/backups/full-deploy-$TS/"
+TS=$(date +%Y%m%d-%H%M) && echo "Backup timestamp: $TS"
 ```
 
-Store the `$TS` value — you'll need it in Phase 6 if token restoration is required.
+### 2b. Create backup dir and copy ktmb_jobs.db
 
-Report the backup path and file sizes to the user.
+```bash
+ssh <user>@<server> "mkdir -p /home/darren/backups/full-deploy-$TS && cp /home/darren/darren-openclaw/modules/ktmb/data/ktmb_jobs.db /home/darren/backups/full-deploy-$TS/ && echo 'ktmb_jobs.db backed up'"
+```
+
+### 2c. Copy refresh_token via Docker (root-owned file)
+
+```bash
+ssh <user>@<server> "docker run --rm -v /home/darren/darren-openclaw/modules/onedrive-sync/config/onedrive:/conf:ro alpine cat /conf/refresh_token > /home/darren/backups/full-deploy-$TS/refresh_token && echo 'refresh_token backed up'"
+```
+
+### 2d. Verify backup
+
+```bash
+ssh <user>@<server> "ls -la /home/darren/backups/full-deploy-$TS/"
+```
+
+Store `$TS` — you'll need it in Phase 6 if token restoration is required. Report the backup path and file sizes to the user.
 
 ## Phase 3 — Git Pull
 
@@ -153,9 +173,9 @@ If you get a JSON array of accounts, the bridge auto-initialized.
 
 ### 6c. If pp-pull fails (token is stale/expired)
 
-1. Restore the backup token:
+1. Restore the backup token (rm first — existing file is root-owned):
 ```bash
-ssh <user>@<server> 'cp /home/darren/backups/full-deploy-<TIMESTAMP>/refresh_token ~/darren-openclaw/modules/onedrive-sync/config/onedrive/refresh_token'
+ssh <user>@<server> 'rm -f ~/darren-openclaw/modules/onedrive-sync/config/onedrive/refresh_token && cp /home/darren/backups/full-deploy-<TIMESTAMP>/refresh_token ~/darren-openclaw/modules/onedrive-sync/config/onedrive/refresh_token'
 ```
 2. Restart portfolio-tracker (it reads the token at startup):
 ```bash
