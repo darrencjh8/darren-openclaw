@@ -246,3 +246,134 @@ describe("ImapIdleHandler markRead", () => {
         await expect(handler.markRead("1")).resolves.toBeUndefined();
     });
 });
+
+describe("ImapIdleHandler idleLoop UID pre-check", () => {
+    const emailSource = Buffer.from(
+        "From: test@test.com\r\nSubject: Test\r\n\r\nBody",
+    );
+
+    function makeMsg(uid) {
+        return { uid, seq: uid, source: emailSource, envelope: {} };
+    }
+
+    function makeIter(messages) {
+        return {
+            [Symbol.asyncIterator]() {
+                let i = 0;
+                return {
+                    async next() {
+                        if (i < messages.length)
+                            return { value: messages[i++], done: false };
+                        return { done: true };
+                    },
+                };
+            },
+        };
+    }
+
+    it("skips recently processed UIDs without calling callback", async () => {
+        const dedup = {
+            isRecentlyProcessed: vi.fn().mockReturnValue(true),
+            recordProcessed: vi.fn(),
+        };
+        const handler = new ImapIdleHandler("h", 993, "u", "p", dedup);
+        const callback = vi.fn();
+
+        handler.connect = vi.fn(async () => {
+            handler._client = {
+                fetch: vi.fn(() => makeIter([makeMsg(200)])),
+                idle: vi.fn(async () => {
+                    handler._running = false;
+                }),
+                logout: vi.fn(async () => {}),
+            };
+        });
+
+        await handler.idleLoop(callback);
+        expect(dedup.isRecentlyProcessed).toHaveBeenCalledWith("200");
+        expect(callback).not.toHaveBeenCalled();
+        expect(dedup.recordProcessed).not.toHaveBeenCalled();
+    });
+
+    it("processes new UIDs and records after success", async () => {
+        const dedup = {
+            isRecentlyProcessed: vi.fn().mockReturnValue(false),
+            recordProcessed: vi.fn(),
+        };
+        const handler = new ImapIdleHandler("h", 993, "u", "p", dedup);
+        const callback = vi.fn(async () => {});
+
+        handler.connect = vi.fn(async () => {
+            handler._client = {
+                fetch: vi.fn(() => makeIter([makeMsg(300)])),
+                idle: vi.fn(async () => {
+                    handler._running = false;
+                }),
+                logout: vi.fn(async () => {}),
+            };
+        });
+
+        await handler.idleLoop(callback);
+        expect(dedup.isRecentlyProcessed).toHaveBeenCalledWith("300");
+        expect(callback).toHaveBeenCalledOnce();
+        expect(callback.mock.calls[0][0].msg_id).toBe("300");
+        expect(dedup.recordProcessed).toHaveBeenCalledWith("300");
+    });
+
+    it("does not record UID when callback throws", async () => {
+        const dedup = {
+            isRecentlyProcessed: vi.fn().mockReturnValue(false),
+            recordProcessed: vi.fn(),
+        };
+        const handler = new ImapIdleHandler("h", 993, "u", "p", dedup);
+        const callback = vi.fn(async () => {
+            throw new Error("processing failed");
+        });
+
+        handler.connect = vi.fn(async () => {
+            handler._client = {
+                fetch: vi.fn(() => makeIter([makeMsg(400)])),
+                idle: vi.fn(async () => {
+                    handler._running = false;
+                }),
+                logout: vi.fn(async () => {}),
+            };
+        });
+
+        await handler.idleLoop(callback);
+        expect(callback).toHaveBeenCalledOnce();
+        expect(dedup.recordProcessed).not.toHaveBeenCalled();
+    });
+
+    it("handles multiple messages mixing new and recent", async () => {
+        const calls = [];
+        const dedup = {
+            isRecentlyProcessed: vi.fn((uid) => uid === "101"),
+            recordProcessed: vi.fn((uid) => calls.push(`record:${uid}`)),
+        };
+        const handler = new ImapIdleHandler("h", 993, "u", "p", dedup);
+        const callback = vi.fn(async (msg) =>
+            calls.push(`callback:${msg.msg_id}`),
+        );
+
+        handler.connect = vi.fn(async () => {
+            handler._client = {
+                fetch: vi.fn(() =>
+                    makeIter([makeMsg(100), makeMsg(101), makeMsg(102)]),
+                ),
+                idle: vi.fn(async () => {
+                    handler._running = false;
+                }),
+                logout: vi.fn(async () => {}),
+            };
+        });
+
+        await handler.idleLoop(callback);
+        expect(dedup.isRecentlyProcessed).toHaveBeenCalledTimes(3);
+        // 101 was recent → skipped; 100 and 102 → processed
+        expect(callback).toHaveBeenCalledTimes(2);
+        expect(dedup.recordProcessed).toHaveBeenCalledTimes(2);
+        expect(dedup.recordProcessed).toHaveBeenCalledWith("100");
+        expect(dedup.recordProcessed).toHaveBeenCalledWith("102");
+    });
+});
