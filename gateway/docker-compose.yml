@@ -104,7 +104,7 @@ services:
         ports:
             - "127.0.0.1:8082:8082"
         volumes:
-            - ../modules/ktmb/.env:/app/.env:ro
+            - ../modules/ktmb/.env:/app/.env
             - ../modules/ktmb/data:/app/data
         environment:
             - KTMB_DB_PATH=/app/data/ktmb_jobs.db
