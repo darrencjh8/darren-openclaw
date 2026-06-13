@@ -834,12 +834,14 @@ An LLM-powered agent that manages investment portfolio data in Portfolio Perform
 The portfolio-tracker does **not** implement its own Telegram sender. All user notifications flow through the **OpenClaw Gateway webhook**:
 
     notify_user(message)
-      -> POST http://openclaw:18800/api/notify
-      -> gateway notify-webhook.py
+      -> POST http://openclaw:18789/api/notify
+      -> OpenClaw HTTP API (port 18789)
       -> Telegram Bot API
       -> User
 
-The gateway runs a minimal Python sidecar (notify-webhook.py on port 18800) that receives JSON and forwards to the Telegram Bot API using the gateway bot token. This avoids duplicating Telegram credentials across modules and ensures all notifications go through a single, consistent channel.
+The gateway exposes `/api/notify` on port 18789 (the main OpenClaw HTTP API). Modules set `OPENCLAW_GATEWAY_URL=http://openclaw:18789` (or `KTMB_NOTIFY_URL` for ktmb). This avoids duplicating Telegram credentials across modules and ensures all notifications go through a single, consistent channel.
+
+**Note:** Port 18800 was originally planned for a separate `notify-webhook.py` sidecar, but this was never built. All notifications now go through port 18789, which requires authentication via the OpenClaw API key.
 
 **Design rationale:** Per the constitution, the gateway owns all channel communication. Modules call back to the gateway for notifications rather than reaching around it to call Telegram directly.
 

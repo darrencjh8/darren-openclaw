@@ -35,6 +35,7 @@ services:
             - OPENCLAW_NO_RESPAWN=1
             - CDP_URL=http://172.17.0.1:9223
             - TZ=Asia/Kuala_Lumpur
+            - OPENCLAW_ALLOW_INSECURE_PRIVATE_WS=1
         restart: unless-stopped
 
     expense-tracker:
@@ -107,6 +108,7 @@ services:
             - ../modules/ktmb/data:/app/data
         environment:
             - KTMB_DB_PATH=/app/data/ktmb_jobs.db
+            - KTMB_NOTIFY_URL=http://openclaw:18789/api/notify
         restart: unless-stopped
 
 volumes:
