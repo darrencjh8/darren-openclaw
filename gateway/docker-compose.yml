@@ -36,6 +36,7 @@ services:
             - CDP_URL=http://172.17.0.1:9223
             - TZ=Asia/Kuala_Lumpur
             - OPENCLAW_ALLOW_INSECURE_PRIVATE_WS=1
+            - OPENCLAW_GATEWAY_URL=http://127.0.0.1:18789
         restart: unless-stopped
 
     expense-tracker:

@@ -88,20 +88,18 @@ if [ ! -f /app/.openclaw/exec-approvals.json ]; then
   "agents": {
     "orchestrator": {
       "allowlist": [
-        { "pattern": "curl" },
+        { "pattern": "curl", "argPattern": "expense-tracker:8080|portfolio-tracker:8081|image-gen:8083|ktmb-booking:8082" },
         { "pattern": "qpdf" },
         { "pattern": "pdftotext" },
-        { "pattern": "echo" },
-        { "pattern": "bash" }
+        { "pattern": "echo" }
       ]
     },
     "thinker": {
       "allowlist": [
-        { "pattern": "curl" },
+        { "pattern": "curl", "argPattern": "expense-tracker:8080|portfolio-tracker:8081|image-gen:8083|ktmb-booking:8082" },
         { "pattern": "qpdf" },
         { "pattern": "pdftotext" },
-        { "pattern": "echo" },
-        { "pattern": "bash" }
+        { "pattern": "echo" }
       ]
     }
   }
