@@ -55,12 +55,12 @@ export class ImapIdleHandler {
             { unseen: true },
             { source: true, envelope: true },
         )) {
-            if (seen.has(msg.seq)) continue;
-            seen.add(msg.seq);
+            if (seen.has(msg.uid)) continue;
+            seen.add(msg.uid);
             try {
                 const parsed = await simpleParser(msg.source);
                 messages.push({
-                    msg_id: String(msg.seq),
+                    msg_id: String(msg.uid),
                     from: parsed.from?.text || "",
                     subject: parsed.subject || "",
                     date: parsed.date?.toISOString() || "",
@@ -76,7 +76,7 @@ export class ImapIdleHandler {
     async markRead(msgId) {
         if (!this._client) return;
         try {
-            await this._client.messageFlagsAdd({ seq: msgId }, ["\\Seen"]);
+            await this._client.messageFlagsAdd({ uid: msgId }, ["\\Seen"]);
         } catch {
             /* ignore */
         }
