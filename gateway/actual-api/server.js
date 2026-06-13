@@ -138,17 +138,7 @@ async function ensureBudget(budgetIdOrName) {
         // Re-check in case another request already switched
         if (syncId === activeSyncId) return;
 
-        // Skip download if already cached — only update activeSyncId
-        if (budgetCache[syncId]) {
-            activeSyncId = syncId;
-            lastSwitchTime = Date.now();
-            console.log(
-                `Switched to cached budget: ${target.name} (${syncId})`,
-            );
-            return;
-        }
-
-        // Download new budget — @actual-app/api needs it to change active budget
+        // Always download when switching — @actual-app/api needs it to change active budget
         await retryWithBackoff(() =>
             actual.downloadBudget(syncId, { password: PASSWORD }),
         );
