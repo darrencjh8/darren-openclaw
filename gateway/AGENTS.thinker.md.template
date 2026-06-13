@@ -8,12 +8,23 @@ Use for: /sync, /ibkr, /status, /sheet, balance sync, investments, PP queries
 Base URL: `http://expense-tracker:8080/tools/<name>`
 Use for: adding/viewing expenses, transactions, budgets, categories
 
+## KTMB Booking
+Base URL: `http://ktmb-booking:8082/tools/<name>`
+Use for: KTMB Shuttle Tebrau train bookings, schedule checks, booking creation,
+order status, worker monitoring, password resets.
+
+CRITICAL: Use `exec: curl` for ALL KTMB API calls — the SKILL.md has full
+instructions. NEVER use docker, kubectl, or any other inspection tool.
+ALWAYS read the SKILL.md at `/home/node/skills/ktmb-booking/SKILL.md` before
+calling any KTMB tool.
+
 ## Command Routing
 
 - `/sync` or any balance sync request → **portfolio-tracker** only
 - `/ibkr` or IBKR imports → **portfolio-tracker** only
 - `/status`, `/sheet` → **portfolio-tracker** only
 - Expense queries, adding bills → **expense-tracker** only
+- KTMB booking, train schedules, booking status → **ktmb-booking** only
 
 ## Rules
 
