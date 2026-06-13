@@ -9,7 +9,7 @@
 
 ## Overview
 
-The baseline OpenClaw Gateway deployment on Docker Compose. This is the **minimum viable platform** that makes the expense-tracker and portfolio-tracker skills usable end-to-end: a user sends a message on Telegram → the gateway agent receives it → the agent uses skill tools → the transaction lands in Actual Budget or portfolio syncs complete.
+The baseline OpenClaw Gateway deployment on Docker Compose. This is the **minimum viable platform** that makes the expense-tracker, portfolio-tracker, and ktmb-booking skills usable end-to-end: a user sends a message on Telegram → the gateway agent receives it → the agent uses skill tools → the transaction lands in Actual Budget, portfolio syncs complete, or KTMB train tickets are booked.
 
 This spec covers the gateway runtime, Telegram channel, agent persona, skill discovery, access control, session management, memory persistence, and workspace file templates. Without this baseline, the skills exist but nothing can reach them.
 
@@ -18,6 +18,7 @@ This spec covers the gateway runtime, Telegram channel, agent persona, skill dis
 | **gateway-baseline** (this spec) | Platform — runtime, channel, agent persona, skill discovery, access control, memory, workspace |
 | **expense-tracker-skill** | Capability — 10 deterministic tools, LLM instructions, HTTP wrappers |
 | **portfolio-tracker-skill** | Capability — portfolio sync, IBKR imports, PP balances, Google Sheets |
+| **ktmb-booking-skill** | Capability — KTMB Shuttle Tebrau train booking, schedule lookup, seat watching |
 
 ---
 
@@ -42,7 +43,7 @@ This spec covers the gateway runtime, Telegram channel, agent persona, skill dis
 
 **As a** user who wants to interact with the agent from my phone,  
 **I want** to send a message to the agent via a dedicated Telegram bot,  
-**So that** I can log expenses and manage my portfolio conversationally.
+**So that** I can log expenses, manage my portfolio, and book KTMB trains conversationally.
 
 **Acceptance Criteria:**
 - [x] Telegram bot created via @BotFather, token set via `TELEGRAM_BOT_TOKEN` env var
@@ -64,8 +65,8 @@ This spec covers the gateway runtime, Telegram channel, agent persona, skill dis
 - [x] Agent introduces itself on first contact
 - [x] Agent confirms before inserting transactions
 - [x] Agent understands dual-currency context (SGD and MYR)
-- [x] Agent routing rules defined for expense-tracker vs portfolio-tracker tools
-- [x] Multi-agent model tiering: orchestrator (v4-flash) delegates complex tasks to thinker (v4-pro)
+- [x] Agent routing rules defined for expense-tracker, portfolio-tracker, and ktmb-booking tools
+- [x] Multi-agent model tiering: orchestrator (deepseek-v4-flash, thinking=low) handles direct requests; KTMB worker-logs/troubleshooting delegated to thinker (deepseek-v4-pro, thinking=xhigh)
 - [x] Bindings route Telegram messages to orchestrator agent
 
 ---
@@ -74,13 +75,14 @@ This spec covers the gateway runtime, Telegram channel, agent persona, skill dis
 
 **As the** gateway agent,  
 **I want** to automatically discover skills from the workspace,  
-**So that** expense-tracker and portfolio-tracker tools are available without manual registration.
+**So that** expense-tracker, portfolio-tracker, and ktmb-booking tools are available without manual registration.
 
 **Acceptance Criteria:**
 - [x] `workspace/skills/expense-tracker/SKILL.md` is auto-discovered
 - [x] `workspace/skills/portfolio-tracker/SKILL.md` is auto-discovered
+- [x] `skills.load.extraDirs` loads `ktmb-booking/SKILL.md` from `/home/node/skills/`
 - [x] SKILL.md instructions are injected into the agent's system prompt
-- [x] Agent can invoke tools from both skill servers
+- [x] Agent can invoke tools from all three skill servers
 
 ---
 

@@ -159,7 +159,7 @@ See `gateway/docker-compose.yml` for the authoritative definition. Summary:
 | **expense-tracker** | 8080 | `modules/expense-tracker/` | Expense tracking tools (Actual Budget) |
 | **actual-api** | 3000 | `gateway/actual-api/` | Actual Budget REST API bridge |
 | **portfolio-tracker** | 8081 | `modules/portfolio-tracker/` | Portfolio sync, IBKR, PP, Google Sheets |
-| **ktmb-booking** | 8082 | `modules/ktmb-booking/` | KTMB train booking + seat watcher |
+| **ktmb-booking** | 8082 | `modules/ktmb/` | KTMB train booking + seat watcher |
 
 Key details:
 - Gateway uses a **custom entrypoint** (`docker-entrypoint.sh`) that generates workspace files from templates before starting OpenClaw
