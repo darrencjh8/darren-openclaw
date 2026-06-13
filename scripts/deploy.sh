@@ -244,8 +244,6 @@ echo "Starting Docker Compose (cached build)..."
 export COMPOSE_DOCKER_CLI_BUILD=1 DOCKER_BUILDKIT=1
 docker compose build
 docker compose up -d "${DOCKER_ARGS[@]}"
-echo "Disconnecting Warp..."
-warp-cli --accept-tos disconnect 2>/dev/null || true
 
 # ---- health checks ----
 
@@ -311,29 +309,25 @@ if [ -d "$GATEWAY_DIR" ]; then
     CHROME_BIN="$(command -v chromium)"
   else
     CHROME_BIN=""
-    echo "  ! No Chrome/Chromium binary found. Attempting apt install..."
-    # Add Google repo and install
-    wget -q -O - https://dl.google.com/linux/linux_signing_key.pub 2>/dev/null | \
-      sudo gpg --dearmor -o /usr/share/keyrings/google-chrome.gpg 2>/dev/null || true
-    echo "deb [arch=amd64 signed-by=/usr/share/keyrings/google-chrome.gpg] http://dl.google.com/linux/chrome/deb/ stable main" | \
-      sudo tee /etc/apt/sources.list.d/google-chrome.list > /dev/null 2>&1 || true
-    sudo apt-get update -qq 2>/dev/null || true
-    sudo apt-get install -y -qq google-chrome-stable 2>/dev/null || true
-    if [ -f /usr/bin/google-chrome-stable ]; then
-      CHROME_BIN="/usr/bin/google-chrome-stable"
-    elif [ -f /usr/bin/google-chrome ]; then
-      CHROME_BIN="/usr/bin/google-chrome"
-    fi
+    echo ""
+    echo "  ✗ No Chrome/Chromium binary found."
+    echo ""
+    echo "  Install Google Chrome before running deploy.sh:"
+    echo ""
+    echo "    wget -q -O - https://dl.google.com/linux/linux_signing_key.pub | \\"
+    echo "      sudo gpg --dearmor -o /usr/share/keyrings/google-chrome.gpg"
+    echo "    echo 'deb [arch=amd64 signed-by=/usr/share/keyrings/google-chrome.gpg] http://dl.google.com/linux/chrome/deb/ stable main' | \\"
+    echo "      sudo tee /etc/apt/sources.list.d/google-chrome.list"
+    echo "    sudo apt-get update && sudo apt-get install -y google-chrome-stable"
+    echo ""
+    echo "  Then re-run: ./scripts/deploy.sh"
+    exit 1
   fi
 
-  if [ -n "$CHROME_BIN" ] && [ -f "$CHROME_BIN" ]; then
-    echo "  ✓ Chrome binary: $CHROME_BIN"
-  else
-    echo "  ✗ Chrome binary not found. Install google-chrome-stable manually."
-  fi
+  echo "  ✓ Chrome binary: $CHROME_BIN"
 
   # Install socat
-  command -v socat &>/dev/null || sudo apt-get install -y -qq socat 2>/dev/null || true
+  command -v socat &>/dev/null || apt-get install -y -qq socat 2>/dev/null || true
 
   # Create chrome-daemon service on first run
   CHROME_SVC="/etc/systemd/system/chrome-daemon.service"
@@ -367,8 +361,8 @@ StandardError=journal
 [Install]
 WantedBy=multi-user.target
 UNIT
-    sudo systemctl daemon-reload
-    sudo systemctl enable chrome-daemon 2>/dev/null || true
+    systemctl daemon-reload 2>/dev/null || true
+    systemctl enable chrome-daemon 2>/dev/null || true
     echo "  ✓ chrome-daemon.service created"
   fi
 
@@ -390,15 +384,19 @@ RestartSec=5
 [Install]
 WantedBy=multi-user.target
 UNIT2
-    sudo systemctl daemon-reload
-    sudo systemctl enable cdp-forward 2>/dev/null || true
+    systemctl daemon-reload 2>/dev/null || true
+    systemctl enable cdp-forward 2>/dev/null || true
     echo "  ✓ cdp-forward.service created"
   fi
 
   # Restart services
-  sudo systemctl restart chrome-daemon 2>/dev/null || true
-  sudo systemctl restart cdp-forward 2>/dev/null || true
+  systemctl restart chrome-daemon 2>/dev/null || true
+  systemctl restart cdp-forward 2>/dev/null || true
   sleep 2
   ss -tlnp 2>/dev/null | grep -q 9222 && echo "  ✓ Chrome daemon :9222" || echo "  ! Chrome daemon not running"
   ss -tlnp 2>/dev/null | grep -q 9223 && echo "  ✓ CDP forward :9223"
 fi
+
+# Disconnect Warp after all network-dependent steps complete
+echo "Disconnecting Warp..."
+warp-cli --accept-tos disconnect 2>/dev/null || true
