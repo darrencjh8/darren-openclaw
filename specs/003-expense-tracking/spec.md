@@ -98,10 +98,11 @@ Incoming emails are pre-classified by a lightweight LLM call into one of three c
 **So that** my Actual Budget ledger stays clean.
 
 **Acceptance Criteria:**
-- [ ] Before insertion, a SHA-256 hash of `(date, amount_cents, account_id, imported_description)` is checked against a local SQLite journal
-- [ ] If a duplicate is detected, the transaction is skipped and the email is marked as read without insertion
-- [ ] The dedup check is a deterministic tool call — no LLM involvement
-- [ ] The journal is persisted across restarts (SQLite file on Server persistent volume)
+- [x] Before insertion, a SHA-256 hash of `(date, amount_cents, account_id, payee_name)` is checked against a local SQLite journal (`dedup` table)
+- [x] If a duplicate is detected in the dedup journal or Actual Budget, the LLM skips insertion and marks the email as read
+- [x] The dedup entry is recorded only AFTER successful insertion (not before the check)
+- [x] A UID-based `processed_uids` table with 60-minute cooldown pre-checks at the IMAP layer — recently processed emails skip all LLM dispatch
+- [x] The journal is persisted across restarts (SQLite file on Docker persistent volume)
 
 ---
 
@@ -128,11 +129,12 @@ Incoming emails are pre-classified by a lightweight LLM call into one of three c
 **So that** crashes or redeploys don't cause duplicate or lost transactions.
 
 **Acceptance Criteria:**
-- [x] Emails are marked as read (`\Seen` flag) only after successful transaction insertion
-- [x] Skipped emails (promos/spam) and uncertain emails remain unread — re-processed on restart
-- [x] On startup, OpenClaw fetches any unread emails and processes them
+- [x] Emails are marked as read after successful processing (insertion, skip, or intentional non-action)
+- [x] Failed or uncertain emails remain unread — re-processed on next IMAP cycle
+- [x] On startup, the IMAP handler fetches any unread emails and processes them
+- [x] A UID-based `processed_uids` SQLite table with 60-minute cooldown prevents recently processed emails from being re-dispatched to the LLM
 - [x] The dedup journal prevents re-insertion of already-processed transactions
-- [x] If OpenClaw crashes mid-processing, the email remains unread and is re-processed on restart
+- [x] If the process crashes mid-processing, the email remains unread and is re-processed on restart (UID is only recorded after successful completion)
 
 ---
 

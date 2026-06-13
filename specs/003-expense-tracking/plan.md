@@ -424,26 +424,37 @@ async def idle_loop(self):
 
 ## 8. Dedup Journal Schema
 
+Two SQLite tables handle deduplication at different pipeline layers:
+
+### Transaction dedup (`dedup`)
+
 ```sql
-CREATE TABLE IF NOT EXISTS dedup_journal (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    hash TEXT UNIQUE NOT NULL,
-    msg_id TEXT NOT NULL,
+CREATE TABLE IF NOT EXISTS dedup (
+    hash TEXT PRIMARY KEY,
     date TEXT NOT NULL,
     amount_cents INTEGER NOT NULL,
     account_id TEXT NOT NULL,
-    merchant TEXT NOT NULL,
-    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    payee_name TEXT NOT NULL,
+    created_at TEXT DEFAULT (datetime('now'))
 );
-
-CREATE INDEX IF NOT EXISTS idx_dedup_hash ON dedup_journal(hash);
 ```
 
+Hash computed over: `SHA-256(date|amount_cents|account_id|payee_name)`. Entry recorded **after** successful insertion (not before the check), preventing false positives if the LLM calls `check_duplicate` multiple times in one session.
+
+### UID pre-check (`processed_uids`)
+
+```sql
+CREATE TABLE IF NOT EXISTS processed_uids (
+    uid TEXT PRIMARY KEY,
+    processed_at TEXT NOT NULL
+);
+```
+
+Checked at the IMAP layer **before** any LLM dispatch. If a message UID was recorded within the last 60 minutes, the email is skipped entirely (no classification, no orchestrator, no LLM calls). The UID is recorded only after successful callback completion — failed emails are retried on the next IMAP cycle.
+
 Hash computation:
-```python
-def compute_hash(date: str, amount_cents: int, account_id: str, merchant: str) -> str:
-    payload = f"{date}|{amount_cents}|{account_id}|{merchant.lower().strip()}"
-    return hashlib.sha256(payload.encode()).hexdigest()
+```
+SHA-256(key) where key = "date|amount_cents|account_id|payee_name"
 ```
 
 ---
