@@ -359,102 +359,103 @@ The LLM is given 16 function definitions (OpenAI-compatible JSON schema). It cho
 ```mermaid
 sequenceDiagram
     participant IMAP as IMAP IDLE Handler
+    participant DB as Dedup Journal (processed_uids)
     participant Orch as Agent Orchestrator
     participant LLM as DeepSeek LLM
     participant Tools as Tool Executor
     participant AB as Actual Budget API
-    participant DB as Dedup Journal
-    participant SMTP as SMTP Notifier
+    participant GW as Gateway Webhook
 
-    IMAP->>Orch: new email detected (msg_id, raw MIME)
-    Orch->>Tools: extract_email_content()
-    Tools-->>Orch: cleaned text content
-    Orch->>LLM: system prompt + tools + email content
-    
-    loop Tool Call Loop (max 5 iterations)
-        LLM-->>Orch: tool_calls: [fetch_accounts, fetch_categories, ...]
-        Orch->>Tools: execute requested tools
-        Tools->>AB: GET /budgets/{id}/accounts
-        AB-->>Tools: account list
-        Tools->>AB: GET /budgets/{id}/categories
-        AB-->>Tools: category list
-        Tools-->>Orch: tool results
-        Orch->>LLM: tool results
-    end
+    IMAP->>DB: isRecentlyProcessed(uid)?
+    alt Recently processed (within 60 min)
+        DB-->>IMAP: yes
+        Note over IMAP: skip — no LLM calls
+    else New or expired cooldown
+        DB-->>IMAP: no
+        IMAP->>Orch: new email detected (uid, raw MIME)
+        Orch->>Tools: extract_email_content()
+        Tools-->>Orch: cleaned text content
+        Orch->>LLM: system prompt + tools + email content
+        
+        loop Tool Call Loop (max 5 iterations)
+            LLM-->>Orch: tool_calls: [fetch_accounts, fetch_categories, ...]
+            Orch->>Tools: execute requested tools
+            Tools->>AB: GET /budgets/{id}/accounts
+            AB-->>Tools: account list
+            Tools->>AB: GET /budgets/{id}/categories
+            AB-->>Tools: category list
+            Tools-->>Orch: tool results
+            Orch->>LLM: tool results
+        end
 
-    LLM-->>Orch: final decision
-    
-    alt Confident (Happy Path)
-        Orch->>Tools: check_duplicate()
-        Tools->>DB: hash lookup
-        DB-->>Tools: not duplicate
-        Orch->>Tools: insert_transaction()
-        Tools->>AB: POST /budgets/{id}/transactions
-        AB-->>Tools: transaction created
-        Orch->>Tools: mark_email_read()
-        Orch->>Tools: log_decision("inserted")
-    else Promotional / Skip
-        Orch->>Tools: log_decision("skipped")
-        Note over Orch: email left unread for re-processing on restart
-    else Uncertain / Error
-        Orch->>Tools: notify_user(reason, content)
-        Tools->>SMTP: send notification email
-        Orch->>Tools: log_decision("notified")
-        Note over Orch: email left unread for manual review
+        LLM-->>Orch: final decision
+        
+        alt Confident (Happy Path)
+            Orch->>Tools: check_duplicate()
+            Tools->>AB: check existing transactions
+            AB-->>Tools: not duplicate
+            Orch->>Tools: insert_transaction()
+            Tools->>AB: POST /transactions
+            AB-->>Tools: transaction created
+            Orch->>Tools: mark_email_read()
+            Orch->>Tools: log_decision("inserted")
+            IMAP->>DB: recordProcessed(uid)
+        else Promotional / Skip
+            Orch->>Tools: log_decision("skipped")
+            Orch->>Tools: mark_email_read()
+            IMAP->>DB: recordProcessed(uid)
+        else Uncertain / Error
+            Orch->>Tools: notify_user(message)
+            Tools->>GW: POST /api/notify
+            GW-->>Tools: 200 OK
+            Orch->>Tools: log_decision("notified")
+            Note over IMAP: UID NOT recorded — retry next cycle
+        end
     end
 ```
 
 ### 5.6 Dedup Journal
 
-SHA-256 hash computed over `(date, amount_cents, account_id, merchant)` and stored in a local SQLite database. The journal is persisted on a Docker volume mount and survives container restarts.
+Two SQLite tables provide dedup at different pipeline layers:
 
-```sql
-CREATE TABLE dedup_journal (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    hash TEXT UNIQUE NOT NULL,
-    msg_id TEXT NOT NULL,
-    date TEXT NOT NULL,
-    amount_cents INTEGER NOT NULL,
-    account_id TEXT NOT NULL,
-    merchant TEXT NOT NULL,
-    created_at TEXT NOT NULL DEFAULT (datetime('now'))
-);
-```
+**Transaction dedup (`dedup`)**: SHA-256 hash over `(date, amount_cents, account_id, payee_name)`. Recorded **after** successful insertion, not before. Prevents false positives if LLM calls `check_duplicate` twice in one session.
+
+**UID pre-check (`processed_uids`)**: Message UID with timestamp. Checked at IMAP layer **before** any LLM call. If UID recorded within 60 min, email is skipped entirely. UID recorded only after successful callback.
 
 ### 5.7 Environment Variables
 
 | Variable | Required | Description |
 |---|---|---|
-| `DEEPSEEK_API_KEY` | ✅ | DeepSeek API key |
-| `ACTUAL_BUDGET_URL` | ✅ | Actual Budget server URL |
-| `ACTUAL_BUDGET_PASSWORD` | ✅ | Actual Budget server password |
-| `ACTUAL_BUDGET_FILE` | ✅ | Budget file ID or name |
-| `ACTUAL_BUDGET_ENCRYPTION_PASSWORD` | ❌ | Optional encryption password |
-| `IMAP_HOST` | ✅ | `imap.example.com` |
-| `IMAP_PORT` | ❌ | Default: `993` |
-| `IMAP_USERNAME` | ✅ | Burner email address (Email account) |
-| `IMAP_PASSWORD` | ✅ | IMAP app-specific password |
-| `NOTIFICATION_SMTP_HOST` | ✅ | SMTP server for notifications (`smtp.example.com`) |
-| `NOTIFICATION_SMTP_PORT` | ❌ | Default: `587` |
-| `NOTIFICATION_EMAIL` | ✅ | User's main email for notifications |
-| `NOTIFICATION_EMAIL_PASSWORD` | ✅ | SMTP password (defaults to IMAP_PASSWORD if not set) |
-| `DEDUP_DB_PATH` | ❌ | Default: `data/dedup.db` |
-| `MEMORY_PATH` | ❌ | Default: `data/MEMORY.md`; path to learned facts file |
-| `LOG_LEVEL` | ❌ | Default: `INFO` |
+| `DEEPSEEK_API_KEY` | Yes | DeepSeek API key |
+| `ACTUAL_BUDGET_URL` | Yes | Actual Budget server URL |
+| `ACTUAL_BUDGET_PASSWORD` | Yes | Actual Budget server password |
+| `ACTUAL_BUDGET_FILE` | Yes | Budget file ID or name |
+| `ACTUAL_BUDGET_ENCRYPTION_PASSWORD` | No | Optional encryption password |
+| `ACTUAL_BUDGET_SYNC_TOKEN` | No | Sync token for budget switching |
+| `IMAP_HOST` | Yes | IMAP server hostname |
+| `IMAP_PORT` | No | Default: `993` |
+| `IMAP_USERNAME` | Yes | Burner email address |
+| `IMAP_PASSWORD` | Yes | IMAP app-specific password |
+| `OPENCLAW_GATEWAY_URL` | Yes | Gateway webhook URL for notifications (e.g., `http://openclaw:18789`) |
+| `OPENCLAW_GATEWAY_TOKEN` | Yes | Gateway API token for auth |
+| `USER_NAME` | No | User name for personalization |
+| `DEDUP_DB_PATH` | No | Default: `data/dedup.db` |
+| `MEMORY_PATH` | No | Default: `data/MEMORY.md`; path to learned facts file |
+| `LOG_LEVEL` | No | Default: `INFO` |
 
 ### 5.8 Email Configuration
 
 | Aspect | Setting |
 |---|---|
-| IMAP Host | `imap.example.com` |
+| IMAP Host | `imap.zoho.com` (configurable via `IMAP_HOST`) |
 | IMAP Port | 993 (SSL) |
-| IDLE Support | ✅ Yes |
+| IDLE Support | Yes (5-min timeout with auto-reconnect) |
 | Auth Method | App-specific password |
-| Free Tier | Email free |
-| IMAP Library | `aioimaplib` |
-| SMTP Host (Notifications) | `smtp.example.com` |
-| SMTP Port | 587 (STARTTLS) |
-| Architectural Impact | **Hostname-only configuration change** from any other IMAP provider |
+| IMAP Library | `imapflow` (Node.js, async IDLE) |
+| Message IDs | UIDs (persistent across sessions, not sequence numbers) |
+| Pre-check | `processed_uids` table with 60-min cooldown before LLM dispatch |
+| Notifications | Gateway webhook via `OPENCLAW_GATEWAY_URL` (replaces SMTP) |
+| Architectural Impact | Hostname-only configuration change from any other IMAP provider |
 
 ### 5.10 Memory System (Embeddings + MEMORY.md)
 
@@ -476,12 +477,12 @@ The expense tracker learns from every processed email using a local semantic mem
 
 | Phase | Artifacts | Status |
 |---|---|---|
-| 0: Constitution | `constitution.md` | ✅ Complete |
-| 1: Specify | `spec.md` (8 user stories, 9 edge cases) | ✅ Complete |
-| 2: Plan | `plan.md` (architecture, 10 tool schemas, system prompt, DB schema) | ✅ Complete |
-| 3: Tasks | `tasks.md` (16 tasks across 4 phases, ~12h estimated) | ✅ Complete |
-| 4: Implement | Source code (stubs exist, logic not yet written) | ⬜ Pending |
-| 5: Validate | Test suite, Docker build verification | ⬜ Pending |
+| 0: Constitution | `constitution.md` | Complete |
+| 1: Specify | `spec.md` (9 user stories, 10 edge cases) | Complete |
+| 2: Plan | `plan.md` | Complete |
+| 3: Tasks | `tasks.md` | Complete |
+| 4: Implement | Source code (Node.js, 16 tools, IMAP IDLE, embeddings) | Complete |
+| 5: Validate | Test suite (269 tests), Docker build | Complete |
 
 ---
 
@@ -936,37 +937,26 @@ https://docs.docker.com/go/wsl2/, off after |
 
 ```mermaid
 flowchart TD
-    A["Email arrives at<br/>Email burner inbox"] --> B["IMAP IDLE detects<br/>new message"]
-    B --> C["Raw email fetched<br/>(MIME envelope + body + attachments)"]
-    C --> D["extract_email_content()"]
+    A["Email arrives at burner inbox"] --> B["IMAP IDLE detects new message"]
+    B --> PREFILTER{"isRecentlyProcessed(uid)?"}
+    PREFILTER -->|"Yes (within 60 min)"| SKIP["Skip — no LLM calls"]
+    PREFILTER -->|"No"| C["fetchUnread() — raw MIME"]
+    C --> CLASSIFY["classifyEmail() — lightweight LLM"]
     
-    D --> D1["HTML body → BeautifulSoup → plain text"]
-    D --> D2["Plain text body → text_cleaner"]
-    D --> D3["PDF attachment → pdf2image → pytesseract → text"]
+    CLASSIFY -->|"skip"| MARK_SKIP["mark_email_read()"]
+    CLASSIFY -->|"transaction"| ORCH["AgentOrchestrator — LLM tool loop (max 5)"]
+    CLASSIFY -->|"statement"| STMT["StatementProcessor (future)"]
     
-    D1 & D2 & D3 --> E["Agent Orchestrator builds<br/>LLM conversation"]
+    ORCH --> DECISION{"LLM final decision?"}
     
-    E --> E1["System prompt<br/>(static instructions + rules)"]
-    E --> E2["Tool definitions<br/>(10 function schemas)"]
-    E --> E3["User message:<br/>'Process this email: {content}'"]
+    DECISION -->|"Confident"| CHECK["check_duplicate() then insert_transaction()"]
+    CHECK --> MARK["mark_email_read() + dedup.record()"]
+    MARK --> NOTIFY["notify_user() via gateway webhook"]
     
-    E1 & E2 & E3 --> F["LLM responds with tool_call(s)"]
-    F --> G["Python executes requested tools"]
-    G --> H["Results fed back to LLM"]
-    H --> F
+    DECISION -->|"Not a transaction"| SKIPLOG["log_decision(skipped) + mark_email_read()"]
     
-    H --> I{"LLM final decision?"}
-    
-    I -->|"Confident"| J["insert_transaction()"]
-    J --> K["mark_email_read()"]
-    K --> L["log_decision('inserted')"]
-    
-    I -->|"Not a transaction"| N["log_decision('skipped')"]
-    N --> Q2["Email left UNREAD<br/>for re-processing on restart"]
-    
-    I -->|"Uncertain/Error"| O["notify_user(reason, content)"]
-    O --> P["log_decision('notified')"]
-    P --> Q["Email left UNREAD<br/>for manual review"]
+    DECISION -->|"Uncertain/Error"| NOTIFY2["notify_user() via gateway webhook"]
+    NOTIFY2 --> UNREAD["Email left unread — UID NOT recorded → retry next cycle"]
 ```
 
 ### 7.2 Email Lifecycle States
@@ -974,16 +964,22 @@ flowchart TD
 ```mermaid
 stateDiagram-v2
     [*] --> New: Email arrives in inbox
-    New --> Processing: IMAP IDLE callback fires
-    Processing --> Processed: LLM confident → insert + mark \Seen
-    Processing --> Processed_Skip: LLM identifies as non-transactional → log decision
-    Processing --> Failed: LLM uncertain / API error → notify_user
-    Processed_Skip --> Processing: On restart: unread emails re-fetched
-    Failed --> Processing: On restart: unread emails re-fetched
+    New --> PreCheck: IMAP IDLE callback fires
+    PreCheck --> Skipped: UID in processed_uids (within 60 min)
+    PreCheck --> Classified: UID not recent
+    Classified --> Processed_Skip: classifyEmail returns "skip"
+    Classified --> Processing: classifyEmail returns "transaction"
+    Processing --> Processed: LLM confident → insert + mark Seen + record UID
+    Processing --> Processed_Skip2: LLM identifies as non-transactional → mark Seen + record UID
+    Processing --> Failed: LLM uncertain / API error → notify_user (UID NOT recorded)
+    Processed_Skip --> [*]
+    Processed_Skip2 --> [*]
+    Failed --> New: On next IMAP cycle: email still unread → retry
     Processed --> [*]
+    Skipped --> [*]
 
-    note right of Processed_Skip: Email left \Unseen
-    note right of Failed: Email left \Unseen for manual review
+    note right of Skipped: Zero LLM calls (IMAP-level pre-check)
+    note right of Failed: Email left unseen — retried
 ```
 
 ---
