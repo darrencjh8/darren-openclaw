@@ -16,14 +16,16 @@ export class ImapIdleHandler {
      * @param {number} port
      * @param {string} username
      * @param {string} password
+     * @param {import('./dedup.js').DedupJournal} [dedupJournal]
      */
-    constructor(host, port, username, password) {
+    constructor(host, port, username, password, dedupJournal = null) {
         this._host = host;
         this._port = port;
         this._username = username;
         this._password = password;
         this._client = null;
         this._running = false;
+        this._dedup = dedupJournal;
     }
 
     async connect() {
@@ -114,6 +116,19 @@ export class ImapIdleHandler {
                     );
                 }
                 for (const msg of unread) {
+                    if (
+                        this._dedup &&
+                        this._dedup.isRecentlyProcessed(msg.msg_id)
+                    ) {
+                        console.log(
+                            JSON.stringify({
+                                event: "imap_recently_skipped",
+                                uid: msg.msg_id,
+                                subject: msg.subject,
+                            }),
+                        );
+                        continue;
+                    }
                     try {
                         console.log(
                             JSON.stringify({
@@ -123,6 +138,8 @@ export class ImapIdleHandler {
                             }),
                         );
                         await callback(msg);
+                        if (this._dedup)
+                            this._dedup.recordProcessed(msg.msg_id);
                     } catch (e) {
                         console.error(
                             JSON.stringify({
