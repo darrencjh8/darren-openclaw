@@ -20,6 +20,7 @@ services:
             - ../modules/ktmb/skills:/home/node/skills/ktmb-booking:ro
             - openclaw_home:/app/.openclaw
             - openclaw_data:/app/data
+            - image_gen_media:/app/.openclaw/workspace/media
         user: node
         entrypoint: ["/app/docker-entrypoint.sh"]
         env_file:
@@ -90,8 +91,10 @@ services:
         volumes:
             - ../gateway/workspace/skills/image-generation:/app/scripts:ro
             - ../modules/perchance-gen:/app/modules/perchance-gen:ro
+            - image_gen_media:/app/.openclaw/workspace/media
         env_file:
             - ../modules/portfolio-tracker/.env
+            - ../modules/image-gen/.env
         environment:
             - CDP_URL=http://172.17.0.1:9223
         extra_hosts:
@@ -116,3 +119,4 @@ volumes:
     openclaw_data:
     openclaw_home:
     onedrive_data:
+    image_gen_media:
