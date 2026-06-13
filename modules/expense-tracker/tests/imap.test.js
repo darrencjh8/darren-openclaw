@@ -96,6 +96,7 @@ describe("ImapIdleHandler fetchUnread", () => {
         const mockMessages = [
             {
                 seq: 1,
+                uid: 100,
                 source: Buffer.from(
                     "From: test@test.com\r\nSubject: Test Alert\r\nDate: Thu, 04 Jun 2026\r\n\r\nBody content",
                 ),
@@ -103,6 +104,7 @@ describe("ImapIdleHandler fetchUnread", () => {
             },
             {
                 seq: 2,
+                uid: 101,
                 source: Buffer.from(
                     "From: alerts@dbs.com\r\nSubject: S$12.80 spent\r\nDate: Thu, 04 Jun 2026\r\n\r\nTransaction",
                 ),
@@ -126,7 +128,10 @@ describe("ImapIdleHandler fetchUnread", () => {
                     return {
                         async next() {
                             if (idx < mockMessages.length) {
-                                return { value: mockMessages[idx++], done: false };
+                                return {
+                                    value: mockMessages[idx++],
+                                    done: false,
+                                };
                             }
                             return { value: undefined, done: true };
                         },
@@ -139,11 +144,11 @@ describe("ImapIdleHandler fetchUnread", () => {
 
         const result = await handler.fetchUnread();
         expect(result.length).toBe(2);
-        expect(result[0].msg_id).toBe("1");
+        expect(result[0].msg_id).toBe("100");
         expect(result[0].from).toBeDefined();
         expect(result[0].subject).toBeDefined();
         expect(result[0].raw_email).toBeDefined();
-        expect(result[1].msg_id).toBe("2");
+        expect(result[1].msg_id).toBe("101");
     });
 
     it("returns empty array when no unseen messages", async () => {
@@ -189,10 +194,9 @@ describe("ImapIdleHandler markRead", () => {
         handler._client = mockClient;
 
         await handler.markRead("42");
-        expect(mockClient.messageFlagsAdd).toHaveBeenCalledWith(
-            { seq: "42" },
-            ["\\Seen"],
-        );
+        expect(mockClient.messageFlagsAdd).toHaveBeenCalledWith({ uid: "42" }, [
+            "\\Seen",
+        ]);
     });
 
     it("handles integer msgId by converting to string", async () => {
@@ -209,10 +213,9 @@ describe("ImapIdleHandler markRead", () => {
         handler._client = mockClient;
 
         await handler.markRead(42);
-        expect(mockClient.messageFlagsAdd).toHaveBeenCalledWith(
-            { seq: 42 },
-            ["\\Seen"],
-        );
+        expect(mockClient.messageFlagsAdd).toHaveBeenCalledWith({ uid: 42 }, [
+            "\\Seen",
+        ]);
     });
 
     it("handles errors gracefully (no client)", async () => {

@@ -667,7 +667,7 @@ export class ToolRegistry {
             args.imported_description || "",
             args.budget_id || "",
         );
-        return this._post(
+        const result = await this._post(
             "/transactions",
             {
                 account: args.account_id || "",
@@ -680,6 +680,14 @@ export class ToolRegistry {
             },
             args.budget_id || "",
         );
+        // Record in dedup journal AFTER successful insert (not before)
+        this._dedup.record(
+            args.date || new Date().toISOString().slice(0, 10),
+            args.amount_cents || 0,
+            args.account_id || "",
+            payee_name,
+        );
+        return result;
     }
 
     async _handle_check_duplicate({
@@ -689,22 +697,17 @@ export class ToolRegistry {
         payee_name,
         budget_id = "",
     }) {
-        const isDup = this._dedup.checkDuplicate(
-            date,
-            amount_cents,
-            account_id,
-            payee_name || "",
-        );
-        // Always journal the check so duplicates are recorded
-        this._dedup.record(date, amount_cents, account_id, payee_name || "");
-        if (isDup) {
-            // Auto-mark duplicate emails as read to prevent re-processing loops
-            if (this._emailMsgId && this._imapHandler) {
-                this._imapHandler.markRead(this._emailMsgId).catch(() => {});
-            }
+        // Check local dedup first, then AB API
+        if (
+            this._dedup.checkDuplicate(
+                date,
+                amount_cents,
+                account_id,
+                payee_name || "",
+            )
+        ) {
             return true;
         }
-        // Fall back to AB API query for matching transactions
         return this._check_ab_duplicate(
             date,
             amount_cents,
