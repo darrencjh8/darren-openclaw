@@ -103,9 +103,7 @@
                     ]
                 },
                 "subagents": {
-                    "allowAgents": [
-                        "thinker"
-                    ],
+                    "allowAgents": ["thinker"],
                     "delegationMode": "prefer"
                 }
             },
@@ -115,9 +113,7 @@
                 "thinkingDefault": "max",
                 "model": {
                     "primary": "deepseek/deepseek-v4-pro",
-                    "fallbacks": [
-                        "deepseek/deepseek-v4-flash"
-                    ]
+                    "fallbacks": ["deepseek/deepseek-v4-flash"]
                 }
             }
         ]
@@ -133,7 +129,7 @@
     ],
     "gateway": {
         "port": 18789,
-        "bind": "loopback",
+        "bind": "lan",
         "mode": "local"
     },
     "tools": {
@@ -142,9 +138,7 @@
             "timeoutSec": 30,
             "strictInlineEval": true
         },
-        "deny": [
-            "image_generate"
-        ]
+        "deny": ["image_generate"]
     },
     "messages": {
         "tts": {
@@ -163,9 +157,7 @@
             "enabled": true,
             "botToken": "${TELEGRAM_BOT_TOKEN}",
             "dmPolicy": "allowlist",
-            "allowFrom": [
-                "tg:${TELEGRAM_CHAT_ID}"
-            ]
+            "allowFrom": ["tg:${TELEGRAM_CHAT_ID}"]
         }
     },
     "hooks": {
