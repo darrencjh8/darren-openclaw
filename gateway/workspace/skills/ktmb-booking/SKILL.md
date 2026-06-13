@@ -19,29 +19,6 @@ fetch: POST http://ktmb-booking:8082/tools/<name> {"key":"value"}
 
 Send parallel fetch calls when the calls are independent (e.g., get-passenger + booking-window + get-schedules together).
 
-## Shuttle Schedules
-
-### JB Sentral → Woodlands CIQ (jb-to-sg) — 18 departures
-
-| Time | Code | Time | Code | Time | Code |
-|------|------|------|------|------|------|
-| 05:00 | 61 | 05:30 | 63 | 06:00 | 65 |
-| 06:30 | 67 | 07:00 | 69 | 07:30 | 71 |
-| 08:45 | 73 | 10:00 | 75 | 11:30 | 77 |
-| 12:45 | 79 | 14:00 | 81 | 15:15 | 83 |
-| 16:30 | 85 | 17:45 | 87 | 19:00 | 89 |
-| 20:15 | 91 | 21:30 | 93 | 22:45 | 95 |
-
-### Woodlands CIQ → JB Sentral (sg-to-jb) — 13 departures
-
-| Time | Code | Time | Code | Time | Code |
-|------|------|------|------|------|------|
-| 08:30 | 72 | 09:45 | 74 | 11:00 | 76 |
-| 12:30 | 78 | 13:45 | 80 | 15:00 | 82 |
-| 16:15 | 84 | 17:30 | 86 | 18:45 | 88 |
-| 20:00 | 90 | 21:15 | 92 | 22:30 | 94 |
-| 23:45 | 96 |
-
 ## Booking Window
 
 Tickets are bookable from today through the last day of the 6th month. Use `booking-window` to get the current valid date range — never hardcode dates.
@@ -62,16 +39,12 @@ Tickets are bookable from today through the last day of the 6th month. Use `book
 
 ## Booking Parameters
 
-| Field | Type | Description | Example |
-|-------|------|-------------|---------|
-| `date` | string | Travel date | `"2026-06-14"` |
-| `direction` | string | `"jb-to-sg"` or `"sg-to-jb"` | `"jb-to-sg"` |
-| `time` | string | Departure timeslot | `"16:30"` |
-| `name` | string | Passenger full name | Ask user |
-| `passport` | string | Passport number | Ask user |
-| `expiry` | string | Passport expiry `YYYY-MM-DD` | Ask user |
-| `contact` | string | Contact number 7-15 digits | Ask user |
-| `gender` | string | `"M"` or `"F"` | Ask user |
+| Field | Type | Note |
+|-------|------|------|
+| `date` | string | `YYYY-MM-DD` |
+| `direction` | string | `jb-to-sg` or `sg-to-jb` |
+| `time` | string | `HH:MM` |
+| `name`, `passport`, `expiry`, `contact`, `gender` | string | Ask user; never guess |
 
 ## Booking Workflow
 

@@ -10,11 +10,7 @@ user-invocable: true
 
 You track expenses in Actual Budget. ALL tools are at `http://expense-tracker:8080/tools/<name>`.
 
-## CRITICAL: exec Rules
-
-`exec` may ONLY be used for `curl` commands to `http://expense-tracker:8080/tools/*`.
-NEVER use exec for: find, cat, ls, grep, ps, /proc, nsenter, systemctl, or any
-other command. Only `curl` to the expense-tracker API.
+## exec Rules
 
 Send curl calls in PARALLEL (multiple exec in one message) when the calls are
 independent (e.g., fetch-accounts + fetch-payees together).
@@ -22,12 +18,6 @@ independent (e.g., fetch-accounts + fetch-payees together).
 ## Date Format
 
 ALL dates MUST be `YYYY-MM-DD`. Always compute the actual date — never use a hardcoded date.
-
-## How to Call a Tool
-
-```
-exec: curl -s -X POST http://expense-tracker:8080/tools/<name> -H "Content-Type: application/json" -d '<json>'
-```
 
 ## Available Tools
 
@@ -72,13 +62,6 @@ exec: curl -s -X POST http://expense-tracker:8080/tools/<name> -H "Content-Type:
 6. Confirm: "I'll log S$X.XX as [Payee] under [Account]. OK?"
 7. If yes → `insert-transaction` with `account_id`, `date`, `amount_cents`, `imported_description`
 8. After every successful insert → call `learn-fact` 3 times (account type, payee, category)
-
-## Memory Corrections
-
-When the user asks to fix a learned mapping:
-- "X should be Y" or "change X to Y" → `search-memory` to find → `update-fact`
-- "forget X" or "remove X" → `search-memory` to find → `delete-fact`
-- "show learned facts" → `list-facts`
 
 ## Email Classification
 
