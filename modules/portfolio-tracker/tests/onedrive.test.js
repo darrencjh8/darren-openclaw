@@ -15,6 +15,7 @@ vi.mock("fs", () => ({
     existsSync: mockExistsSync,
     readFileSync: mockReadFileSync,
     writeFileSync: mockWriteFileSync,
+    mkdirSync: mockMkdirSync,
 }));
 
 vi.mock("path", () => ({
@@ -22,7 +23,6 @@ vi.mock("path", () => ({
         const idx = p.lastIndexOf("/");
         return idx === -1 ? "." : p.substring(0, idx);
     },
-    mkdirSync: mockMkdirSync,
 }));
 
 describe("onedrive", () => {

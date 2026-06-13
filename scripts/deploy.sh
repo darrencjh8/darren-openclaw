@@ -244,8 +244,6 @@ echo "Starting Docker Compose (cached build)..."
 export COMPOSE_DOCKER_CLI_BUILD=1 DOCKER_BUILDKIT=1
 docker compose build
 docker compose up -d "${DOCKER_ARGS[@]}"
-echo "Disconnecting Warp..."
-warp-cli --accept-tos disconnect 2>/dev/null || true
 
 # ---- health checks ----
 
@@ -301,32 +299,51 @@ if [ -d "$GATEWAY_DIR" ]; then
   echo ""
   echo "--- Chrome Daemon ---"
 
-  # Download Chrome binary directly from Playwright CDN (no container dependency)
-  CHROME_BIN="/usr/local/bin/chromium"
-  if [ ! -f "$CHROME_BIN" ]; then
-    CHROME_VER="1223"
-    CHROME_URL="https://playwright.azureedge.net/builds/chromium/${CHROME_VER}/chromium-linux64.zip"
-    echo "  Downloading Chrome ${CHROME_VER} for daemon..."
-    curl -fsSL "$CHROME_URL" -o /tmp/chromium.zip 2>/dev/null || \
-      wget -q "$CHROME_URL" -O /tmp/chromium.zip 2>/dev/null
-    if [ -f /tmp/chromium.zip ]; then
-      mkdir -p /tmp/chromium-extract
-      unzip -qo /tmp/chromium.zip -d /tmp/chromium-extract 2>/dev/null
-      cp /tmp/chromium-extract/chrome-linux/chrome "$CHROME_BIN" 2>/dev/null || \
-        cp /tmp/chromium-extract/chrome-linux64/chrome "$CHROME_BIN" 2>/dev/null
-      chmod +x "$CHROME_BIN" 2>/dev/null
-      rm -rf /tmp/chromium.zip /tmp/chromium-extract 2>/dev/null
-    fi
+  # Prefer Google Chrome (production uses this).
+  # Fall back to chromium if google-chrome not found.
+  if [ -f /usr/bin/google-chrome ]; then
+    CHROME_BIN="/usr/bin/google-chrome"
+  elif command -v google-chrome-stable &>/dev/null; then
+    CHROME_BIN="$(command -v google-chrome-stable)"
+  elif command -v chromium &>/dev/null; then
+    CHROME_BIN="$(command -v chromium)"
+  else
+    CHROME_BIN=""
+    echo ""
+    echo "  ✗ No Chrome/Chromium binary found."
+    echo ""
+    echo "  Install Google Chrome before running deploy.sh:"
+    echo ""
+    echo "    wget -q -O - https://dl.google.com/linux/linux_signing_key.pub | \\"
+    echo "      sudo gpg --dearmor -o /usr/share/keyrings/google-chrome.gpg"
+    echo "    echo 'deb [arch=amd64 signed-by=/usr/share/keyrings/google-chrome.gpg] http://dl.google.com/linux/chrome/deb/ stable main' | \\"
+    echo "      sudo tee /etc/apt/sources.list.d/google-chrome.list"
+    echo "    sudo apt-get update && sudo apt-get install -y google-chrome-stable"
+    echo ""
+    echo "  Then re-run: ./scripts/deploy.sh"
+    exit 1
   fi
-  [ -f "$CHROME_BIN" ] && echo "  ✓ Chrome binary" || echo "  ! Chrome binary missing"
+
+  echo "  ✓ Chrome binary: $CHROME_BIN"
 
   # Install socat
-  command -v socat &>/dev/null || apt-get install -y -qq socat 2>/dev/null
+  if command -v socat &>/dev/null; then
+    :
+  elif sudo -n true 2>/dev/null; then
+    sudo apt-get install -y -qq socat 2>/dev/null || true
+  else
+    echo "  ! socat not found and sudo unavailable — install manually"
+  fi
+
+  # Check if we can manage systemd services
+  HAS_SUDO=false
+  sudo -n true 2>/dev/null && HAS_SUDO=true
 
   # Create chrome-daemon service on first run
   CHROME_SVC="/etc/systemd/system/chrome-daemon.service"
-  if [ ! -f "$CHROME_SVC" ] && [ -f "$CHROME_BIN" ]; then
-    cat > "$CHROME_SVC" << UNIT
+  if [ ! -f "$CHROME_SVC" ] && [ -n "$CHROME_BIN" ] && [ -f "$CHROME_BIN" ]; then
+    if $HAS_SUDO; then
+      cat > "$CHROME_SVC" << UNIT
 [Unit]
 Description=Chrome Headless Daemon (CDP :9222)
 After=network.target
@@ -340,6 +357,7 @@ ExecStartPre=/bin/sleep 2
 ExecStart=$CHROME_BIN \\
   --disable-dev-shm-usage \\
   --remote-debugging-port=9222 \\
+  --remote-debugging-address=0.0.0.0 \\
   --user-data-dir=/tmp/chrome-daemon \\
   --disable-gpu \\
   --disable-software-rasterizer \\
@@ -348,19 +366,25 @@ ExecStart=$CHROME_BIN \\
   about:blank
 Restart=on-failure
 RestartSec=5
+StandardOutput=journal
+StandardError=journal
 
 [Install]
 WantedBy=multi-user.target
 UNIT
-    systemctl daemon-reload
-    systemctl enable chrome-daemon 2>/dev/null || true
-    echo "  ✓ chrome-daemon.service created"
+      systemctl daemon-reload 2>/dev/null || true
+      systemctl enable chrome-daemon 2>/dev/null || true
+      echo "  ✓ chrome-daemon.service created"
+    else
+      echo "  ! sudo unavailable — chrome-daemon.service not created"
+    fi
   fi
 
   # Create cdp-forward service on first run
   CDP_SVC="/etc/systemd/system/cdp-forward.service"
   if [ ! -f "$CDP_SVC" ] && command -v socat &>/dev/null; then
-    cat > "$CDP_SVC" << UNIT2
+    if $HAS_SUDO; then
+      cat > "$CDP_SVC" << UNIT2
 [Unit]
 Description=CDP Forward (9223→9222)
 After=chrome-daemon.service
@@ -375,15 +399,26 @@ RestartSec=5
 [Install]
 WantedBy=multi-user.target
 UNIT2
-    systemctl daemon-reload
-    systemctl enable cdp-forward 2>/dev/null || true
-    echo "  ✓ cdp-forward.service created"
+      systemctl daemon-reload 2>/dev/null || true
+      systemctl enable cdp-forward 2>/dev/null || true
+      echo "  ✓ cdp-forward.service created"
+    else
+      echo "  ! sudo unavailable — cdp-forward.service not created"
+    fi
   fi
 
-  # Restart services
-  systemctl restart chrome-daemon 2>/dev/null || true
-  systemctl restart cdp-forward 2>/dev/null || true
-  sleep 2
+  # Restart services (skip if sudo unavailable)
+  if $HAS_SUDO; then
+    systemctl restart chrome-daemon 2>/dev/null || true
+    systemctl restart cdp-forward 2>/dev/null || true
+    sleep 2
+  else
+    echo "  ! Skipping service restart (sudo unavailable)"
+  fi
   ss -tlnp 2>/dev/null | grep -q 9222 && echo "  ✓ Chrome daemon :9222" || echo "  ! Chrome daemon not running"
   ss -tlnp 2>/dev/null | grep -q 9223 && echo "  ✓ CDP forward :9223"
 fi
+
+# Disconnect Warp after all network-dependent steps complete
+echo "Disconnecting Warp..."
+warp-cli --accept-tos disconnect 2>/dev/null || true
