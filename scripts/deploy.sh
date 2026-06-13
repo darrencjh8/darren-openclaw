@@ -301,31 +301,43 @@ if [ -d "$GATEWAY_DIR" ]; then
   echo ""
   echo "--- Chrome Daemon ---"
 
-  # Download Chrome binary directly from Playwright CDN (no container dependency)
-  CHROME_BIN="/usr/local/bin/chromium"
-  if [ ! -f "$CHROME_BIN" ]; then
-    CHROME_VER="1223"
-    CHROME_URL="https://playwright.azureedge.net/builds/chromium/${CHROME_VER}/chromium-linux64.zip"
-    echo "  Downloading Chrome ${CHROME_VER} for daemon..."
-    curl -fsSL "$CHROME_URL" -o /tmp/chromium.zip 2>/dev/null || \
-      wget -q "$CHROME_URL" -O /tmp/chromium.zip 2>/dev/null
-    if [ -f /tmp/chromium.zip ]; then
-      mkdir -p /tmp/chromium-extract
-      unzip -qo /tmp/chromium.zip -d /tmp/chromium-extract 2>/dev/null
-      cp /tmp/chromium-extract/chrome-linux/chrome "$CHROME_BIN" 2>/dev/null || \
-        cp /tmp/chromium-extract/chrome-linux64/chrome "$CHROME_BIN" 2>/dev/null
-      chmod +x "$CHROME_BIN" 2>/dev/null
-      rm -rf /tmp/chromium.zip /tmp/chromium-extract 2>/dev/null
+  # Prefer Google Chrome (production uses this).
+  # Fall back to chromium if google-chrome not found.
+  if [ -f /usr/bin/google-chrome ]; then
+    CHROME_BIN="/usr/bin/google-chrome"
+  elif command -v google-chrome-stable &>/dev/null; then
+    CHROME_BIN="$(command -v google-chrome-stable)"
+  elif command -v chromium &>/dev/null; then
+    CHROME_BIN="$(command -v chromium)"
+  else
+    CHROME_BIN=""
+    echo "  ! No Chrome/Chromium binary found. Attempting apt install..."
+    # Add Google repo and install
+    wget -q -O - https://dl.google.com/linux/linux_signing_key.pub 2>/dev/null | \
+      sudo gpg --dearmor -o /usr/share/keyrings/google-chrome.gpg 2>/dev/null || true
+    echo "deb [arch=amd64 signed-by=/usr/share/keyrings/google-chrome.gpg] http://dl.google.com/linux/chrome/deb/ stable main" | \
+      sudo tee /etc/apt/sources.list.d/google-chrome.list > /dev/null 2>&1 || true
+    sudo apt-get update -qq 2>/dev/null || true
+    sudo apt-get install -y -qq google-chrome-stable 2>/dev/null || true
+    if [ -f /usr/bin/google-chrome-stable ]; then
+      CHROME_BIN="/usr/bin/google-chrome-stable"
+    elif [ -f /usr/bin/google-chrome ]; then
+      CHROME_BIN="/usr/bin/google-chrome"
     fi
   fi
-  [ -f "$CHROME_BIN" ] && echo "  ✓ Chrome binary" || echo "  ! Chrome binary missing"
+
+  if [ -n "$CHROME_BIN" ] && [ -f "$CHROME_BIN" ]; then
+    echo "  ✓ Chrome binary: $CHROME_BIN"
+  else
+    echo "  ✗ Chrome binary not found. Install google-chrome-stable manually."
+  fi
 
   # Install socat
-  command -v socat &>/dev/null || apt-get install -y -qq socat 2>/dev/null
+  command -v socat &>/dev/null || sudo apt-get install -y -qq socat 2>/dev/null || true
 
   # Create chrome-daemon service on first run
   CHROME_SVC="/etc/systemd/system/chrome-daemon.service"
-  if [ ! -f "$CHROME_SVC" ] && [ -f "$CHROME_BIN" ]; then
+  if [ ! -f "$CHROME_SVC" ] && [ -n "$CHROME_BIN" ] && [ -f "$CHROME_BIN" ]; then
     cat > "$CHROME_SVC" << UNIT
 [Unit]
 Description=Chrome Headless Daemon (CDP :9222)
@@ -340,6 +352,7 @@ ExecStartPre=/bin/sleep 2
 ExecStart=$CHROME_BIN \\
   --disable-dev-shm-usage \\
   --remote-debugging-port=9222 \\
+  --remote-debugging-address=0.0.0.0 \\
   --user-data-dir=/tmp/chrome-daemon \\
   --disable-gpu \\
   --disable-software-rasterizer \\
@@ -348,12 +361,14 @@ ExecStart=$CHROME_BIN \\
   about:blank
 Restart=on-failure
 RestartSec=5
+StandardOutput=journal
+StandardError=journal
 
 [Install]
 WantedBy=multi-user.target
 UNIT
-    systemctl daemon-reload
-    systemctl enable chrome-daemon 2>/dev/null || true
+    sudo systemctl daemon-reload
+    sudo systemctl enable chrome-daemon 2>/dev/null || true
     echo "  ✓ chrome-daemon.service created"
   fi
 
@@ -375,14 +390,14 @@ RestartSec=5
 [Install]
 WantedBy=multi-user.target
 UNIT2
-    systemctl daemon-reload
-    systemctl enable cdp-forward 2>/dev/null || true
+    sudo systemctl daemon-reload
+    sudo systemctl enable cdp-forward 2>/dev/null || true
     echo "  ✓ cdp-forward.service created"
   fi
 
   # Restart services
-  systemctl restart chrome-daemon 2>/dev/null || true
-  systemctl restart cdp-forward 2>/dev/null || true
+  sudo systemctl restart chrome-daemon 2>/dev/null || true
+  sudo systemctl restart cdp-forward 2>/dev/null || true
   sleep 2
   ss -tlnp 2>/dev/null | grep -q 9222 && echo "  ✓ Chrome daemon :9222" || echo "  ! Chrome daemon not running"
   ss -tlnp 2>/dev/null | grep -q 9223 && echo "  ✓ CDP forward :9223"
