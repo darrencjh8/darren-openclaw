@@ -29,7 +29,7 @@ Incoming emails are pre-classified by a lightweight LLM call into one of three c
 - [ ] OpenClaw maintains a persistent IMAP IDLE connection to Email Provider (`imap.example.com:993`)
 - [ ] New emails are detected within 5 seconds of arrival
 - [ ] If the IMAP connection drops, OpenClaw reconnects automatically and performs a catch-up fetch of any emails missed during the disconnection
-- [ ] Each email is processed exactly once (idempotent via dedup)
+- [ ] Each email is processed exactly once (idempotent via UID-based `processed_uids` table with 60-min cooldown + SHA-256 dedup journal)
 
 ---
 

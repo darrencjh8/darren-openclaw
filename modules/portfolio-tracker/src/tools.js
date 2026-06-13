@@ -10,6 +10,9 @@ import { parseIBKRFlexQuery } from "./ibkr_parser.js";
 import { extractEmailContent } from "./email_handler.js";
 import { extractPdfText } from "./pdf_extractor.js";
 import { SheetsClient } from "./sheets_client.js";
+import { pullFromOneDrive, pushToOneDrive } from "./onedrive.js";
+import { existsSync } from "fs";
+import { PpJavaBridge } from "./java_bridge.js";
 
 // ---------------------------------------------------------------------------
 // Tool schemas
@@ -375,11 +378,32 @@ export class ToolRegistry {
         this._config = config;
         this._dedup = dedupJournal;
         this._memory = memoryStore;
-        this._ppBridge = ppBridge;
+        this.__ppBridge = ppBridge;
         this._abClient = abClient;
         this._currentPdfBytes = Buffer.alloc(0);
         this._currentRawEmail = Buffer.alloc(0);
         this._sheetsClient = null;
+    }
+
+    /**
+     * Lazy getter for the PP Java bridge.
+     * If the bridge was not provided at construction (e.g. XML file missing
+     * at startup), checks whether the file now exists on disk and creates
+     * the bridge on demand. This avoids requiring a container restart after
+     * pp-pull downloads the Portfolio XML for the first time.
+     */
+    get _ppBridge() {
+        if (!this.__ppBridge) {
+            const xmlPath = this._config.ppXmlPath;
+            if (existsSync(xmlPath)) {
+                this.__ppBridge = new PpJavaBridge(
+                    this._config.ppJarPath,
+                    xmlPath,
+                    this._config.ppPassword || "",
+                );
+            }
+        }
+        return this.__ppBridge;
     }
 
     /** Set event context (PDF bytes and raw email for extraction). */
@@ -492,16 +516,28 @@ export class ToolRegistry {
                     notes: args.notes || "",
                 });
 
-            // OneDrive
+            // OneDrive — uses Microsoft Graph API directly, no Java bridge needed
             case "pp-pull":
-                if (!this._ppBridge)
-                    return { error: "PP bridge not configured" };
-                return this._ppBridge.pull();
+                try {
+                    const result = await pullFromOneDrive();
+                    return {
+                        status: result.success ? "ok" : "error",
+                        detail: result.success ? "downloaded" : result.error,
+                    };
+                } catch (e) {
+                    return { status: "error", detail: e.message };
+                }
 
             case "pp-push":
-                if (!this._ppBridge)
-                    return { error: "PP bridge not configured" };
-                return this._ppBridge.push();
+                try {
+                    const result = await pushToOneDrive();
+                    return {
+                        status: result.success ? "ok" : "error",
+                        detail: result.success ? "uploaded" : result.error,
+                    };
+                } catch (e) {
+                    return { status: "error", detail: e.message };
+                }
 
             // Sync all
             case "pp-sync-all":

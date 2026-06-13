@@ -403,7 +403,15 @@ async def idle_loop(self):
             await self.select("INBOX")
             
             # Process any unread emails first (catch-up)
-            await self.process_unread()
+            for msg in self.fetch_unread():
+                # Pre-check: skip recently processed UIDs (60-min cooldown)
+                if self.dedup.is_recently_processed(msg.uid, cooldown_minutes=60):
+                    continue
+                try:
+                    await self.callback(msg)
+                    self.dedup.record_processed(msg.uid)  # only on success
+                except Exception:
+                    pass  # UID not recorded, retry next cycle
             
             # Enter IDLE mode
             await self.idle_start()
@@ -411,7 +419,15 @@ async def idle_loop(self):
                 response = await self.wait_for_idle(timeout=300)  # 5 min timeout
                 if response:  # New email or flag change
                     await self.idle_done()
-                    await self.process_unread()
+                    # Same UID pre-check for emails arriving during IDLE
+                    for msg in self.fetch_unread():
+                        if self.dedup.is_recently_processed(msg.uid, cooldown_minutes=60):
+                            continue
+                        try:
+                            await self.callback(msg)
+                            self.dedup.record_processed(msg.uid)
+                        except Exception:
+                            pass
                     await self.idle_start()
         except (ConnectionError, TimeoutError):
             await asyncio.sleep(5)  # Backoff before reconnect

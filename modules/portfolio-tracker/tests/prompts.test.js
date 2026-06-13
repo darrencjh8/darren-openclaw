@@ -75,13 +75,6 @@ describe("SYSTEM_PROMPT", () => {
         expect(mod.SYSTEM_PROMPT).toContain("query_pp_taxonomies");
     });
 
-    // SKIP: ESM module namespace cannot be spied on in vitest.
-    // The _loadLearnedContext function is tested implicitly by the following:
-    // - It's called at module load time; the module loads without error.
-    // - When no file exists, it returns "" (verified by all other tests loading fine).
-    // - The structure is present: `KNOWN SECURITIES` literal is in the source code.
-    it.skip("includes learned context when mappings file exists (requires integration)", () => {});
-
     it("does not crash when mappings file is invalid JSON", async () => {
         vi.restoreAllMocks();
         vi.spyOn(fs, "existsSync").mockReturnValue(true);

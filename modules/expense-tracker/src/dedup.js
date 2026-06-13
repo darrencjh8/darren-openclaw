@@ -29,6 +29,18 @@ export class DedupJournal {
         this._stmtInsert = this._db.prepare(
             "INSERT OR IGNORE INTO dedup (hash, date, amount_cents, account_id, payee_name) VALUES (?, ?, ?, ?, ?)",
         );
+        this._db.exec(`
+      CREATE TABLE IF NOT EXISTS processed_uids (
+        uid TEXT PRIMARY KEY,
+        processed_at TEXT NOT NULL
+      )
+    `);
+        this._stmtCheckRecent = this._db.prepare(
+            "SELECT 1 FROM processed_uids WHERE uid = ? AND processed_at > ?",
+        );
+        this._stmtInsertUid = this._db.prepare(
+            "INSERT OR REPLACE INTO processed_uids (uid, processed_at) VALUES (?, ?)",
+        );
     }
 
     _makeHash(date, amountCents, accountId, payeeName) {
@@ -58,5 +70,16 @@ export class DedupJournal {
 
     close() {
         this._db.close();
+    }
+
+    isRecentlyProcessed(uid, cooldownMinutes = 60) {
+        const cutoff = new Date(
+            Date.now() - cooldownMinutes * 60 * 1000,
+        ).toISOString();
+        return !!this._stmtCheckRecent.get(uid, cutoff);
+    }
+
+    recordProcessed(uid) {
+        this._stmtInsertUid.run(uid, new Date().toISOString());
     }
 }

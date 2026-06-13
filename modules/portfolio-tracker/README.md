@@ -58,7 +58,7 @@ pip install -r requirements.txt
 python -m src.main
 ```
 
-OneDrive sync is handled by `pp-pull` and `pp-push` tools (Java bridge methods in `src/pp_client/java_bridge.py`), not a separate `onedrive-sync` container.
+OneDrive sync is handled by `pp-pull` and `pp-push` tools (Microsoft Graph API via `src/onedrive.js`), not a separate `onedrive-sync` container. These tools no longer require the Java bridge — the bridge lazy-initializes when the XML file is first downloaded.
 
 Or via Docker:
 
