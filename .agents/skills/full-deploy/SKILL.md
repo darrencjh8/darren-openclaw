@@ -335,57 +335,12 @@ If any health check, API call, or log audit reveals a persistent failure that yo
 ssh <user>@<server> 'cd ~/darren-openclaw/gateway && curl -s -X POST http://localhost:8081/tools/notify-user -H "Content-Type: application/json" -d "{\"message\":\"[FULL-DEPLOY] Failure: <brief description>. Check logs on production.\"}"'
 ```
 
-## Phase 10 — Create helper scripts if missing
+## Phase 10 — OneDrive helper script
 
-During the deploy, you may need these helper scripts on the production server. If they don't exist yet, create them:
-
-### scripts/sync-onedrive.sh
-
-This script syncs OneDrive data using the refresh token (non-interactive). If the token is missing or broken, it falls back to interactive OAuth.
-
-Create it at `~/darren-openclaw/scripts/sync-onedrive.sh` on production:
+If `pp-pull` fails due to a stale token, run the committed helper script on production:
 
 ```bash
-cat > /home/darren/darren-openclaw/scripts/sync-onedrive.sh << 'SCRIPT'
-#!/usr/bin/env bash
-set -euo pipefail
-
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-CONF_DIR="$ROOT/modules/onedrive-sync/config/onedrive"
-TOKEN="$CONF_DIR/refresh_token"
-
-mkdir -p "$CONF_DIR"
-
-if [ -f "$TOKEN" ]; then
-  echo "=== OneDrive: Non-interactive sync (token found) ==="
-  docker run --rm \
-    -v "$CONF_DIR:/onedrive/conf" \
-    -v gateway_onedrive_data:/onedrive/data \
-    driveone/onedrive:latest --sync --confdir /onedrive/conf --syncdir /onedrive/data
-  echo "Sync complete."
-else
-  echo "=== OneDrive: No refresh token found. Starting interactive OAuth ==="
-  echo ""
-  echo "Open this URL, log in, and paste the redirect URI:"
-  echo "https://login.microsoftonline.com/common/oauth2/v2.0/authorize?client_id=d50ca740-c83f-4d1b-b616-12c519384f0c&scope=Files.ReadWrite%20Files.ReadWrite.All%20Sites.ReadWrite.All%20offline_access&response_type=code&prompt=login&redirect_uri=https://login.microsoftonline.com/common/oauth2/nativeclient"
-  echo ""
-  echo -n "Paste redirect URI: "
-  read -r REDIRECT_URI
-
-  if [ -n "$REDIRECT_URI" ]; then
-    echo "$REDIRECT_URI" | docker run --rm -i \
-      -v "$CONF_DIR:/onedrive/conf" \
-      -v gateway_onedrive_data:/onedrive/data \
-      driveone/onedrive:latest --sync --verbose --confdir /onedrive/conf --syncdir /onedrive/data
-    if [ -f "$TOKEN" ]; then
-      echo "Token saved. Restart portfolio-tracker to pick up changes:"
-      echo "  cd ~/darren-openclaw/gateway && docker compose restart portfolio-tracker"
-    fi
-  fi
-fi
-SCRIPT
-
-chmod +x /home/darren/darren-openclaw/scripts/sync-onedrive.sh
+ssh <user>@<server> 'cd ~/darren-openclaw && bash ./scripts/sync-onedrive.sh'
 ```
 
-Push this to the repo when done so it's available for future deploys.
+This syncs OneDrive non-interactively if a refresh token exists, or falls back to interactive OAuth. After sync, re-run Phase 6a and 6b.
