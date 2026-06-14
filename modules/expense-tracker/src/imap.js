@@ -160,8 +160,10 @@ export class ImapIdleHandler {
                         );
                     }
                 }
-                // Wait for new mail via IDLE
-                await this._client.idle();
+                // Wait for new mail via IDLE, timeout as keepalive
+                await this._client.idle({
+                    timeoutMs: this.IDLE_TIMEOUT * 1000,
+                });
             } catch (e) {
                 console.warn(
                     JSON.stringify({
