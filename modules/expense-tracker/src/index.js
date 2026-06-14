@@ -6,11 +6,12 @@
 import express from "express";
 import { Config } from "./config.js";
 import { MemoryStore } from "./memory.js";
-import { ToolRegistry } from "./tools.js";
+import { ToolRegistry, StatementJournal } from "./tools.js";
 import { AgentOrchestrator } from "./orchestrator.js";
 import { ImapIdleHandler } from "./imap.js";
 import { classifyEmail, dispatchEmail } from "./classify.js";
 import { DedupJournal } from "./dedup.js";
+import { StatementProcessor } from "./statement/orchestrator.js";
 import { existsSync } from "fs";
 
 // ── Crash diagnostics ──────────────────────────────────────────────
@@ -77,12 +78,18 @@ async function main() {
     const orchestrator = new AgentOrchestrator(cfg, registry);
     const dedupJournal = new DedupJournal(cfg.dedupDbPath);
 
+    // Statement reconciliation pipeline (spec/004)
+    const statementJournal = new StatementJournal(cfg.statementDbPath);
+    registry.setStatementJournal(statementJournal);
+    const statementProcessor = new StatementProcessor(cfg, registry);
+
     const imapHandler = new ImapIdleHandler(
         cfg.imapHost,
         cfg.imapPort,
         cfg.imapUsername,
         cfg.imapPassword,
         dedupJournal,
+        cfg.imapMailbox,
     );
 
     const classify = (rawEmail, subject, sender) =>
@@ -94,7 +101,7 @@ async function main() {
             classify,
             orchestrator,
             imapHandler,
-            // statementProcessor omitted — spec/004 will wire it back
+            statementProcessor,
         );
     }
 

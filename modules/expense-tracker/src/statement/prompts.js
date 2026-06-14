@@ -86,7 +86,17 @@ NOTIFICATION FORMAT:
 
 CURRENCY ROUTING:
   SGD → budget "${BUDGET_FILE}". MYR/RM → budget "${MYR_BUDGET_FILE}".
-`;
+
+PASSWORD-PROTECTED PDFs:
+  If extract_email_content returns text containing [PDF_ENCRYPTED]:
+    1. Call search_memory(query="statement password") to look for stored passwords.
+    2. If memory returns a password → use extract_pdf_text with pdf_bytes_b64 and the password to decrypt.
+    3. If no password in memory → scan the email body for patterns like "password is X" or "Password: X".
+    4. If found in email body → extract and use it with extract_pdf_text.
+    5. If still no password → call notify_user asking: "This PDF is password-protected. What's the password?"
+    6. After successful extraction with a password → call learn_fact(fact="[account] statement password is [password]") to store for future use.
+  If extract_email_content returns [PDF_EXTRACTION_ERROR] (not encrypted, just corrupt/unreadable):
+    → notify_user with the error details and ask the user to check the PDF.`;
 
 export const STATEMENT_FEW_SHOT = [
     [

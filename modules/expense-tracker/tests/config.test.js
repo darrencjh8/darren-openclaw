@@ -35,10 +35,16 @@ describe("Config", () => {
     it("uses defaults for optional variables", () => {
         const config = new Config(requiredEnv);
         expect(config.imapPort).toBe(993);
+        expect(config.imapMailbox).toBe("INBOX");
         expect(config.dedupDbPath).toBe("data/dedup.db");
         expect(config.logLevel).toBe("INFO");
         expect(config.memoryPath).toBe("data/MEMORY.md");
         expect(config.actualBudgetEncryptionPassword).toBe(null);
+    });
+
+    it("respects custom IMAP_MAILBOX", () => {
+        const config = new Config({ ...requiredEnv, IMAP_MAILBOX: "Archive" });
+        expect(config.imapMailbox).toBe("Archive");
     });
 
     it("respects custom IMAP port", () => {

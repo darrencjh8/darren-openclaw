@@ -4,11 +4,20 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
+
+// Mock extractors module for password retry testing
+vi.mock("../../src/extractors.js", () => ({
+    extractEmailContent: vi.fn(),
+    extractPdfFromBuffer: vi.fn(),
+}));
+
 import {
     StatementProcessor,
     DeepSeekClient,
+    extractPasswordFromFacts,
 } from "../../src/statement/orchestrator.js";
 import { STATEMENT_PROMPT } from "../../src/statement/prompts.js";
+import { extractEmailContent } from "../../src/extractors.js";
 
 function makeConfig(overrides = {}) {
     return {
@@ -33,9 +42,7 @@ describe("DeepSeekClient", () => {
                 ],
             };
             client._mergeReasoning(data);
-            expect(data.choices[0].message.content).toBe(
-                "I need to think...",
-            );
+            expect(data.choices[0].message.content).toBe("I need to think...");
         });
 
         it("leaves existing content untouched", () => {
@@ -64,9 +71,7 @@ describe("DeepSeekClient", () => {
             const client = new DeepSeekClient(makeConfig());
             const data = { choices: [{ message: {} }] };
             client._mergeReasoning(data);
-            expect(
-                "content" in data.choices[0].message,
-            ).toBe(false);
+            expect("content" in data.choices[0].message).toBe(false);
         });
     });
 });
@@ -101,9 +106,7 @@ describe("StatementProcessor", () => {
             const messages = processor._buildMessages(
                 "CREDIT CARD STATEMENT TEXT",
             );
-            expect(messages[1].content).toContain(
-                "CREDIT CARD STATEMENT TEXT",
-            );
+            expect(messages[1].content).toContain("CREDIT CARD STATEMENT TEXT");
         });
 
         it("truncates long content to 60000 chars", () => {
@@ -114,6 +117,11 @@ describe("StatementProcessor", () => {
     });
 
     describe("processStatement", () => {
+        beforeEach(() => {
+            vi.clearAllMocks();
+            // Default: extractEmailContent returns plain text (no encryption)
+            extractEmailContent.mockResolvedValue("Plain statement content.");
+        });
         it("returns completed when LLM finishes with stop and no tool calls", async () => {
             const mockChat = vi.fn().mockResolvedValue({
                 choices: [
@@ -426,6 +434,83 @@ describe("StatementProcessor", () => {
             );
             expect(result.action).toBe("completed");
         });
+
+        it("passes [PDF_ENCRYPTED] content through to LLM when no password available", async () => {
+            extractEmailContent.mockResolvedValue(
+                "Email body. [PDF_ENCRYPTED: use search-memory for password or ask user]",
+            );
+
+            // search_memory returns no matching password
+            mockTools.executeTool.mockImplementation((name) => {
+                if (name === "search_memory") {
+                    return Promise.resolve({
+                        results: ["Coffee mapping: Coffee Bean maps to Coffee"],
+                    });
+                }
+                return Promise.resolve({ result: "ok" });
+            });
+
+            processor._llm.chat = vi.fn().mockResolvedValue({
+                choices: [
+                    {
+                        finish_reason: "stop",
+                        message: { content: "Cannot process encrypted PDF." },
+                    },
+                ],
+            });
+
+            const rawEmail = Buffer.from("encrypted email");
+            await processor.processStatement("msg-1", rawEmail, null);
+
+            // Only called once — no retry with password
+            expect(extractEmailContent).toHaveBeenCalledTimes(1);
+            // [PDF_ENCRYPTED] marker should remain in the text passed to LLM
+            const messages = processor._buildMessages(
+                "Email body. [PDF_ENCRYPTED: use search-memory for password or ask user]",
+            );
+            expect(messages[1].content).toContain("[PDF_ENCRYPTED");
+        });
+    });
+});
+
+describe("extractPasswordFromFacts", () => {
+    it("extracts password from 'password is X' pattern", () => {
+        expect(
+            extractPasswordFromFacts([
+                "DBS Yuu statement password is Test@123",
+            ]),
+        ).toBe("Test@123");
+    });
+
+    it("extracts password from 'password: X' pattern", () => {
+        expect(
+            extractPasswordFromFacts(["CIMB statement password: MySecret99"]),
+        ).toBe("MySecret99");
+    });
+
+    it("extracts password from 'password = X' pattern", () => {
+        expect(extractPasswordFromFacts(["OCBC PDF password = abc-123"])).toBe(
+            "abc-123",
+        );
+    });
+
+    it("returns null when no password fact exists", () => {
+        expect(
+            extractPasswordFromFacts([
+                "Coffee mapping: Coffee Bean maps to Coffee",
+                "Food category: hawker",
+            ]),
+        ).toBeNull();
+    });
+
+    it("returns null for empty facts array", () => {
+        expect(extractPasswordFromFacts([])).toBeNull();
+    });
+
+    it("returns null for non-array input", () => {
+        expect(extractPasswordFromFacts(null)).toBeNull();
+        expect(extractPasswordFromFacts(undefined)).toBeNull();
+        expect(extractPasswordFromFacts({ password: "x" })).toBeNull();
     });
 });
 
@@ -498,14 +583,20 @@ describe("DeepSeekClient API format", () => {
         const config = makeConfig();
         const client = new DeepSeekClient(config);
 
-        const mockCreate = vi.fn()
+        const mockCreate = vi
+            .fn()
             .mockRejectedValueOnce(new Error("Network error"))
             .mockResolvedValue({
-                choices: [{ finish_reason: "stop", message: { content: "ok" } }],
+                choices: [
+                    { finish_reason: "stop", message: { content: "ok" } },
+                ],
             });
         client._client.chat.completions.create = mockCreate;
 
-        const result = await client.chat([{ role: "user", content: "hi" }], null);
+        const result = await client.chat(
+            [{ role: "user", content: "hi" }],
+            null,
+        );
         expect(mockCreate).toHaveBeenCalledTimes(2);
         expect(result.choices[0].message.content).toBe("ok");
     });

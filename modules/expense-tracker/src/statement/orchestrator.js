@@ -72,6 +72,15 @@ export class DeepSeekClient {
     }
 }
 
+export function extractPasswordFromFacts(facts) {
+    if (!Array.isArray(facts)) return null;
+    const passwordFact = facts.find(
+        (f) => typeof f === "string" && /password\s*(is|=|:)\s*\S+/i.test(f),
+    );
+    if (!passwordFact) return null;
+    return passwordFact.match(/password\s*(?:is|=|:)\s*(\S+)/i)?.[1] || null;
+}
+
 export class StatementProcessor {
     /**
      * Orchestrates the LLM conversation loop for processing bank statements.
@@ -100,14 +109,45 @@ export class StatementProcessor {
     async processStatement(msgId, rawEmail, imapHandler) {
         this._tools.setEmailContext(msgId, rawEmail, imapHandler);
 
+        const raw = Buffer.isBuffer(rawEmail)
+            ? rawEmail
+            : Buffer.from(rawEmail || "");
+
+        // Extract content, retrying with password if encrypted PDF detected
         let emailText = "";
-        try {
-            const raw = Buffer.isBuffer(rawEmail)
-                ? rawEmail
-                : Buffer.from(rawEmail || "");
-            emailText = await extractEmailContent(raw);
-        } catch {
-            emailText = String(rawEmail || "");
+        const MAX_PASSWORD_RETRIES = 2;
+        for (let attempt = 0; attempt <= MAX_PASSWORD_RETRIES; attempt++) {
+            try {
+                emailText = await extractEmailContent(raw);
+            } catch {
+                emailText = String(rawEmail || "");
+            }
+
+            // Check if extraction hit an encrypted PDF
+            if (emailText.includes("[PDF_ENCRYPTED]")) {
+                // Try memory for password
+                const memResult = await this._tools.executeTool(
+                    "search_memory",
+                    { query: "statement password" },
+                );
+                const facts = (memResult && memResult.results) || [];
+                const password = extractPasswordFromFacts(facts);
+                if (password && attempt < MAX_PASSWORD_RETRIES) {
+                    // Retry extraction with password
+                    try {
+                        emailText = await extractEmailContent(raw, password);
+                        if (!emailText.includes("[PDF_ENCRYPTED]")) {
+                            break; // Success — got decrypted content
+                        }
+                    } catch {
+                        // Password didn't work, continue loop
+                    }
+                }
+                // If we're here, either no password found or it didn't work
+                // Leave [PDF_ENCRYPTED] in the text for the LLM to handle
+                break;
+            }
+            break; // No encrypted PDF — done
         }
 
         const messages = this._buildMessages(emailText);
@@ -187,6 +227,15 @@ export class StatementProcessor {
                 }
             }
 
+            await this._ensureEmailRead();
+            try {
+                await this._tools.executeTool("notify_user", {
+                    message:
+                        "Statement processing exceeded maximum iterations — may be too large or malformed.",
+                });
+            } catch {
+                // Ignore notification failures
+            }
             return {
                 action: "error",
                 details: "Max tool iterations exceeded",

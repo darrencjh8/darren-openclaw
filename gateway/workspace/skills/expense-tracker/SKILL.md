@@ -66,7 +66,51 @@ ALL dates MUST be `YYYY-MM-DD`. Always compute the actual date — never use a h
 ## Email Classification
 
 Incoming emails are pre-classified as "statement", "transaction", or "skip":
+- "statement": monthly bank/credit card statements with multiple transactions → routed to the statement reconciliation pipeline (see below)
+- "transaction": single purchase alerts, receipts, promos → routed to the transaction alert pipeline
 - "skip": trade confirmations, IBKR Activity Flex, portfolio reports, investment summaries → ignored silently. These are handled by the portfolio-tracker module.
+
+## Statement Reconciliation
+
+When an email is classified as "statement", the system enters the reconciliation
+pipeline. A statement is **authoritative** — it represents the bank's final record.
+
+### Statement Tools
+
+| Tool | Key Args |
+|---|---|
+| `reconcile-transaction` | `{"ab_transaction_id":"...", "statement_ref":"Statement May 2026"}` — mark an AB transaction as cleared |
+| `fetch-unreconciled-transactions` | `{"account_id":"...", "date_from":"2026-05-01", "date_to":"2026-06-01"}` — get uncleared txns for matching |
+| `record-statement` | `{"account_id":"...", "period_start":"2026-05-01", "period_end":"2026-06-01", "matched_count":12, "outlier_count":3}` — prevent double-processing |
+| `fetch-statement-history` | `{"account_id":"...", "period_start":"2026-05-01", "period_end":"2026-06-01"}` — check if period already processed |
+| `check-statement-duplicate` | `{"date":"YYYY-MM-DD", "amount_cents":-800, "account_id":"..."}` — check exact duplicate before inserting outlier |
+
+### Statement Workflow
+
+1. Extract statement content:
+   - **Email path**: `extract-email-content` is called automatically (handles PDF attachments via `pdftotext`)
+   - **Telegram path**: Use `exec pdftotext /path/to/file.pdf -` to extract text locally
+2. **Password-protected PDFs**: 
+   - First try: `exec pdftotext /path/to/file.pdf -`
+   - If it fails with "encrypted", "password", or "permission" error → decrypt with `qpdf`:
+     `exec qpdf --password=PASSWORD --decrypt file.pdf - | pdftotext - -`
+   - **Password sources** (try in order):
+     1. `search-memory` for stored passwords (e.g., "DBS statement password", "CIMB PDF password")
+     2. Check email body for password patterns ("password is X", "your NRIC is X")
+     3. Ask user: "This PDF is password-protected. What's the password?"
+   - After user provides password → save it: `learn-fact "DBS Yuu statement password is 850101015555"` so it's auto-retrieved next time
+   - If all sources fail → notify user, mark email read, stop
+3. Call `fetch-statement-history` — if already processed, stop and notify user
+4. Call `fetch-accounts` to match the statement's account
+5. Call `fetch-unreconciled-transactions` for the statement period
+6. For each line item, fuzzy-match against uncleared transactions:
+   - **Match found** → call `reconcile-transaction` (marks as cleared in AB)
+   - **No match** → call `check-statement-duplicate`, then `insert-transaction` with `cleared: false` and notes: `"OUTLIER | Statement May 2026"`
+7. Call `record-statement` with matched/outlier counts
+8. Call `notify-user` with summary: X reconciled, Y outliers
+9. Call `mark-email-read` (email path only)
+
+Always use `deepseek-v4-pro` model for statement processing (not flash).
 
 ## Amounts
 

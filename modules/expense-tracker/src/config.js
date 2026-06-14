@@ -30,6 +30,7 @@ export class Config {
         this.imapPort = parseInt(env.IMAP_PORT || "993", 10);
         this.imapUsername = env.IMAP_USERNAME || "";
         this.imapPassword = env.IMAP_PASSWORD || "";
+        this.imapMailbox = env.IMAP_MAILBOX || "INBOX";
         this.openclawGatewayUrl =
             env.OPENCLAW_GATEWAY_URL || "http://openclaw:18800";
         this.openclawGatewayToken = env.OPENCLAW_GATEWAY_TOKEN || "";

@@ -315,9 +315,12 @@ app.post("/transactions/:id/clear", async (req, res) => {
     try {
         await ensureBudget(getBudgetId(req));
         const { notes } = req.body || {};
+        const txn = await actual.getTransaction(req.params.id);
+        if (!txn)
+            return res.status(404).json({ error: "Transaction not found" });
         const fields = { cleared: true };
         if (notes) {
-            fields.notes = notes;
+            fields.notes = (txn.notes || "") + " | " + notes;
         }
         await actual.updateTransaction(req.params.id, fields);
         res.json({ status: "cleared", id: req.params.id });

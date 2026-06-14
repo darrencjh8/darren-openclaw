@@ -17,8 +17,45 @@ describe("ImapIdleHandler constructor", () => {
         expect(handler._port).toBe(993);
         expect(handler._username).toBe("user@example.com");
         expect(handler._password).toBe("app-pass");
+        expect(handler._mailbox).toBe("INBOX");
         expect(handler._client).toBeNull();
         expect(handler._running).toBe(false);
+    });
+
+    it("defaults mailbox to INBOX", () => {
+        const handler = new ImapIdleHandler(
+            "imap.example.com",
+            993,
+            "user@example.com",
+            "app-pass",
+        );
+        expect(handler._mailbox).toBe("INBOX");
+    });
+
+    it("accepts custom mailbox", () => {
+        const handler = new ImapIdleHandler(
+            "imap.example.com",
+            993,
+            "user@example.com",
+            "app-pass",
+            null,
+            "Trades",
+        );
+        expect(handler._mailbox).toBe("Trades");
+    });
+
+    it("accepts mailbox with dedupJournal", () => {
+        const dedup = { isRecentlyProcessed: () => false };
+        const handler = new ImapIdleHandler(
+            "imap.example.com",
+            993,
+            "user@example.com",
+            "app-pass",
+            dedup,
+            "Archive",
+        );
+        expect(handler._dedup).toBe(dedup);
+        expect(handler._mailbox).toBe("Archive");
     });
 });
 
