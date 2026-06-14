@@ -94,7 +94,7 @@
         "list": [
             {
                 "id": "orchestrator",
-                "thinkingDefault": "low",
+                "thinkingDefault": "medium",
                 "model": {
                     "primary": "deepseek/deepseek-v4-flash",
                     "fallbacks": [
@@ -134,6 +134,9 @@
         "auth": {
             "token": "${OPENCLAW_GATEWAY_TOKEN}"
         }
+    },
+    "diagnostics": {
+        "stuckSessionAbortMs": 120000
     },
     "tools": {
         "exec": {
