@@ -43,15 +43,21 @@ Always call: `http://expense-tracker:8080/tools/search-memory`, `update-fact`, `
 
 ## PDF Workflow
 
-1. If OpenClaw's built-in parser returns empty or "Incorrect password":
-   - Decrypt with: `exec: qpdf --decrypt --password=ASK_USER /path/to/file /tmp/decrypted.pdf`
-   - Extract text: `exec: pdftotext /tmp/decrypted.pdf -`
-2. If pdftotext also returns empty (scanned PDF):
+PDFs always arrive as file attachments forwarded by the user (never "pdf" text).
+The gateway's built-in parser extracts text automatically. If that fails:
+
+1. **Encrypted PDF** — the built-in parser returns "Incorrect password":
+   - Decrypt: `exec: qpdf --decrypt --password=ASK_USER /path/to/file /tmp/decrypted.pdf`
+   - Extract: `exec: pdftotext /tmp/decrypted.pdf -`
+2. **Scanned PDF** — `pdftotext` returns empty (image-only):
    - Call expense-tracker's `extract-pdf-text` for Tesseract OCR
-3. Read the extracted text, classify:
+3. **Read the extracted text, classify:**
    - Trade confirmation (BUY/SELL, ticker symbols, ISIN) → **portfolio-tracker** tools
    - Bank statement / receipt (card numbers, merchant names, amounts) → **expense-tracker** tools
 4. Proceed with the appropriate module's workflow
+
+The `pdf` skill (qpdf/pdftotext) is infrastructure only — NOT user-invoked.
+Users always forward PDFs as file attachments; the fallback chain above handles everything.
 
 $SYSTEM_PROMPT_EXTRA
 

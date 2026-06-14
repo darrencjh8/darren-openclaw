@@ -99,7 +99,7 @@ echo "--- Gateway (.env) ---"
 GW_ENV="$GATEWAY_DIR/.env"
 if check_file "$GW_ENV"; then
   for v in TELEGRAM_BOT_TOKEN TELEGRAM_CHAT_ID DEEPSEEK_API_KEY \
-           ACTUAL_BUDGET_URL; do
+           ACTUAL_BUDGET_URL OPENCLAW_GATEWAY_TOKEN; do
     check_var "$v" "$GW_ENV"
   done
 else

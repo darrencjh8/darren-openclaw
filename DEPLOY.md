@@ -50,7 +50,7 @@ cp modules/expense-tracker/.env.example modules/expense-tracker/.env
 
 # Gateway (OpenClaw + actual-api)
 cp gateway/.env.example gateway/.env
-# Edit: TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, DEEPSEEK_API_KEY,
+# Edit: TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, DEEPSEEK_API_KEY, OPENCLAW_GATEWAY_TOKEN,
 #       ACTUAL_BUDGET_URL, ACTUAL_BUDGET_SERVER_URL, ACTUAL_BUDGET_PASSWORD,
 #       ACTUAL_BUDGET_FILE, MYR_BUDGET_FILE
 ```

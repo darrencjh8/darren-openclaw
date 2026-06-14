@@ -130,7 +130,10 @@
     "gateway": {
         "port": 18789,
         "bind": "lan",
-        "mode": "local"
+        "mode": "local",
+        "auth": {
+            "token": "${OPENCLAW_GATEWAY_TOKEN}"
+        }
     },
     "tools": {
         "exec": {

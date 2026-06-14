@@ -75,6 +75,12 @@ describe("SYSTEM_PROMPT", () => {
         expect(mod.SYSTEM_PROMPT).toContain("query_pp_taxonomies");
     });
 
+    it("instructs asking user to forward PDF when trade email has no attachment", async () => {
+        const mod = await import("../src/prompts.js");
+        expect(mod.SYSTEM_PROMPT).toContain("forward the PDF via Telegram");
+        expect(mod.SYSTEM_PROMPT).toContain("no PDF is attached");
+    });
+
     it("does not crash when mappings file is invalid JSON", async () => {
         vi.restoreAllMocks();
         vi.spyOn(fs, "existsSync").mockReturnValue(true);
@@ -87,6 +93,30 @@ describe("SYSTEM_PROMPT", () => {
         const mod = await import("../src/prompts.js");
         expect(mod.SYSTEM_PROMPT).toBeDefined();
         expect(mod.SYSTEM_PROMPT.length).toBeGreaterThan(100);
+    });
+
+    it("contains missing-PDF rule (rule 13)", async () => {
+        const mod = await import("../src/prompts.js");
+        expect(mod.SYSTEM_PROMPT).toContain("extract_email_content()");
+        expect(mod.SYSTEM_PROMPT).toContain("no PDF");
+        expect(mod.SYSTEM_PROMPT).toContain("forward the PDF via Telegram");
+    });
+
+    it("explicitly avoids mark_email_read (not a PT tool)", async () => {
+        const mod = await import("../src/prompts.js");
+        // The rules section should NOT instruct the LLM to call mark_email_read
+        // (the PT has no such tool; dispatchEmail handles it in finally)
+        const rulesSection = mod.SYSTEM_PROMPT.split("WORKFLOW")[0];
+        expect(rulesSection).not.toContain("mark_email_read");
+    });
+
+    it("has exactly 13 numbered rules", async () => {
+        const mod = await import("../src/prompts.js");
+        const rulesSection = mod.SYSTEM_PROMPT.split("WORKFLOW")[0];
+        // Count numbered rules (digit followed by period and space)
+        const ruleMatches = rulesSection.match(/^\s*\d+\.\s/gm);
+        expect(ruleMatches).not.toBeNull();
+        expect(ruleMatches.length).toBe(13);
     });
 });
 

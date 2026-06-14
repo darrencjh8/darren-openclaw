@@ -1,7 +1,7 @@
 ---
 name: pdf
-description: Decrypt and extract text from PDFs using qpdf and pdftotext.
-user-invocable: true
+description: Decrypt and extract text from PDFs using qpdf and pdftotext. Infrastructure only — used by gateway agent's PDF fallback chain, not user-invoked.
+user-invocable: false
 ---
 
 # PDF Tool

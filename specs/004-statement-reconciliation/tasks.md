@@ -16,7 +16,7 @@
 ### T0.A2 — IMAP_MAILBOX env var per module
 - [x] ET: Add `IMAP_MAILBOX` to Config class (default `"INBOX"`, optional)
 - [x] ET: Add `IMAP_MAILBOX` to `.env.example` file
-- [ ] PT: Add `IMAP_MAILBOX` to `.env.example` file (PT already uses `IMAP_FOLDER`, may rename for consistency)
+- [x] PT: Add `IMAP_MAILBOX` to `.env.example` file (PT already uses `IMAP_FOLDER`, may rename for consistency)
 - [ ] `deploy.sh`: Validate IMAP_MAILBOX as required
 
 ### T0.A3 — IMAP handlers use configured mailbox
@@ -26,9 +26,9 @@
 - [x] PT: `mark_read` after processing trade emails (done in migration spec 012)
 
 ### T0.A4 — PDF notification workflow
-- [ ] PT SKILL.md: Add missing-PDF workflow + pdf/PDF/attachment triggers
-- [ ] PT Orchestrator: Expand email_trade message with no-PDF instructions
-- [ ] PT Prompts: Add missing-PDF rule to SYSTEM_PROMPT
+- [x] PT SKILL.md: Add missing-PDF workflow + pdf/PDF/attachment triggers ✅ Done (pre-existing, verified 2026-06-14)
+- [x] PT Orchestrator: Expand email_trade message with no-PDF instructions ✅ Done (pre-existing via prompts.js rule 13)
+- [x] PT Prompts: Add missing-PDF rule to SYSTEM_PROMPT ✅ Done (pre-existing rule 13, test added 2026-06-14)
 
 ---
 
@@ -504,7 +504,7 @@ currently **uninvoked**. They need to be wired in as part of this spec:
 | # | Issue | Priority | Rationale for deferral |
 |---|---|---|---|
 | D1 | `StatementJournal.addTransaction()` never called — no per-line-item audit trail | P3 | Summary-level tracking (matched_count/outlier_count) satisfies core requirement. Per-txn journaling is nice-to-have. |
-| D2 | `check_statement_duplicate` only checks dedup.db, not AB API | P2 | Edge case: only affects manually-entered+already-cleared transactions. `insert_transaction` handler updates dedup.db after insertion. |
+| D2 | `check_statement_duplicate` AB API fallback | ✅ Done (2026-06-14) — now checks dedup.db first, falls back to AB API |
 | D3 | Duplicate `DeepSeekClient` classes (orchestrator.js + statement/orchestrator.js) | P3 | Both ~55 lines. Statement version adds configurable model param (needed for Phase 4). Extract when touching this code next. |
 | D4 | `_handle_extract_email_content` tool returns parsed.text only, not PDF content | P2 | StatementProcessor pre-extracts content before LLM loop. Only matters for mid-conversation re-extraction (Phase 4 password handling). |
 | D5 | Statement pipeline has no concurrency guard for simultaneous period processing | P3 | Unlikely in practice (IMAP processes sequentially). Application-level mutex could be added if needed. |

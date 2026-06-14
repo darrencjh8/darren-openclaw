@@ -79,6 +79,9 @@ RULES:
 	    "Could not parse this email: OCR failed ❌".
 	    The user MUST be notified of every outcome.
 	12. Always explain your reasoning before making tool calls.
+	13. If extract_email_content() returns text without trade/transaction
+	    data AND no PDF is attached → call notify_user() asking the
+	    user to forward the PDF via Telegram.
 
 SECURITY MATCHING:
 - Match securities by ISIN first (most reliable), then ticker symbol,

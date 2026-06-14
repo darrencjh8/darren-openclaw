@@ -249,6 +249,48 @@ Core rules:
 
 Currency routing: SGD → "My Budget", MYR → "My MYR Budget" (via ACTUAL_BUDGET_FILE / MYR_BUDGET_FILE env vars).
 
+### 8.3 Portfolio Tracker Prompt — Missing-PDF Rule (deepseek-chat, thinking=adaptive)
+
+Located in `modules/portfolio-tracker/src/prompts.js` as `SYSTEM_PROMPT`.
+
+Add one rule after existing rule 12:
+
+```
+13. If extract_email_content() returns text without trade/transaction
+    data AND no PDF is attached → call notify_user() asking the
+    user to forward the PDF via Telegram.
+```
+
+**Why no `mark_email_read` in the prompt:** The portfolio tracker's `dispatchEmail()`
+(`modules/portfolio-tracker/src/classify.js`, lines 75-83) always calls
+`imapHandler.markRead()` in a `finally` block after the orchestrator returns.
+Email read-marking is guaranteed by the framework, not the LLM.
+
+**Corresponding SKILL.md change** (`gateway/workspace/skills/portfolio-tracker/SKILL.md`):
+
+Add a `## Trade Email with Missing PDF` section:
+
+```markdown
+## Trade Email with Missing PDF
+
+If a trade email arrives with no PDF attachment → call notify-user asking
+the user to forward the PDF via Telegram. The email is marked read
+automatically by the dispatch wrapper.
+
+User forwards PDF via Telegram → gateway activates this skill:
+  1. Call extract-pdf-text(pdf_bytes_b64=<base64 from gateway>)
+  2. Match securities by ISIN/ticker (as normal trade workflow)
+  3. Call check-duplicate → insert-pp-transaction
+  4. Call notify-user with summary
+  5. Call learn-mapping for each match
+```
+
+**Corresponding .env.example change** (`modules/portfolio-tracker/.env.example`):
+
+Relocate `IMAP_FOLDER=Trades` from the `# --- Telegram ---` section to the
+`# --- IMAP Email ---` section (uncomment it). It currently exists commented
+out in the wrong section.
+
 ---
 
 ## 9. File Skeleton (Node.js, post-migration)
