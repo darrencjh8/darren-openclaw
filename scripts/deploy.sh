@@ -234,6 +234,16 @@ else
   echo "  ! mvn not found or pp-cli not present — skipping (will use cached JAR if exists)"
 fi
 
+# ---- pull latest code ----
+
+echo ""
+echo "--- Git Pull ---"
+cd "$ROOT"
+git stash push -m "auto-deploy-stash-$(date +%s)" 2>/dev/null || true
+git pull origin main
+git stash drop 2>/dev/null || true
+echo "  ✓ code updated"
+
 # ---- deploy ----
 
 cd "$GATEWAY_DIR"
