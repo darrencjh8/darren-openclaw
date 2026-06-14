@@ -129,6 +129,17 @@ CRITICAL: DO NOT SWAP BUDGET VALUES. THIS IS THE MOST COMMON BUG.
 1. Call `pp-sync-all` — this does the entire sync in one shot (fetch budgets + update PP + export taxonomies)
 2. Call `notify-user` with the deltas from the response
 
+## Trade Email with Missing PDF
+
+If a trade email arrives with no PDF attachment → call `notify-user` asking the user to forward the PDF via Telegram. The email is marked read automatically by the dispatch wrapper — do NOT call `mark-email-read`.
+
+User forwards PDF via Telegram → gateway activates this skill:
+1. Call `extract-pdf-text` with `pdf_bytes_b64` from gateway
+2. Match securities by ISIN/ticker (as normal trade workflow)
+3. Call `check-duplicate` → `pp-insert-transaction`
+4. Call `notify-user` with summary
+5. Call `learn-mapping` for each match
+
 ## Security Matching Rules
 
 - Match by ISIN first (most reliable)

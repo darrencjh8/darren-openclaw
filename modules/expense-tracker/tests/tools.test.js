@@ -26,6 +26,78 @@ describe("ToolRegistry", () => {
         expect(names).toContain("insert_transaction");
     });
 
+    it("extract_pdf_text schema includes optional password field", () => {
+        const cfg = new Config(testEnv);
+        const registry = new ToolRegistry(cfg);
+        const schemas = registry.getToolSchemas();
+        const pdfTool = schemas.find(
+            (s) => s.function.name === "extract_pdf_text",
+        );
+        expect(pdfTool).toBeDefined();
+        expect(pdfTool.function.parameters.properties).toHaveProperty(
+            "password",
+        );
+        expect(pdfTool.function.parameters.required).toEqual(["pdf_bytes_b64"]);
+    });
+
+    it("check_statement_duplicate falls back to AB API when dedup misses", async () => {
+        const { vi } = await import("vitest");
+        const cfg = new Config(testEnv);
+        const registry = new ToolRegistry(cfg);
+
+        // Mock fetch for AB API fallback
+        const origFetch = global.fetch;
+        global.fetch = vi.fn().mockResolvedValue({
+            ok: true,
+            json: async () => [
+                { id: "txn-1", date: "2026-06-01", amount: -1280 },
+            ],
+        });
+
+        try {
+            const result = await registry.executeTool(
+                "check_statement_duplicate",
+                {
+                    date: "2026-06-01",
+                    amount_cents: -1280,
+                    account_id: "acc-test",
+                },
+            );
+            // Should return true because AB API found a matching transaction
+            expect(result).toBe(true);
+            // fetch should have been called (AB fallback was triggered)
+            expect(global.fetch).toHaveBeenCalled();
+        } finally {
+            global.fetch = origFetch;
+        }
+    });
+
+    it("check_statement_duplicate returns false when neither dedup nor AB matches", async () => {
+        const { vi } = await import("vitest");
+        const cfg = new Config(testEnv);
+        const registry = new ToolRegistry(cfg);
+
+        const origFetch = global.fetch;
+        global.fetch = vi.fn().mockResolvedValue({
+            ok: true,
+            json: async () => [],
+        });
+
+        try {
+            const result = await registry.executeTool(
+                "check_statement_duplicate",
+                {
+                    date: "2026-07-15",
+                    amount_cents: -9999,
+                    account_id: "acc-test",
+                },
+            );
+            expect(result).toBe(false);
+        } finally {
+            global.fetch = origFetch;
+        }
+    });
+
     it("executes known tool", async () => {
         const cfg = new Config(testEnv);
         const registry = new ToolRegistry(cfg);
@@ -60,6 +132,25 @@ describe("ToolRegistry", () => {
             fact: "test",
         });
         expect(result.added).toBe(false);
+    });
+
+    it("_post does not mutate the caller's body object", async () => {
+        const cfg = new Config(testEnv);
+        const registry = new ToolRegistry(cfg);
+        const body = { name: "test", value: 42 };
+        const original = { ...body };
+
+        // Mock fetch to avoid real network call
+        const origFetch = global.fetch;
+        global.fetch = async () => ({ ok: true, json: async () => ({}) });
+        try {
+            await registry._post("/test", body, "my-budget");
+        } finally {
+            global.fetch = origFetch;
+        }
+        // The original body must remain unchanged
+        expect(body).toEqual(original);
+        expect(body.budget_id).toBeUndefined();
     });
 });
 

@@ -156,6 +156,20 @@ describe("STATEMENT_PROMPT", () => {
         expect(STATEMENT_PROMPT).toContain("ALREADY processed");
         expect(STATEMENT_PROMPT).toContain("Do NOT re-process");
     });
+
+    it("includes password recovery instructions for encrypted PDFs", () => {
+        expect(STATEMENT_PROMPT).toContain("PASSWORD-PROTECTED PDFs");
+        expect(STATEMENT_PROMPT).toContain("[PDF_ENCRYPTED]");
+        expect(STATEMENT_PROMPT).toContain("search_memory");
+        expect(STATEMENT_PROMPT).toContain("learn_fact");
+        expect(STATEMENT_PROMPT).toContain("extract_pdf_text");
+    });
+
+    it("references qpdf for password-protected PDF decryption", () => {
+        expect(STATEMENT_PROMPT).toContain("password");
+        expect(STATEMENT_PROMPT).toContain("[PDF_ENCRYPTED]");
+        expect(STATEMENT_PROMPT).toContain("search_memory");
+    });
 });
 
 // ---------------------------------------------------------------------------

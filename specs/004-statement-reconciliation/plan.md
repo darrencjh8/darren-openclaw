@@ -1,56 +1,55 @@
 # Technical Plan: Credit Card Statement Reconciliation
 
 **Feature:** statement-reconciliation
-**Plan Version:** 2.0.0
-**Status:** Planned
+**Plan Version:** 3.0.0
+**Status:** Implemented (Node.js, migrated spec 012)
 **Constitution Hash:** v2.0.0
 
 ---
 
 ## 1. Technology Stack
 
-No new dependencies. Reuses existing stack:
+Post-migration (spec 012), the expense-tracker is Node.js. No Python remains.
 
 | Layer | Choice | Rationale |
 |---|---|---|
-| Runtime | Python 3.12-slim | Same container |
-| LLM (alert) | DeepSeek `deepseek-v4-flash` | Existing — fast, cheap |
-| LLM (pre-classification) | DeepSeek `deepseek-v4-flash` | Single-shot classification, ~$0.00007 |
-| LLM (statement) | DeepSeek `deepseek-v4-pro` | Strong reasoning for 15+ iteration reconciliation |
-| DB | `sqlite3` (stdlib) | Same pattern as dedup journal |
-| HTTP | `aiohttp` | Same client for actual-api |
-| PDF OCR | `pytesseract` + `pdf2image` | Already installed |
-| Logging | `logging` + `json` (stdlib) | Same JSON-line format |
+| Runtime | Node.js 24 (ESM) | Spec 012 migration — `"type": "module"` |
+| LLM (all pipelines) | DeepSeek `deepseek-chat` | Real API model name. Thinking level controls depth (`adaptive` for statements, not used for classification) |
+| DB | `better-sqlite3` | Same pattern as dedup journal (migrated from Python sqlite3) |
+| HTTP | `fetch` (built-in) | Calls actual-api proxy at `http://actual-api:3000` |
+| PDF extraction | `pdftotext` (poppler-utils) | CLI tool, called via `execFile`. For encrypted PDFs: `qpdf --password=... --decrypt` pipe |
+| Logging | `console.log` (JSON-line) | Same JSON-line format as pre-migration |
 | Container | Docker Compose (existing) | No new services |
+| Test runner | `vitest` | Spec 012 migration — all tests are `.test.js` files |
 
 ---
 
 ## 2. Architecture: Parallel Pipelines, Shared Infrastructure
 
 ```
-main.py: on_new_email(msg)
+index.js: onNewEmail(msg)
     │
-    ├── 1. Extract content (text/HTML/PDF OCR)
+    ├── 1. classifyEmail() — LLM pre-classification (deepseek-chat, no tools)
+    │       "Classify: 'statement', 'transaction', or 'skip'"
     │
-    ├── 2. Pre-classification LLM call (flash, no tools)
-    │       "Classify: 'statement' or 'transaction'"
+    ├── "transaction" → AgentOrchestrator.processEmail()
+    │                    (EXISTING — alert pipeline, unchanged)
     │
-    ├── "transaction" → AgentOrchestrator.process_email()
-    │                    (EXISTING — UC-1/2/3, unchanged)
+    ├── "skip" → mark_email_read() (trade emails, ignored)
     │
-    └── "statement"  → StatementProcessor.process_statement()
-                         (NEW — deepseek-v4-pro, max 20 iterations)
+    └── "statement"  → StatementProcessor.processStatement()
+                         (NEW — deepseek-chat, thinking=adaptive, max 20 iterations)
 ```
 
 ### Dispatch Diagram
 
 ```
-Email → extract_email_content() → pre-classification LLM call
-                                        │
-                              "transaction"  "statement"
-                                    │            │
-                              UC-1/2/3     StatementProcessor
-                              (flash)      (v4-pro, 20 iter)
+Email → classifyEmail() → dispatch()
+                │
+    "transaction"  "statement"      "skip"
+          │            │               │
+    AgentOrchestrator  StatementProcessor  markRead
+    (5 iter max)      (20 iter max)
 ```
 
 ---
@@ -61,43 +60,38 @@ Email → extract_email_content() → pre-classification LLM call
 Statement email dispatched
     │
     ▼
-StatementProcessor.process_statement() — model: deepseek-v4-pro
+StatementProcessor.processStatement() — model: deepseek-chat, thinking=adaptive
     │
     ├── Turn 1: Extract metadata + transactions
-    │   tool_calls: [fetch_accounts, fetch_categories, fetch_statement_history]
+    │   tool_calls: [extract_email_content, fetch_statement_history]
     │     fetch_statement_history → NOT FOUND → proceed
     │     (if FOUND → notify duplicate → mark_read → stop)
+    │     (if PDF_ENCRYPTED → search_memory for password → retry extract)
     │
-    ├── Turn 2: Fetch uncleared AB txns for matching
-    │   tool_calls: [fetch_unreconciled_transactions(account_id, date_from, date_to)]
+    ├── Turn 2: Fetch account + uncleared AB txns for matching
+    │   tool_calls: [fetch_accounts, fetch_unreconciled_transactions(account_id, date_from, date_to)]
     │     → GET /transactions?account_id=X&cleared=false&since_date=Y&until_date=Z
     │
     ├── Turns 3-N: For EACH statement line item:
     │   │
-    │   │  LLM sends to matcher:
-    │   │    fuzzy_match(stmt_date, stmt_amount_cents, stmt_description, uncleared_txns)
-    │   │    → Returns top 3 scored candidates
-    │   │
-    │   │  LLM decides:
+    │   │  LLM evaluates fuzzy_match() results:
     │   │
     │   │  MATCH (score ≥ 50):
     │   │    reconcile_transaction(ab_txn_id, "Statement May 2026")
     │   │    → POST /transactions/:id/clear
     │   │    → actual.updateTransaction(id, { cleared: true, notes: "... | Statement May 2026" })
-    │   │    → journal: status="reconciled"
     │   │
     │   │  OUTLIER (no candidate):
+    │   │    check_statement_duplicate(date, amount_cents, account_id)
     │   │    insert_transaction(account_id, date, amount_cents, description,
     │   │                       notes="OUTLIER | Statement May 2026")
-    │   │    → POST /transactions (cleared: false — default)
-    │   │    → journal: status="outlier"
     │   │
     │   │  (LLM may batch: multiple tool_calls in one turn for independent items)
     │
     └── Final turn: record + notify + mark_read
         tool_calls: [record_statement(...), notify_user(...), mark_email_read()]
           → INSERT statement.db
-          → Telegram: "✅ X reconciled, ⚠️ Y outliers: [list]"
+          → Telegram notification via gateway hook: "✅ X reconciled, ⚠️ Y outliers: [list]"
           → IMAP \Seen flag
 
 On failure (any step):
@@ -110,14 +104,14 @@ On failure (any step):
 
 ## 4. Fuzzy Matching Algorithm
 
-`src/statement/matcher.py` — `fuzzy_match(stmt_date, stmt_amount_cents, stmt_description, uncleared_txns) → list[dict]`
+`src/statement/matcher.js` — `fuzzyMatch(stmtDate, stmtAmountCents, stmtDescription, unclearedTxns) → list[dict]`
 
 | Signal | Weight | Condition |
 |---|---|---|
-| Amount exact | **80** | abs(ab_amount - stmt_amount) == 0 |
+| Amount exact | **80** | abs(ab_amount - stmt_amount) === 0 |
 | Amount within ±20c | **50** | abs(ab_amount - stmt_amount) <= 20 |
-| Date exact same day | **30** | date_diff == 0 |
-| Date within ±2 days | **15** | date_diff <= 2 |
+| Date exact same day | **30** | dateDiff === 0 |
+| Date within ±2 days | **15** | dateDiff <= 2 |
 | Merchant token overlap > 0.5 | **20** | Jaccard sim of word tokens |
 
 - Minimum threshold: 50 to be considered a candidate match
@@ -127,7 +121,7 @@ On failure (any step):
 
 ---
 
-## 5. New Tools (4 new, 15 total with existing 11)
+## 5. New Tools (5 statement tools, 21 total)
 
 | # | Tool | Pipeline | Schema |
 |---|---|---|---|
@@ -135,8 +129,12 @@ On failure (any step):
 | 13 | `reconcile_transaction` | Statement | `ab_transaction_id: str, statement_ref?: str, budget_id?: str` → `dict` |
 | 14 | `record_statement` | Statement | `account_id: str, period_start: str, period_end: str, matched_count: int, outlier_count: int, budget_id?: str, total_amount_cents?: int, due_date?: str, currency?: str` → `dict` |
 | 15 | `fetch_statement_history` | Statement | `account_id: str, period_start: str, period_end: str` → `dict | null` |
+| 16 | `check_statement_duplicate` | Statement | `date: str, amount_cents: int, account_id: str` → `bool` |
 
-Existing 11 alert tools are **unchanged** and shared by both pipelines.
+Existing 16 alert tools are **unchanged** and shared by both pipelines.
+
+> **Note**: `check_statement_duplicate` differs from `check_duplicate` — it ignores payee name
+> (statements may use different merchant names than alerts). See tasks.md T4.6 for potential consolidation.
 
 ---
 
@@ -219,86 +217,112 @@ app.get("/transactions", async (req, res) => {
 
 ## 8. System Prompts
 
-### 8.1 Pre-Classification Prompt (flash model)
+### 8.1 Pre-Classification Prompt (deepseek-chat, no tools)
 
-```
-You classify financial emails. Respond ONLY with a single word.
+Located in `src/classify.js` as `CLASSIFICATION_PROMPT`.
 
-Classify this email as one of:
-- "statement" — monthly bank/credit card statement with MULTIPLE transaction line items
-- "transaction" — single purchase, receipt, or instant transaction alert
+Classifies emails into "statement", "transaction", or "skip":
+- "statement" → Statement reconciliation pipeline
+- "transaction" → Existing alert pipeline (unchanged)
+- "skip" → IBKR trades, portfolio reports → silently marked read
 
-DO NOT explain. Respond with only "statement" or "transaction".
-```
+### 8.2 Statement Reconciliation Prompt (deepseek-chat, thinking=adaptive)
 
-### 8.2 Statement Reconciliation Prompt (v4-pro model)
+Located in `src/statement/prompts.js` as `STATEMENT_PROMPT`.
 
-```
-You are a statement reconciliation agent for Actual Budget. Your job is to
-process monthly bank statements — the bank's AUTHORITATIVE transaction record
-for a billing cycle.
-
-RULES:
-1. Extract ALL transactions from the statement text.
-2. Identify: statement period (start/end), account name, currency.
-3. fetch_accounts + fetch_statement_history (check duplicate period).
-4. fetch_unreconciled_transactions(account_id, period_start, period_end).
+Core rules:
+1. Extract ALL transactions from the statement text
+2. Identify: statement period (start/end), account name, currency
+3. fetch_statement_history (check duplicate period) + fetch_accounts
+4. fetch_unreconciled_transactions(account_id, period_start, period_end)
 5. For EACH statement line item:
-   a. Call fuzzy_match to find candidate matches in uncleared AB transactions.
-   b. If MATCH found → reconcile_transaction(ab_txn_id, "Statement [period]").
-   c. If NO match → insert_transaction as OUTLIER:
-      - notes: "OUTLIER | Statement [period]"
-      - Do NOT set cleared (defaults to false).
-6. After ALL items → record_statement + notify_user + mark_email_read.
-7. On any failure → notify_user + mark_email_read.
+   a. Call fuzzy_match to find candidate matches
+   b. MATCH → reconcile_transaction(ab_txn_id, "Statement [period]")
+   c. OUTLIER → check_statement_duplicate → insert_transaction with notes="OUTLIER | Statement [period]"
+6. After ALL items → record_statement + notify_user + mark_email_read
+7. On any failure → notify_user + mark_email_read
 
-AMOUNTS: INTEGER CENTS, negative for spending. S$12.80 = -1280.
-DUPLICATES: If fetch_statement_history returns a record for this (account, period),
-  notify_user and stop.
+**Password recovery** (Phase 4):
+- If extract_email_content returns `[PDF_ENCRYPTED]` → search_memory for "statement password"
+- If found → retry extraction with password; if not → check email body → ask user
+- After successful extraction → learn_fact to store password
 
-NOTIFICATION FORMAT:
-  "[Account] statement for [period] processed:
-   ✅ X transactions reconciled and cleared
-   ⚠️ Y outliers inserted but not cleared:
-     - [date]: [amount] at [description]
-     - ..."
+Currency routing: SGD → "My Budget", MYR → "My MYR Budget" (via ACTUAL_BUDGET_FILE / MYR_BUDGET_FILE env vars).
 
-If all outliers: "No prior transaction alerts for this account — may be new/unmonitored."
+### 8.3 Portfolio Tracker Prompt — Missing-PDF Rule (deepseek-chat, thinking=adaptive)
+
+Located in `modules/portfolio-tracker/src/prompts.js` as `SYSTEM_PROMPT`.
+
+Add one rule after existing rule 12:
+
 ```
+13. If extract_email_content() returns text without trade/transaction
+    data AND no PDF is attached → call notify_user() asking the
+    user to forward the PDF via Telegram.
+```
+
+**Why no `mark_email_read` in the prompt:** The portfolio tracker's `dispatchEmail()`
+(`modules/portfolio-tracker/src/classify.js`, lines 75-83) always calls
+`imapHandler.markRead()` in a `finally` block after the orchestrator returns.
+Email read-marking is guaranteed by the framework, not the LLM.
+
+**Corresponding SKILL.md change** (`gateway/workspace/skills/portfolio-tracker/SKILL.md`):
+
+Add a `## Trade Email with Missing PDF` section:
+
+```markdown
+## Trade Email with Missing PDF
+
+If a trade email arrives with no PDF attachment → call notify-user asking
+the user to forward the PDF via Telegram. The email is marked read
+automatically by the dispatch wrapper.
+
+User forwards PDF via Telegram → gateway activates this skill:
+  1. Call extract-pdf-text(pdf_bytes_b64=<base64 from gateway>)
+  2. Match securities by ISIN/ticker (as normal trade workflow)
+  3. Call check-duplicate → insert-pp-transaction
+  4. Call notify-user with summary
+  5. Call learn-mapping for each match
+```
+
+**Corresponding .env.example change** (`modules/portfolio-tracker/.env.example`):
+
+Relocate `IMAP_FOLDER=Trades` from the `# --- Telegram ---` section to the
+`# --- IMAP Email ---` section (uncomment it). It currently exists commented
+out in the wrong section.
 
 ---
 
-## 9. File Skeleton
+## 9. File Skeleton (Node.js, post-migration)
 
 ```
 modules/expense-tracker/
 ├── src/
-│   ├── statement/                    NEW (5 files)
-│   │   ├── __init__.py
-│   │   ├── orchestrator.py           StatementProcessor (v4-pro, 20 iter)
-│   │   ├── prompts.py                CLASSIFICATION_PROMPT + STATEMENT_PROMPT
-│   │   ├── matcher.py                fuzzy_match()
-│   │   └── journal.py                StatementJournal (statement.db)
-│   ├── main.py                       MODIFIED (+pre-classification + dispatch)
-│   ├── agent/
-│   │   └── tools.py                  MODIFIED (+4 tool handlers/schemas)
-│   ├── extractors/
-│   │   └── __init__.py               MODIFIED (+application/pdf branch)
-│   └── tools_api.py                  MODIFIED (+4 endpoint registrations)
+│   ├── statement/                    (4 files)
+│   │   ├── orchestrator.js           StatementProcessor (deepseek-chat, thinking=adaptive, 20 iter)
+│   │   ├── prompts.js                STATEMENT_PROMPT + STATEMENT_FEW_SHOT
+│   │   └── matcher.js                fuzzyMatch()
+│   ├── index.js                      MODIFIED (+statement pipeline wiring, +imapMailbox)
+│   ├── tools.js                      MODIFIED (+StatementJournal class, +5 tool handlers/schemas)
+│   ├── classify.js                   CLASSIFICATION_PROMPT + classifyEmail() + dispatchEmail()
+│   ├── orchestrator.js               AgentOrchestrator (transaction pipeline)
+│   ├── extractors.js                 MODIFIED (extractEmailContent, extractPdfFromBuffer)
+│   ├── imap.js                       MODIFIED (+mailbox param)
+│   └── config.js                     MODIFIED (+imapMailbox, +statementDbPath)
 ├── tests/
-│   ├── statement/                    NEW (5 test files)
-│   │   ├── __init__.py
-│   │   ├── test_statement_journal.py
-│   │   ├── test_statement_matcher.py
-│   │   ├── test_statement_tools.py
-│   │   ├── test_statement_orchestrator.py
-│   │   └── test_statement_classification.py
-│   ├── test_tools.py                 MODIFIED (10→15 schemas)
-│   └── test_integration.py           MODIFIED (11→15 endpoints)
+│   ├── statement/                    (4 test files, ~113 tests)
+│   │   ├── journal.test.js           StatementJournal (17 tests)
+│   │   ├── matcher.test.js           fuzzyMatch (31 tests)
+│   │   ├── orchestrator.test.js      StatementProcessor (22 tests)
+│   │   └── prompts.test.js           STATEMENT_PROMPT + CLASSIFICATION_PROMPT (43 tests)
+│   └── ...                           (config, imap, classify, extractors, etc. — 175+ tests)
+│   Total: ~292 tests (all pass)
 
 gateway/
-└── actual-api/
-    └── server.js                     MODIFIED (+clear endpoint +GET filters)
+├── actual-api/
+│   └── server.js                     MODIFIED (+clear endpoint, +GET filters)
+└── workspace/skills/expense-tracker/
+    └── SKILL.md                      MODIFIED (+statement reconciliation section)
 ```
 
 ---
@@ -307,19 +331,18 @@ gateway/
 
 | File | Changed? | Risk | Mitigation |
 |---|---|---|---|
-| `agent/orchestrator.py` | No | None | Untouched |
-| `agent/prompts.py` | No | None | Untouched |
-| `agent/tools.py` | Yes | Low | Additive (+4 handlers, +4 schemas) |
-| `utils/dedup.py` | No | None | Untouched |
-| `imap/idle_handler.py` | No | None | Untouched |
-| `extractors/__init__.py` | Yes | Low | New `elif` branch, existing logic unchanged |
-| `extractors/pdf_extractor.py` | No | None | Already exists, now called |
-| `tools_api.py` | Yes | Low | Additive (+4 route registrations) |
-| `config.py` | No | None | No new env vars needed |
-| `main.py` | Yes | Medium | Pre-classification call + dispatch + StatementProcessor init |
+| `orchestrator.js` (transaction) | No | None | Untouched |
+| `prompts.js` (transaction) | No | None | Untouched |
+| `tools.js` | Yes | Low | Additive (+StatementJournal class, +5 handlers, +5 schemas) |
+| `dedup.js` | No | None | Untouched |
+| `imap.js` | Yes | Low | Additive (+mailbox param, default "INBOX") |
+| `extractors.js` | Yes | Low | Additive (+PDF extraction branch) |
+| `config.js` | Yes | Low | Additive (+imapMailbox, +statementDbPath fields) |
+| `index.js` | Yes | Medium | Statement pipeline wiring + mailbox passthrough |
 | `actual-api/server.js` | Yes | Low | Additive (+clear endpoint, +filter params) |
+| `SKILL.md` | Yes | Low | Additive (+statement reconciliation section) |
 | `docker-compose.yml` | No | None | Untouched |
-| `Dockerfile` | No | None | Tesseract already installed |
+| `Dockerfile` | No | None | pdftotext already installed |
 
 **Intentional test changes:**
 - `test_tools.py`: 10→15 schemas (rename test)
@@ -329,10 +352,12 @@ gateway/
 
 ## 11. Cost Estimate
 
-| Step | Model | Input | Output | Cost |
-|---|---|---|---|---|
-| Pre-classification | flash | ~500 tok | ~5 tok | ~$0.00007 |
-| Statement processing (15 txns) | v4-pro | ~6000 tok | ~2500 tok | ~$0.002 |
-| Per-email total | | | | **~$0.002** |
+All pipelines use `deepseek-chat` with thinking level controlling depth.
 
-At 4 statements/month + ~100 alerts/month: **~$0.11/month total**.
+| Step | Model | Thinking | Input | Output | Cost |
+|---|---|---|---|---|---|
+| Pre-classification | deepseek-chat | _(not set)_ | ~500 tok | ~5 tok | ~$0.00014 |
+| Statement processing (15 txns) | deepseek-chat | adaptive | ~6000 tok | ~2500 tok | ~$0.002 |
+| Per-email total | | | | | **~$0.002** |
+
+At 4 statements/month + ~100 alerts/month: **~$0.12/month total**.

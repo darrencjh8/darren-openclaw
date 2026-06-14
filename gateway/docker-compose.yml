@@ -4,8 +4,8 @@ services:
             context: .
             dockerfile: Dockerfile
         ports:
-            - "127.0.0.1:18789:18789"
-            - "127.0.0.1:18800:18800"
+            - "0.0.0.0:18789:18789"
+            - "0.0.0.0:18800:18800"
         volumes:
             - ./openclaw.json:/app/openclaw.json.bk:ro
             - ./exec-approvals.json:/app/exec-approvals.json:ro
@@ -39,6 +39,7 @@ services:
             - TZ=Asia/Kuala_Lumpur
             - OPENCLAW_ALLOW_INSECURE_PRIVATE_WS=1
             - OPENCLAW_GATEWAY_URL=http://127.0.0.1:18789
+            - OPENCLAW_GATEWAY_TOKEN=${OPENCLAW_GATEWAY_TOKEN}
         restart: unless-stopped
 
     expense-tracker:

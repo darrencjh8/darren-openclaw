@@ -17,8 +17,16 @@ export class ImapIdleHandler {
      * @param {string} username
      * @param {string} password
      * @param {import('./dedup.js').DedupJournal} [dedupJournal]
+     * @param {string} [mailbox="INBOX"]
      */
-    constructor(host, port, username, password, dedupJournal = null) {
+    constructor(
+        host,
+        port,
+        username,
+        password,
+        dedupJournal = null,
+        mailbox = "INBOX",
+    ) {
         this._host = host;
         this._port = port;
         this._username = username;
@@ -26,6 +34,7 @@ export class ImapIdleHandler {
         this._client = null;
         this._running = false;
         this._dedup = dedupJournal;
+        this._mailbox = mailbox;
     }
 
     async connect() {
@@ -37,7 +46,7 @@ export class ImapIdleHandler {
             logger: false,
         });
         await this._client.connect();
-        await this._client.mailboxOpen("INBOX");
+        await this._client.mailboxOpen(this._mailbox);
     }
 
     async disconnect() {
@@ -91,6 +100,7 @@ export class ImapIdleHandler {
                 event: "imap_idle_starting",
                 host: this._host,
                 port: this._port,
+                mailbox: this._mailbox,
             }),
         );
         while (this._running) {
@@ -101,6 +111,7 @@ export class ImapIdleHandler {
                             event: "imap_connecting",
                             host: this._host,
                             port: this._port,
+                            mailbox: this._mailbox,
                         }),
                     );
                     await this.connect();

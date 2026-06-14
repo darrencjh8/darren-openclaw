@@ -94,7 +94,7 @@
         "list": [
             {
                 "id": "orchestrator",
-                "thinkingDefault": "low",
+                "thinkingDefault": "medium",
                 "model": {
                     "primary": "deepseek/deepseek-v4-flash",
                     "fallbacks": [
@@ -130,7 +130,13 @@
     "gateway": {
         "port": 18789,
         "bind": "lan",
-        "mode": "local"
+        "mode": "local",
+        "auth": {
+            "token": "${OPENCLAW_GATEWAY_TOKEN}"
+        }
+    },
+    "diagnostics": {
+        "stuckSessionAbortMs": 120000
     },
     "tools": {
         "exec": {

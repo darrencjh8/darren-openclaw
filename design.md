@@ -215,7 +215,7 @@ OpenClaw uses the **LLM Agent Pattern**: the Python host is a thin runtime that 
 | **ktmb-booking** | Ubuntu laptop (Docker) | Python aiohttp API server + seat watcher worker; SQLite job store | ~150MB RAM |
 | **Email Burner** | Any IMAP provider | Public IMAP (imap.example.com:993) | Free tier, dedicated inbox |
 | **DeepSeek API** | DeepSeek Cloud | Public HTTPS (api.deepseek.com/v1) | Pay-per-token |
-| **Windows Node** (future) | Windows laptop | Canvas, camera, screen, voice — connects via WebSocket | Any modern Windows PC |
+| **Windows Companion** | Windows laptop | Windows Hub app connects via `ws://192.168.68.51:18789` + token. Canvas, camera, screen, voice, TTS/STT via node mode | Any modern Windows 10/11 PC |
 | **Chrome Daemon** | Production server | Chromium (headed, Xvfb :99) CDP :9222, socat-forwarded :9223 for Docker | ~300 MB RAM |
 
 ### Production Server Setup
@@ -744,14 +744,13 @@ OpenClaw natively supports 26+ channels. To enable WhatsApp:
 
 The gateway handles Meta webhook verification, message parsing, and DM pairing. No custom code needed.
 
-### 6.6 Windows Node Expansion (Future)
+### 6.6 Windows Companion
 
-A Windows laptop can connect as an OpenClaw node:
-```bash
-openclaw node connect --gateway <ubuntu-ip>:18789
-```
+The [Windows Hub](https://docs.openclaw.ai/platforms/windows) companion app (signed x64/arm64 installer from OpenClaw releases) connects via LAN WebSocket using the gateway auth token. After installing, choose **Advanced setup** → **Remote Gateway by URL and token**, using `ws://192.168.68.51:18789` plus the token from `gateway.auth.token`.
 
-The node exposes device capabilities (`nodes.camera`, `nodes.screen`, `nodes.canvas`, `nodes.voice`) to the gateway agent. No code changes in darren-openclaw.
+The companion can run in **node mode** to expose device capabilities (canvas, screen, camera, TTS, STT, `system.run`) to the gateway agent. Pairing is required — approve via `openclaw devices approve <requestId>` on the gateway host.
+
+**Connection requires**: Docker port `0.0.0.0:18789` (not loopback-only) and `gateway.auth.token` configured in `openclaw.json`.
 
 ### 6.7 Status
 
@@ -997,8 +996,11 @@ All credentials are injected via environment variables:
 - **IMAP password** — `IMAP_PASSWORD` (IMAP app-specific password)
 - **Actual Budget password** — `ACTUAL_BUDGET_PASSWORD`
 - **SMTP password** — `NOTIFICATION_EMAIL_PASSWORD`
+- **Gateway auth token** — `OPENCLAW_GATEWAY_TOKEN` (authenticates operators, nodes, and internal CLI)
 
-Secrets are set via `.env` file (mounted as read-only volume in Docker Compose). `.env` is `.gitignore`d.
+Secrets are set via `.env` file (mounted as read-only volume in Docker Compose). `.env` is `.gitignore`d. Both `openclaw.json` and `docker-compose.yml` reference `${OPENCLAW_GATEWAY_TOKEN}` via env-var substitution — no hardcoded tokens.
+
+At container startup, `docker-entrypoint.sh` seeds `/app/.openclaw/exec-approvals.json` (the allowlist for `exec:` commands). Device pairing is handled separately: on first connect, the Windows Companion sends a pairing request. Run `docker exec openclaw openclaw devices approve <requestId>` on the server to approve it. Once approved, the pairing persists in `/app/.openclaw/devices/paired.json` (managed by the OpenClaw runtime). This is a one-time step.
 
 ### 8.2 Network Isolation
 
@@ -1008,6 +1010,8 @@ Secrets are set via `.env` file (mounted as read-only volume in Docker Compose).
 | expense-tracker → DeepSeek | HTTPS (public) | Outbound only |
 | expense-tracker → IMAP | IMAP/SSL (public) | Outbound only |
 | User → Actual Budget UI | HTTPS (public) | For manual budget management |
+| Windows Companion → Gateway | WebSocket (LAN) | `0.0.0.0:18789` authenticated via `gateway.auth.token` |
+| Internal services → Gateway | HTTP (Docker network) | Inter-container only; webhooks use `hooks.token` |
 
 ### 8.3 Burner Email Isolation
 

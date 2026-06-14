@@ -16,9 +16,10 @@ import { join } from "path";
  * pdftotext for PDF attachments.
  *
  * @param {Buffer|string} rawEmail - raw MIME email bytes or string
+ * @param {string} [password] - optional password for encrypted PDFs
  * @returns {Promise<string>} extracted plain text
  */
-export async function extractEmailContent(rawEmail) {
+export async function extractEmailContent(rawEmail, password = null) {
     const raw = Buffer.isBuffer(rawEmail)
         ? rawEmail
         : Buffer.from(rawEmail || "");
@@ -42,10 +43,25 @@ export async function extractEmailContent(rawEmail) {
         for (const att of parsed.attachments || []) {
             if (att.contentType === "application/pdf" && att.content) {
                 try {
-                    const pdfText = await extractPdfFromBuffer(att.content);
+                    const pdfText = await extractPdfFromBuffer(
+                        att.content,
+                        password,
+                    );
                     if (pdfText.trim()) parts.push(pdfText.trim());
-                } catch {
-                    // PDF extraction failed, skip this attachment
+                } catch (e) {
+                    const errMsg = String(e.message || e).toLowerCase();
+                    if (
+                        errMsg.includes("password") ||
+                        errMsg.includes("encrypt")
+                    ) {
+                        parts.push(
+                            "[PDF_ENCRYPTED: use search-memory for password or ask user]",
+                        );
+                    } else {
+                        parts.push(
+                            `[PDF_EXTRACTION_ERROR: ${String(e.message || e).slice(0, 200)}]`,
+                        );
+                    }
                 }
             }
         }
@@ -84,9 +100,10 @@ export async function extractEmailContent(rawEmail) {
  * Extract text from a PDF buffer using pdftotext.
  *
  * @param {Buffer} pdfBuffer - raw PDF bytes
+ * @param {string} [password] - optional password for encrypted PDFs
  * @returns {Promise<string>} extracted text
  */
-export async function extractPdfFromBuffer(pdfBuffer) {
+export async function extractPdfFromBuffer(pdfBuffer, password = null) {
     const pdfPath = join(
         tmpdir(),
         `pdf-ext-${Date.now()}-${Math.random().toString(36).slice(2)}.pdf`,
@@ -94,12 +111,65 @@ export async function extractPdfFromBuffer(pdfBuffer) {
     const outPath = pdfPath.replace(".pdf", ".txt");
     writeFileSync(pdfPath, pdfBuffer);
 
+    if (password) {
+        // Decrypt with qpdf first, then pdftotext on decrypted output
+        const decPath = pdfPath.replace(".pdf", "-dec.pdf");
+        return new Promise((resolve, reject) => {
+            execFile(
+                "qpdf",
+                ["--password=" + password, "--decrypt", pdfPath, decPath],
+                (qpdfErr) => {
+                    try {
+                        unlinkSync(pdfPath);
+                    } catch {}
+                    if (qpdfErr) {
+                        try {
+                            unlinkSync(decPath);
+                        } catch {}
+                        reject(qpdfErr);
+                        return;
+                    }
+                    execFile(
+                        "pdftotext",
+                        ["-layout", decPath, outPath],
+                        (pdftotextErr) => {
+                            try {
+                                unlinkSync(decPath);
+                            } catch {}
+                            if (pdftotextErr) {
+                                try {
+                                    unlinkSync(outPath);
+                                } catch {}
+                                reject(pdftotextErr);
+                            } else {
+                                try {
+                                    const text = readFileSync(outPath, "utf8");
+                                    resolve(text);
+                                } catch (e) {
+                                    reject(e);
+                                } finally {
+                                    try {
+                                        unlinkSync(outPath);
+                                    } catch {}
+                                }
+                            }
+                        },
+                    );
+                },
+            );
+        });
+    }
+
+    // No password — existing behavior
     return new Promise((resolve, reject) => {
         execFile("pdftotext", ["-layout", pdfPath, outPath], (err) => {
             try {
                 unlinkSync(pdfPath);
             } catch {}
             if (err) {
+                try {
+                    unlinkSync(outPath);
+                } catch {}
                 reject(err);
             } else {
                 try {

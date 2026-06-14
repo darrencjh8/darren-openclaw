@@ -181,7 +181,7 @@ Files live on the `openclaw_home` named Docker volume (`/app/.openclaw`) which p
 
 **Gateway Runtime:**
 - **FR-001**: Gateway MUST start from the custom Dockerfile extending `openclaw:latest-browser`
-- **FR-002**: Gateway MUST bind to port 18789 (loopback) with Docker port publishing for host access
+- **FR-002**: Gateway MUST bind to port 18789 (lan) with Docker port publishing `0.0.0.0:18789` for LAN access by Windows companion
 - **FR-003**: Gateway MUST load `deepseek`, `google`, and `browser` plugins
 - **FR-004**: Gateway MUST use DeepSeek V4 Flash as primary model with Gemini and DeepSeek V4 Pro as fallbacks
 - **FR-005**: Gateway MUST auto-discover skills from `workspace/skills/` (the OpenClaw gateway standard). Additional skill paths may be configured via `skills.load.extraDirs` for modules outside the workspace.
@@ -249,6 +249,7 @@ Files live on the `openclaw_home` named Docker volume (`/app/.openclaw`) which p
 
 ## Assumptions
 
+- `gateway.auth.token` is configured in `openclaw.json` for LAN-accessible gateway auth
 - The Docker host runs Ubuntu with Docker Compose v2
 - Chrome is installed on the Docker host for CDP browser relay
 - `GEMINI_API_KEY` and `DEEPSEEK_API_KEY` are set in `gateway/.env`

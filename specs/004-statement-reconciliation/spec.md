@@ -2,7 +2,7 @@
 
 **Feature:** statement-reconciliation
 **Spec Version:** 3.0.0
-**Status:** Specified
+**Status:** Implementing (expense-tracker wired, PT pending)
 **Constitution Hash:** v2.0.0
 
 ---
@@ -22,7 +22,7 @@ A **statement is authoritative** — it represents the bank's final record for a
 | **"No match"** | Insert new txn (cleared=false) | **Insert as outlier** (cleared=false, noted) |
 | **Result** | 1 txn inserted or skipped | Reconciliation report: X cleared, Y outliers inserted |
 | **Database** | dedup.db (prevent duplicates) | statement.db (prevent re-processing periods) |
-| **LLM Model** | deepseek-v4-flash | deepseek-v4-pro |
+| **LLM Model** | deepseek-chat (thinking=off) | deepseek-chat (thinking=adaptive) |
 | **Email disposition** | Read on insert; unread on skip/fail | Always marked read |
 
 ---
@@ -54,9 +54,11 @@ A **statement is authoritative** — it represents the bank's final record for a
 **So that** the LLM can extract their transactions for reconciliation.
 
 **Acceptance Criteria:**
-- [ ] `extract_email_content()` handles `application/pdf` MIME parts via `extract_pdf()` (Tesseract OCR)
+- [ ] `extract_email_content()` handles `application/pdf` MIME parts via `extractPdfFromBuffer()` (pdftotext)
 - [ ] OCR text is cleaned and passed to the LLM as part of the statement prompt
-- [ ] If OCR fails (Tesseract missing, corrupt PDF) → `[PDF_OCR_UNAVAILABLE]` or `[PDF_EXTRACTION_ERROR]` returned
+- [ ] If `pdftotext` fails → `[PDF_EXTRACTION_ERROR]` or `[PDF_ENCRYPTED]` markers returned (not silently swallowed)
+- [ ] Password-protected PDFs: `extractPdfFromBuffer` accepts optional `password` param → pipes through `qpdf --password=... --decrypt` before `pdftotext`
+- [ ] LLM prompts instruct password recovery: `search-memory` → email body scan → ask user → `learn-fact` on success
 - [ ] PDFs with zero extractable text → notify user, mark read, log error
 
 ### US-3: Multi-Transaction Statement Extraction
@@ -155,7 +157,7 @@ A **statement is authoritative** — it represents the bank's final record for a
 | Account has zero uncleared AB transactions (new card) | All items inserted as outliers with `"no prior alerts"` note |
 | Statement in MYR | `ensureBudget` switches to MYR budget — all AB operations on MYR |
 | OCR extracts wrong amount (garbled) | fuzzy_match amount diffs → no match → inserted as outlier (safe) |
-| PDF is password-protected | pdf2image raises error → `[PDF_EXTRACTION_ERROR]` → notify → mark read |
+| PDF is password-protected | `pdftotext` fails → `qpdf --password=... --decrypt` → `pdftotext`. Password sourced from: (1) `search-memory` for stored passwords, (2) email body patterns, (3) user prompt → saved via `learn-fact`. If all fail → `[PDF_EXTRACTION_ERROR]` → notify → mark read |
 | Statement text exceeds LLM context window | DeepSeek V4 has 1M context — 40-page statement fine. Text is truncated at 60K chars as safety. |
 | IBKR Activity Flex or trade confirmation email arrives | Pre-classification returns `"skip"` → email silently marked read, bypassed entirely. Handled by the portfolio-tracker module |
 | IMAP folder doesn't exist | Auto-create Trades folder on first connection |

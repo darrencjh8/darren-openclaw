@@ -3,19 +3,12 @@
  * Ported 1:1 from src/agent/tools.py
  */
 
-import { execSync } from "child_process";
-import {
-    writeFileSync,
-    unlinkSync,
-    rmdirSync,
-    mkdtempSync,
-    mkdirSync,
-} from "fs";
-import { tmpdir } from "os";
+import { mkdirSync } from "fs";
 import { join, dirname } from "path";
 import Database from "better-sqlite3";
 import { simpleParser } from "mailparser";
 import { DedupJournal } from "./dedup.js";
+import { extractPdfFromBuffer } from "./extractors.js";
 
 const ACTUAL_API_URL = process.env.ACTUAL_API_URL || "http://localhost:3000";
 
@@ -344,13 +337,17 @@ const TOOLS = [
     {
         name: "extract_pdf_text",
         description:
-            "Extract text from a PDF document provided as base64-encoded bytes using pdftotext.",
+            "Extract text from a PDF document provided as base64-encoded bytes using pdftotext. For encrypted PDFs, provide the password.",
         schema: {
             type: "object",
             properties: {
                 pdf_bytes_b64: {
                     type: "string",
                     description: "Base64-encoded PDF bytes",
+                },
+                password: {
+                    type: "string",
+                    description: "Optional password for encrypted PDFs",
                 },
             },
             required: ["pdf_bytes_b64"],
@@ -531,6 +528,10 @@ const TOOLS = [
                 date: { type: "string", description: "YYYY-MM-DD" },
                 amount_cents: { type: "integer" },
                 account_id: { type: "string" },
+                budget_id: {
+                    type: "string",
+                    description: "Optional budget ID for AB API fallback",
+                },
             },
             required: ["date", "amount_cents", "account_id"],
         },
@@ -735,30 +736,9 @@ export class ToolRegistry {
 
     // ── PDF extraction ────────────────────────────────────────────
 
-    async _handle_extract_pdf_text({ pdf_bytes_b64 }) {
+    async _handle_extract_pdf_text({ pdf_bytes_b64, password }) {
         const pdfBytes = Buffer.from(pdf_bytes_b64, "base64");
-        const tmpDir = mkdtempSync(join(tmpdir(), "pdf-extract-"));
-        const tmpFile = join(tmpDir, "input.pdf");
-        try {
-            writeFileSync(tmpFile, pdfBytes);
-            const text = execSync(`pdftotext -layout "${tmpFile}" -`, {
-                encoding: "utf8",
-                timeout: 30000,
-                maxBuffer: 10 * 1024 * 1024,
-                stdio: ["ignore", "pipe", "pipe"],
-            });
-            return text;
-        } catch (e) {
-            const stderr = e.stderr ? String(e.stderr) : "";
-            throw new Error(`pdftotext failed: ${stderr || e.message}`);
-        } finally {
-            try {
-                unlinkSync(tmpFile);
-            } catch {}
-            try {
-                rmdirSync(tmpDir);
-            } catch {}
-        }
+        return extractPdfFromBuffer(pdfBytes, password || null);
     }
 
     // ── Reconciliation tools ──────────────────────────────────────
@@ -918,8 +898,18 @@ export class ToolRegistry {
         date,
         amount_cents,
         account_id,
+        budget_id = "",
     }) {
-        return this._dedup.checkExact(date, amount_cents, account_id);
+        // Check local dedup first, then AB API
+        if (this._dedup.checkExact(date, amount_cents, account_id)) {
+            return true;
+        }
+        return this._check_ab_duplicate(
+            date,
+            amount_cents,
+            account_id,
+            budget_id,
+        );
     }
 
     // ── HTTP helpers ──────────────────────────────────────────────
@@ -935,11 +925,12 @@ export class ToolRegistry {
     }
 
     async _post(path, body, budgetId) {
-        if (budgetId) body.budget_id = budgetId;
+        const payload = { ...body };
+        if (budgetId) payload.budget_id = budgetId;
         const r = await fetch(`${ACTUAL_API_URL}${path}`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(body),
+            body: JSON.stringify(payload),
         });
         if (!r.ok) throw new Error(`actual-api ${r.status}`);
         return r.json();

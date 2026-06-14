@@ -108,7 +108,7 @@ See `gateway/openclaw.json` for the authoritative config. Key sections:
   "bindings": [
     { "agentId": "orchestrator", "match": { "channel": "telegram", "accountId": "*" } }
   ],
-  "gateway": { "port": 18789, "bind": "loopback", "mode": "local" },
+  "gateway": { "port": 18789, "bind": "lan", "mode": "local", "auth": { "token": "<secret>" } },
   "messages": { "tts": { "auto": "tagged", "provider": "microsoft" } },
   "channels": {
     "telegram": {
@@ -234,7 +234,7 @@ Gateway starts
 | Unauthorized access | `dmPolicy: "allowlist"` — only `allowFrom` IDs can message |
 | Session isolation | `dmScope: "per-channel-peer"` — each user has separate session |
 | Bot scope | Telegram Bot API — bot only sees messages sent to it. No access to chats, contacts, or groups |
-| Gateway exposed | Bound to `0.0.0.0` within Docker network only. Host maps `18789` if needed |
+| Gateway exposed | Bound to `0.0.0.0:18789` on host (LAN-accessible). Authenticated via `gateway.auth.token` |
 | Expense-tracker exposed | Bound to `127.0.0.1:8080` — only gateway on same host can reach it |
 
 ### dmPolicy Rationale

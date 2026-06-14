@@ -134,6 +134,24 @@ describe("extractEmailContent — text/HTML extraction", () => {
     });
 });
 
+describe("extractEmailContent — PDF error markers", () => {
+    it("includes [PDF_EXTRACTION_ERROR] marker for corrupt PDF attachment", async () => {
+        // A corrupt PDF that pdftotext will reject with a non-encryption error
+        const corruptPdf = Buffer.from("this is not a pdf file at all");
+        const email = buildMimeEmail({
+            text: "Text body still extracted",
+            pdfAttachment: corruptPdf,
+        });
+
+        const result = await extractEmailContent(email);
+        // Text body should still be present
+        expect(result).toContain("Text body still extracted");
+        // pdftotext should fail with a parse error → marker
+        expect(result).toContain("[PDF_EXTRACTION_ERROR");
+        expect(result).not.toContain("[PDF_ENCRYPTED");
+    });
+});
+
 describe("extractEmailContent — PDF/multipart structure", () => {
     it("extracts text body from multipart/mixed email with PDF attachment", async () => {
         const pdfContent = Buffer.from("%PDF-1.4\n%%EOF");
