@@ -135,6 +135,8 @@ Incoming emails are pre-classified by a lightweight LLM call into one of three c
 - [x] A UID-based `processed_uids` SQLite table with 60-minute cooldown prevents recently processed emails from being re-dispatched to the LLM
 - [x] The dedup journal prevents re-insertion of already-processed transactions
 - [x] If the process crashes mid-processing, the email remains unread and is re-processed on restart (UID is only recorded after successful completion)
+- [x] Memory facts are deduplicated via exact-match `Set` gate in `MemoryStore.add()` — repeated `learn_fact` calls for the same mapping produce `{ skipped: true }` instead of appending duplicates to MEMORY.md
+- [x] MEMORY.md is written atomically (temp file + rename) to prevent corruption on crash mid-write
 
 ---
 

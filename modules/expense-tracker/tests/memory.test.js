@@ -3,7 +3,13 @@
  * Ported 1:1 from tests/test_memory.py
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { writeFileSync, unlinkSync, existsSync, mkdirSync } from "fs";
+import {
+    readFileSync,
+    writeFileSync,
+    unlinkSync,
+    existsSync,
+    mkdirSync,
+} from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 
@@ -273,6 +279,144 @@ describe("MemoryStore", () => {
             expect(store._embeddingCache.size).toBeGreaterThanOrEqual(
                 cacheSizeBefore,
             );
+        });
+    });
+
+    // ── Dedup behaviour ─────────────────────────────────────────
+
+    describe("dedup", () => {
+        it("rejects exact duplicate facts", () => {
+            const store = new MemoryStore(tempMemoryPath);
+            const r1 = store.add("Kopitiam merchant maps to Food payee");
+            expect(r1).toEqual({ added: true, skipped: false });
+            const r2 = store.add("Kopitiam merchant maps to Food payee");
+            expect(r2).toEqual({
+                added: false,
+                skipped: true,
+                reason: "duplicate",
+            });
+            expect(store.listFacts().length).toBe(4); // 3 from file + 1 new
+        });
+
+        it("deduplicates on startup when file has duplicates", () => {
+            const dupPath = tempFile(
+                ".md",
+                "# Long-Term Memory\n\n## Facts\n\n- foo\n- bar\n- foo\n- baz\n- bar\n",
+            );
+            const store = new MemoryStore(dupPath);
+            const facts = store.listFacts();
+            expect(facts.length).toBe(3);
+            expect(facts).toContain("foo");
+            expect(facts).toContain("bar");
+            expect(facts).toContain("baz");
+            try {
+                unlinkSync(dupPath);
+            } catch (_) {}
+        });
+
+        it("allows re-adding a fact after it was removed", () => {
+            const store = new MemoryStore(tempMemoryPath);
+            store.add("unique test fact");
+            store.remove("unique test fact");
+            expect(
+                store.listFacts().some((f) => f === "unique test fact"),
+            ).toBe(false);
+            const r = store.add("unique test fact");
+            expect(r).toEqual({ added: true, skipped: false });
+        });
+
+        it("maintains dedup set when a fact is updated", () => {
+            const store = new MemoryStore(tempMemoryPath);
+            store.add("Toast Box merchant maps to Food payee");
+            store.update(
+                "Toast Box",
+                "Toast Box merchant maps to Coffee payee",
+            );
+            // Old fact can be re-added (key was deleted from dedup set)
+            const r1 = store.add("Toast Box merchant maps to Food payee");
+            expect(r1).toEqual({ added: true, skipped: false });
+            // New fact is blocked (key was added to dedup set)
+            const r2 = store.add("Toast Box merchant maps to Coffee payee");
+            expect(r2).toEqual({
+                added: false,
+                skipped: true,
+                reason: "duplicate",
+            });
+        });
+
+        it("writes facts to disk and cleans up tmp after rewrite", () => {
+            const store = new MemoryStore(tempMemoryPath);
+            store.add("disk write test fact");
+            const content = readFileSync(tempMemoryPath, "utf8");
+            expect(content).toContain("disk write test fact");
+            expect(existsSync(tempMemoryPath + ".tmp")).toBe(false);
+        });
+
+        it("rejects duplicates of facts loaded from file", () => {
+            const store = new MemoryStore(tempMemoryPath);
+            // tempMemoryPath has "DBS Yuu is a debit card account"
+            const r = store.add("DBS Yuu is a debit card account");
+            expect(r).toEqual({
+                added: false,
+                skipped: true,
+                reason: "duplicate",
+            });
+        });
+
+        it("treats case differences as duplicates", () => {
+            const store = new MemoryStore(tempMemoryPath);
+            store.add("GRAB MERCHANT maps to Transport payee");
+            const r = store.add("grab merchant maps to transport payee");
+            expect(r).toEqual({
+                added: false,
+                skipped: true,
+                reason: "duplicate",
+            });
+        });
+
+        it("populates dedup set after migration from mappings.json", () => {
+            const memoryPath = join(tmpdir(), `post-migrate-${Date.now()}.md`);
+            MemoryStore.migrateFromMappings(mappingsPath, memoryPath);
+            const store = new MemoryStore(memoryPath);
+            // Should have facts from mappings.json
+            expect(store.listFacts().length).toBeGreaterThan(0);
+            // Dedup set should be populated — re-adding a migrated fact is rejected
+            const r = store.add("DBS Yuu is a debit card account");
+            expect(r).toEqual({
+                added: false,
+                skipped: true,
+                reason: "duplicate",
+            });
+            try {
+                unlinkSync(memoryPath);
+            } catch (_) {}
+        });
+
+        it("reload() picks up new facts written externally and updates dedup set", () => {
+            const store = new MemoryStore(emptyMemoryPath);
+            expect(store.listFacts().length).toBe(0);
+            // Simulate migration: write facts to the file externally
+            writeFileSync(
+                emptyMemoryPath,
+                "# Long-Term Memory\n\n## Facts\n\n- reloaded fact one\n- reloaded fact two\n",
+            );
+            store.reload();
+            expect(store.listFacts().length).toBe(2);
+            // Dedup set should now block re-adding reloaded facts
+            const r = store.add("reloaded fact one");
+            expect(r).toEqual({
+                added: false,
+                skipped: true,
+                reason: "duplicate",
+            });
+        });
+
+        it("_dedupSet is always a Set, never null", () => {
+            const store = new MemoryStore(tempMemoryPath);
+            expect(store._dedupSet).toBeInstanceOf(Set);
+            // add() and update() should not crash (no null dereference)
+            store.add("safety check fact");
+            store.update("safety", "updated safety fact");
         });
     });
 });

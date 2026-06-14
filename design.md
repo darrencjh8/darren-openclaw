@@ -467,7 +467,11 @@ The expense tracker learns from every processed email using a local semantic mem
 
 **Semantic Search**: `search_memory(query)` — cosine similarity over 384-dim embeddings. Handles spelling variations ("TOASTBOX" matches "Toast Box") and partial matches ("card 4605" matches "Card ending 4605").
 
-**Self-Learning**: After each successful insert, `learn_fact()` appends 3 facts (account, payee, category). Dedup: cosine ≥ 0.95 → skip. Periodic rewrite every 50 facts cross-deduplicates the file.
+**Self-Learning**: After each successful insert, `learn_fact()` appends 3 facts (account, payee, category). Dedup: exact-match via normalized `Set` — repeated facts return `{ skipped: true, reason: "duplicate" }` without touching disk. File rewrites on every unique add (no batching).
+
+**Startup Dedup**: `_dedupExisting()` runs on init, removing duplicate facts from MEMORY.md accumulated before the dedup gate was added. One-time cleanup, idempotent.
+
+**File Safety**: `_rewriteFile()` writes to `.tmp` then `renameSync()` (atomic on Linux). If rename fails, temp file is cleaned up and error re-thrown.
 
 **User Feedback**: Gateway routes Telegram corrections ("X should be Y") to `update-fact`/`delete-fact`. Corrections clear the notification cooldown so pending emails re-process immediately.
 
@@ -1044,7 +1048,19 @@ Every email's IMAP `message_id` is carried through the entire pipeline as `corre
 - The dedup journal (`msg_id` column)
 - The Actual Budget transaction `notes` field
 
-### 9.3 Health Check
+### 9.3 Crash Diagnostics
+
+Three `process` handlers log the cause of any unexpected exit:
+
+| Handler | Trigger | Log Event | Exit Code |
+|---|---|---|---|
+| `unhandledRejection` | Promise rejects with no `.catch()` | `fatal_unhandled_rejection` | 1 |
+| `uncaughtException` | Synchronous throw outside try/catch | `fatal_uncaught_exception` | 1 |
+| `beforeExit` | Event loop drained (no more work) | `process_before_exit` | 0 |
+
+SIGTERM (Docker `compose stop`) uses Node default — exit code 143, no custom handler, distinguishable from event-loop drain.
+
+### 9.4 Health Check
 
 The expense-tracker container exposes an HTTP health check on port 8080 (returns 200 OK) for Docker health monitoring. No other endpoints are exposed.
 
