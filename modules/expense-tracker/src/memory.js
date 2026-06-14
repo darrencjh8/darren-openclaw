@@ -6,7 +6,14 @@
  * file backed by all-MiniLM-L6-v2 WASM embeddings for semantic search.
  */
 
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from "fs";
+import {
+    readFileSync,
+    writeFileSync,
+    existsSync,
+    mkdirSync,
+    renameSync,
+    unlinkSync,
+} from "fs";
 import { dirname } from "path";
 
 const MEMORY_TEMPLATE = `# Long-Term Memory
@@ -26,11 +33,24 @@ export class MemoryStore {
         this._modelPromise = null;
         this._embeddingCache = new Map();
         this._initialized = false;
-        this._addCounter = 0;
+        this._dedupSet = new Set();
         this._init();
     }
 
     // ── public interface ──────────────────────────────────────────
+
+    /**
+     * Reload facts from disk and rebuild the dedup set.
+     * Used after migrateFromMappings() writes new facts to the file.
+     */
+    reload() {
+        this._loadFacts();
+        this._dedupExisting();
+        this._dedupSet.clear();
+        for (const f of this._facts) {
+            this._dedupSet.add(f.trim().toLowerCase());
+        }
+    }
 
     get initialized() {
         return this._initialized;
@@ -65,19 +85,27 @@ export class MemoryStore {
         if (!fact)
             return { added: false, skipped: false, reason: "empty fact" };
 
+        const normalized = fact.toLowerCase();
+        if (this._dedupSet.has(normalized)) {
+            return { added: false, skipped: true, reason: "duplicate" };
+        }
+
+        this._dedupSet.add(normalized);
         this._facts.push(fact);
-        this._appendToFile(fact);
-        this._addCounter++;
-        if (this._addCounter >= 50) this._periodicRewrite();
+        this._rewriteFile();
 
         return { added: true, skipped: false };
     }
 
     remove(matchText) {
         const original = this._facts.length;
-        this._facts = this._facts.filter(
-            (f) => !f.toLowerCase().includes(matchText.toLowerCase()),
-        );
+        this._facts = this._facts.filter((f) => {
+            const match = f.toLowerCase().includes(matchText.toLowerCase());
+            if (match) {
+                this._dedupSet.delete(f.trim().toLowerCase());
+            }
+            return !match;
+        });
         const removed = original - this._facts.length;
         if (removed > 0) {
             this._rewriteFile();
@@ -99,10 +127,11 @@ export class MemoryStore {
                     .includes(oldText.trim().toLowerCase())
             ) {
                 const oldFact = this._facts[i];
+                this._dedupSet.delete(oldFact.trim().toLowerCase());
+                this._dedupSet.add(newText.trim().toLowerCase());
                 this._facts[i] = newText.trim();
-                this._rewriteFile();
-                // Invalidate cache for the old fact text
                 this._embeddingCache.delete(oldFact);
+                this._rewriteFile();
                 return { updated: true, found: true };
             }
         }
@@ -114,9 +143,34 @@ export class MemoryStore {
     _init() {
         this._ensureFile();
         this._loadFacts();
+        this._dedupExisting();
+        this._dedupSet.clear();
+        for (const f of this._facts) {
+            this._dedupSet.add(f.trim().toLowerCase());
+        }
         this._loadModel();
         this._initialized = true;
     }
+
+    // ── dedup ────────────────────────────────────────────────────
+
+    _dedupExisting() {
+        const seen = new Set();
+        const unique = [];
+        for (const f of this._facts) {
+            const n = f.trim().toLowerCase();
+            if (!seen.has(n)) {
+                seen.add(n);
+                unique.push(f);
+            }
+        }
+        if (unique.length < this._facts.length) {
+            this._facts = unique;
+            this._rewriteFile();
+        }
+    }
+
+    // ── file I/O ──────────────────────────────────────────────────
 
     _ensureFile() {
         if (!existsSync(this.path)) {
@@ -142,42 +196,19 @@ export class MemoryStore {
         this._facts = facts;
     }
 
-    _appendToFile(fact) {
-        let content = readFileSync(this.path, "utf8");
-        if (!content.includes("## Facts")) content = MEMORY_TEMPLATE;
-        const lines = content.split("\n");
-        let factsIdx = -1;
-        let nextSectionIdx = -1;
-        for (let i = 0; i < lines.length; i++) {
-            if (lines[i].trim().startsWith("## Facts")) factsIdx = i;
-            else if (
-                factsIdx >= 0 &&
-                i > factsIdx &&
-                lines[i].trim().startsWith("##")
-            ) {
-                nextSectionIdx = i;
-                break;
-            }
-        }
-        if (factsIdx < 0) {
-            lines.push("## Facts", `- ${fact}`);
-        } else if (nextSectionIdx >= 0) {
-            lines.splice(nextSectionIdx, 0, `- ${fact}`);
-        } else {
-            lines.push(`- ${fact}`);
-        }
-        writeFileSync(this.path, lines.join("\n") + "\n");
-    }
-
     _rewriteFile() {
+        const tmp = this.path + ".tmp";
         const lines = ["# Long-Term Memory", "", "## Facts", ""];
         for (const f of this._facts) lines.push(`- ${f}`);
-        writeFileSync(this.path, lines.join("\n") + "\n");
-    }
-
-    _periodicRewrite() {
-        this._rewriteFile();
-        this._addCounter = 0;
+        writeFileSync(tmp, lines.join("\n") + "\n");
+        try {
+            renameSync(tmp, this.path);
+        } catch (e) {
+            try {
+                unlinkSync(tmp);
+            } catch (_) {}
+            throw e;
+        }
     }
 
     // ── embedding ─────────────────────────────────────────────────

@@ -13,6 +13,37 @@ import { classifyEmail, dispatchEmail } from "./classify.js";
 import { DedupJournal } from "./dedup.js";
 import { existsSync } from "fs";
 
+// ── Crash diagnostics ──────────────────────────────────────────────
+
+process.on("unhandledRejection", (reason) => {
+    console.error(
+        JSON.stringify({
+            event: "fatal_unhandled_rejection",
+            error: String(reason),
+        }),
+    );
+    process.exit(1);
+});
+
+process.on("uncaughtException", (err) => {
+    console.error(
+        JSON.stringify({
+            event: "fatal_uncaught_exception",
+            error: err.message,
+        }),
+    );
+    process.exit(1);
+});
+
+process.on("beforeExit", (code) => {
+    console.error(
+        JSON.stringify({
+            event: "process_before_exit",
+            code,
+        }),
+    );
+});
+
 async function main() {
     const cfg = Config.fromEnv();
     console.log(
@@ -31,9 +62,8 @@ async function main() {
                 JSON.stringify({ event: "migrating_mappings_to_memory" }),
             );
             MemoryStore.migrateFromMappings(mappingsPath, cfg.memoryPath);
-            // Reload after migration
-            const reloaded = new MemoryStore(cfg.memoryPath);
-            memory._facts = reloaded._facts;
+            // Reload after migration (avoids second WASM model load)
+            memory.reload();
         }
     }
     console.log(
