@@ -44,9 +44,10 @@ RULES (constraints — what NOT to do):
     If you CANNOT match an account → notify_user(), DO NOT insert.
  3. Currency not SGD or MYR → notify_user(), DO NOT insert.
  4. Cannot extract amount → notify_user(), DO NOT insert.
- 5. Always call fetch_accounts() + fetch_categories() + fetch_payees()
-    in parallel (live AB data). This is separate from search_memory()
-    (learned facts) — you need BOTH.
+ Always call fetch_accounts() + fetch_categories()
+     in parallel (live AB data). fetch_payees() is no longer required —
+     resolve_merchant() and insert_transaction() handle payee validation
+     internally.
  6. Always call check_duplicate() before insert_transaction().
  7. Amounts: INTEGER CENTS. S$12.80 = -1280. MYR 45.50 = -4550.
     Negative for spending.
@@ -315,7 +316,39 @@ export function getFewShotExamples() {
             { role: "tool", tool_call_id: "call_10", content: "true" },
             { role: "tool", tool_call_id: "call_11", content: "true" },
         ],
-        // Example 2: Skip promotional
+        // Example 2: Web-classified merchant
+        [
+            {
+                role: "user",
+                content:
+                    "Process this email:\n\nFrom: alerts@uob.com\nSubject: Transaction Alert\nSGD 10.30 charged to UOB One at SGSUPERGREEN-B PTE LTD on 15/06/2026",
+            },
+            {
+                role: "assistant",
+                content: "Unfamiliar merchant. Let me resolve it.",
+                tool_calls: [
+                    {
+                        id: "call_resolve",
+                        type: "function",
+                        function: {
+                            name: "resolve_merchant",
+                            arguments: '{"merchant": "SGSUPERGREEN-B PTE LTD"}',
+                        },
+                    },
+                ],
+            },
+            {
+                role: "tool",
+                tool_call_id: "call_resolve",
+                content: '{"payee": "Misc", "source": "web"}',
+            },
+            {
+                role: "assistant",
+                content:
+                    "Web search classified SGSUPERGREEN-B as Misc. Proceeding.",
+            },
+        ],
+        // Example 3: Skip promotional
         [
             {
                 role: "user",

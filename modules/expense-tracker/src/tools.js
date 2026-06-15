@@ -1011,7 +1011,8 @@ export class ToolRegistry {
         }
     }
 
-    async _handle_resolve_merchant({ merchant, budget_id = "" }) {
+    async _handle_resolve_merchant({ merchant, budget_id }) {
+        if (!this._memory) return { payee: "Misc", source: "fallback" };
         // Step 1: Check memory for existing mapping
         const memResults = await this._memory.search(merchant);
         if (memResults && memResults.length > 0) {

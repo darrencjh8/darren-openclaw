@@ -463,6 +463,15 @@ describe("resolve_merchant pipeline", () => {
         // Should NOT return memory (regex won't match), but keyword WILL match
         expect(result).toEqual({ payee: "Transport", source: "keyword" });
     });
+
+    it("returns fallback when memory is null", async () => {
+        // Create registry WITHOUT passing memory
+        const registryNoMem = new ToolRegistry(mockConfig(), null);
+        const result = await registryNoMem.executeTool("resolve_merchant", {
+            merchant: "Anything",
+        });
+        expect(result).toEqual({ payee: "Misc", source: "fallback" });
+    });
 });
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -540,6 +549,57 @@ describe("Classification prompt structure", () => {
         // Contains JSON output format instruction
         expect(prompt).toContain('{ "payee"');
         expect(prompt).toContain("Respond with a JSON object");
+
+        vi.unstubAllGlobals();
+    });
+
+    it("extracts JSON from mixed text response (regex fallback)", async () => {
+        const memory = mockMemoryStore();
+        const config = mockConfig();
+        const registry = new ToolRegistry(config, memory);
+
+        // fetch: search_web (Brave) → payees
+        const fetchMock = vi
+            .fn()
+            .mockResolvedValueOnce({
+                ok: true,
+                json: async () => ({
+                    web: {
+                        results: [
+                            {
+                                title: "Some Merchant",
+                                url: "https://example.com",
+                                description: "A test merchant",
+                            },
+                        ],
+                    },
+                }),
+            })
+            .mockResolvedValueOnce({
+                ok: true,
+                json: async () => [{ name: "Coffee" }, { name: "Food" }],
+            });
+        vi.stubGlobal("fetch", fetchMock);
+
+        // Mock chat to return "Here is the result: {"payee":"Coffee"} additional text"
+        mockChat.mockResolvedValueOnce({
+            choices: [
+                {
+                    message: {
+                        content:
+                            'Here is the result: {"payee":"Coffee"} additional text',
+                    },
+                },
+            ],
+        });
+
+        const result = await registry.executeTool("resolve_merchant", {
+            merchant: "Test",
+            budget_id: "",
+        });
+        // Verify it successfully extracted Coffee from the mixed text
+        expect(result.payee).toBe("Coffee");
+        expect(result.source).toBe("web");
 
         vi.unstubAllGlobals();
     });
@@ -829,6 +889,47 @@ describe("Category validation in insert_transaction", () => {
 
         vi.unstubAllGlobals();
     });
+
+    it("keeps original category_id when Fun Money not in list", async () => {
+        // Mock categories WITHOUT "Fun Money"
+        const fetchMock = vi
+            .fn()
+            .mockResolvedValueOnce({
+                ok: true,
+                json: async () => [{ name: "Misc" }],
+            })
+            .mockResolvedValueOnce({
+                ok: true,
+                json: async () => [{ id: "cat-other", name: "Other" }],
+            })
+            .mockResolvedValueOnce({
+                ok: true,
+                json: async () => ({ id: "txn-new", amount: -500 }),
+            });
+        vi.stubGlobal("fetch", fetchMock);
+
+        const memory = mockMemoryStore();
+        const config = mockConfig();
+        const registry = new ToolRegistry(config, memory);
+
+        await registry.executeTool("insert_transaction", {
+            account_id: "acct-1",
+            date: "2026-06-15",
+            amount_cents: -500,
+            imported_description: "Test Merchant",
+            category_id: "cat-unknown",
+        });
+
+        // Verify the original category_id was kept (not replaced)
+        // Check mockFetch was called with category: "cat-unknown" in body
+        const postCall = fetchMock.mock.calls.find(
+            (c) => c[1]?.method === "POST",
+        );
+        const body = JSON.parse(postCall[1].body);
+        expect(body.category).toBe("cat-unknown");
+
+        vi.unstubAllGlobals();
+    });
 });
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -1086,5 +1187,31 @@ describe("update_transaction", () => {
         expect(patchUrl).toBe("http://localhost:3000/transactions/txn-1");
 
         vi.unstubAllGlobals();
+    });
+});
+
+// ─────────────────────────────────────────────────────────────────────────
+// Few-shot examples
+// ─────────────────────────────────────────────────────────────────────────
+
+import { getFewShotExamples } from "../src/prompts.js";
+
+describe("Few-shot examples", () => {
+    it("Example 2 uses resolve_merchant with source: web", () => {
+        const examples = getFewShotExamples();
+        // Example 2 is the web-classified example (index 1)
+        const ex2 = examples[1];
+        // Find the resolve_merchant tool call
+        const resolveCall = ex2.find((m) =>
+            m.tool_calls?.some(
+                (tc) => tc.function?.name === "resolve_merchant",
+            ),
+        );
+        expect(resolveCall).toBeDefined();
+        // Find the tool result with source: web
+        const toolResult = ex2.find(
+            (m) => m.role === "tool" && m.content?.includes('"source": "web"'),
+        );
+        expect(toolResult).toBeDefined();
     });
 });
