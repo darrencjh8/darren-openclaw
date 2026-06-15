@@ -30,6 +30,7 @@ vi.mock("../src/orchestrator.js", () => ({
 // ── Imports ──────────────────────────────────────────────────────────────
 
 import { ToolRegistry } from "../src/tools.js";
+import { matchKeyword } from "../src/keywords.js";
 
 // ── Helpers ──────────────────────────────────────────────────────────────
 
@@ -237,6 +238,29 @@ describe("resolve_merchant pipeline", () => {
         expect(result).toEqual({ payee: "Groceries", source: "keyword" });
     });
 
+    it("matchKeyword: COLD STORAGE SINGAPORE → Groceries (multi-word)", () => {
+        expect(matchKeyword("COLD STORAGE SINGAPORE")).toBe("Groceries");
+    });
+
+    it("matchKeyword: bubble tea shop → Coffee (multi-word)", () => {
+        expect(matchKeyword("bubble tea shop")).toBe("Coffee");
+    });
+
+    it("matchKeyword: 'shell' substring matches Shell petrol → Transport", () => {
+        expect(matchKeyword("Shell petrol")).toBe("Transport");
+    });
+
+    it("matchKeyword: known false-positive risk — 'shell' substring match can misclassify", () => {
+        // This documents expected behavior per spec: substring matching
+        // means "shell" in the keyword table will match any merchant
+        // containing "shell", including unrelated names.
+        // "SHELLY'S BAKERY" has no earlier keyword match (no Food/coffee),
+        // so "shell" matches it to Transport even though it's not one.
+        // This is a known limitation — adjust keywords if false positives
+        // become a problem in practice.
+        expect(matchKeyword("SHELLY'S BAKERY")).toBe("Transport");
+    });
+
     it("falls back to Misc for unknown merchant with no API key (T011)", async () => {
         const memory = mockMemoryStore();
         const config = mockConfig({ braveSearchApiKey: undefined });
@@ -438,6 +462,86 @@ describe("resolve_merchant pipeline", () => {
 
         // Should NOT return memory (regex won't match), but keyword WILL match
         expect(result).toEqual({ payee: "Transport", source: "keyword" });
+    });
+});
+
+// ─────────────────────────────────────────────────────────────────────────
+// Classification prompt structure (T005)
+// ─────────────────────────────────────────────────────────────────────────
+
+describe("Classification prompt structure", () => {
+    it("passes merchant name, web snippets, payee list, and JSON format instruction", async () => {
+        const memory = mockMemoryStore();
+        const config = mockConfig();
+        const registry = new ToolRegistry(config, memory);
+
+        // fetch: search_web (Brave) → payees
+        const fetchMock = vi
+            .fn()
+            .mockResolvedValueOnce({
+                ok: true,
+                json: async () => ({
+                    web: {
+                        results: [
+                            {
+                                title: "Joe's Diner",
+                                url: "https://joes.example",
+                                description: "A family restaurant",
+                            },
+                            {
+                                title: "Joe's Diner Menu",
+                                url: "https://joes.example/menu",
+                                description: "Breakfast and lunch",
+                            },
+                        ],
+                    },
+                }),
+            })
+            .mockResolvedValueOnce({
+                ok: true,
+                json: async () => [
+                    { name: "Food" },
+                    { name: "Coffee" },
+                    { name: "Groceries" },
+                ],
+            });
+        vi.stubGlobal("fetch", fetchMock);
+
+        mockChat.mockResolvedValueOnce({
+            choices: [{ message: { content: '{"payee":"Food"}' } }],
+        });
+
+        await registry._handle_resolve_merchant({
+            merchant: "Joe's Diner",
+        });
+
+        // Verify chat received a single call
+        expect(mockChat).toHaveBeenCalledTimes(1);
+
+        // The first argument is the messages array; first (and only) message
+        const messages = mockChat.mock.calls[0][0];
+        const prompt = messages[0].content;
+
+        // Contains the merchant name
+        expect(prompt).toContain('"Joe\'s Diner"');
+
+        // Contains web search snippets
+        expect(prompt).toContain("Joe's Diner");
+        expect(prompt).toContain("https://joes.example");
+        expect(prompt).toContain("A family restaurant");
+        expect(prompt).toContain("Joe's Diner Menu");
+        expect(prompt).toContain("Breakfast and lunch");
+
+        // Contains available payee list
+        expect(prompt).toContain("Food");
+        expect(prompt).toContain("Coffee");
+        expect(prompt).toContain("Groceries");
+
+        // Contains JSON output format instruction
+        expect(prompt).toContain('{ "payee"');
+        expect(prompt).toContain("Respond with a JSON object");
+
+        vi.unstubAllGlobals();
     });
 });
 

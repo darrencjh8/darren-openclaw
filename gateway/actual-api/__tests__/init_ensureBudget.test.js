@@ -3,6 +3,7 @@ jest.mock("fs", () => ({ mkdirSync: jest.fn() }));
 const mockApp = {
     get: jest.fn(),
     post: jest.fn(),
+    patch: jest.fn(),
     delete: jest.fn(),
     use: jest.fn(),
     listen: jest.fn(),

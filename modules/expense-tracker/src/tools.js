@@ -1087,13 +1087,17 @@ export class ToolRegistry {
         const content = (response.choices || [{}])[0].message?.content || "";
         try {
             const parsed = JSON.parse(content);
-            return parsed.payee || null;
+            const payee = parsed.payee || null;
+            if (payee && !payeeNames.includes(payee)) return null;
+            return payee;
         } catch {
             // Try to extract JSON from the response
             const jsonMatch = content.match(/\{[\s\S]*\}/);
             if (jsonMatch) {
                 try {
-                    return JSON.parse(jsonMatch[0]).payee || null;
+                    const payee = JSON.parse(jsonMatch[0]).payee || null;
+                    if (payee && !payeeNames.includes(payee)) return null;
+                    return payee;
                 } catch {}
             }
             return null;
