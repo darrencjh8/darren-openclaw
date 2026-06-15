@@ -10,6 +10,7 @@
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `merchant` | string | ✅ | Raw merchant name from transaction email |
+| `budget_id` | string | ❌ | Budget file name (e.g., "Darren SGD") — used for payee validation |
 | → `payee` | string | ✅ | Resolved payee name or "Misc" |
 | → `source` | enum | ✅ | `"memory"`, `"keyword"`, `"web"`, or `"fallback"` |
 

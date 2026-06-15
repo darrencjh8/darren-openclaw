@@ -6,7 +6,7 @@
 ## resolve_merchant
 
 **HTTP**: `POST /tools/resolve-merchant`
-**Body**: `{ "merchant": "string" }`
+**Body**: `{ "merchant": "string", "budget_id?": "string" }`
 **Response**: `{ "payee": "string", "source": "memory"|"keyword"|"web"|"fallback" }`
 
 ### Gateway Plugin: budget_resolve_merchant
@@ -16,8 +16,9 @@ api.registerTool({
   name: "budget_resolve_merchant",
   description: "Resolve a raw merchant name to a canonical payee using memory, keywords, or web search.",
   parameters: Type.Object({
-    merchant: Type.String({ description: "Raw merchant name from transaction" }),
-  }),
+      merchant: Type.String({ description: "Raw merchant name from transaction" }),
+      budget_id: Type.Optional(Type.String({ description: "Budget file name (e.g. 'Darren SGD', 'Darren MYR')" })),
+    }),
   async execute(_id, params) {
     const res = await fetch("http://expense-tracker:8080/tools/resolve-merchant", {
       method: "POST",

@@ -110,7 +110,7 @@ An `update_transaction` tool allows the agent to retroactively fix misclassified
 
 **resolve_merchant (FR-001 to FR-010):**
 
-- **FR-001**: The expense-tracker MUST expose a `resolve_merchant` tool at `POST /tools/resolve-merchant` accepting `{ merchant: string }` and returning `{ payee: string, source: "memory"|"keyword"|"web"|"fallback" }`.
+- **FR-001**: The expense-tracker MUST expose a `resolve_merchant` tool at `POST /tools/resolve-merchant` accepting `{ merchant: string, budget_id?: string }` and returning `{ payee: string, source: "memory"|"keyword"|"web"|"fallback" }`. The `budget_id` is used for payee list validation (FR-007) — when omitted, the default budget is used.
 - **FR-002**: The tool MUST execute steps in this exact order, short-circuiting on first match: (1) `MemoryStore.search()` lookup in MEMORY.md, (2) keyword heuristic matching against a hardcoded table, (3) Brave web search + DeepSeek LLM classification, (4) "Misc" fallback.
 - **FR-003**: Brave Search MUST be called only when `BRAVE_SEARCH_API_KEY` is configured in the expense-tracker's environment AND steps 1-2 have no match.
 - **FR-004**: LLM classification MUST use the existing DeepSeek client with `temperature: 0.1` and `thinking: { type: "disabled" }` (no reasoning needed for structured classification).

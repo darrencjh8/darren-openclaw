@@ -39,6 +39,7 @@ export class Config {
         this.dedupDbPath = env.DEDUP_DB_PATH || "data/dedup.db";
         this.statementDbPath = env.STATEMENT_DB_PATH || "data/statement.db";
         this.memoryPath = env.MEMORY_PATH || "data/MEMORY.md";
+        this.braveSearchApiKey = env.BRAVE_SEARCH_API_KEY || "";
         this.logLevel = env.LOG_LEVEL || "INFO";
     }
 

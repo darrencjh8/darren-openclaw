@@ -71,7 +71,7 @@ modules/expense-tracker/src/
 ├── tools.js                      # +resolve_merchant, +update_transaction handlers
 ├── index.js                      # +resolve_merchant, +update_transaction routes
 ├── prompts.js                    # Updated: use resolve_merchant
-└── config.js                     # Already done: braveSearchApiKey
+└── config.js                     # +braveSearchApiKey field
 
 gateway/plugins/expense-tracker-tools/
 ├── index.js                      # +budget_resolve_merchant, +budget_update_transaction
