@@ -1,7 +1,7 @@
 # Feature Specification: Merchant Resolver
 
 **Feature:** merchant-resolver
-**Spec Version:** 1.0.0
+**Spec Version:** 1.1.0
 **Status:** Draft
 **Created:** 2026-06-15
 **Constitution Hash:** v4.0.0
@@ -14,7 +14,7 @@ The expense-tracker orchestrator currently relies on its LLM to run a multi-step
 
 Add a `resolve_merchant` tool inside the expense-tracker that runs the full pipeline in code: memory lookup → keyword heuristic → Brave web search → LLM classification → auto-learn. The orchestrator LLM calls one tool and gets one answer. The Gateway agent benefits via a `budget_resolve_merchant` plugin tool wrapping the same endpoint.
 
-For obscure merchants like "SGSUPERGREEN-B PTE LTD" where neither memory nor keywords match, Brave Search provides real web data for LLM classification. Without a Brave API key, the pipeline degrades gracefully to LLM-only classification from the merchant name.
+When the classification is wrong, the user can correct it from Telegram. An `update_transaction` tool allows the agent to retroactively fix the misclassified transaction's payee and category, with validation to ensure only existing payees and categories are used.
 
 ---
 
@@ -73,6 +73,24 @@ For obscure merchants like "SGSUPERGREEN-B PTE LTD" where neither memory nor key
 
 ---
 
+### US-4: User Corrections Update Transaction and Memory (Priority: P2)
+
+**As a** user who spots a misclassification (e.g., "SGSUPERGREEN-B should be Food, not Misc"),
+**I want** to send a correction message on Telegram and have the agent fix both the learned fact and the existing transaction,
+**So that** future transactions for the same merchant are correct AND the past transaction is retroactively fixed.
+
+**Why this priority**: Without `update_transaction`, user corrections only fix the memory (future transactions) but leave the misclassified transaction in Actual Budget. The user must manually fix it. Adding `update_transaction` closes this gap.
+
+**Independent Test**: Send "no, supergreen is food" on Telegram. Agent calls `budget_update_fact` to fix the memory, `budget_fetch_recent_transactions` to find the wrong transaction, `budget_update_transaction` to fix its payee, and `budget_notify_user` to confirm. The transaction now shows the correct payee in Actual Budget.
+
+**Acceptance Scenarios**:
+
+1. **Given** a merchant was misclassified to "Misc" and a transaction was inserted, **When** the user sends a correction via Telegram, **Then** the Gateway agent calls `budget_update_fact` to update the memory, finds the transaction via `budget_fetch_recent_transactions`, calls `budget_update_transaction` with the corrected payee, and notifies the user.
+2. **Given** the agent calls `budget_update_transaction` with a payee that does not exist in the payee list, **When** the tool validates it, **Then** the payee is rejected and the transaction is not updated — the agent must use a valid payee from `budget_fetch_payees`.
+3. **Given** the agent calls `budget_update_transaction` with a category_id that does not exist, **When** the tool validates it, **Then** the category is rejected — the agent must use a valid category from `budget_fetch_categories` or omit the category.
+
+---
+
 ### Edge Cases
 
 - **What happens when Brave Search returns zero results?** The tool skips to LLM classification with only the merchant name. If that also fails, falls back to `{ payee: "Misc", source: "fallback" }`.
@@ -81,6 +99,8 @@ For obscure merchants like "SGSUPERGREEN-B PTE LTD" where neither memory nor key
 - **What happens with very long merchant names (>200 chars)?** The full name is used for memory/keyword matching. The web search query uses the first 100 characters.
 - **What if the LLM classifies to a payee not in the fetch_payees list?** The tool validates the classification against the live payee list. If no match, falls back to "Misc".
 - **What happens during concurrent calls for the same merchant?** Each call runs independently. The first to complete calls `learn_fact`; subsequent calls may still run the pipeline but the second `learn_fact` call is a no-op (dedup).
+- **What if the user corrects a transaction that doesn't exist?** `update_transaction` returns an error from the actual-api. The agent reports the failure to the user.
+- **What if `update_transaction` receives an empty body (no fields to update)?** The tool returns a validation error — at least one field (payee, notes, amount, date, category, account) must be provided.
 
 ---
 
@@ -88,22 +108,33 @@ For obscure merchants like "SGSUPERGREEN-B PTE LTD" where neither memory nor key
 
 ### Functional Requirements
 
+**resolve_merchant (FR-001 to FR-010):**
+
 - **FR-001**: The expense-tracker MUST expose a `resolve_merchant` tool at `POST /tools/resolve-merchant` accepting `{ merchant: string }` and returning `{ payee: string, source: "memory"|"keyword"|"web"|"fallback" }`.
 - **FR-002**: The tool MUST execute steps in this exact order, short-circuiting on first match: (1) `MemoryStore.search()` lookup in MEMORY.md, (2) keyword heuristic matching against a hardcoded table, (3) Brave web search + DeepSeek LLM classification, (4) "Misc" fallback.
 - **FR-003**: Brave Search MUST be called only when `BRAVE_SEARCH_API_KEY` is configured in the expense-tracker's environment AND steps 1-2 have no match.
-- **FR-004**: LLM classification MUST use the existing DeepSeek client (`deepseek-chat`, temperature 0.1) with a structured prompt: given the merchant name, top 5 Brave search result snippets (if available), and the list of available payee names from the internal payee list, return a JSON classification.
+- **FR-004**: LLM classification MUST use the existing DeepSeek client (`deepseek-chat`, temperature 0.1) with a structured prompt: given the merchant name, top 5 Brave search result snippets (if available), and the list of available payee names, return a JSON classification.
 - **FR-005**: After resolving via `source: "web"` or `source: "keyword"`, the tool MUST call `MemoryStore.add()` to persist the mapping to MEMORY.md. Resolutions via `source: "memory"` or `source: "fallback"` MUST NOT trigger learning.
-- **FR-006**: The tool MUST validate that the resolved payee exists in the live payee list from the expense-tracker's internal payee fetch. Unmatched classifications MUST fall back to "Misc".
+- **FR-006**: The tool MUST validate that the resolved payee exists in the live payee list. Unmatched classifications MUST fall back to "Misc".
 - **FR-007**: The tool MUST return within 500ms (memory/keyword path) or 20 seconds (web search path). Timeout at any step MUST fall through to the next step, not crash.
-- **FR-008**: The Gateway plugin MUST add `budget_resolve_merchant` tool wrapping `POST /tools/resolve-merchant` with the same `merchant` parameter.
-- **FR-009**: The expense-tracker orchestrator prompt (`src/prompts.js`) MUST be updated to use `resolve_merchant` instead of the multi-step `search_memory` + keyword + `fetch_payees` payee matching sequence.
-- **FR-010**: The SKILL.md MUST be updated to use `budget_resolve_merchant` in the Gateway agent's payee matching workflow.
+- **FR-008**: The Gateway plugin MUST add `budget_resolve_merchant` tool wrapping `POST /tools/resolve-merchant`.
+- **FR-009**: The expense-tracker orchestrator prompt (`src/prompts.js`) MUST be updated to use `resolve_merchant` instead of the multi-step payee matching sequence.
+- **FR-010**: The SKILL.md MUST be updated to use `budget_resolve_merchant` in the payee matching workflow.
+
+**update_transaction (FR-011 to FR-014):**
+
+- **FR-011**: The actual-api MUST expose a `PATCH /transactions/:id` endpoint accepting partial transaction fields (payee, notes, amount, date, category, account, cleared). Only provided fields are updated; omitted fields are left unchanged.
+- **FR-012**: The expense-tracker MUST expose an `update_transaction` tool at `POST /tools/update-transaction` accepting `{ id: string, budget_id?, payee_name?, notes?, amount?, date?, category_id?, account_id? }`. At least one optional field must be provided.
+- **FR-013**: The `update_transaction` tool MUST validate the payee_name against the live payee list (reuse `_validate_payee`). Unknown payees MUST be rejected — they must NOT fall back to "Misc" on update (unlike insert, where fallback is acceptable).
+- **FR-014**: The `update_transaction` tool MUST validate category_id against the live category list from Actual Budget. Unknown categories MUST be rejected.
+- **FR-015**: The Gateway plugin MUST add `budget_update_transaction` tool wrapping `POST /tools/update-transaction`.
 
 ### Key Entities
 
-- **resolve_merchant tool**: A deterministic pipeline tool inside the expense-tracker container. Input: merchant name string. Output: payee classification with source. Registered as an HTTP endpoint and available to the orchestrator LLM as a callable tool.
-- **Keyword heuristic table**: A hardcoded mapping in the tool code (not the LLM prompt). Maps keyword → payee name. Example: `["hawker", "food", "restaurant", "cafe"]` → "Food". Same keywords as the current orchestrator prompt in `src/prompts.js`.
-- **Web search classification prompt**: A structured prompt sent to the existing `deepseek-chat` client with the merchant name, top 5 Brave search result snippets, and the list of available payee names. Returns a JSON `{ payee: string }` classification.
+- **resolve_merchant tool**: A deterministic pipeline tool inside the expense-tracker container. Input: merchant name. Output: payee classification with source. Registered as an HTTP endpoint and available to the orchestrator LLM.
+- **update_transaction tool**: A partial-update tool for correcting misclassified transactions. Input: transaction ID and fields to update. Validates payee and category against live lists before applying.
+- **Keyword heuristic table**: A hardcoded mapping in the tool code. Maps keyword → payee name. Same keywords as the current orchestrator prompt.
+- **Web search classification prompt**: A structured prompt sent to `deepseek-chat` with merchant name, Brave snippets, and payee list. Returns JSON classification.
 
 ---
 
@@ -113,10 +144,11 @@ For obscure merchants like "SGSUPERGREEN-B PTE LTD" where neither memory nor key
 
 - **SC-001**: `resolve_merchant("KOUFU PTE LTD")` returns `source: "memory"` with `payee: "Food"` in under 500ms.
 - **SC-002**: `resolve_merchant("NTUC FairPrice")` returns `source: "keyword"` with `payee: "Groceries"` in under 500ms.
-- **SC-003**: `resolve_merchant("SGSUPERGREEN-B PTE LTD")` returns a classification (from web search or fallback "Misc" if no API key) in under 20 seconds.
+- **SC-003**: `resolve_merchant("SGSUPERGREEN-B PTE LTD")` returns a classification in under 20 seconds (web search or fallback "Misc").
 - **SC-004**: After a "web" or "keyword" resolution, MEMORY.md contains a new fact within 1 second.
-- **SC-005**: Second call to `resolve_merchant` for the same merchant returns `source: "memory"` — no web search performed.
-- **SC-006**: The orchestrator processes a transaction email using `resolve_merchant` instead of multi-step payee matching (confirmed by tool call log showing a single `resolve_merchant` call).
+- **SC-005**: `update_transaction` rejects a payee not in the payee list (returns validation error, does not call actual-api).
+- **SC-006**: `update_transaction` rejects a category_id not in the category list.
+- **SC-007**: User correction flow completes: `update_fact` + `fetch_recent_transactions` + `update_transaction` + `notify_user` — the transaction's payee is updated in Actual Budget.
 
 ---
 
@@ -126,10 +158,10 @@ For obscure merchants like "SGSUPERGREEN-B PTE LTD" where neither memory nor key
 - Adding web search capability to the Gateway agent (already has `web_search` built-in)
 - Replacing the keyword heuristic table with an external knowledge graph
 - Caching Brave Search results beyond MEMORY.md learning
-- Adding web search for purposes other than payee classification
 - Supporting search providers other than Brave Search (single provider for v1)
 - Resolving merchants to categories (only payees) — category assignment remains the agent's responsibility
-- Batch resolution (multiple merchants in one call)
+- Batch resolution or batch update (single merchant/transaction per call)
+- Deleting transactions (use Actual Budget directly)
 
 ---
 
@@ -142,3 +174,6 @@ For obscure merchants like "SGSUPERGREEN-B PTE LTD" where neither memory nor key
 - `MemoryStore` (MEMORY.md) is accessible from the tool handler for both search and add operations
 - The expense-tracker's internal payee fetch returns the current payee list from Actual Budget
 - The Gateway plugin can call the expense-tracker's internal Docker network (`http://expense-tracker:8080`)
+- Correcting a fact via `update_fact` / `delete_fact` is already a documented workflow in the SKILL.md
+- `insert_transaction`'s existing `_validate_payee` fallback behavior (unknown → "Misc") remains unchanged
+- `update_transaction`'s stricter validation (unknown → reject) is only for updates, not inserts
