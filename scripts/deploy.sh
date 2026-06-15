@@ -255,6 +255,16 @@ export COMPOSE_DOCKER_CLI_BUILD=1 DOCKER_BUILDKIT=1
 docker compose build
 docker compose up -d "${DOCKER_ARGS[@]}"
 
+# ---- plugin registration (one-time, persists on named volume) ----
+
+if [ -d "$GATEWAY_DIR/plugins/expense-tracker-tools" ]; then
+  echo ""
+  echo "--- Plugin Registration ---"
+  docker exec gateway-openclaw-1 openclaw plugins install /home/node/plugins/expense-tracker-tools --force 2>/dev/null && \
+    echo "  ✓ expense-tracker-tools plugin registered" || \
+    echo "  ! plugin registration skipped (may already be installed)"
+fi
+
 # ---- health checks ----
 
 echo ""
