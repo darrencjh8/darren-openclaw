@@ -14,7 +14,7 @@ The expense-tracker orchestrator currently relies on its LLM to run a multi-step
 
 Add a `resolve_merchant` tool inside the expense-tracker that runs the full pipeline in code: memory lookup → keyword heuristic → Brave web search → LLM classification → auto-learn. The orchestrator LLM calls one tool and gets one answer. The Gateway agent benefits via a `budget_resolve_merchant` plugin tool wrapping the same endpoint.
 
-When the classification is wrong, the user can correct it from Telegram. An `update_transaction` tool allows the agent to retroactively fix the misclassified transaction's payee and category, with validation to ensure only existing payees and categories are used.
+An `update_transaction` tool allows the agent to retroactively fix misclassified transactions, with validation to ensure only existing payees and categories are used. Both `insert_transaction` and `update_transaction` validate payees (fallback to "Misc" on insert, reject on update) and categories (fallback to "Fun Money" on insert, reject on update).
 
 ---
 
@@ -121,18 +121,19 @@ When the classification is wrong, the user can correct it from Telegram. An `upd
 - **FR-009**: The expense-tracker orchestrator prompt (`src/prompts.js`) MUST be updated to use `resolve_merchant` instead of the multi-step payee matching sequence.
 - **FR-010**: The SKILL.md MUST be updated to use `budget_resolve_merchant` in the payee matching workflow.
 
-**update_transaction (FR-011 to FR-014):**
+**Transaction Validation (FR-011 to FR-015):**
 
 - **FR-011**: The actual-api MUST expose a `PATCH /transactions/:id` endpoint accepting partial transaction fields (payee, notes, amount, date, category, account, cleared). Only provided fields are updated; omitted fields are left unchanged.
 - **FR-012**: The expense-tracker MUST expose an `update_transaction` tool at `POST /tools/update-transaction` accepting `{ id: string, budget_id?, payee_name?, notes?, amount?, date?, category_id?, account_id? }`. At least one optional field must be provided.
-- **FR-013**: The `update_transaction` tool MUST validate the payee_name against the live payee list (reuse `_validate_payee`). Unknown payees MUST be rejected — they must NOT fall back to "Misc" on update (unlike insert, where fallback is acceptable).
-- **FR-014**: The `update_transaction` tool MUST validate category_id against the live category list from Actual Budget. Unknown categories MUST be rejected.
+- **FR-013**: Both `insert_transaction` and `update_transaction` MUST validate `payee_name` against the live payee list. Unknown payees on insert fall back to "Misc". Unknown payees on update are rejected — the agent must pick a valid payee.
+- **FR-014**: Both `insert_transaction` and `update_transaction` MUST validate `category_id` against the live category list from Actual Budget. Unknown categories on insert fall back to "Fun Money". Unknown categories on update are rejected.
 - **FR-015**: The Gateway plugin MUST add `budget_update_transaction` tool wrapping `POST /tools/update-transaction`.
 
 ### Key Entities
 
-- **resolve_merchant tool**: A deterministic pipeline tool inside the expense-tracker container. Input: merchant name. Output: payee classification with source. Registered as an HTTP endpoint and available to the orchestrator LLM.
-- **update_transaction tool**: A partial-update tool for correcting misclassified transactions. Input: transaction ID and fields to update. Validates payee and category against live lists before applying.
+- **resolve_merchant tool**: A deterministic pipeline tool inside the expense-tracker container. Input: merchant name. Output: payee classification with source.
+- **update_transaction tool**: A partial-update tool for correcting misclassified transactions. Validates payee and category against live lists before applying.
+- **Transaction validation**: On insert, unknown payee → "Misc", unknown category → "Fun Money". On update, unknown payee or category → reject.
 - **Keyword heuristic table**: A hardcoded mapping in the tool code. Maps keyword → payee name. Same keywords as the current orchestrator prompt.
 - **Web search classification prompt**: A structured prompt sent to `deepseek-chat` with merchant name, Brave snippets, and payee list. Returns JSON classification.
 
@@ -146,8 +147,8 @@ When the classification is wrong, the user can correct it from Telegram. An `upd
 - **SC-002**: `resolve_merchant("NTUC FairPrice")` returns `source: "keyword"` with `payee: "Groceries"` in under 500ms.
 - **SC-003**: `resolve_merchant("SGSUPERGREEN-B PTE LTD")` returns a classification in under 20 seconds (web search or fallback "Misc").
 - **SC-004**: After a "web" or "keyword" resolution, MEMORY.md contains a new fact within 1 second.
-- **SC-005**: `update_transaction` rejects a payee not in the payee list (returns validation error, does not call actual-api).
-- **SC-006**: `update_transaction` rejects a category_id not in the category list.
+- **SC-005**: `insert_transaction` with an unknown category_id falls back to "Fun Money" — transaction is inserted with the fallback category.
+- **SC-006**: `update_transaction` with an unknown payee is rejected (returns validation error, does not call actual-api).
 - **SC-007**: User correction flow completes: `update_fact` + `fetch_recent_transactions` + `update_transaction` + `notify_user` — the transaction's payee is updated in Actual Budget.
 
 ---
@@ -176,4 +177,4 @@ When the classification is wrong, the user can correct it from Telegram. An `upd
 - The Gateway plugin can call the expense-tracker's internal Docker network (`http://expense-tracker:8080`)
 - Correcting a fact via `update_fact` / `delete_fact` is already a documented workflow in the SKILL.md
 - `insert_transaction`'s existing `_validate_payee` fallback behavior (unknown → "Misc") remains unchanged
-- `update_transaction`'s stricter validation (unknown → reject) is only for updates, not inserts
+- Category "Fun Money" exists in the budget and is the system default for unknown categories on insert
