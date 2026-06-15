@@ -185,6 +185,59 @@ describe("search_web", () => {
         expect(result).toEqual({ results: [] });
         vi.unstubAllGlobals();
     });
+
+    it("truncates merchant names longer than 100 characters", async () => {
+        const config = mockConfig({ braveSearchApiKey: "test-key" });
+        const registry = new ToolRegistry(config, null);
+
+        const longName = "A".repeat(250) + " PTE LTD";
+        let capturedUrl = "";
+        vi.stubGlobal(
+            "fetch",
+            vi.fn((url) => {
+                capturedUrl = url;
+                return Promise.resolve({
+                    ok: true,
+                    json: async () => ({ web: { results: [] } }),
+                });
+            }),
+        );
+
+        await registry._handle_search_web({ merchant: longName });
+
+        // URL should contain truncated name (max 100 chars)
+        const decoded = decodeURIComponent(capturedUrl);
+        expect(decoded.length).toBeLessThan(200); // URL shouldn't be massive
+        vi.unstubAllGlobals();
+    });
+
+    it("strips special characters from merchant name before web search", async () => {
+        const config = mockConfig({ braveSearchApiKey: "test-key" });
+        const registry = new ToolRegistry(config, null);
+
+        let capturedUrl = "";
+        vi.stubGlobal(
+            "fetch",
+            vi.fn((url) => {
+                capturedUrl = url;
+                return Promise.resolve({
+                    ok: true,
+                    json: async () => ({ web: { results: [] } }),
+                });
+            }),
+        );
+
+        await registry._handle_search_web({
+            merchant: "SGSUPERGREEN-B PTE. LTD.",
+        });
+
+        // The . and & should be stripped from the query
+        const decoded = decodeURIComponent(capturedUrl);
+        expect(decoded).not.toContain("PTE.");
+        expect(decoded).not.toContain("LTD.");
+        expect(decoded).toContain("SGSUPERGREEN-B PTE LTD");
+        vi.unstubAllGlobals();
+    });
 });
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -501,6 +554,30 @@ describe("resolve_merchant pipeline", () => {
             merchant: "Anything",
         });
         expect(result).toEqual({ payee: "Misc", source: "fallback" });
+    });
+
+    it("falls back to keyword match when payee validation API hangs (5s timeout)", async () => {
+        vi.useFakeTimers();
+        const memory = mockMemoryStore();
+        const config = mockConfig();
+        const registry = new ToolRegistry(config, memory);
+
+        // Mock fetch to hang (never resolves)
+        vi.stubGlobal("fetch", () => new Promise(() => {}));
+
+        const promise = registry._handle_resolve_merchant({
+            merchant: "NTUC FairPrice",
+        });
+
+        // Advance past 5s keyword validation timeout
+        await vi.advanceTimersByTimeAsync(6000);
+
+        const result = await promise;
+        // Should still return keyword match (catches timeout → trusts keyword)
+        expect(result).toEqual({ payee: "Groceries", source: "keyword" });
+
+        vi.useRealTimers();
+        vi.unstubAllGlobals();
     });
 });
 

@@ -991,7 +991,12 @@ export class ToolRegistry {
         const apiKey = this._config.braveSearchApiKey;
         if (!apiKey) return { results: [] };
         try {
-            const q = encodeURIComponent(merchant);
+            // Sanitize: trim, strip special characters, truncate to 100 chars
+            const sanitized = (merchant || "")
+                .trim()
+                .replace(/[^\w\s-]/g, "")
+                .slice(0, 100);
+            const q = encodeURIComponent(sanitized);
             const r = await fetch(
                 `https://api.search.brave.com/res/v1/web/search?q=${q}&count=5&search_lang=en`,
                 { headers: { "X-Subscription-Token": apiKey } },
@@ -1025,9 +1030,14 @@ export class ToolRegistry {
         // Step 2: Keyword matching
         const keywordMatch = matchKeyword(merchant);
         if (keywordMatch) {
-            // Validate keyword-resolved payee exists in live payee list
+            // Validate keyword-resolved payee exists in live payee list (5s timeout)
             try {
-                const payees = await this._get("/payees", budget_id || "");
+                const payees = await Promise.race([
+                    this._get("/payees", budget_id || ""),
+                    new Promise((_, reject) =>
+                        setTimeout(() => reject(new Error("timeout")), 5000),
+                    ),
+                ]);
                 const valid =
                     Array.isArray(payees) &&
                     payees.some(
