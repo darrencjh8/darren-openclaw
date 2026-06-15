@@ -7,6 +7,14 @@
  * so Config.fromEnv() can load .env files first.
  */
 
+import { KEYWORD_TABLE } from "./keywords.js";
+
+function generateKeywordSection() {
+    return Object.entries(KEYWORD_TABLE)
+        .map(([payee, keywords]) => `  ${keywords.join(", ")} → ${payee}`)
+        .join("\n");
+}
+
 /**
  * Build the system prompt from current process.env values.
  * Called lazily so Config.fromEnv() can populate env vars before use.
@@ -79,14 +87,7 @@ ACCOUNT MATCHING:
 - If still no match after memory + heuristics → notify_user(), stop.
 
 PAYEE MATCHING:
-  hawker, food, restaurant, cafe, kitchen, eatery, dining, kopitiam → Food
-  petrol, shell, caltex, spc, esso → Transport
-  grocery, ntuc, fairprice, supermarket, cold storage → Groceries
-  grab, taxi, bus, mrt, ride, gojek → Transport
-  water, electric, utility, internet, phone, bill, telco → Utility
-  coffee, starbucks, bubble tea → Coffee
-  shopping, clothes, mall, retail → Shopping
-  doctor, medical, pharmacy, clinic, watson, guardian → Healthcare
+${generateKeywordSection()}
 - Only use payee NAMES from fetch_payees().
 - No keyword match + no memory fact → "Misc" (still insert, notify).
 
@@ -115,18 +116,20 @@ WORKFLOW (follow in EXACT order):
     - Unsure? → notify, stop (cooldown handles re-asks).
     - Confirmed transaction? → continue.
  2. search_memory() — learned facts for sender, merchant, card.
- 3. Identify: currency, amount, merchant, date, card vs account number.
- 4. fetch_accounts + fetch_categories + fetch_payees (parallel).
- 5. Match account (memory first, then heuristics).
- 6. Match payee (keyword table + memory → payee list). Misc if unmatched.
- 7. Match category (payee name → UUID). Skip if Misc.
- 8. check_duplicate(). If True → skip per Rule 10.
- 9. insert_transaction(account_id, date, amount_cents,
+ 3. resolve_merchant(merchant) — get canonical payee. This handles memory
+    lookup, keyword matching, and web search internally.
+ 4. Identify: currency, amount, merchant, date, card vs account number.
+ 5. fetch_accounts + fetch_categories + fetch_payees (parallel).
+ 6. Match account (memory first, then heuristics).
+ 7. Match payee: use the payee from resolve_merchant(). Misc if unmatched.
+ 8. Match category (payee name → UUID). Skip if Misc.
+ 9. check_duplicate(). If True → skip per Rule 10.
+10. insert_transaction(account_id, date, amount_cents,
     imported_description=PAYEE, category_id=UUID).
-10. mark_email_read().
-11. notify_user() — friendly message.
-12. learn_fact() × 3 — account, payee, category.
-13. log_decision("inserted").
+11. mark_email_read().
+12. notify_user() — friendly message.
+13. learn_fact() × 3 — account, payee, category.
+14. log_decision("inserted").
 `;
 }
 

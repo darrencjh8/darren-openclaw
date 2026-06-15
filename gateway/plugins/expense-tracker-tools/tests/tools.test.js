@@ -918,11 +918,8 @@ describe("Phase 3 — Memory & Document Tools", () => {
 });
 
 describe("Phase 7 — Edge Cases", () => {
-    it("registers exactly 21 tools (safety net)", () => {
-        expect(
-            registeredTools.length,
-            "Tool count mismatch — update contracts.tools in manifest",
-        ).toBe(21);
+    it("registers exactly 23 tools (safety net)", () => {
+        expect(registeredTools.length).toBe(23);
     });
     // ── helpers ────────────────────────────────────────────────────────
     const findTool = (name) => {

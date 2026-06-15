@@ -134,6 +134,9 @@ async function main() {
         "log_decision",
         "extract_email_content",
         "check_statement_duplicate",
+        "search_web",
+        "resolve_merchant",
+        "update_transaction",
     ];
 
     for (const name of toolNames) {

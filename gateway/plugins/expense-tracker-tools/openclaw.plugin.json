@@ -24,7 +24,9 @@
             "budget_fetch_unreconciled",
             "budget_record_statement",
             "budget_fetch_statement_history",
-            "budget_check_statement_duplicate"
+            "budget_check_statement_duplicate",
+            "budget_resolve_merchant",
+            "budget_update_transaction"
         ]
     },
     "activation": {

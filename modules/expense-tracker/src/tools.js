@@ -9,6 +9,8 @@ import Database from "better-sqlite3";
 import { simpleParser } from "mailparser";
 import { DedupJournal } from "./dedup.js";
 import { extractPdfFromBuffer } from "./extractors.js";
+import { matchKeyword } from "./keywords.js";
+import { DeepSeekClient } from "./orchestrator.js";
 
 const ACTUAL_API_URL = process.env.ACTUAL_API_URL || "http://localhost:3000";
 
@@ -536,6 +538,56 @@ const TOOLS = [
             required: ["date", "amount_cents", "account_id"],
         },
     },
+    {
+        name: "search_web",
+        description:
+            "Search the web for information about a merchant using Brave Search. Returns top 5 result snippets.",
+        schema: {
+            type: "object",
+            properties: {
+                merchant: {
+                    type: "string",
+                    description: "Merchant name to search for",
+                },
+            },
+            required: ["merchant"],
+        },
+    },
+    {
+        name: "resolve_merchant",
+        description:
+            "Resolve a raw merchant name to a canonical payee using memory, keyword matching, web search, and AI classification.",
+        schema: {
+            type: "object",
+            properties: {
+                merchant: {
+                    type: "string",
+                    description: "Raw merchant name from transaction",
+                },
+                budget_id: { type: "string", default: "" },
+            },
+            required: ["merchant"],
+        },
+    },
+    {
+        name: "update_transaction",
+        description:
+            "Update an existing transaction's fields. Payee and category are validated against live lists.",
+        schema: {
+            type: "object",
+            properties: {
+                id: { type: "string" },
+                budget_id: { type: "string", default: "" },
+                payee_name: { type: "string" },
+                notes: { type: "string" },
+                amount: { type: "number" },
+                date: { type: "string" },
+                category_id: { type: "string" },
+                account_id: { type: "string" },
+            },
+            required: ["id"],
+        },
+    },
 ];
 
 const TOOL_MAP = Object.fromEntries(TOOLS.map((t) => [t.name, t]));
@@ -668,6 +720,27 @@ export class ToolRegistry {
             args.imported_description || "",
             args.budget_id || "",
         );
+        let categoryId = args.category_id || null;
+        if (categoryId) {
+            try {
+                const categories = await this._get(
+                    "/categories",
+                    args.budget_id || "",
+                );
+                const match = Array.isArray(categories)
+                    ? categories.find((c) => c.id === categoryId)
+                    : null;
+                if (!match) {
+                    // Fall back to "Fun Money"
+                    const funMoney = Array.isArray(categories)
+                        ? categories.find((c) => c.name === "Fun Money")
+                        : null;
+                    categoryId = funMoney ? funMoney.id : categoryId;
+                }
+            } catch {
+                // Keep original category_id if validation fails
+            }
+        }
         const result = await this._post(
             "/transactions",
             {
@@ -677,7 +750,7 @@ export class ToolRegistry {
                 payee_name: payee_name,
                 notes: args.notes || "",
                 cleared: false,
-                ...(args.category_id ? { category: args.category_id } : {}),
+                ...(categoryId ? { category: categoryId } : {}),
             },
             args.budget_id || "",
         );
@@ -912,6 +985,121 @@ export class ToolRegistry {
         );
     }
 
+    // ── Merchant resolution tools ─────────────────────────────────
+
+    async _handle_search_web({ merchant }) {
+        const apiKey = this._config.braveSearchApiKey;
+        if (!apiKey) return { results: [] };
+        try {
+            const q = encodeURIComponent(merchant);
+            const r = await fetch(
+                `https://api.search.brave.com/res/v1/web/search?q=${q}&count=5&search_lang=en`,
+                { headers: { "X-Subscription-Token": apiKey } },
+            );
+            if (!r.ok) return { results: [] };
+            const data = await r.json();
+            const results = (data.web?.results || [])
+                .slice(0, 5)
+                .map((item) => ({
+                    title: item.title || "",
+                    url: item.url || "",
+                    description: item.description || "",
+                }));
+            return { results };
+        } catch {
+            return { results: [] };
+        }
+    }
+
+    async _handle_resolve_merchant({ merchant, budget_id = "" }) {
+        // Step 1: Check memory for existing mapping
+        const memResults = await this._memory.search(merchant);
+        if (memResults && memResults.length > 0) {
+            for (const r of memResults) {
+                const match = (r.text || "").match(/maps to (\S+) payee/i);
+                if (match) return { payee: match[1], source: "memory" };
+            }
+        }
+
+        // Step 2: Keyword matching
+        const keywordMatch = matchKeyword(merchant);
+        if (keywordMatch) {
+            await this._memory.add(
+                merchant + " maps to " + keywordMatch + " payee",
+            );
+            return { payee: keywordMatch, source: "keyword" };
+        }
+
+        // Step 3: Web search + AI classification
+        if (this._config.braveSearchApiKey) {
+            try {
+                const { results } = await this._handle_search_web({ merchant });
+                const payee = await this._classify_merchant(
+                    merchant,
+                    results,
+                    budget_id,
+                );
+                if (payee) {
+                    await this._memory.add(
+                        merchant + " maps to " + payee + " payee",
+                    );
+                    return { payee, source: "web" };
+                }
+            } catch {
+                // Classification failed, fall through to fallback
+            }
+        }
+
+        // Step 4: Fallback
+        return { payee: "Misc", source: "fallback" };
+    }
+
+    async _classify_merchant(merchant, searchResults, budgetId) {
+        const payees = await this._get("/payees", budgetId);
+        const payeeNames = Array.isArray(payees)
+            ? payees.map((p) => p.name).filter(Boolean)
+            : [];
+
+        const snippets = (searchResults || [])
+            .map(
+                (r, i) =>
+                    `${i + 1}. ${r.title}\n   ${r.description}\n   ${r.url}`,
+            )
+            .join("\n\n");
+
+        const prompt = [
+            `Given the merchant name "${merchant}" and the following web search results, determine the most appropriate payee from the list below.`,
+            "",
+            "Web Search Results:",
+            snippets || "No results available.",
+            "",
+            "Available Payees:",
+            payeeNames.join("\n"),
+            "",
+            'Respond with a JSON object: { "payee": "Chosen Payee Name" }',
+        ].join("\n");
+
+        const client = new DeepSeekClient(this._config);
+        const response = await client.chat(
+            [{ role: "user", content: prompt }],
+            undefined,
+        );
+        const content = (response.choices || [{}])[0].message?.content || "";
+        try {
+            const parsed = JSON.parse(content);
+            return parsed.payee || null;
+        } catch {
+            // Try to extract JSON from the response
+            const jsonMatch = content.match(/\{[\s\S]*\}/);
+            if (jsonMatch) {
+                try {
+                    return JSON.parse(jsonMatch[0]).payee || null;
+                } catch {}
+            }
+            return null;
+        }
+    }
+
     // ── HTTP helpers ──────────────────────────────────────────────
 
     async _get(path, budgetId, extraParams = {}) {
@@ -929,6 +1117,73 @@ export class ToolRegistry {
         if (budgetId) payload.budget_id = budgetId;
         const r = await fetch(`${ACTUAL_API_URL}${path}`, {
             method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+        });
+        if (!r.ok) throw new Error(`actual-api ${r.status}`);
+        return r.json();
+    }
+
+    async _handle_update_transaction(args) {
+        const {
+            id,
+            budget_id,
+            payee_name,
+            notes,
+            amount,
+            date,
+            category_id,
+            account_id,
+        } = args;
+        const budgetId = budget_id || "";
+
+        // Build fields to update
+        const fields = {};
+        if (payee_name !== undefined) {
+            // Validate payee exists (strict — reject unknown)
+            const payees = await this._get("/payees", budgetId);
+            const payeeMatch = Array.isArray(payees)
+                ? payees.find(
+                      (p) =>
+                          p.name &&
+                          p.name.toLowerCase() === payee_name.toLowerCase(),
+                  )
+                : null;
+            if (!payeeMatch)
+                return {
+                    error: `Payee "${payee_name}" not found in payee list. Use a valid payee from fetch_payees.`,
+                };
+            fields.payee_name = payeeMatch.name;
+        }
+        if (notes !== undefined) fields.notes = notes;
+        if (amount !== undefined) fields.amount = amount;
+        if (date !== undefined) fields.date = date;
+        if (category_id !== undefined) {
+            // Validate category exists (strict — reject unknown)
+            const categories = await this._get("/categories", budgetId);
+            const catMatch = Array.isArray(categories)
+                ? categories.find((c) => c.id === category_id)
+                : null;
+            if (!catMatch)
+                return {
+                    error: `Category ID "${category_id}" not found in category list. Use a valid category from fetch_categories.`,
+                };
+            fields.category = category_id;
+        }
+        if (account_id !== undefined) fields.account = account_id;
+
+        if (Object.keys(fields).length === 0) {
+            return { error: "At least one field must be provided to update" };
+        }
+
+        return this._patch(`/transactions/${id}`, fields, budgetId);
+    }
+
+    async _patch(path, body, budgetId) {
+        const payload = { ...body };
+        if (budgetId) payload.budget_id = budgetId;
+        const r = await fetch(`${ACTUAL_API_URL}${path}`, {
+            method: "PATCH",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(payload),
         });
