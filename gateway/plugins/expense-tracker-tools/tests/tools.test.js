@@ -996,3 +996,91 @@ describe("Phase 7 — Edge Cases", () => {
         expect(postBody()).toEqual({});
     });
 });
+
+describe("Phase 8 — Merchant Resolver & Update Transaction", () => {
+    // ── helpers ────────────────────────────────────────────────────────
+    const findTool = (name) => {
+        const tool = registeredTools.find((t) => t.name === name);
+        expect(tool, `${name} tool not registered`).toBeDefined();
+        return tool;
+    };
+
+    const postBody = () => {
+        expect(mockFetch).toHaveBeenCalledTimes(1);
+        const [, options] = mockFetch.mock.calls[0];
+        return JSON.parse(options.body);
+    };
+
+    const setupFetch = (response) => {
+        mockFetch.mockReset();
+        mockFetch.mockResolvedValueOnce({
+            text: async () => response,
+        });
+    };
+
+    // ══════════════════════════════════════════════════════════════════
+    // budget_resolve_merchant
+    // ══════════════════════════════════════════════════════════════════
+    it("registers budget_resolve_merchant with correct schema", () => {
+        const tool = findTool("budget_resolve_merchant");
+        expect(tool.name).toBe("budget_resolve_merchant");
+        expect(tool.parameters.properties.merchant).toBeDefined();
+        expect(tool.parameters.properties.budget_id).toBeDefined();
+    });
+
+    it("budget_resolve_merchant makes POST to /tools/resolve-merchant", async () => {
+        setupFetch('{"payee":"Food","source":"memory"}');
+        const tool = findTool("budget_resolve_merchant");
+        await tool.execute("test-id", { merchant: "Toast Box" });
+        const [url, opts] = mockFetch.mock.calls[0];
+        expect(url).toBe("http://expense-tracker:8080/tools/resolve-merchant");
+        expect(opts.method).toBe("POST");
+        expect(postBody()).toEqual({ merchant: "Toast Box" });
+    });
+
+    it("budget_resolve_merchant passes budget_id when provided", async () => {
+        setupFetch('{"payee":"Food","source":"memory"}');
+        const tool = findTool("budget_resolve_merchant");
+        await tool.execute("test-id", {
+            merchant: "Toast Box",
+            budget_id: "Darren SGD",
+        });
+        expect(postBody()).toEqual({
+            merchant: "Toast Box",
+            budget_id: "Darren SGD",
+        });
+    });
+
+    // ══════════════════════════════════════════════════════════════════
+    // budget_update_transaction
+    // ══════════════════════════════════════════════════════════════════
+    it("registers budget_update_transaction with correct schema", () => {
+        const tool = findTool("budget_update_transaction");
+        expect(tool.name).toBe("budget_update_transaction");
+        expect(tool.parameters.properties.id).toBeDefined();
+        expect(tool.parameters.properties.payee_name).toBeDefined();
+        expect(tool.parameters.properties.category_id).toBeDefined();
+    });
+
+    it("budget_update_transaction makes POST to /tools/update-transaction", async () => {
+        setupFetch('{"status":"updated","id":"txn-1"}');
+        const tool = findTool("budget_update_transaction");
+        await tool.execute("test-id", { id: "txn-1", payee_name: "Food" });
+        const [url, opts] = mockFetch.mock.calls[0];
+        expect(url).toBe(
+            "http://expense-tracker:8080/tools/update-transaction",
+        );
+        expect(opts.method).toBe("POST");
+        const body = JSON.parse(opts.body);
+        expect(body.payee_name).toBe("Food");
+        expect(body.id).toBe("txn-1");
+    });
+
+    it("budget_update_transaction omits undefined optional params", async () => {
+        setupFetch('{"status":"updated","id":"txn-1"}');
+        const tool = findTool("budget_update_transaction");
+        await tool.execute("test-id", { id: "txn-1" });
+        const body = JSON.parse(mockFetch.mock.calls[0][1].body);
+        expect(body).toEqual({ id: "txn-1" });
+    });
+});
