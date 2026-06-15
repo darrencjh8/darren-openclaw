@@ -722,11 +722,21 @@ describe("Auto-learning", () => {
         const config = mockConfig();
         const registry = new ToolRegistry(config, memory);
 
+        // Mock payee list so keyword validation succeeds
+        vi.stubGlobal(
+            "fetch",
+            vi.fn().mockResolvedValueOnce({
+                ok: true,
+                json: async () => [{ name: "Groceries" }, { name: "Food" }],
+            }),
+        );
+
         await registry._handle_resolve_merchant({ merchant: "NTUC FairPrice" });
 
         expect(memory.add).toHaveBeenCalledWith(
             "NTUC FairPrice maps to Groceries payee",
         );
+        vi.unstubAllGlobals();
     });
 
     it("triggers learn_fact on web resolution (T019)", async () => {

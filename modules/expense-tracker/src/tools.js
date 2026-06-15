@@ -1018,13 +1018,18 @@ export class ToolRegistry {
 
     async _handle_resolve_merchant({ merchant, budget_id }) {
         if (!this._memory) return { payee: "Misc", source: "fallback" };
+
         // Step 1: Check memory for existing mapping
-        const memResults = await this._memory.search(merchant);
-        if (memResults && memResults.length > 0) {
-            for (const r of memResults) {
-                const match = (r.text || "").match(/maps to (.+?) payee/i);
-                if (match) return { payee: match[1], source: "memory" };
+        try {
+            const memResults = await this._memory.search(merchant);
+            if (memResults && memResults.length > 0) {
+                for (const r of memResults) {
+                    const match = (r.text || "").match(/maps to (.+?) payee/i);
+                    if (match) return { payee: match[1], source: "memory" };
+                }
             }
+        } catch {
+            // Memory search failed — fall through to keyword step
         }
 
         // Step 2: Keyword matching
@@ -1054,10 +1059,7 @@ export class ToolRegistry {
                     return { payee: keywordMatch, source: "keyword" };
                 }
             } catch {
-                // Payee list fetch failed — still trust the keyword match
-                await this._memory.add(
-                    merchant + " maps to " + keywordMatch + " payee",
-                );
+                // Payee list fetch failed — return keyword match without learning
                 return { payee: keywordMatch, source: "keyword" };
             }
         }
