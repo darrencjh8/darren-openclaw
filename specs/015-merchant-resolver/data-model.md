@@ -46,9 +46,9 @@ export const KEYWORD_TABLE = {
   Food: ["hawker", "food", "restaurant", "cafe", "kitchen", "eatery", "dining", "kopitiam"],
   Transport: ["petrol", "shell", "caltex", "spc", "esso", "grab", "taxi", "bus", "mrt", "ride", "gojek"],
   Groceries: ["grocery", "ntuc", "fairprice", "supermarket", "cold storage"],
-  Utilities: ["water", "electric", "utility", "internet", "phone", "bill", "telco", "telecom"],
+  Utility: ["water", "electric", "utility", "internet", "phone", "bill", "telco"],
   Coffee: ["coffee", "starbucks", "bubble tea"],
-  Shopping: ["shopping", "clothes", "mall", "retail", "shopee"],
+  Shopping: ["shopping", "clothes", "mall", "retail"],
   Healthcare: ["doctor", "medical", "pharmacy", "clinic", "watson", "guardian"],
 };
 ```

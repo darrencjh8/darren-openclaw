@@ -30,7 +30,8 @@
 - [ ] T005 [P] Write failing test for DeepSeek classification prompt in `modules/expense-tracker/tests/resolve-merchant.test.js` — verify prompt structure includes merchant, snippets, payee list
 - [ ] T006 Implement Brave Search helper in `modules/expense-tracker/src/tools.js` — function that queries `https://api.search.brave.com/res/v1/web/search` with `X-Subscription-Token` header
 - [ ] T007 Implement classification helper in `modules/expense-tracker/src/tools.js` — calls DeepSeek with structured prompt, parses JSON response
-- [ ] T008 Verify T004 and T005 pass (Brave search + LLM classification pattern proven)
+- [ ] T008 Add `_patch()` HTTP helper method to ToolRegistry in `modules/expense-tracker/src/tools.js` — follows same pattern as `_get()` and `_post()`, needed for update_transaction
+- [ ] T009 Verify T004 and T005 pass (Brave search + LLM classification pattern proven)
 
 **Checkpoint**: External API pattern proven. Ready for pipeline implementation.
 
@@ -101,7 +102,7 @@
 
 - [ ] T029 [US3] Implement `budget_resolve_merchant` in `gateway/plugins/expense-tracker-tools/index.js` — `api.registerTool()` with TypeBox schema, POST to expense-tracker
 - [ ] T030 [US3] Add `budget_resolve_merchant` to `contracts.tools` in `gateway/plugins/expense-tracker-tools/openclaw.plugin.json`
-- [ ] T031 [US3] Update safety net test — change `expect(registeredTools.length).toBe(21)` to `.toBe(22)` in `gateway/plugins/expense-tracker-tools/tests/tools.test.js`
+- [ ] T031 [US3] Add safety net test `expect(registeredTools.length).toBe(22)` in `gateway/plugins/expense-tracker-tools/tests/tools.test.js`
 - [ ] T032 [US3] Run tests and confirm they pass
 
 **Checkpoint**: Gateway agent can call `budget_resolve_merchant`.
@@ -133,7 +134,7 @@
 - [ ] T044 [US4] Add category validation to `_handle_insert_transaction` in `modules/expense-tracker/src/tools.js` — validate `category_id` against live categories, fall back to "Fun Money" if unknown
 - [ ] T045 [US4] Implement `budget_update_transaction` in `gateway/plugins/expense-tracker-tools/index.js`
 - [ ] T046 [US4] Add `budget_update_transaction` to `contracts.tools` in `gateway/plugins/expense-tracker-tools/openclaw.plugin.json`
-- [ ] T047 [US4] Update safety net test — change `expect(registeredTools.length).toBe(22)` to `.toBe(23)` in `gateway/plugins/expense-tracker-tools/tests/tools.test.js`
+- [ ] T047 [US4] Update safety net test `expect(registeredTools.length).toBe(23)` in `gateway/plugins/expense-tracker-tools/tests/tools.test.js`
 - [ ] T048 [US4] Run all tests and confirm they pass
 
 **Checkpoint**: User corrections flow works end-to-end.

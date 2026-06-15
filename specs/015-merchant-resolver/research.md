@@ -47,7 +47,7 @@
 
 **Decision**: Use Brave Search API `https://api.search.brave.com/res/v1/web/search` with `count=5` and `search_lang=en`. Header: `X-Subscription-Token`.
 
-**Rationale**: Brave Search has a generous free tier ($5/month = 1,000 queries). The API returns structured results with title/description snippets suitable for LLM classification. DuckDuckGo Instant Answer API was tested and returned empty results for obscure Singapore merchants.
+**Rationale**: Brave Search has 2,000 free queries/month. The API returns structured results with title/description snippets suitable for LLM classification. DuckDuckGo Instant Answer API was tested and returned empty results for obscure Singapore merchants.
 
 **Alternatives considered**:
 - DuckDuckGo — tested, returns empty for Singapore businesses
