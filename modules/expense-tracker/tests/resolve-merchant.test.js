@@ -13,18 +13,20 @@ vi.mock("mailparser", () => ({
 
 // Mock dedup.js to avoid fs / better-sqlite3 / crypto dependency chains
 vi.mock("../src/dedup.js", () => ({
-    DedupJournal: vi.fn(() => ({
-        record: vi.fn(),
-        checkDuplicate: vi.fn(() => false),
-        checkExact: vi.fn(() => false),
-        close: vi.fn(),
-    })),
+    DedupJournal: vi.fn(function () {
+        this.record = vi.fn();
+        this.checkDuplicate = vi.fn(() => false);
+        this.checkExact = vi.fn(() => false);
+        this.close = vi.fn();
+    }),
 }));
 
 // Mock DeepSeekClient used by _classify_merchant for web-search resolution
 const mockChat = vi.fn();
 vi.mock("../src/orchestrator.js", () => ({
-    DeepSeekClient: vi.fn(() => ({ chat: mockChat })),
+    DeepSeekClient: vi.fn(function () {
+        this.chat = mockChat;
+    }),
 }));
 
 // ── Imports ──────────────────────────────────────────────────────────────
@@ -207,11 +209,21 @@ describe("resolve_merchant pipeline", () => {
         const config = mockConfig();
         const registry = new ToolRegistry(config, memory);
 
+        // Mock payee list for keyword validation (gap 6.3-1)
+        vi.stubGlobal(
+            "fetch",
+            vi.fn().mockResolvedValueOnce({
+                ok: true,
+                json: async () => [{ name: "Groceries" }, { name: "Food" }],
+            }),
+        );
+
         const result = await registry._handle_resolve_merchant({
             merchant: "NTUC FairPrice",
         });
 
         expect(result).toEqual({ payee: "Groceries", source: "keyword" });
+        vi.unstubAllGlobals();
     });
 
     it("matches keyword for Shell petrol station → Transport", async () => {
@@ -219,11 +231,20 @@ describe("resolve_merchant pipeline", () => {
         const config = mockConfig();
         const registry = new ToolRegistry(config, memory);
 
+        vi.stubGlobal(
+            "fetch",
+            vi.fn().mockResolvedValueOnce({
+                ok: true,
+                json: async () => [{ name: "Transport" }, { name: "Food" }],
+            }),
+        );
+
         const result = await registry._handle_resolve_merchant({
             merchant: "Shell Station",
         });
 
         expect(result).toEqual({ payee: "Transport", source: "keyword" });
+        vi.unstubAllGlobals();
     });
 
     it("matches keyword case-insensitively", async () => {
@@ -231,11 +252,20 @@ describe("resolve_merchant pipeline", () => {
         const config = mockConfig();
         const registry = new ToolRegistry(config, memory);
 
+        vi.stubGlobal(
+            "fetch",
+            vi.fn().mockResolvedValueOnce({
+                ok: true,
+                json: async () => [{ name: "Groceries" }, { name: "Food" }],
+            }),
+        );
+
         const result = await registry._handle_resolve_merchant({
             merchant: "fairprice finest",
         });
 
         expect(result).toEqual({ payee: "Groceries", source: "keyword" });
+        vi.unstubAllGlobals();
     });
 
     it("matchKeyword: COLD STORAGE SINGAPORE → Groceries (multi-word)", () => {
@@ -1213,5 +1243,80 @@ describe("Few-shot examples", () => {
             (m) => m.role === "tool" && m.content?.includes('"source": "web"'),
         );
         expect(toolResult).toBeDefined();
+    });
+});
+
+describe("Multi-word payee regex", () => {
+    it("extracts multi-word payee like Fun Money from memory fact", async () => {
+        const memory = mockMemoryStore([
+            "SGSUPERGREEN-B maps to Fun Money payee",
+        ]);
+        const config = mockConfig();
+        const registry = new ToolRegistry(config, memory);
+
+        const result = await registry._handle_resolve_merchant({
+            merchant: "SGSUPERGREEN-B",
+        });
+
+        expect(result).toEqual({ payee: "Fun Money", source: "memory" });
+    });
+});
+
+describe("budget_id parameter", () => {
+    it("routes budget_id through to payee list fetch", async () => {
+        const memory = mockMemoryStore();
+        const config = mockConfig();
+        const registry = new ToolRegistry(config, memory);
+
+        // Spy on _get to verify budget_id is passed
+        const originalGet = registry._get.bind(registry);
+        let capturedBudgetId = null;
+        registry._get = async (path, budgetId) => {
+            if (path === "/payees") capturedBudgetId = budgetId;
+            return originalGet(path, budgetId);
+        };
+
+        // Use fetch mock for the payee list
+        vi.stubGlobal(
+            "fetch",
+            vi.fn().mockResolvedValueOnce({
+                ok: true,
+                json: async () => [{ name: "Food" }],
+            }),
+        );
+
+        await registry._handle_resolve_merchant({
+            merchant: "SomeUnknownMerchant",
+            budget_id: "Darren MYR",
+        });
+
+        // Keyword match fails → should call _get with Darren MYR
+        expect(capturedBudgetId).toBe("Darren MYR");
+        vi.unstubAllGlobals();
+    });
+});
+
+describe("Timeout enforcement", () => {
+    it("falls back to Misc when web search + classification exceeds 20s", async () => {
+        vi.useFakeTimers();
+        const memory = mockMemoryStore();
+        const config = mockConfig({ braveSearchApiKey: "test-key" });
+        const registry = new ToolRegistry(config, memory);
+
+        // Make fetch take forever
+        vi.stubGlobal("fetch", () => new Promise(() => {})); // never resolves
+
+        const promise = registry._handle_resolve_merchant({
+            merchant: "UnknownBiz",
+        });
+
+        // Advance past 20s timeout (async to flush microtasks)
+        await vi.advanceTimersByTimeAsync(21000);
+
+        const result = await promise;
+        expect(result).toEqual({ payee: "Misc", source: "fallback" });
+
+        vi.useRealTimers();
+        vi.unstubAllGlobals();
     });
 });

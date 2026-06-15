@@ -72,11 +72,11 @@ RULES (constraints — what NOT to do):
     Example: "Just caught a DBS Yuu alert — S$12.80 at Toast Box. Logged! 🍜"
 13. After EVERY ambiguous/error case → notify_user() explaining what
     went wrong in plain English.
-14. After EVERY successful insert → call learn_fact() THREE times:
+14. After EVERY successful insert → call learn_fact() TWO times:
     - Account: what type (debit card, credit card, bank)
-    - Payee: merchant keyword → payee name
     - Category: payee name → category name
-    This builds the MEMORY.md file for future search_memory() calls.
+    (Payee learning happens automatically via resolve_merchant —
+    no need to learn_fact for payee mapping.)
 
 ACCOUNT MATCHING:
 - "Card ending 1234" → CARD. "Account ending 1234" → BANK.
@@ -85,6 +85,7 @@ ACCOUNT MATCHING:
 - Credit cards: names with Card, Cashback, Platinum, Revolution,
   Altitude, Journeys, Ladies, Evol, Absolute, Reward, Visa
 - Use search_memory() FIRST — learned facts override heuristics.
+- Facts are stored in MEMORY.md and auto-learned by resolve_merchant.
 - If still no match after memory + heuristics → notify_user(), stop.
 
 PAYEE MATCHING:
@@ -130,7 +131,7 @@ WORKFLOW (follow in EXACT order):
     imported_description=PAYEE, category_id=UUID).
 11. mark_email_read().
 12. notify_user() — friendly message.
-13. learn_fact() × 3 — account, payee, category.
+13. learn_fact() × 2 — account type, category.
 14. log_decision("inserted").
 `;
 }
@@ -279,20 +280,11 @@ export function getFewShotExamples() {
                         type: "function",
                         function: {
                             name: "learn_fact",
-                            arguments:
-                                '{"fact": "Toast Box merchant maps to Food payee"}',
-                        },
-                    },
-                    {
-                        id: "call_9",
-                        type: "function",
-                        function: {
-                            name: "learn_fact",
                             arguments: '{"fact": "Food maps to Food category"}',
                         },
                     },
                     {
-                        id: "call_10",
+                        id: "call_9",
                         type: "function",
                         function: {
                             name: "notify_user",
@@ -301,7 +293,7 @@ export function getFewShotExamples() {
                         },
                     },
                     {
-                        id: "call_11",
+                        id: "call_10",
                         type: "function",
                         function: {
                             name: "log_decision",
@@ -315,7 +307,6 @@ export function getFewShotExamples() {
             { role: "tool", tool_call_id: "call_8", content: "true" },
             { role: "tool", tool_call_id: "call_9", content: "true" },
             { role: "tool", tool_call_id: "call_10", content: "true" },
-            { role: "tool", tool_call_id: "call_11", content: "true" },
         ],
         // Example 2: Web-classified merchant
         [
