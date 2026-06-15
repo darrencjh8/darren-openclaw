@@ -113,21 +113,22 @@ An `update_transaction` tool allows the agent to retroactively fix misclassified
 - **FR-001**: The expense-tracker MUST expose a `resolve_merchant` tool at `POST /tools/resolve-merchant` accepting `{ merchant: string }` and returning `{ payee: string, source: "memory"|"keyword"|"web"|"fallback" }`.
 - **FR-002**: The tool MUST execute steps in this exact order, short-circuiting on first match: (1) `MemoryStore.search()` lookup in MEMORY.md, (2) keyword heuristic matching against a hardcoded table, (3) Brave web search + DeepSeek LLM classification, (4) "Misc" fallback.
 - **FR-003**: Brave Search MUST be called only when `BRAVE_SEARCH_API_KEY` is configured in the expense-tracker's environment AND steps 1-2 have no match.
-- **FR-004**: LLM classification MUST use the existing DeepSeek client (`deepseek-chat`, temperature 0.1) with a structured prompt: given the merchant name, top 5 Brave search result snippets (if available), and the list of available payee names, return a JSON classification.
-- **FR-005**: After resolving via `source: "web"` or `source: "keyword"`, the tool MUST call `MemoryStore.add()` to persist the mapping to MEMORY.md. Resolutions via `source: "memory"` or `source: "fallback"` MUST NOT trigger learning.
-- **FR-006**: The tool MUST validate that the resolved payee exists in the live payee list. Unmatched classifications MUST fall back to "Misc".
-- **FR-007**: The tool MUST return within 500ms (memory/keyword path) or 20 seconds (web search path). Timeout at any step MUST fall through to the next step, not crash.
-- **FR-008**: The Gateway plugin MUST add `budget_resolve_merchant` tool wrapping `POST /tools/resolve-merchant`.
-- **FR-009**: The expense-tracker orchestrator prompt (`src/prompts.js`) MUST be updated to use `resolve_merchant` instead of the multi-step payee matching sequence.
-- **FR-010**: The SKILL.md MUST be updated to use `budget_resolve_merchant` in the payee matching workflow.
+- **FR-004**: LLM classification MUST use the existing DeepSeek client with `temperature: 0.1` and `thinking: { type: "disabled" }` (no reasoning needed for structured classification).
+- **FR-005**: The keyword heuristic table MUST be extracted from the orchestrator prompt into a shared constant (e.g., `src/keywords.js`) imported by both `prompts.js` and the `resolve_merchant` handler, preventing drift between the LLM prompt and the tool code.
+- **FR-006**: After resolving via `source: "web"` or `source: "keyword"`, the tool MUST call `MemoryStore.add()` to persist the mapping to MEMORY.md. Resolutions via `source: "memory"` or `source: "fallback"` MUST NOT trigger learning.
+- **FR-007**: The tool MUST validate that the resolved payee exists in the live payee list. Unmatched classifications MUST fall back to "Misc" with `source: "fallback"`.
+- **FR-008**: The tool MUST return within 500ms (memory/keyword path) or 20 seconds (web search path). Timeout at any step MUST fall through to the next step, not crash.
+- **FR-009**: The Gateway plugin MUST add `budget_resolve_merchant` tool wrapping `POST /tools/resolve-merchant`.
+- **FR-010**: The expense-tracker orchestrator prompt (`src/prompts.js`) MUST be updated to use `resolve_merchant` instead of the multi-step payee matching sequence.
+- **FR-011**: The SKILL.md MUST be updated to use `budget_resolve_merchant` in the payee matching workflow.
 
-**Transaction Validation (FR-011 to FR-015):**
+**Transaction Validation (FR-012 to FR-016):**
 
-- **FR-011**: The actual-api MUST expose a `PATCH /transactions/:id` endpoint accepting partial transaction fields (payee, notes, amount, date, category, account, cleared). Only provided fields are updated; omitted fields are left unchanged.
-- **FR-012**: The expense-tracker MUST expose an `update_transaction` tool at `POST /tools/update-transaction` accepting `{ id: string, budget_id?, payee_name?, notes?, amount?, date?, category_id?, account_id? }`. At least one optional field must be provided.
-- **FR-013**: Both `insert_transaction` and `update_transaction` MUST validate `payee_name` against the live payee list. Unknown payees on insert fall back to "Misc". Unknown payees on update are rejected — the agent must pick a valid payee.
-- **FR-014**: Both `insert_transaction` and `update_transaction` MUST validate `category_id` against the live category list from Actual Budget. Unknown categories on insert fall back to "Fun Money". Unknown categories on update are rejected.
-- **FR-015**: The Gateway plugin MUST add `budget_update_transaction` tool wrapping `POST /tools/update-transaction`.
+- **FR-012**: The actual-api MUST expose a `PATCH /transactions/:id` endpoint accepting partial transaction fields (payee, notes, amount, date, category, account, cleared). Only provided fields are updated; omitted fields are left unchanged.
+- **FR-013**: The expense-tracker MUST expose an `update_transaction` tool at `POST /tools/update-transaction` accepting `{ id: string, budget_id?, payee_name?, notes?, amount?, date?, category_id?, account_id? }`. At least one optional field must be provided.
+- **FR-014**: Both `insert_transaction` and `update_transaction` MUST validate the resolved payee against the live payee list. On insert, the `imported_description` is resolved through `_validate_payee` → unknown payees fall back to "Misc". On update, the `payee_name` is validated directly → unknown payees are rejected.
+- **FR-015**: Both `insert_transaction` and `update_transaction` MUST validate `category_id` against the live category list from Actual Budget. Unknown categories on insert fall back to "Fun Money". Unknown categories on update are rejected.
+- **FR-016**: The Gateway plugin MUST add `budget_update_transaction` tool wrapping `POST /tools/update-transaction`.
 
 ### Key Entities
 
