@@ -16,7 +16,7 @@ This spec covers the gateway runtime, Telegram channel, agent persona, skill dis
 | Feature | Role |
 |---|---|
 | **gateway-baseline** (this spec) | Platform — runtime, channel, agent persona, skill discovery, access control, memory, workspace |
-| **expense-tracker-skill** | Capability — 10 deterministic tools, LLM instructions, HTTP wrappers |
+| **expense-tracker-skill** | Capability — 21 typed plugin tools (budget_ prefix) |
 | **portfolio-tracker-skill** | Capability — portfolio sync, IBKR imports, PP balances, Google Sheets |
 | **ktmb-booking-skill** | Capability — KTMB Shuttle Tebrau train booking, schedule lookup, seat watching |
 

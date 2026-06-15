@@ -137,7 +137,7 @@ graph TB
             IMAP -->|"new email callback"| Orch
         end
 
-        subgraph Tools["10 Deterministic Tools (agent/tools.py)"]
+        subgraph Tools["21 Typed Plugin Tools (budget_ prefix)"]
             T1["extract_email_content()"]
             T2["fetch_accounts()"]
             T3["fetch_categories()"]
@@ -197,9 +197,9 @@ graph LR
 
 ### 3.3 Architectural Pattern
 
-OpenClaw uses the **LLM Agent Pattern**: the Python host is a thin runtime that provides deterministic tools. All intelligence — parsing, classification, matching, routing — is delegated to the DeepSeek LLM via OpenAI-compatible function calling.
+OpenClaw uses the **LLM Agent Pattern**: expense-tracker tools are exposed as typed plugin tools (`budget_*` prefix) via the OpenClaw plugin system. All intelligence — parsing, classification, matching, routing — is delegated to the DeepSeek LLM via OpenAI-compatible function calling.
 
-**Key Principle:** No business rules are hardcoded in Python. Category mapping, account matching, and currency detection are performed by the LLM using live data fetched from Actual Budget's API at runtime.
+**Key Principle:** No business rules are hardcoded. Category mapping, account matching, and currency detection are performed by the LLM using live data fetched from Actual Budget's API at runtime.
 
 ---
 
@@ -209,7 +209,7 @@ OpenClaw uses the **LLM Agent Pattern**: the Python host is a thin runtime that 
 |---|---|---|---|
 | **Actual Budget** | Server #1 (existing) | Public HTTPS for web UI; API via HTTPS (with auth) | Existing production instance |
 | **OpenClaw Gateway** | Ubuntu laptop (Docker) | Agent orchestration, channels, skills, tool calling | ~400MB RAM |
-| **Expense-tracker** | Ubuntu laptop (Docker) | ~12 deterministic Node.js tools, IMAP IDLE | ~150MB RAM |
+| **Expense-tracker** | Ubuntu laptop (Docker) | 21 typed plugin tools (budget_ prefix), IMAP IDLE | ~150MB RAM |
 | **Portfolio-tracker** | Ubuntu server (Docker) | Node.js agent + Java CLI subprocess; IMAP ingress (Trades folder); PP XML read/write; notifications via Gateway webhook | ~256MB RAM |
 | **actual-api** | Ubuntu laptop (Docker) | Official `@actual-app/api` (Node.js), WebSocket sync | ~100MB RAM |
 | **ktmb-booking** | Ubuntu laptop (Docker) | Python aiohttp API server + seat watcher worker; SQLite job store | ~150MB RAM |
@@ -331,9 +331,9 @@ An LLM-powered agent that monitors a dedicated Email burner inbox via IMAP IDLE.
 | US-7 | Notification for Ambiguous Emails | Unknown currency, missing amount, unmatched account → SMTP notification, email left unread |
 | US-8 | Idempotent Processing | Emails marked `\Seen` only after successful insert; safe to restart at any time |
 
-### 5.4 The 16 LLM Tools
+### 5.4 The 21 LLM Tools
 
-The LLM is given 16 function definitions (OpenAI-compatible JSON schema). It chooses which tools to call and in what order:
+The LLM is given 21 function definitions (OpenAI-compatible JSON schema). It chooses which tools to call and in what order:
 
 | # | Tool | Type | Description |
 |---|---|---|---|
@@ -353,6 +353,11 @@ The LLM is given 16 function definitions (OpenAI-compatible JSON schema). It cho
 | 14 | `update_fact` | Write | Replace a fact by substring match; clears notification cooldown |
 | 15 | `delete_fact` | Write | Remove facts by substring match; clears notification cooldown |
 | 16 | `reconcile_transaction` | Write | Mark AB transaction as cleared against statement |
+| 17 | `budget_extract_email_content` | Pre-processing | Extract & clean text from email via plugin typed tool |
+| 18 | `budget_mark_email_read` | Write | Set IMAP `\Seen` flag via plugin typed tool |
+| 19 | `budget_notify_user` | Write | Send notification via plugin typed tool (cooldown: 1h) |
+| 20 | `budget_log_decision` | Write | Structured JSON log entry via plugin typed tool |
+| 21 | `budget_check_statement_duplicate` | Read | Check statement journal for duplicate (account, period) |
 
 ### 5.5 Agent Orchestration (Mermaid Sequence)
 
@@ -567,7 +572,7 @@ On ANY failure:
       → notify_user("Failed: [error]") → mark_email_read() → log error
 ```
 
-### 5A.4 New Tools (4 new, 15 total with existing 11)
+### 5A.4 New Tools (5 new, 16 total with existing 11)
 
 | # | Tool | Pipeline | Purpose |
 |---|---|---|---|
@@ -575,6 +580,7 @@ On ANY failure:
 | 13 | `reconcile_transaction` | Statement | PATCH AB transaction → `cleared: true` |
 | 14 | `record_statement` | Statement | Log statement processing in statement journal |
 | 15 | `fetch_statement_history` | Statement | Check if (account, period) was already processed |
+| 16 | `check_statement_duplicate` | Statement | Check statement journal for duplicate (account, period) before processing |
 
 Existing 11 alert tools are **shared** between both pipelines (unchanged).
 

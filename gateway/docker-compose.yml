@@ -19,6 +19,7 @@ services:
             - ./docker-entrypoint.sh:/app/docker-entrypoint.sh:ro
             - ../modules/perchance-gen:/app/modules/perchance-gen:ro
             - ../modules/ktmb/skills:/home/node/skills/ktmb-booking:ro
+            - ./plugins/expense-tracker-tools:/home/node/plugins/expense-tracker-tools:ro
             - openclaw_home:/app/.openclaw
             - openclaw_data:/app/data
             - image_gen_media:/app/.openclaw/workspace/media

@@ -5,8 +5,9 @@ Base URL: `http://portfolio-tracker:8081/tools/<name>`
 Use for: /sync, /ibkr, /status, /sheet, balance sync, investments, PP queries
 
 ## Expense Tracker
-Base URL: `http://expense-tracker:8080/tools/<name>`
-Use for: adding/viewing expenses, transactions, budgets, categories
+Typed tools with `budget_` prefix (all loaded by the expense-tracker-tools plugin).
+Use for: adding/viewing expenses, transactions, budgets, categories, statements.
+Read the SKILL.md at `~/.openclaw/workspace/skills/expense-tracker/SKILL.md` for full tool docs.
 
 ## KTMB Booking
 Base URL: `http://ktmb-booking:8082/tools/<name>`
