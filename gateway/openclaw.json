@@ -168,7 +168,8 @@
             "enabled": true,
             "botToken": "${TELEGRAM_BOT_TOKEN}",
             "dmPolicy": "allowlist",
-            "allowFrom": ["tg:${TELEGRAM_CHAT_ID}"]
+            "allowFrom": ["tg:${TELEGRAM_CHAT_ID}"],
+            "linkPreview": false
         }
     },
     "hooks": {
