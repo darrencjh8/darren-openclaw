@@ -708,7 +708,7 @@ export class ToolRegistry {
             if (results && results.length > 0) {
                 // Extract a payee name from the top result
                 const top = results[0].text || "";
-                const payeeMatch = top.match(/maps to (\S+) payee/i);
+                const payeeMatch = top.match(/maps to (.+?) payee/i);
                 if (payeeMatch) return payeeMatch[1];
             }
         }
@@ -1016,7 +1016,7 @@ export class ToolRegistry {
         const memResults = await this._memory.search(merchant);
         if (memResults && memResults.length > 0) {
             for (const r of memResults) {
-                const match = (r.text || "").match(/maps to (\S+) payee/i);
+                const match = (r.text || "").match(/maps to (.+?) payee/i);
                 if (match) return { payee: match[1], source: "memory" };
             }
         }
@@ -1153,7 +1153,7 @@ export class ToolRegistry {
                 return {
                     error: `Payee "${payee_name}" not found in payee list. Use a valid payee from fetch_payees.`,
                 };
-            fields.payee_name = payeeMatch.name;
+            fields.payee = payeeMatch.name;
         }
         if (notes !== undefined) fields.notes = notes;
         if (amount !== undefined) fields.amount = amount;

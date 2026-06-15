@@ -157,14 +157,22 @@ export function getFewShotExamples() {
             {
                 role: "assistant",
                 content:
-                    "Classifying: confirmed transaction (currency SGD, amount $12.80, merchant Toast Box, date clear). Let me search memory and fetch data.",
+                    "Classifying: confirmed transaction (currency SGD, amount $12.80, merchant Toast Box, date clear). Let me resolve the merchant and fetch data.",
                 tool_calls: [
+                    {
+                        id: "call_resolve",
+                        type: "function",
+                        function: {
+                            name: "resolve_merchant",
+                            arguments: '{"merchant": "Toast Box"}',
+                        },
+                    },
                     {
                         id: "call_search",
                         type: "function",
                         function: {
                             name: "search_memory",
-                            arguments: '{"query": "DBS Yuu Toast Box"}',
+                            arguments: '{"query": "DBS Yuu card account"}',
                         },
                     },
                     {
@@ -183,21 +191,18 @@ export function getFewShotExamples() {
                             arguments: '{"budget_id": "' + sgdBudget + '"}',
                         },
                     },
-                    {
-                        id: "call_3",
-                        type: "function",
-                        function: {
-                            name: "fetch_payees",
-                            arguments: '{"budget_id": "' + sgdBudget + '"}',
-                        },
-                    },
                 ],
+            },
+            {
+                role: "tool",
+                tool_call_id: "call_resolve",
+                content: '{"payee": "Food", "source": "memory"}',
             },
             {
                 role: "tool",
                 tool_call_id: "call_search",
                 content:
-                    '{"results":[{"text":"DBS Yuu is a debit card account","score":0.95},{"text":"Toast Box merchant maps to Food payee","score":0.88}]}',
+                    '{"results":[{"text":"DBS Yuu is a debit card account","score":0.95}]}',
             },
             {
                 role: "tool",
@@ -210,14 +215,9 @@ export function getFewShotExamples() {
                 content: '[{"id": "cat-food", "name": "Food"}]',
             },
             {
-                role: "tool",
-                tool_call_id: "call_3",
-                content: '[{"id": "payee-food", "name": "Food"}]',
-            },
-            {
                 role: "assistant",
                 content:
-                    "Memory confirms: DBS Yuu is debit card, Toast Box → Food. Checking duplicate.",
+                    "Merchant resolved: Toast Box → Food (memory). DBS Yuu is debit card. Checking duplicate.",
                 tool_calls: [
                     {
                         id: "call_4",
