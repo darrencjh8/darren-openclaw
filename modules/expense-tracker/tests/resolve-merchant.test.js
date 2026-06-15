@@ -653,10 +653,10 @@ describe("Auto-learning", () => {
             choices: [{ message: { content: '{"payee":"Coffee"}' } }],
         });
 
-        await registry._handle_resolve_merchant({ merchant: "NewCoffeePlace" });
+        await registry._handle_resolve_merchant({ merchant: "UnchartedBiz" });
 
         expect(memory.add).toHaveBeenCalledWith(
-            "NewCoffeePlace maps to Coffee payee",
+            "UnchartedBiz maps to Coffee payee",
         );
 
         vi.unstubAllGlobals();

@@ -1025,26 +1025,57 @@ export class ToolRegistry {
         // Step 2: Keyword matching
         const keywordMatch = matchKeyword(merchant);
         if (keywordMatch) {
-            await this._memory.add(
-                merchant + " maps to " + keywordMatch + " payee",
-            );
-            return { payee: keywordMatch, source: "keyword" };
+            // Validate keyword-resolved payee exists in live payee list
+            try {
+                const payees = await this._get("/payees", budget_id || "");
+                const valid =
+                    Array.isArray(payees) &&
+                    payees.some(
+                        (p) =>
+                            p.name &&
+                            p.name.toLowerCase() === keywordMatch.toLowerCase(),
+                    );
+                if (!valid) {
+                    // Keyword payee not in live list — fall through to web search
+                } else {
+                    await this._memory.add(
+                        merchant + " maps to " + keywordMatch + " payee",
+                    );
+                    return { payee: keywordMatch, source: "keyword" };
+                }
+            } catch {
+                // Payee list fetch failed — still trust the keyword match
+                await this._memory.add(
+                    merchant + " maps to " + keywordMatch + " payee",
+                );
+                return { payee: keywordMatch, source: "keyword" };
+            }
         }
 
-        // Step 3: Web search + AI classification
+        // Step 3: Web search + AI classification (20s timeout per FR-008)
         if (this._config.braveSearchApiKey) {
             try {
-                const { results } = await this._handle_search_web({ merchant });
-                const payee = await this._classify_merchant(
-                    merchant,
-                    results,
-                    budget_id,
-                );
-                if (payee) {
+                const result = await Promise.race([
+                    (async () => {
+                        const { results } = await this._handle_search_web({
+                            merchant,
+                        });
+                        const payee = await this._classify_merchant(
+                            merchant,
+                            results,
+                            budget_id,
+                        );
+                        return payee;
+                    })(),
+                    new Promise((_, reject) =>
+                        setTimeout(() => reject(new Error("timeout")), 20000),
+                    ),
+                ]);
+                if (result) {
                     await this._memory.add(
-                        merchant + " maps to " + payee + " payee",
+                        merchant + " maps to " + result + " payee",
                     );
-                    return { payee, source: "web" };
+                    return { payee: result, source: "web" };
                 }
             } catch {
                 // Classification failed, fall through to fallback

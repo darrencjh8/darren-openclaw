@@ -120,7 +120,8 @@ WORKFLOW (follow in EXACT order):
  3. resolve_merchant(merchant) — get canonical payee. This handles memory
     lookup, keyword matching, and web search internally.
  4. Identify: currency, amount, merchant, date, card vs account number.
- 5. fetch_accounts + fetch_categories + fetch_payees (parallel).
+ 5. fetch_accounts + fetch_categories (parallel). fetch_payees is optional —
+     resolve_merchant() and insert_transaction() validate payees internally.
  6. Match account (memory first, then heuristics).
  7. Match payee: use the payee from resolve_merchant(). Misc if unmatched.
  8. Match category (payee name → UUID). Skip if Misc.
