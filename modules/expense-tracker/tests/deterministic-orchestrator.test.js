@@ -703,6 +703,186 @@ describe("Critical Fix 3: resolve_merchant timeout falls back to Misc", () => {
 });
 
 // ─────────────────────────────────────────────────────────────────
+// Fix 5: Closed account validation
+// ─────────────────────────────────────────────────────────────────
+
+describe("Fix 5: account validation rejects closed accounts", () => {
+    it("rejects LLM-chosen account when closed=true", async () => {
+        const { AgentOrchestrator } = await import("../src/orchestrator.js");
+
+        const config = {
+            deepseekApiKey: "sk-test",
+            systemPrompt: "You are an expense tracker.",
+        };
+        const tools = {
+            setEmailContext: vi.fn(),
+            getLlmToolSchemas: vi.fn(() => []),
+            executeTool: vi.fn(async (name, args) => {
+                if (name === "fetch_accounts")
+                    return [
+                        { id: "acc-1", name: "Closed Card", closed: true },
+                        { id: "acc-2", name: "Active Card", closed: false },
+                    ];
+                if (name === "check_duplicate") return false;
+                if (name === "insert_transaction") return { id: "txn-1" };
+                return true;
+            }),
+        };
+        const orch = new AgentOrchestrator(config, tools);
+
+        orch._llm.chat = vi.fn(async () => ({
+            choices: [
+                {
+                    finish_reason: "stop",
+                    message: {
+                        content: JSON.stringify({
+                            action: "insert",
+                            merchant: "Test",
+                            amount_cents: -500,
+                            date: "2026-06-16",
+                            currency: "SGD",
+                            account_id: "acc-1", // closed account
+                            notes: "",
+                            reasoning: "Test",
+                            notify_message: "Test",
+                        }),
+                    },
+                },
+            ],
+        }));
+
+        const result = await orch.processEmail("test-closed", "Email");
+
+        // Must NOT insert to closed account
+        expect(result.action).not.toBe("inserted");
+        expect(tools.executeTool).not.toHaveBeenCalledWith(
+            "insert_transaction",
+            expect.anything(),
+        );
+    });
+
+    it("accepts active account", async () => {
+        const { AgentOrchestrator } = await import("../src/orchestrator.js");
+
+        const config = {
+            deepseekApiKey: "sk-test",
+            systemPrompt: "You are an expense tracker.",
+        };
+        const tools = {
+            setEmailContext: vi.fn(),
+            getLlmToolSchemas: vi.fn(() => []),
+            executeTool: vi.fn(async (name, args) => {
+                if (name === "fetch_accounts")
+                    return [
+                        { id: "acc-1", name: "Closed Card", closed: true },
+                        { id: "acc-2", name: "Active Card", closed: false },
+                    ];
+                if (name === "check_duplicate") return false;
+                if (name === "insert_transaction") return { id: "txn-1" };
+                return true;
+            }),
+        };
+        const orch = new AgentOrchestrator(config, tools);
+
+        orch._llm.chat = vi.fn(async () => ({
+            choices: [
+                {
+                    finish_reason: "stop",
+                    message: {
+                        content: JSON.stringify({
+                            action: "insert",
+                            merchant: "Test",
+                            amount_cents: -500,
+                            date: "2026-06-16",
+                            currency: "SGD",
+                            account_id: "acc-2", // active account
+                            notes: "",
+                            reasoning: "Test",
+                            notify_message: "Test",
+                        }),
+                    },
+                },
+            ],
+        }));
+
+        const result = await orch.processEmail("test-active", "Email");
+
+        // Must insert to active account
+        expect(result.action).toBe("inserted");
+        expect(tools.executeTool).toHaveBeenCalledWith(
+            "insert_transaction",
+            expect.anything(),
+        );
+    });
+});
+
+// ─────────────────────────────────────────────────────────────────
+// Fix 7: search_memory is mandatory (auto-called if LLM skips)
+// ─────────────────────────────────────────────────────────────────
+
+describe("Fix 7: search_memory auto-called when LLM skips it", () => {
+    it("auto-calls search_memory when LLM returns JSON without calling it", async () => {
+        const { AgentOrchestrator } = await import("../src/orchestrator.js");
+
+        const config = {
+            deepseekApiKey: "sk-test",
+            systemPrompt: "You are an expense tracker.",
+        };
+
+        const toolCalls = [];
+        const tools = {
+            setEmailContext: vi.fn(),
+            getLlmToolSchemas: vi.fn(() => []),
+            executeTool: vi.fn(async (name, args) => {
+                toolCalls.push(name);
+                if (name === "search_memory")
+                    return {
+                        results: [
+                            {
+                                text: "Test merchant maps to Food payee",
+                                score: 0.9,
+                            },
+                        ],
+                    };
+                if (name === "fetch_accounts")
+                    return [{ id: "acc-1", name: "DBS Yuu", closed: false }];
+                if (name === "check_duplicate") return false;
+                if (name === "insert_transaction") return { id: "txn-1" };
+                return true;
+            }),
+        };
+        const orch = new AgentOrchestrator(config, tools);
+
+        // LLM returns JSON without ever calling search_memory
+        orch._llm.chat = vi.fn(async () => ({
+            choices: [
+                {
+                    finish_reason: "stop",
+                    message: {
+                        content: JSON.stringify({
+                            action: "insert",
+                            merchant: "Test Merchant",
+                            amount_cents: -500,
+                            date: "2026-06-16",
+                            currency: "SGD",
+                            account_id: "acc-1",
+                            notes: "",
+                            reasoning: "Test",
+                            notify_message: "Test",
+                        }),
+                    },
+                },
+            ],
+        }));
+
+        await orch.processEmail("test-no-search", "Email");
+
+        // search_memory must have been called even though LLM skipped it
+        expect(toolCalls).toContain("search_memory");
+    });
+});
+
+// ─────────────────────────────────────────────────────────────────
 // System Prompt: stripped down for Phase 1
 // ─────────────────────────────────────────────────────────────────
 
