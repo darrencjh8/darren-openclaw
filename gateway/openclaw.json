@@ -107,6 +107,7 @@
                         "google/gemini-3.1-flash-lite"
                     ]
                 },
+                "contextTokens": 128000,
                 "subagents": {
                     "allowAgents": ["thinker"],
                     "delegationMode": "prefer"
