@@ -612,6 +612,25 @@ export class ToolRegistry {
         }));
     }
 
+    /**
+     * Get only info-gathering tool schemas for Phase 1 LLM (spec 020).
+     */
+    getLlmToolSchemas() {
+        const LLM_TOOLS = new Set([
+            "search_memory",
+            "fetch_accounts",
+            "fetch_categories",
+        ]);
+        return TOOLS.filter((t) => LLM_TOOLS.has(t.name)).map((t) => ({
+            type: "function",
+            function: {
+                name: t.name,
+                description: t.description,
+                parameters: t.schema,
+            },
+        }));
+    }
+
     async executeTool(name, args) {
         const handler = this[`_handle_${name.replace(/-/g, "_")}`];
         if (!handler) throw new Error(`Unknown tool: ${name}`);
