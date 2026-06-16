@@ -36,7 +36,8 @@ RULES:
  1. Extract: merchant name, amount (in integer CENTS, negative for spending),
     currency (SGD or MYR), date (YYYY-MM-DD), and account hint (card ending XXXX
     or account name).
- 2. Call search_memory() for learned facts about the sender and card.
+ 2. MANDATORY: Always call search_memory() FIRST for learned facts about the
+    sender and card. This is required — never skip it.
  3. Call fetch_accounts() + fetch_categories() in parallel for live data.
  4. Match the account_id from fetch_accounts results by name similarity.
  5. If you CANNOT extract an amount, currency, or account_id -> action: "unsure".

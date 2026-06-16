@@ -133,7 +133,7 @@ describe("AgentOrchestrator", () => {
             setEmailContext: vi.fn(),
             getToolSchemas: vi.fn(() => []),
             getLlmToolSchemas: vi.fn(() => []),
-            executeTool: vi.fn(),
+            executeTool: vi.fn(async () => true),
         };
         const orch = new AgentOrchestrator(config, tools);
 
@@ -149,8 +149,12 @@ describe("AgentOrchestrator", () => {
         }));
 
         const result = await orch.processEmail("test-003", "Some email");
-        expect(result.action).toBe("error");
-        expect(result.details).toContain("Failed to parse");
+        // Now notifies user instead of returning error
+        expect(tools.executeTool).toHaveBeenCalledWith(
+            "notify_user",
+            expect.anything(),
+        );
+        expect(result.action).toBe("notified");
     });
 
     it("returns error when max tool iterations exceeded", async () => {
@@ -167,7 +171,7 @@ describe("AgentOrchestrator", () => {
         };
         const orch = new AgentOrchestrator(config, tools);
 
-        // Always return tool_calls so the loop runs until MAX_TOOL_ITERATIONS
+        // Always return tool_calls — never a final JSON response
         orch._llm.chat = vi.fn(async () => ({
             choices: [
                 {
@@ -188,8 +192,12 @@ describe("AgentOrchestrator", () => {
         }));
 
         const result = await orch.processEmail("test-004", "Email content");
-        expect(result.action).toBe("error");
-        expect(result.details).toContain("Phase 1 returned no output");
+        // Now notifies user and marks read instead of returning error
+        expect(tools.executeTool).toHaveBeenCalledWith(
+            "notify_user",
+            expect.anything(),
+        );
+        expect(result.action).toBe("notified");
     });
 });
 

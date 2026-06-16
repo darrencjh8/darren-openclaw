@@ -111,17 +111,42 @@ export class AgentOrchestrator {
         try {
             llmOutput = await this._runPhase1(messages, llmTools);
         } catch (e) {
+            // Parse failure or LLM error — notify user, mark as read to
+            // prevent poison-pill reprocessing, log the error.
             console.error(
                 JSON.stringify({
                     event: "phase1_error",
                     error: e.message,
                 }),
             );
-            return { action: "error", details: `Phase 1 failed: ${e.message}` };
+            await this._tools.executeTool("notify_user", {
+                message:
+                    "I couldn't understand an email in your inbox. " +
+                    "Please review it manually in your email client.",
+            });
+            await this._tools.executeTool("mark_email_read", {});
+            await this._tools.executeTool("log_decision", {
+                action: "error",
+                reasoning: `Phase 1 parse failed: ${e.message}`,
+                timestamp: new Date().toISOString(),
+            });
+            return { action: "notified" };
         }
 
-        if (!llmOutput) {
-            return { action: "error", details: "Phase 1 returned no output" };
+        if (!llmOutput || !llmOutput.action) {
+            // LLM returned valid JSON but missing required fields
+            await this._tools.executeTool("notify_user", {
+                message:
+                    "I received an incomplete response while processing " +
+                    "an email. Please review it manually.",
+            });
+            await this._tools.executeTool("mark_email_read", {});
+            await this._tools.executeTool("log_decision", {
+                action: "error",
+                reasoning: "Phase 1 output missing action field",
+                timestamp: new Date().toISOString(),
+            });
+            return { action: "notified" };
         }
 
         // If LLM says skip or unsure, go straight to Phase 2
@@ -133,7 +158,31 @@ export class AgentOrchestrator {
         // Phase 1.5: DETERMINISTIC PAYEE RESOLUTION
         // ═══════════════════════════════════════════════════════════
         try {
-            const memoryResults = this._tools._lastSearchMemoryResults || [];
+            // If LLM skipped search_memory, auto-call it now (mandatory)
+            let memoryResults = this._tools._lastSearchMemoryResults || [];
+            if (memoryResults.length === 0) {
+                try {
+                    const result = await this._tools.executeTool(
+                        "search_memory",
+                        {
+                            query:
+                                llmOutput.merchant ||
+                                llmOutput.raw_description ||
+                                "",
+                        },
+                    );
+                    memoryResults = result.results || [];
+                    console.log(
+                        JSON.stringify({
+                            event: "search_memory_fallback",
+                            merchant: llmOutput.merchant,
+                        }),
+                    );
+                } catch {
+                    // search_memory failed — continue with empty results
+                }
+            }
+
             const payeeResult = await resolvePayeeDeterministic(
                 llmOutput.merchant || llmOutput.raw_description || "",
                 memoryResults,
@@ -331,7 +380,7 @@ export class AgentOrchestrator {
     }
 
     /**
-     * Validate that an account_id exists in the fetched accounts.
+     * Validate that an account_id exists, is active, and matches currency.
      */
     async _validateAccountId(accountId, budgetId) {
         try {
@@ -339,7 +388,20 @@ export class AgentOrchestrator {
                 budget_id: budgetId,
             });
             if (Array.isArray(accounts)) {
-                return accounts.some((a) => a.id === accountId);
+                const match = accounts.find((a) => a.id === accountId);
+                if (!match) return false;
+                // Reject closed accounts
+                if (match.closed) {
+                    console.warn(
+                        JSON.stringify({
+                            event: "account_validation_closed",
+                            account_id: accountId,
+                            name: match.name,
+                        }),
+                    );
+                    return false;
+                }
+                return true;
             }
             return true; // Can't validate, assume valid
         } catch {
