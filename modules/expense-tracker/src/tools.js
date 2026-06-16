@@ -539,21 +539,6 @@ const TOOLS = [
         },
     },
     {
-        name: "search_web",
-        description:
-            "Search the web for information about a merchant using Brave Search. Returns top 5 result snippets.",
-        schema: {
-            type: "object",
-            properties: {
-                merchant: {
-                    type: "string",
-                    description: "Merchant name to search for",
-                },
-            },
-            required: ["merchant"],
-        },
-    },
-    {
         name: "resolve_merchant",
         description:
             "Resolve a raw merchant name to a canonical payee using memory, keyword matching, web search, and AI classification.",
@@ -1059,7 +1044,10 @@ export class ToolRegistry {
                     return { payee: keywordMatch, source: "keyword" };
                 }
             } catch {
-                // Payee list fetch failed — return keyword match without learning
+                // Payee list fetch failed — trust the keyword match and learn
+                await this._memory.add(
+                    merchant + " maps to " + keywordMatch + " payee",
+                );
                 return { payee: keywordMatch, source: "keyword" };
             }
         }
