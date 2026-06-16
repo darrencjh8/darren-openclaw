@@ -41,7 +41,7 @@ Each tool registered via `api.registerTool()` has the following structure:
     "tools": [
       "budget_fetch_accounts",
       "budget_fetch_categories",
-      // ... all 21 tool names
+      // ... all 20 tool names
     ]
   },
   "activation": {
@@ -62,7 +62,7 @@ Tools are grouped by functional category in the SKILL.md (not in the plugin itse
 |---|---|---|
 | Budget & Transactions | 6 | `budget_fetch_accounts`, `budget_fetch_categories`, `budget_fetch_payees`, `budget_fetch_recent_transactions`, `budget_insert_transaction`, `budget_check_duplicate` |
 | Memory & Learning | 5 | `budget_search_memory`, `budget_learn_fact`, `budget_list_facts`, `budget_update_fact`, `budget_delete_fact` |
-| Documents | 4 | `budget_extract_pdf_text`, `budget_extract_email_content`, `budget_mark_email_read`, `budget_notify_user` |
+| Documents | 3 | `budget_extract_pdf_text`, `budget_extract_email_content`, `budget_mark_email_read` |
 | Statement | 5 | `budget_reconcile_transaction`, `budget_fetch_unreconciled`, `budget_record_statement`, `budget_fetch_statement_history`, `budget_check_statement_duplicate` |
 | Audit | 1 | `budget_log_decision` |
 
@@ -86,7 +86,6 @@ Each tool maps to an expense-tracker HTTP endpoint. The plugin owns this mapping
 | `budget_extract_pdf_text` | `/tools/extract-pdf-text` | `pdf_bytes_b64, password?` |
 | `budget_extract_email_content` | `/tools/extract-email-content` | `include_headers?` |
 | `budget_mark_email_read` | `/tools/mark-email-read` | *(none)* |
-| `budget_notify_user` | `/tools/notify-user` | `message` |
 | `budget_log_decision` | `/tools/log-decision` | `action, reasoning, transaction_id?` |
 | `budget_reconcile_transaction` | `/tools/reconcile-transaction` | `ab_transaction_id, statement_ref?, budget_id?` |
 | `budget_fetch_unreconciled` | `/tools/fetch-unreconciled-transactions` | `account_id, date_from, date_to, budget_id?` |

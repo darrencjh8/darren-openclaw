@@ -94,14 +94,12 @@ describe("STATEMENT_PROMPT", () => {
         expect(occurrences).toBeGreaterThanOrEqual(2);
     });
 
-    it("references notify_user for reconciliation summaries", () => {
-        expect(STATEMENT_PROMPT).toContain("notify_user");
-        const occurrences = STATEMENT_PROMPT.split("notify_user").length - 1;
-        expect(occurrences).toBeGreaterThanOrEqual(2);
+    it("does not reference notify_user (LLM communicates via agent response)", () => {
+        expect(STATEMENT_PROMPT).not.toContain("notify_user");
     });
 
-    it("contains NOTIFICATION RULES with warm, conversational tone", () => {
-        expect(STATEMENT_PROMPT).toContain("NOTIFICATION RULES");
+    it("contains RESPONSE GUIDELINES with warm, conversational tone", () => {
+        expect(STATEMENT_PROMPT).toContain("RESPONSE GUIDELINES");
         expect(STATEMENT_PROMPT).toContain("warm");
         expect(STATEMENT_PROMPT).toContain("conversational");
     });

@@ -146,8 +146,7 @@ graph TB
             T6["insert_transaction()"]
             T7["check_duplicate()"]
             T8["mark_email_read()"]
-            T9["notify_user()"]
-            T10["log_decision()"]
+            T9["log_decision()"]
         end
 
         Orch -->|"LLM calls tools"| Tools
@@ -163,7 +162,6 @@ graph TB
     T6 -->|"POST transaction"| AB
     T7 -->|"hash lookup"| SQLite
     T8 -->|"\Seen flag"| EmailSvc
-    T9 -->|"SMTP notification"| User["User's Main Inbox"]
 ```
 
 ### 3.2 Component Relationship Diagram
@@ -189,7 +187,7 @@ graph LR
 
     Decision -->|"confident"| Insert["insert_transaction()<br/>→ Actual Budget"]
     Decision -->|"promo/spam"| Skip["mark_email_read()<br/>→ Skip"]
-    Decision -->|"uncertain"| Notify["notify_user()<br/>→ User email"]
+    Decision -->|"uncertain"| Notify["log_decision() + mark_email_read()"]
 
     Insert --> Dedup["check_duplicate()<br/>→ Dedup Journal"]
     Dedup -->|"not duplicate"| AB_API["Actual Budget<br/>REST API"]
@@ -331,9 +329,9 @@ An LLM-powered agent that monitors a dedicated Email burner inbox via IMAP IDLE.
 | US-7 | Notification for Ambiguous Emails | Unknown currency, missing amount, unmatched account → SMTP notification, email left unread |
 | US-8 | Idempotent Processing | Emails marked `\Seen` only after successful insert; safe to restart at any time |
 
-### 5.4 The 21 LLM Tools
+### 5.4 The 20 LLM Tools
 
-The LLM is given 21 function definitions (OpenAI-compatible JSON schema). It chooses which tools to call and in what order:
+The LLM is given 20 function definitions (OpenAI-compatible JSON schema). It chooses which tools to call and in what order:
 
 | # | Tool | Type | Description |
 |---|---|---|---|
@@ -345,19 +343,17 @@ The LLM is given 21 function definitions (OpenAI-compatible JSON schema). It cho
 | 6 | `insert_transaction` | Write | POST transaction to Actual Budget |
 | 7 | `check_duplicate` | Read | SHA-256 lookup in SQLite dedup journal |
 | 8 | `mark_email_read` | Write | Set IMAP `\Seen` flag |
-| 9 | `notify_user` | Write | Send notification via gateway webhook (cooldown: 1h) |
-| 10 | `log_decision` | Write | Structured JSON log entry |
-| 11 | `search_memory` | Read | Semantic search over learned facts in MEMORY.md |
-| 12 | `learn_fact` | Write | Append fact to MEMORY.md with cosine-similarity dedup (≥0.95) |
-| 13 | `list_facts` | Read | Return all learned facts |
-| 14 | `update_fact` | Write | Replace a fact by substring match; clears notification cooldown |
-| 15 | `delete_fact` | Write | Remove facts by substring match; clears notification cooldown |
-| 16 | `reconcile_transaction` | Write | Mark AB transaction as cleared against statement |
-| 17 | `budget_extract_email_content` | Pre-processing | Extract & clean text from email via plugin typed tool |
-| 18 | `budget_mark_email_read` | Write | Set IMAP `\Seen` flag via plugin typed tool |
-| 19 | `budget_notify_user` | Write | Send notification via plugin typed tool (cooldown: 1h) |
-| 20 | `budget_log_decision` | Write | Structured JSON log entry via plugin typed tool |
-| 21 | `budget_check_statement_duplicate` | Read | Check statement journal for duplicate (account, period) |
+| 9 | `log_decision` | Write | Structured JSON log entry |
+| 10 | `search_memory` | Read | Semantic search over learned facts in MEMORY.md |
+| 11 | `learn_fact` | Write | Append fact to MEMORY.md with cosine-similarity dedup (≥0.95) |
+| 12 | `list_facts` | Read | Return all learned facts |
+| 13 | `update_fact` | Write | Replace a fact by substring match |
+| 14 | `delete_fact` | Write | Remove facts by substring match |
+| 15 | `reconcile_transaction` | Write | Mark AB transaction as cleared against statement |
+| 16 | `budget_extract_email_content` | Pre-processing | Extract & clean text from email via plugin typed tool |
+| 17 | `budget_mark_email_read` | Write | Set IMAP `\Seen` flag via plugin typed tool |
+| 18 | `budget_log_decision` | Write | Structured JSON log entry via plugin typed tool |
+| 19 | `budget_check_statement_duplicate` | Read | Check statement journal for duplicate (account, period) |
 
 ### 5.5 Agent Orchestration (Mermaid Sequence)
 
@@ -410,11 +406,9 @@ sequenceDiagram
             Orch->>Tools: mark_email_read()
             IMAP->>DB: recordProcessed(uid)
         else Uncertain / Error
-            Orch->>Tools: notify_user(message)
-            Tools->>GW: POST /api/notify
-            GW-->>Tools: 200 OK
-            Orch->>Tools: log_decision("notified")
-            Note over IMAP: UID NOT recorded — retry next cycle
+            Orch->>Tools: log_decision("skipped")
+            Orch->>Tools: mark_email_read()
+            Note over IMAP: UID recorded — processed silently
         end
     end
 ```
@@ -478,9 +472,7 @@ The expense tracker learns from every processed email using a local semantic mem
 
 **File Safety**: `_rewriteFile()` writes to `.tmp` then `renameSync()` (atomic on Linux). If rename fails, temp file is cleaned up and error re-thrown.
 
-**User Feedback**: Gateway routes Telegram corrections ("X should be Y") to `update-fact`/`delete-fact`. Corrections clear the notification cooldown so pending emails re-process immediately.
-
-**Notification Cooldown**: Ambiguous emails trigger `notify_user()` once per hour per msg_id. Set cleared on any fact correction — unread emails re-process on next IDLE cycle.
+**User Feedback**: Gateway routes Telegram corrections ("X should be Y") to `update-fact`/`delete-fact`.
 
 ### 5.11 Implementation Status
 
@@ -959,13 +951,11 @@ flowchart TD
     ORCH --> DECISION{"LLM final decision?"}
     
     DECISION -->|"Confident"| CHECK["check_duplicate() then insert_transaction()"]
-    CHECK --> MARK["mark_email_read() + dedup.record()"]
-    MARK --> NOTIFY["notify_user() via gateway webhook"]
+    CHECK --> MARK["mark_email_read() + log_decision() + dedup.record()"]
     
     DECISION -->|"Not a transaction"| SKIPLOG["log_decision(skipped) + mark_email_read()"]
     
-    DECISION -->|"Uncertain/Error"| NOTIFY2["notify_user() via gateway webhook"]
-    NOTIFY2 --> UNREAD["Email left unread — UID NOT recorded → retry next cycle"]
+    DECISION -->|"Uncertain/Error"| UNCERTAIN["log_decision() + mark_email_read()"]
 ```
 
 ### 7.2 Email Lifecycle States
@@ -980,15 +970,15 @@ stateDiagram-v2
     Classified --> Processing: classifyEmail returns "transaction"
     Processing --> Processed: LLM confident → insert + mark Seen + record UID
     Processing --> Processed_Skip2: LLM identifies as non-transactional → mark Seen + record UID
-    Processing --> Failed: LLM uncertain / API error → notify_user (UID NOT recorded)
+    Processing --> Failed: LLM uncertain / API error → log_decision + mark_email_read
     Processed_Skip --> [*]
     Processed_Skip2 --> [*]
-    Failed --> New: On next IMAP cycle: email still unread → retry
+    Failed --> [*]
     Processed --> [*]
     Skipped --> [*]
 
     note right of Skipped: Zero LLM calls (IMAP-level pre-check)
-    note right of Failed: Email left unseen — retried
+    note right of Failed: Handled silently — no user notification
 ```
 
 ---

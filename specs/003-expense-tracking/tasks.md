@@ -230,7 +230,7 @@ Phase 3: Integration & Deploy
   - Each tool is an `async def` function with typed parameters
   - `execute_tool(name, arguments) -> dict` dispatcher
   - `get_tool_schemas() -> list[dict]` returns OpenAI-compatible function definitions
-  - All 10 tools implemented:
+  - All 9 tools implemented:
     1. `extract_email_content(include_headers: bool = True) -> str`
     2. `fetch_accounts(budget_id: str) -> list[dict]`
     3. `fetch_categories(budget_id: str) -> list[dict]`
@@ -239,16 +239,16 @@ Phase 3: Integration & Deploy
     6. `insert_transaction(budget_id, account_id, date, amount_cents, imported_description, category_id=None, notes="") -> dict`
     7. `check_duplicate(date, amount_cents, account_id, merchant) -> bool`
     8. `mark_email_read() -> bool`
-    9. `notify_user(subject, body) -> bool`
-    10. `log_decision(action, reasoning, transaction_id=None) -> bool`
+    9. `log_decision(action, reasoning, transaction_id=None) -> bool`
 - [x] Tools that need the current email context receive it via a closure or context object
 - [x] Write `tests/test_tools.py`:
-  - Test: tool registry returns exactly 10 schemas
+  - Test: tool registry returns exactly 9 schemas
   - Test: execute_tool dispatches correctly by name
   - Test: insert_transaction calls ActualBudgetClient.create_transaction with correct args
-  - Test: notify_user calls EmailNotifier.send with passed subject/body
+  - Test: mark_email_read calls IMAP handler correctly
+  - Test: log_decision writes to structured log correctly
 
-**Validation:** `pytest tests/test_tools.py -v` passes all 4 tests.
+**Validation:** `pytest tests/test_tools.py -v` passes all 5 tests.
 
 ---
 
@@ -265,7 +265,7 @@ Phase 3: Integration & Deploy
   - `FEW_SHOT_EXAMPLES` list: 2-3 example conversations showing:
     1. **Happy path:** DBS SGD alert → fetch accounts/categories → match → insert → mark read
     2. **MYR path:** TNG eWallet MYR alert → detect MYR → fetch MYR budget → match → insert
-    3. **Uncertain path:** Unknown currency → notify_user
+    3. **Uncertain path:** Unknown currency → log_decision("skipped", "unsupported currency") + mark_email_read()
   - Each example is a list of `{"role": "user"|"assistant"|"tool", "content": ...}` messages
   - Developer note: update budget IDs in examples to match your actual MYR budget ID
 - [x] No unit tests (content validation is manual review)
@@ -288,7 +288,7 @@ Phase 3: Integration & Deploy
       2. Build conversation: system prompt + few-shot examples + current email
       3. Call DeepSeek with tool definitions
       4. Loop: if LLM returns tool_calls → execute tools → feed results back → repeat (max 5 iterations)
-      5. LLM makes final decision → return `{"action": "inserted"|"skipped"|"notified", "details": ...}`
+      5. LLM makes final decision → return `{"action": "inserted"|"skipped"|"error", "details": ...}`
     - `_build_messages(email_content) -> list[dict]`: assembles full message list
     - `_execute_tool_calls(tool_calls) -> list[dict]`: executes all requested tools, returns results
     - Guardrail: max 5 tool-call iterations per email (prevents infinite loops)
@@ -297,7 +297,7 @@ Phase 3: Integration & Deploy
 - [x] Write `tests/test_agent_orchestrator.py`:
   - Test: happy path — mock DeepSeek returns tool_calls for fetch → check → insert → mark_read
   - Test: skipped — mock DeepSeek identifies promotional email → calls mark_read only
-  - Test: notified — mock DeepSeek detects unknown currency → calls notify_user
+  - Test: notified — mock DeepSeek detects unknown currency → calls log_decision + mark_email_read, no insert
   - Test: max iterations exceeded → returns error, logs warning
   - Test: dedup journal check returns True → LLM is told duplicate exists → skips insert
 
@@ -388,7 +388,7 @@ Phase 3: Integration & Deploy
 - [x] Write `tests/test_integration.py`:
   - Test: full pipeline — idle callback → process_email → insert → mark_read (all mocks)
   - Test: promo email → process_email → mark_read, no insert
-  - Test: ambiguous currency → process_email → notify_user, email left unread
+  - Test: ambiguous currency → process_email → log_decision + mark_email_read, no insert
   - Test: duplicate detection — same email processed twice → second call skips insert
   - Test: API failure → retry → eventual success
 
@@ -455,7 +455,7 @@ Run after T0.1–T0.4:
 ### Checkpoint Bravo: Tools Complete
 Run after T1.1–T1.5:
 - [x] `pytest tests/test_actual_client.py tests/test_extractors.py tests/test_imap_handler.py tests/test_notifier.py tests/test_tools.py -v` — all tests pass
-- [x] `python -c "from src.agent.tools import ToolRegistry; r = ToolRegistry(...); assert len(r.get_tool_schemas()) == 10"`
+- [x] `python -c "from src.agent.tools import ToolRegistry; r = ToolRegistry(...); assert len(r.get_tool_schemas()) == 9"`
 
 ### Checkpoint Charlie: Agent Complete
 Run after T2.1–T2.3:

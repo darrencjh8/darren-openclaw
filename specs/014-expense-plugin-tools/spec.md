@@ -33,24 +33,24 @@ All tool names use a `budget_` prefix. This gives the LLM an immediate domain si
 **Acceptance Scenarios**:
 
 1. **Given** the expense-tracker plugin is loaded, **When** the agent needs to fetch accounts, **Then** it calls the `budget_fetch_accounts` tool with structured parameters, not `exec curl`.
-2. **Given** any of the 21 tools is invoked, **When** the tool executes, **Then** the HTTP call to `expense-tracker:8080` succeeds and the result is returned to the agent.
+2. **Given** any of the 20 tools is invoked, **When** the tool executes, **Then** the HTTP call to `expense-tracker:8080` succeeds and the result is returned to the agent.
 3. **Given** the agent previously hallucinated `| jq '.'` on curl commands, **When** the plugin tools are used, **Then** no shell pipe, flag, or syntax errors occur because no shell is involved.
 
 ---
 
-### US-2: All 21 Expense-Tracker Tools Are Available (Priority: P1)
+### US-2: All 20 Expense-Tracker Tools Are Available (Priority: P1)
 
 **As the** Gateway agent,
-**I want** all 21 expense-tracker REST endpoints exposed as typed plugin tools,
+**I want** all 20 expense-tracker REST endpoints exposed as typed plugin tools,
 **So that** every tool the SKILL.md references is callable without `exec curl`.
 
-**Why this priority**: Partial migration leaves some tools still on `exec curl`, creating a split brain where some calls work and others fail. All 21 must be migrated together.
+**Why this priority**: Partial migration leaves some tools still on `exec curl`, creating a split brain where some calls work and others fail. All 20 must be migrated together.
 
-**Independent Test**: Verify via `openclaw plugins inspect expense-tracker-tools --runtime --json` that all 21 tool names are listed under `toolNames`.
+**Independent Test**: Verify via `openclaw plugins inspect expense-tracker-tools --runtime --json` that all 20 tool names are listed under `toolNames`.
 
 **Acceptance Scenarios**:
 
-1. **Given** the plugin is loaded, **When** the agent lists available tools, **Then** all 21 budget-prefixed tools appear: `budget_fetch_accounts`, `budget_fetch_categories`, `budget_fetch_payees`, `budget_fetch_recent_transactions`, `budget_insert_transaction`, `budget_check_duplicate`, `budget_search_memory`, `budget_learn_fact`, `budget_list_facts`, `budget_update_fact`, `budget_delete_fact`, `budget_extract_pdf_text`, `budget_extract_email_content`, `budget_mark_email_read`, `budget_notify_user`, `budget_log_decision`, `budget_reconcile_transaction`, `budget_fetch_unreconciled`, `budget_record_statement`, `budget_fetch_statement_history`, `budget_check_statement_duplicate`.
+1. **Given** the plugin is loaded, **When** the agent lists available tools, **Then** all 20 budget-prefixed tools appear: `budget_fetch_accounts`, `budget_fetch_categories`, `budget_fetch_payees`, `budget_fetch_recent_transactions`, `budget_insert_transaction`, `budget_check_duplicate`, `budget_search_memory`, `budget_learn_fact`, `budget_list_facts`, `budget_update_fact`, `budget_delete_fact`, `budget_extract_pdf_text`, `budget_extract_email_content`, `budget_mark_email_read`, `budget_log_decision`, `budget_reconcile_transaction`, `budget_fetch_unreconciled`, `budget_record_statement`, `budget_fetch_statement_history`, `budget_check_statement_duplicate`.
 2. **Given** the plugin is loaded, **When** each tool is called with valid parameters, **Then** it makes the correct POST request to `http://expense-tracker:8080/tools/<name>` with the JSON body matching the tool's parameter schema.
 
 **Tool Name to HTTP Endpoint Mapping** (shortened names where different):
@@ -71,7 +71,6 @@ All tool names use a `budget_` prefix. This gives the LLM an immediate domain si
 | `budget_extract_pdf_text` | `/tools/extract-pdf-text` |
 | `budget_extract_email_content` | `/tools/extract-email-content` |
 | `budget_mark_email_read` | `/tools/mark-email-read` |
-| `budget_notify_user` | `/tools/notify-user` |
 | `budget_log_decision` | `/tools/log-decision` |
 | `budget_reconcile_transaction` | `/tools/reconcile-transaction` |
 | `budget_fetch_unreconciled` | `/tools/fetch-unreconciled-transactions` |
@@ -89,7 +88,7 @@ All tool names use a `budget_` prefix. This gives the LLM an immediate domain si
 
 **Why this priority**: Without persistence, every rebuild would require manual re-installation. P2 because the immediate fix works without persistence, but long-term operation requires it.
 
-**Independent Test**: Run `docker compose down && docker compose up --build`. Verify the plugin loads and all 21 tools are available without manual intervention.
+**Independent Test**: Run `docker compose down && docker compose up --build`. Verify the plugin loads and all 20 tools are available without manual intervention.
 
 **Acceptance Scenarios**:
 
@@ -146,7 +145,7 @@ All tool names use a `budget_` prefix. This gives the LLM an immediate domain si
 
 ### Functional Requirements
 
-- **FR-001**: The plugin MUST register all 21 expense-tracker REST endpoints as typed OpenClaw tools, each with a TypeBox parameter schema matching the existing API contract. All tool names MUST use the `budget_` prefix (e.g., `budget_fetch_accounts`) for LLM disambiguation. The prefix establishes a naming convention that future skill plugins (portfolio-tracker, image-gen) should follow.
+- **FR-001**: The plugin MUST register all 20 expense-tracker REST endpoints as typed OpenClaw tools, each with a TypeBox parameter schema matching the existing API contract. All tool names MUST use the `budget_` prefix (e.g., `budget_fetch_accounts`) for LLM disambiguation. The prefix establishes a naming convention that future skill plugins (portfolio-tracker, image-gen) should follow.
 - **FR-002**: Each tool MUST make a POST request to `http://expense-tracker:8080/tools/<hyphenated-name>` with a JSON body containing the tool parameters. The full tool-name-to-endpoint mapping is specified in US-2.
 - **FR-003**: The plugin MUST be bind-mounted into the gateway container at a fixed path (e.g., `/home/node/plugins/expense-tracker-tools/`) so it survives container rebuilds.
 - **FR-004**: The plugin MUST be enabled via the following `openclaw.json` configuration and loaded on Gateway startup:
@@ -162,15 +161,15 @@ All tool names use a `budget_` prefix. This gives the LLM an immediate domain si
 - **FR-005**: The SKILL.md MUST be updated to remove all `exec curl` instructions and replace them with typed tool invocation guidance.
 - **FR-006**: The SKILL.md MUST instruct the agent to call independent tools in parallel (e.g., `budget_fetch_accounts` + `budget_fetch_payees` + `budget_fetch_categories` together).
 - **FR-007**: The `exec-approvals.json` allowlist MUST retain the `pdftotext` and `qpdf` entries (used for PDF decryption and local text extraction — not expense-tracker API calls). The `curl` entry MAY be retained for non-expense-tracker use but the SKILL.md MUST NOT reference it.
-- **FR-008**: `design.md` MUST be updated: (a) section 5.4 tool count from 16 to 21, (b) section 5A.4 new tools table MUST include `check_statement_duplicate`, (c) architecture diagrams MUST show the Gateway agent calling plugin tools (typed functions) rather than `exec curl`.
+- **FR-008**: `design.md` MUST be updated: (a) section 5.4 tool count from 16 to 20, (b) section 5A.4 new tools table MUST include `check_statement_duplicate`, (c) architecture diagrams MUST show the Gateway agent calling plugin tools (typed functions) rather than `exec curl`.
 - **FR-009**: `specs/001-gateway-baseline/spec.md` MUST be updated to reference the expense-tracker plugin in its skills architecture section.
 - **FR-010**: The plugin source code MUST live at `gateway/plugins/expense-tracker-tools/` and be version-controlled in the repository.
 - **FR-011**: Each tool's HTTP call MUST use the original endpoint name (e.g., `budget_fetch_accounts` -> `/tools/fetch-accounts`), independent of the OpenClaw tool name. Shortened OpenClaw names (e.g., `budget_fetch_unreconciled`) MUST map to the full hyphenated endpoint name (`/tools/fetch-unreconciled-transactions`).
 
 ### Key Entities
 
-- **Plugin manifest** (`openclaw.plugin.json`): Declares the plugin identity (`expense-tracker-tools`), contracts (`tools: [...]` listing all 21 tool names), and activation (`onStartup: true`).
-- **Plugin entry point** (`index.js`): Registers all 21 tools via `api.registerTool()`, each with a TypeBox parameter schema and an `execute` handler that makes an HTTP POST to the expense-tracker.
+- **Plugin manifest** (`openclaw.plugin.json`): Declares the plugin identity (`expense-tracker-tools`), contracts (`tools: [...]` listing all 20 tool names), and activation (`onStartup: true`).
+- **Plugin entry point** (`index.js`): Registers all 20 tools via `api.registerTool()`, each with a TypeBox parameter schema and an `execute` handler that makes an HTTP POST to the expense-tracker.
 - **Tool schema**: Each registered tool has a `name`, `description`, `parameters` (TypeBox Object), and `execute` function. The Gateway agent sees these as structured function definitions in its tool catalog.
 - **Bind mount**: A Docker volume mount in `docker-compose.yml` that maps `./plugins/expense-tracker-tools/` (host) to a path inside the gateway container, ensuring the plugin source persists across rebuilds.
 - **SKILL.md**: The markdown instruction file at `gateway/workspace/skills/expense-tracker/SKILL.md` that teaches the Gateway agent how to use the expense-tracker tools.
@@ -181,10 +180,10 @@ All tool names use a `budget_` prefix. This gives the LLM an immediate domain si
 
 ### Measurable Outcomes
 
-- **SC-001**: All 21 tools appear in `openclaw plugins inspect expense-tracker-tools --runtime --json` output with status `loaded`.
-- **SC-002**: The Gateway agent completes an expense-tracking flow (email -> classify -> fetch accounts/payees/categories -> check duplicate -> insert -> notify) without any `exec` tool invocations — confirmed by gateway logs showing zero `exec.approval.*` events for expense-tracker operations.
+- **SC-001**: All 20 tools appear in `openclaw plugins inspect expense-tracker-tools --runtime --json` output with status `loaded`.
+- **SC-002**: The Gateway agent completes an expense-tracking flow (email -> classify -> fetch accounts/payees/categories -> check duplicate -> insert) without any `exec` tool invocations — confirmed by gateway logs showing zero `exec.approval.*` events for expense-tracker operations.
 - **SC-003**: Zero `exec curl` failures related to expense-tracker in gateway logs after migration (previously: 102+ `exec.approval.waitDecision` events in one incident).
-- **SC-004**: `docker compose down && docker compose up --build` results in the plugin loading successfully with all 21 tools available, without manual `openclaw plugins install` commands.
+- **SC-004**: `docker compose down && docker compose up --build` results in the plugin loading successfully with all 20 tools available, without manual `openclaw plugins install` commands.
 - **SC-005**: The SKILL.md contains zero references to `curl`, `exec`, or shell commands.
 - **SC-006**: A developer reading `design.md` can understand the tool invocation flow (Gateway agent -> plugin tool -> HTTP -> expense-tracker) without encountering `exec curl`.
 

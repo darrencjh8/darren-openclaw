@@ -47,7 +47,6 @@ ALL dates MUST be `YYYY-MM-DD`. Always compute the actual date — never use a h
 | `budget_check_duplicate` | `{"date":"YYYY-MM-DD","amount_cents":-800,"account_id":"...","payee_name":"Food"}` |
 | `budget_insert_transaction` | `{"date":"YYYY-MM-DD","amount_cents":-800,"account_id":"...","imported_description":"Food","budget_id":"...","category_id":"...","notes":"..."}` |
 | `budget_log_decision` | `{"action":"inserted","reasoning":"..."}` |
-| `budget_notify_user` | `{"message":"..."}` |
 
 ### Memory & Learning
 
@@ -106,16 +105,15 @@ pipeline. A statement is **authoritative** — it represents the bank's final re
      2. Check email body for password patterns ("password is X", "your NRIC is X")
      3. Ask user: "This PDF is password-protected. What's the password?"
    - After user provides password → save it: `budget_learn_fact "DBS Yuu statement password is 850101015555"` so it's auto-retrieved next time
-   - If all sources fail → notify user, mark email read, stop
-3. Call `budget_fetch_statement_history` — if already processed, stop and notify user
+   - If all sources fail → tell user, mark email read, stop
+3. Call `budget_fetch_statement_history` — if already processed, stop and tell user
 4. Call `budget_fetch_accounts` to match the statement's account
 5. Call `budget_fetch_unreconciled` for the statement period
 6. For each line item, fuzzy-match against uncleared transactions:
    - **Match found** → call `budget_reconcile_transaction` (marks as cleared in AB)
    - **No match** → call `budget_check_statement_duplicate`, then `budget_insert_transaction` with `cleared: false` and notes: `"OUTLIER | Statement May 2026"`
 7. Call `budget_record_statement` with matched/outlier counts
-8. Call `budget_notify_user` with summary: X reconciled, Y outliers
-9. Call `budget_mark_email_read` (email path only)
+8. Call `budget_mark_email_read` (email path only)
 
 Always use `deepseek-v4-pro` model for statement processing (not flash).
 

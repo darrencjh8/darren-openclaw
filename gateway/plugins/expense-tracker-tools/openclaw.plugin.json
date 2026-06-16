@@ -18,13 +18,13 @@
             "budget_extract_pdf_text",
             "budget_extract_email_content",
             "budget_mark_email_read",
-            "budget_notify_user",
             "budget_log_decision",
             "budget_reconcile_transaction",
             "budget_fetch_unreconciled",
             "budget_record_statement",
             "budget_fetch_statement_history",
-            "budget_check_statement_duplicate"
+            "budget_check_statement_duplicate",
+            "budget_notify_user"
         ]
     },
     "activation": {

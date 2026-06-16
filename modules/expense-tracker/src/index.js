@@ -130,7 +130,6 @@ async function main() {
         "record_statement",
         "fetch_statement_history",
         "mark_email_read",
-        "notify_user",
         "log_decision",
         "extract_email_content",
         "check_statement_duplicate",

@@ -13,27 +13,29 @@ import {
 import { join } from "path";
 import { tmpdir } from "os";
 
-// Mock @xenova/transformers before importing MemoryStore
-vi.mock("@xenova/transformers", () => {
-    // Deterministic char-bigram embeddings for testing
-    function bigramEmbed(text, dim = 8) {
-        const emb = new Float32Array(dim);
-        for (let i = 0; i < text.length - 1; i++) {
-            const bigram = text.charCodeAt(i) * 256 + text.charCodeAt(i + 1);
-            emb[Math.abs(bigram) % dim] += 0.1;
-        }
-        return emb;
-    }
-
-    return {
-        pipeline: vi.fn().mockResolvedValue(async (text) => ({
-            data: bigramEmbed(text),
-            dims: [1, 1, 8],
-        })),
-    };
-});
-
 import { MemoryStore } from "../src/memory.js";
+
+// Deterministic char-bigram embeddings for testing
+function bigramEmbed(text, dim = 8) {
+    const emb = new Float32Array(dim);
+    for (let i = 0; i < text.length - 1; i++) {
+        const bigram = text.charCodeAt(i) * 256 + text.charCodeAt(i + 1);
+        emb[Math.abs(bigram) % dim] += 0.1;
+    }
+    return emb;
+}
+
+// Mock _loadModel on the prototype to bypass the real ONNX model download.
+// vi.mock cannot reliably intercept the dynamic import("@xenova/transformers")
+// inside _loadModel(), which would otherwise download ~80 MB and take 2+ min.
+const origLoadModel = MemoryStore.prototype._loadModel;
+MemoryStore.prototype._loadModel = function () {
+    this._modelPromise = Promise.resolve(true);
+    this._model = async (text) => ({
+        data: bigramEmbed(text),
+        dims: [1, 1, 8],
+    });
+};
 
 function tempFile(suffix, content) {
     const path = join(

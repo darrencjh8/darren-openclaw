@@ -57,11 +57,6 @@ describe("Config", () => {
         expect(config.logLevel).toBe("DEBUG");
     });
 
-    it("uses default gateway URL", () => {
-        const config = new Config(requiredEnv);
-        expect(config.openclawGatewayUrl).toBe("http://openclaw:18800");
-    });
-
     it("all fields populated with custom values", () => {
         const config = new Config({
             DEEPSEEK_API_KEY: "sk-test-123",
@@ -84,6 +79,11 @@ describe("Config", () => {
         expect(config.dedupDbPath).toBe("/tmp/dedup.db");
         expect(config.memoryPath).toBe("/tmp/memory.md");
         expect(config.logLevel).toBe("DEBUG");
+    });
+
+    it("uses default gateway URL", () => {
+        const config = new Config(requiredEnv);
+        expect(config.openclawGatewayUrl).toBe("http://openclaw:18800");
     });
 
     it("loads .env file from path", () => {

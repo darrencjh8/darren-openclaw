@@ -484,15 +484,6 @@ const TOOLS = [
         schema: { type: "object", properties: {} },
     },
     {
-        name: "notify_user",
-        description: "Send a notification to the user via the gateway.",
-        schema: {
-            type: "object",
-            properties: { message: { type: "string" } },
-            required: ["message"],
-        },
-    },
-    {
         name: "log_decision",
         description: "Log the final decision for this email.",
         schema: {
@@ -500,7 +491,7 @@ const TOOLS = [
             properties: {
                 action: {
                     type: "string",
-                    enum: ["inserted", "skipped", "notified", "error"],
+                    enum: ["inserted", "skipped", "error"],
                 },
                 reasoning: { type: "string" },
                 transaction_id: { type: "string", default: "" },

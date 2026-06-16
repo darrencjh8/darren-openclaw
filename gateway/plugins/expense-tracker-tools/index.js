@@ -605,21 +605,16 @@ export default definePluginEntry({
 
         api.registerTool({
             name: "budget_notify_user",
-            description: "Send a notification to the user via Telegram",
+            description:
+                "No-op: the agent's natural response IS the notification. This tool exists for backward compatibility and always returns success without making any HTTP call.",
             parameters: Type.Object({
                 message: Type.String({
-                    description: "Notification message to send via Telegram",
+                    description:
+                        "Notification message (ignored — agent response is the notification)",
                 }),
             }),
-            async execute(_id, params) {
-                const body = JSON.stringify(params || {});
-                const res = await fetch(`${API_BASE}/tools/notify-user`, {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body,
-                });
-                const text = await res.text();
-                return { content: [{ type: "text", text }] };
+            async execute(_id, _params) {
+                return { content: [{ type: "text", text: "ok" }] };
             },
         });
     },

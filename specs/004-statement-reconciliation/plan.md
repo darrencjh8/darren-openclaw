@@ -65,7 +65,7 @@ StatementProcessor.processStatement() — model: deepseek-chat, thinking=adaptiv
     ├── Turn 1: Extract metadata + transactions
     │   tool_calls: [extract_email_content, fetch_statement_history]
     │     fetch_statement_history → NOT FOUND → proceed
-    │     (if FOUND → notify duplicate → mark_read → stop)
+    │     (if FOUND → log duplicate → mark_read → stop)
     │     (if PDF_ENCRYPTED → search_memory for password → retry extract)
     │
     ├── Turn 2: Fetch account + uncleared AB txns for matching
@@ -88,16 +88,15 @@ StatementProcessor.processStatement() — model: deepseek-chat, thinking=adaptiv
     │   │
     │   │  (LLM may batch: multiple tool_calls in one turn for independent items)
     │
-    └── Final turn: record + notify + mark_read
-        tool_calls: [record_statement(...), notify_user(...), mark_email_read()]
+    └── Final turn: record + mark_read
+        tool_calls: [record_statement(...), mark_email_read()]
           → INSERT statement.db
-          → Telegram notification via gateway hook: "✅ X reconciled, ⚠️ Y outliers: [list]"
+          → Agent's natural response IS the notification (summary visible in chat)
           → IMAP \Seen flag
 
 On failure (any step):
-    → notify_user("Failed: [error]")
-    → mark_email_read()
     → log error
+    → mark_email_read()
 ```
 
 ---
@@ -121,7 +120,7 @@ On failure (any step):
 
 ---
 
-## 5. New Tools (5 statement tools, 21 total)
+## 5. New Tools (5 statement tools, 20 total)
 
 | # | Tool | Pipeline | Schema |
 |---|---|---|---|
@@ -131,7 +130,7 @@ On failure (any step):
 | 15 | `fetch_statement_history` | Statement | `account_id: str, period_start: str, period_end: str` → `dict | null` |
 | 16 | `check_statement_duplicate` | Statement | `date: str, amount_cents: int, account_id: str` → `bool` |
 
-Existing 16 alert tools are **unchanged** and shared by both pipelines.
+Existing 15 alert tools are **unchanged** and shared by both pipelines.
 
 > **Note**: `check_statement_duplicate` differs from `check_duplicate` — it ignores payee name
 > (statements may use different merchant names than alerts). See tasks.md T4.6 for potential consolidation.
@@ -239,8 +238,8 @@ Core rules:
    a. Call fuzzy_match to find candidate matches
    b. MATCH → reconcile_transaction(ab_txn_id, "Statement [period]")
    c. OUTLIER → check_statement_duplicate → insert_transaction with notes="OUTLIER | Statement [period]"
-6. After ALL items → record_statement + notify_user + mark_email_read
-7. On any failure → notify_user + mark_email_read
+6. After ALL items → record_statement + mark_email_read
+7. On any failure → mark_email_read
 
 **Password recovery** (Phase 4):
 - If extract_email_content returns `[PDF_ENCRYPTED]` → search_memory for "statement password"

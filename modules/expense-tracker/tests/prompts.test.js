@@ -51,6 +51,15 @@ describe("getSystemPrompt", () => {
     it("injects USER_NAME from env", () => {
         expect(prompt).toContain("You communicate with there via Telegram");
     });
+
+    it("does not reference notify_user (LLM uses silent handling)", () => {
+        expect(prompt).not.toContain("notify_user");
+    });
+
+    it("instructs silent processing via log_decision + mark_email_read", () => {
+        expect(prompt).toContain("no notification calls");
+        expect(prompt).toContain("process emails silently");
+    });
 });
 
 describe("getFewShotExamples", () => {

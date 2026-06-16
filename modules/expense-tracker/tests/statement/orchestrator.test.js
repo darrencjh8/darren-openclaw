@@ -522,9 +522,9 @@ describe("STATEMENT_PROMPT", () => {
         expect(prompt).toContain("outlier");
     });
 
-    it("contains notification rules", () => {
+    it("contains response guidelines", () => {
         const prompt = STATEMENT_PROMPT.toLowerCase();
-        expect(prompt).toContain("notify_user");
+        expect(prompt).toContain("response guidelines");
         expect(prompt).toContain("mark_email_read");
     });
 

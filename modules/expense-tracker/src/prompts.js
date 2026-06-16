@@ -32,10 +32,13 @@ RULES (constraints — what NOT to do):
  2. Both payee_name AND category_id are required for insert_transaction().
     If you CAN match both → insert normally.
     If you CANNOT match a payee → fallback to "Misc", insert WITHOUT
-    category_id, then notify_user() explaining the fallback.
-    If you CANNOT match an account → notify_user(), DO NOT insert.
- 3. Currency not SGD or MYR → notify_user(), DO NOT insert.
- 4. Cannot extract amount → notify_user(), DO NOT insert.
+    category_id, then log_decision("inserted", "fallback payee Misc").
+    If you CANNOT match an account → log_decision("skipped", "cannot match account"),
+    mark_email_read(), stop.
+ 3. Currency not SGD or MYR → log_decision("skipped", "unsupported currency"),
+    mark_email_read(), stop.
+ 4. Cannot extract amount → log_decision("skipped", "cannot extract amount"),
+    mark_email_read(), stop.
  5. Always call fetch_accounts() + fetch_categories() + fetch_payees()
     in parallel (live AB data). This is separate from search_memory()
     (learned facts) — you need BOTH.
@@ -48,8 +51,8 @@ RULES (constraints — what NOT to do):
        portfolio report, no amount) →
        log_decision("skipped"), mark_email_read(), stop. No notify.
     b. UNSURE (might be a transaction but can't extract details) →
-       notify_user() explaining the ambiguity. DO NOT mark as read.
-       DO NOT ask again about the same email within 1 hour.
+       log_decision("skipped", "ambiguous email — cannot extract details"),
+       mark_email_read(), stop.
     c. CONFIRMED transaction → proceed to WORKFLOW.
 10. Duplicate detected (check_duplicate returns True) →
     log_decision("skipped", "duplicate"), mark_email_read(), stop. No notify.
@@ -58,11 +61,10 @@ RULES (constraints — what NOT to do):
     - Confirmed non-transactional (per Rule 9a)
     - Duplicate detected (per Rule 10)
     NEVER mark as read in any other case.
-12. After EVERY successful insert → notify_user() with a friendly,
-    one-sentence message acknowledging the email. Use emojis occasionally.
-    Example: "Just caught a DBS Yuu alert — S$12.80 at Toast Box. Logged! 🍜"
-13. After EVERY ambiguous/error case → notify_user() explaining what
-    went wrong in plain English.
+12. The Gateway orchestrator agent handles all user communication.
+    Your job is to process emails silently — no notification calls.
+13. After EVERY ambiguous/error case → log_decision("skipped", reason),
+    mark_email_read(), stop.
 14. After EVERY successful insert → call learn_fact() THREE times:
     - Account: what type (debit card, credit card, bank)
     - Payee: merchant keyword → payee name
@@ -76,7 +78,7 @@ ACCOUNT MATCHING:
 - Credit cards: names with Card, Cashback, Platinum, Revolution,
   Altitude, Journeys, Ladies, Evol, Absolute, Reward, Visa
 - Use search_memory() FIRST — learned facts override heuristics.
-- If still no match after memory + heuristics → notify_user(), stop.
+- If still no match after memory + heuristics → log_decision("skipped", "cannot match account"), mark_email_read(), stop.
 
 PAYEE MATCHING:
   hawker, food, restaurant, cafe, kitchen, eatery, dining, kopitiam → Food
@@ -88,7 +90,7 @@ PAYEE MATCHING:
   shopping, clothes, mall, retail → Shopping
   doctor, medical, pharmacy, clinic, watson, guardian → Healthcare
 - Only use payee NAMES from fetch_payees().
-- No keyword match + no memory fact → "Misc" (still insert, notify).
+- No keyword match + no memory fact → "Misc" (still insert).
 
 CATEGORY MATCHING:
 - Payee name → category name → UUID from fetch_categories().
@@ -112,7 +114,7 @@ USER CORRECTIONS (via Telegram → Gateway):
 WORKFLOW (follow in EXACT order):
  1. Classify the email per Rule 9.
     - Non-transactional? → mark read, log, stop.
-    - Unsure? → notify, stop (cooldown handles re-asks).
+    - Unsure? → log_decision("skipped", "ambiguous"), mark_email_read(), stop.
     - Confirmed transaction? → continue.
  2. search_memory() — learned facts for sender, merchant, card.
  3. Identify: currency, amount, merchant, date, card vs account number.
@@ -124,9 +126,8 @@ WORKFLOW (follow in EXACT order):
  9. insert_transaction(account_id, date, amount_cents,
     imported_description=PAYEE, category_id=UUID).
 10. mark_email_read().
-11. notify_user() — friendly message.
-12. learn_fact() × 3 — account, payee, category.
-13. log_decision("inserted").
+11. learn_fact() × 3 — account, payee, category.
+12. log_decision("inserted").
 `;
 }
 
@@ -258,7 +259,7 @@ export function getFewShotExamples() {
             { role: "tool", tool_call_id: "call_6", content: "true" },
             {
                 role: "assistant",
-                content: "Done. Learning facts and notifying.",
+                content: "Done. Learning facts and logging.",
                 tool_calls: [
                     {
                         id: "call_7",
@@ -290,15 +291,6 @@ export function getFewShotExamples() {
                         id: "call_10",
                         type: "function",
                         function: {
-                            name: "notify_user",
-                            arguments:
-                                '{"message": "Just caught a DBS Yuu alert — S$12.80 at Toast Box. Logged! 🍜"}',
-                        },
-                    },
-                    {
-                        id: "call_11",
-                        type: "function",
-                        function: {
                             name: "log_decision",
                             arguments:
                                 '{"action": "inserted", "reasoning": "S$12.80 Toast Box → Food, DBS Yuu"}',
@@ -310,7 +302,6 @@ export function getFewShotExamples() {
             { role: "tool", tool_call_id: "call_8", content: "true" },
             { role: "tool", tool_call_id: "call_9", content: "true" },
             { role: "tool", tool_call_id: "call_10", content: "true" },
-            { role: "tool", tool_call_id: "call_11", content: "true" },
         ],
         // Example 2: Skip promotional
         [
@@ -353,25 +344,21 @@ export function getFewShotExamples() {
             {
                 role: "assistant",
                 content:
-                    "Classifying per Rule 9b: unsure — currency is THB (not SGD or MYR). Per Rule 3, notify and stop. NOT marking as read.",
+                    "Classifying per Rule 9b: unsure — currency is THB (not SGD or MYR). Per Rule 3, log and skip. Marking as read.",
                 tool_calls: [
                     {
                         id: "call_1",
                         type: "function",
                         function: {
-                            name: "notify_user",
+                            name: "log_decision",
                             arguments:
-                                '{"message": "Got THB 500 at Bangkok Cafe — only SGD and MYR supported. Skipping this one."}',
+                                '{"action": "skipped", "reasoning": "Unknown currency THB — unsupported"}',
                         },
                     },
                     {
                         id: "call_2",
                         type: "function",
-                        function: {
-                            name: "log_decision",
-                            arguments:
-                                '{"action": "notified", "reasoning": "Unknown currency THB"}',
-                        },
+                        function: { name: "mark_email_read", arguments: "{}" },
                     },
                 ],
             },

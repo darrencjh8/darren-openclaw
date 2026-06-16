@@ -44,8 +44,8 @@
 │  │  └──────────────────┘    │  4. LLM returns tool_call │  │  │
 │  │                          │  5. Execute tool(s)       │  │  │
 │  │                          │  6. Feed results back     │  │  │
-│  │                          │  7. LLM makes final call  │  │  │
-│  │                          │     (insert or notify)    │  │  │
+│  │                          │  7. LLM makes final call  │  │
+│  │                          │     (insert or skip)      │  │  │
 │  │                          └──────────┬───────────────┘  │  │
 │  │                                     │                   │  │
 │  │  ┌──────────────────────────────────┼────────────────┐  │  │
@@ -68,13 +68,10 @@
 │  │  │  │ check_duplicate() → utils/dedup.py          │   │  │  │
 │  │  │  └─────────────────────────────────────────────┘   │  │  │
 │  │  │  ┌─────────────────────────────────────────────┐   │  │  │
-│  │  │  │ mark_email_read() → imap/idle_handler.py    │   │  │  │
+│  │  │  mark_email_read() → imap/idle_handler.py    │   │  │
 │  │  │  └─────────────────────────────────────────────┘   │  │  │
 │  │  │  ┌─────────────────────────────────────────────┐   │  │  │
-│  │  │  │ notify_user() → notifier/email_notifier.py  │   │  │  │
-│  │  │  └─────────────────────────────────────────────┘   │  │  │
-│  │  │  ┌─────────────────────────────────────────────┐   │  │  │
-│  │  │  │ log_decision() → utils/logging.py           │   │  │  │
+│  │  │  │  log_decision() → utils/logging.py           │   │  │  │
 │  │  │  └─────────────────────────────────────────────┘   │  │  │
 │  │  └──────────────────────────────────────────────────┘  │  │
 │  └────────────────────────────────────────────────────────┘  │
@@ -132,7 +129,7 @@ LLM makes final decision:
     ├── HAPPY PATH: insert_transaction(account_id, amount, category, date, description)
     │   └── mark_email_read() ← only mark read on successful insert
     ├── SKIP: log_decision("not a transaction") ← leave unread (re-process on restart)
-    └── NOTIFY: notify_user(reason, email_content) ← leave unread (manual review)
+    └── SKIP: log_decision("skipped", reason) + mark_email_read() ← silently handled
     │
     ▼
 On successful insert: mark_email_read() + log_decision("inserted")
@@ -260,31 +257,15 @@ On successful insert: mark_email_read() + log_decision("inserted")
 }
 ```
 
-### 4.8 `notify_user`
-```json
-{
-  "name": "notify_user",
-  "description": "Send a notification email to the user's main inbox. Use this when the LLM cannot confidently process an email.",
-  "parameters": {
-    "type": "object",
-    "properties": {
-      "subject": {"type": "string", "description": "Notification subject"},
-      "body": {"type": "string", "description": "Detailed explanation of the issue and the original email content for reference"}
-    },
-    "required": ["subject", "body"]
-  }
-}
-```
-
-### 4.9 `log_decision`
+### 4.8 `log_decision`
 ```json
 {
   "name": "log_decision",
-  "description": "Log the final decision for this email (inserted, skipped, notified) with reasoning.",
+  "description": "Log the final decision for this email (inserted, skipped, error) with reasoning.",
   "parameters": {
     "type": "object",
     "properties": {
-      "action": {"type": "string", "enum": ["inserted", "skipped", "notified", "error"]},
+      "action": {"type": "string", "enum": ["inserted", "skipped", "error"]},
       "reasoning": {"type": "string"},
       "transaction_id": {"type": "string", "description": "Actual Budget transaction ID if inserted"}
     },
@@ -293,7 +274,7 @@ On successful insert: mark_email_read() + log_decision("inserted")
 }
 ```
 
-### 4.10 `get_budget_ids`
+### 4.9 `get_budget_ids`
 ```json
 {
   "name": "get_budget_ids",
@@ -315,10 +296,9 @@ process receipt and transaction alert emails forwarded to a burner inbox.
 RULES (non-negotiable):
 1. NEVER insert a transaction unless you are confident in ALL of: amount, 
    currency, date, merchant, and account.
-2. If currency is not SGD or MYR → call notify_user(), do NOT insert.
-3. If you cannot extract an amount → call notify_user(), do NOT insert.
-4. If you cannot match an account → call notify_user() with the list of 
-   available accounts, do NOT insert.
+2. If currency is not SGD or MYR → call log_decision("skipped", "unsupported currency") + mark_email_read(), do NOT insert.
+3. If you cannot extract an amount → call log_decision("skipped", "cannot extract amount") + mark_email_read(), do NOT insert.
+4. If you cannot match an account → call log_decision("skipped", "cannot match account") + mark_email_read(), do NOT insert.
 5. Always call fetch_accounts() and fetch_categories() before matching.
 6. Always call check_duplicate() before insert_transaction().
 7. Categories are optional — if uncertain, leave category_id as null.
@@ -326,7 +306,7 @@ RULES (non-negotiable):
 9. The user's Actual Budget date format is DD/MM/YYYY. Convert all dates to 
    YYYY-MM-DD before calling insert_transaction().
 10. If the email is a promotional message, bank statement summary, or 
-    anything NOT a single transaction → log_decision("skipped"). Do NOT mark as read.
+    anything NOT a single transaction → log_decision("skipped"), mark_email_read(), stop.
 11. Only call mark_email_read() after a successful insert_transaction().
 12. Always explain your reasoning in the response before making tool calls.
 13. After all actions are complete, call log_decision() with the final outcome.
@@ -334,7 +314,7 @@ RULES (non-negotiable):
 WORKFLOW:
 1. extract_email_content()
 2. Identify: currency, amount, merchant, date, potential account
-3. If any required field is ambiguous → notify_user()
+3. If any required field is ambiguous → log_decision("skipped", reason) + mark_email_read()
 4. Determine which budget (SGD → $BUDGET_FILE, MYR → $MYR_BUDGET_FILE)
 5. fetch_accounts(budget_id)
 6. Match account by name similarity
@@ -622,9 +602,9 @@ darren-openclaw/
 
 | Risk | Likelihood | Mitigation |
 |---|---|---|
-| DeepSeek API downtime | Low | 3 retries with backoff; on failure, leave email unread + notify user |
+| DeepSeek API downtime | Low | 3 retries with backoff; on failure, leave email unread + log error |
 | IMAP IDLE connection drops | Medium | Auto-reconnect with catch-up fetch of unread emails |
 | Actual Budget API schema change | Low | Version-locked in Actual Budget; check release notes |
-| LLM hallucinates transaction data | Medium | Guardrails in system prompt; check_duplicate catches repeats; notify_user on uncertainty |
+| LLM hallucinates transaction data | Medium | Guardrails in system prompt; check_duplicate catches repeats; log_decision + mark_email_read on uncertainty |
 | blocks automated IMAP access | Low | Use app-specific password; OAuth2 fallback available |
 | 256MB RAM insufficient for Tesseract OCR | Medium | Make PDF/OCR optional; can process PDFs as plain text attachment fallback |

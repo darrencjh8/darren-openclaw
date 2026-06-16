@@ -44,7 +44,7 @@ Incoming emails are pre-classified by a lightweight LLM call into one of three c
 - [ ] The LLM extracts: amount, currency (SGD/MYR/other), merchant name, transaction date, and source account hints
 - [ ] The LLM handles all common Singapore/Malaysia formats: DBS alerts, OCBC alerts, UOB alerts, Grab receipts, Shopee receipts, TNG eWallet alerts, Maybank alerts, generic forwarded receipts
 - [ ] No bank-specific parser code exists in the Python layer
-- [ ] If the LLM cannot confidently extract required fields, it calls `notify_user` instead of guessing
+- [ ] If the LLM cannot confidently extract required fields, it calls `log_decision("skipped", reason)` + `mark_email_read()` and stops
 
 ---
 
@@ -58,7 +58,7 @@ Incoming emails are pre-classified by a lightweight LLM call into one of three c
 - [ ] The LLM detects currency from the email content (explicit: "RM", "MYR", "SGD", "S$"; contextual: Malaysian merchants, Singaporean merchants)
 - [ ] SGD transactions are routed to the `Test-SGD-Budget` budget
 - [ ] MYR transactions are routed to the corresponding MYR budget
-- [ ] If currency is ambiguous or neither SGD nor MYR, the LLM calls `notify_user` and skips insertion
+- [ ] If currency is ambiguous or neither SGD nor MYR, the LLM calls `log_decision("skipped", "unsupported currency")` + `mark_email_read()` and stops
 - [ ] The `notes` field on the Actual Budget transaction records the detected currency for audit
 
 ---
@@ -72,7 +72,7 @@ Incoming emails are pre-classified by a lightweight LLM call into one of three c
 **Acceptance Criteria:**
 - [ ] The LLM calls `fetch_accounts` before matching any transaction
 - [ ] Account matching is by name similarity (e.g., "DBS Yuu" in email → "DBS Yuu" in Actual Budget)
-- [ ] If no clear account match exists, the LLM calls `notify_user` with available accounts listed
+- [ ] If no clear account match exists, the LLM calls `log_decision("skipped", "cannot match account")` + `mark_email_read()` and stops
 - [ ] No hardcoded account UUIDs or names exist in config or code
 
 ---
@@ -106,19 +106,19 @@ Incoming emails are pre-classified by a lightweight LLM call into one of three c
 
 ---
 
-### US-7: Notification for Ambiguous Emails
+### US-7: Silent Handling for Ambiguous Emails
 
 **As a** user who wants a clean Actual Budget ledger,  
-**I want** OpenClaw to notify me when it cannot confidently process an email,  
-**So that** I can manually review rather than having bad data silently inserted.
+**I want** OpenClaw to silently skip and log when it cannot confidently process an email,  
+**So that** I can review the logs later rather than being interrupted with notifications.
 
 **Acceptance Criteria:**
-- [ ] If the LLM detects unknown currency (not SGD, not MYR) → notification, no insert
-- [ ] If the LLM cannot extract an amount → notification, no insert
-- [ ] If the LLM cannot match an account → notification with available accounts listed, no insert
-- [ ] If the LLM detects an actual error (API failure, network issue) → notification with error details
-- [ ] Notifications are sent to the user's main email via SMTP
-- [ ] The original email is left unread so the user can manually review it
+- [ ] If the LLM detects unknown currency (not SGD, not MYR) → silent skip with log_decision + mark_email_read
+- [ ] If the LLM cannot extract an amount → silent skip with log_decision + mark_email_read
+- [ ] If the LLM cannot match an account → silent skip with log_decision + mark_email_read
+- [ ] If the LLM detects an actual error (API failure, network issue) → silent skip with log_decision("error", details) + mark_email_read
+- [ ] All skips and decisions are logged in the structured JSON-line log for later review
+- [ ] The original email is marked as read so it is not re-processed
 
 ---
 
@@ -160,10 +160,10 @@ Incoming emails are pre-classified by a lightweight LLM call into one of three c
 
 | Scenario | Expected Behavior |
 |---|---|
-| Email with PDF receipt attachment | PDF → OCR via Tesseract → text sent to LLM. If OCR fails, notify user |
-| Email with both SGD and MYR amounts | LLM detects ambiguity → notify user |
-| Email from unknown sender | LLM attempts generic extraction. If confident, proceeds. If not, notifies user |
-| Actual Budget API is down | Retry 3x with exponential backoff (1s, 2s, 4s). If all fail, leave email unread, notify user |
+| Email with PDF receipt attachment | PDF → OCR via Tesseract → text sent to LLM. If OCR fails, silently log and mark read |
+| Email with both SGD and MYR amounts | LLM detects ambiguity → silently log and mark read |
+| Email from unknown sender | LLM attempts generic extraction. If confident, proceeds. If not, silently logs and marks read |
+| Actual Budget API is down | Retry 3x with exponential backoff (1s, 2s, 4s). If all fail, leave email unread, silently log error |
 | DeepSeek API is down | Same retry strategy as above |
 | Email body is base64-encoded | Extractors handle MIME decoding before LLM receives content |
 | Email is a bank promo/ad (not a transaction) | LLM identifies it as non-transactional → skip, mark read, no insert |

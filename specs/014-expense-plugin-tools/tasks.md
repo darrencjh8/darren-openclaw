@@ -24,7 +24,7 @@
 
 ## Phase 2: Foundational (Blocking Prerequisites)
 
-**Purpose**: Prove the plugin loads and a single tool works before scaling to 21 tools
+**Purpose**: Prove the plugin loads and a single tool works before scaling to 20 tools
 
 **⚠️ CRITICAL**: No user story work beyond the first tool can begin until this phase is complete
 
@@ -33,21 +33,21 @@
 - [x] T008 Implement `budget_fetch_accounts` tool in `gateway/plugins/expense-tracker-tools/index.js` — `api.registerTool()` with TypeBox schema and fetch handler
 - [x] T009 Verify T006 and T007 pass (first tool working, pattern proven)
 
-**Checkpoint**: Single tool pattern proven. Ready to scale to all 21 tools.
+**Checkpoint**: Single tool pattern proven. Ready to scale to all 20 tools.
 
 ---
 
-## Phase 3: User Story 1 + 2 — Agent Calls Typed Tools / All 21 Tools Available (Priority: P1) 🎯 MVP
+## Phase 3: User Story 1 + 2 — Agent Calls Typed Tools / All 20 Tools Available (Priority: P1) 🎯 MVP
 
-**Goal**: All 21 expense-tracker REST endpoints exposed as `budget_`-prefixed typed tools. Agent calls them without `exec curl`.
+**Goal**: All 20 expense-tracker REST endpoints exposed as `budget_`-prefixed typed tools. Agent calls them without `exec curl`.
 
-**Independent Test**: `openclaw plugins inspect expense-tracker-tools --runtime --json` shows all 21 tools with status `loaded`. Agent on Telegram calls `budget_fetch_accounts` and receives account list.
+**Independent Test**: `openclaw plugins inspect expense-tracker-tools --runtime --json` shows all 20 tools with status `loaded`. Agent on Telegram calls `budget_fetch_accounts` and receives account list.
 
 ### Tests for US1+US2 (TDD — write first, confirm failure)
 
 - [x] T010 [P] [US1] Write failing tests for Budget & Transactions tools (6 tools) in `gateway/plugins/expense-tracker-tools/tests/tools.test.js` — verify each tool name, required params, HTTP endpoint
 - [x] T011 [P] [US1] Write failing tests for Memory & Learning tools (5 tools) in `gateway/plugins/expense-tracker-tools/tests/tools.test.js`
-- [x] T012 [P] [US1] Write failing tests for Document tools (4 tools) in `gateway/plugins/expense-tracker-tools/tests/tools.test.js`
+- [x] T012 [P] [US1] Write failing tests for Document tools (3 tools) in `gateway/plugins/expense-tracker-tools/tests/tools.test.js`
 - [x] T013 [P] [US1] Write failing tests for Statement tools (5 tools) in `gateway/plugins/expense-tracker-tools/tests/tools.test.js`
 - [x] T014 [P] [US1] Write failing test for Audit tool (`budget_log_decision`) in `gateway/plugins/expense-tracker-tools/tests/tools.test.js`
 - [x] T015 [US1] Run all tests and confirm they fail with `Cannot find module` or similar (tools not registered yet)
@@ -56,13 +56,13 @@
 
 - [x] T016 [US2] Implement Budget & Transactions tools (6 tools) in `gateway/plugins/expense-tracker-tools/index.js`
 - [x] T017 [US2] Implement Memory & Learning tools (5 tools) in `gateway/plugins/expense-tracker-tools/index.js` (depends on T016 — same file, append after T016 block)
-- [x] T018 [US2] Implement Document tools (4 tools) in `gateway/plugins/expense-tracker-tools/index.js` (depends on T017 — same file, append after T017 block)
+- [x] T018 [US2] Implement Document tools (3 tools) in `gateway/plugins/expense-tracker-tools/index.js` (depends on T017 — same file, append after T017 block)
 - [x] T019 [US2] Implement Statement tools (5 tools) in `gateway/plugins/expense-tracker-tools/index.js` (depends on T018 — same file, append after T018 block)
 - [x] T020 [US2] Implement Audit tool (`budget_log_decision`) in `gateway/plugins/expense-tracker-tools/index.js` (depends on T019 — same file, append after T019 block)
-- [x] T021 [US2] Update plugin manifest `contracts.tools` to list all 21 tool names in `gateway/plugins/expense-tracker-tools/openclaw.plugin.json`
-- [x] T022 [US1] Run all tests and confirm they pass (all 21 tools registered with correct schemas and endpoints)
+- [x] T021 [US2] Update plugin manifest `contracts.tools` to list all 20 tool names in `gateway/plugins/expense-tracker-tools/openclaw.plugin.json`
+- [x] T022 [US1] Run all tests and confirm they pass (all 20 tools registered with correct schemas and endpoints)
 
-**Checkpoint**: All 21 tools registered, all tests passing. Plugin ready for production deployment.
+**Checkpoint**: All 20 tools registered, all tests passing. Plugin ready for production deployment.
 
 ---
 
@@ -70,14 +70,14 @@
 
 **Goal**: Plugin source bind-mounted and enabled in config so it loads on every gateway start without re-installation.
 
-**Independent Test**: `docker compose down && docker compose up --build` — plugin loads with all 21 tools without running `openclaw plugins install`.
+**Independent Test**: `docker compose down && docker compose up --build` — plugin loads with all 20 tools without running `openclaw plugins install`.
 
 ### Implementation for US3
 
 - [x] T023 [US3] Add plugin bind-mount volume to openclaw service in `gateway/docker-compose.yml` (`./plugins/expense-tracker-tools:/home/node/plugins/expense-tracker-tools:ro`)
 - [x] T024 [US3] Add `plugins.entries.expense-tracker-tools.enabled: true` to `gateway/openclaw.json`
 - [ ] T025 [US3] Run one-time `openclaw plugins install /home/node/plugins/expense-tracker-tools --force` in gateway container
-- [ ] T026 [US3] Verify plugin status: `openclaw plugins inspect expense-tracker-tools --runtime --json` shows `status: loaded` and all 21 `budget_*` tools
+- [ ] T026 [US3] Verify plugin status: `openclaw plugins inspect expense-tracker-tools --runtime --json` shows `status: loaded` and all 20 `budget_*` tools
 - [ ] T027 [US3] Verify rebuild persistence: `docker compose down && docker compose up -d --build`, confirm plugin loads without re-installation
 
 **Checkpoint**: Plugin survives rebuilds. Source version-controlled and bind-mounted.
@@ -189,14 +189,14 @@ Task: "T014 Write failing test for Audit tool"
 
 1. Complete Phase 1: Setup (T001-T005)
 2. Complete Phase 2: Foundational (T006-T009) — single tool pattern proven
-3. Complete Phase 3: US1+US2 (T010-T022) — all 21 tools working
+3. Complete Phase 3: US1+US2 (T010-T022) — all 20 tools working
 4. **STOP and VALIDATE**: Verify via `openclaw plugins inspect`, test on Telegram
 5. Deploy to production
 
 ### Incremental Delivery
 
 1. Setup + Foundational → Single tool proven
-2. Add US1+US2 → All 21 tools available → Deploy (MVP!)
+2. Add US1+US2 → All 20 tools available → Deploy (MVP!)
 3. Add US3 → Plugin survives rebuilds → Deploy
 4. Add US4 → SKILL.md updated → Deploy
 5. Add US5 → Documentation updated

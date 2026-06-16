@@ -26,6 +26,35 @@ describe("ToolRegistry", () => {
         expect(names).toContain("insert_transaction");
     });
 
+    it("does not expose notify_user in LLM tool schemas", () => {
+        const cfg = new Config(testEnv);
+        const registry = new ToolRegistry(cfg);
+        const schemas = registry.getToolSchemas();
+        const names = schemas.map((s) => s.function.name);
+        expect(names).not.toContain("notify_user");
+    });
+
+    it("_handle_notify_user handler exists for internal use (statement processor)", async () => {
+        const { vi } = await import("vitest");
+        const cfg = new Config({
+            ...testEnv,
+            OPENCLAW_GATEWAY_URL: "http://gateway:9999",
+        });
+        const registry = new ToolRegistry(cfg);
+        // Mock fetch so the handler can execute without network
+        const origFetch = global.fetch;
+        global.fetch = vi.fn().mockResolvedValue({ ok: true });
+        try {
+            const result = await registry.executeTool("notify_user", {
+                message: "test",
+            });
+            // Handler exists and executes successfully
+            expect(result).toBe(true);
+        } finally {
+            global.fetch = origFetch;
+        }
+    });
+
     it("extract_pdf_text schema includes optional password field", () => {
         const cfg = new Config(testEnv);
         const registry = new ToolRegistry(cfg);

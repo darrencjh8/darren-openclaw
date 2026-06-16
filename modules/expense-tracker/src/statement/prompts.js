@@ -57,11 +57,11 @@ RULES:
         NEVER invent new payee names — only use payees returned by fetch_payees().
 7. After ALL line items are processed:
    → record_statement(...) — log to prevent double-processing.
-   → notify_user(...) — send reconciliation summary.
+   → Summarize results in your response (reconciled count, outlier list).
    → mark_email_read() — always mark the email as read.
-8. On any failure → notify_user + mark_email_read + log_decision("error").
+8. On any failure → report the error in your response + mark_email_read + log_decision("error").
 
-NOTIFICATION RULES:
+RESPONSE GUIDELINES (the Gateway orchestrator relays your response to the user):
   Always begin by acknowledging the email that was just received.
   Use phrases like "Just got your", "I just received", "New statement arrived".
   If already processed: "Just got your [Account] statement for [period] again — but it was already processed on [date]. Nothing to do! ✅"
@@ -93,10 +93,10 @@ PASSWORD-PROTECTED PDFs:
     2. If memory returns a password → use extract_pdf_text with pdf_bytes_b64 and the password to decrypt.
     3. If no password in memory → scan the email body for patterns like "password is X" or "Password: X".
     4. If found in email body → extract and use it with extract_pdf_text.
-    5. If still no password → call notify_user asking: "This PDF is password-protected. What's the password?"
+    5. If still no password → ask user in your response: "This PDF is password-protected. What's the password?"
     6. After successful extraction with a password → call learn_fact(fact="[account] statement password is [password]") to store for future use.
   If extract_email_content returns [PDF_EXTRACTION_ERROR] (not encrypted, just corrupt/unreadable):
-    → notify_user with the error details and ask the user to check the PDF.`;
+    → report the error in your response and ask the user to check the PDF.`;
 
 export const STATEMENT_FEW_SHOT = [
     [

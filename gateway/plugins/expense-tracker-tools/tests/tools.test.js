@@ -901,19 +901,18 @@ describe("Phase 3 — Memory & Document Tools", () => {
         expect(tool.parameters.properties.message).toBeDefined();
     });
 
-    it("T027b: budget_notify_user makes POST to /tools/notify-user", async () => {
+    it("T027b: budget_notify_user returns ok without making any HTTP call (no-op)", async () => {
         setupFetch();
         const tool = findTool("budget_notify_user");
 
-        await tool.execute("test-id", {
+        const result = await tool.execute("test-id", {
             message: "Your statement is ready",
         });
 
-        const [url, options] = mockFetch.mock.calls[0];
-        expect(url).toBe("http://expense-tracker:8080/tools/notify-user");
-        expect(options.method).toBe("POST");
-        expect(options.headers["Content-Type"]).toBe("application/json");
-        expect(postBody()).toEqual({ message: "Your statement is ready" });
+        // Must not make any HTTP request
+        expect(mockFetch).not.toHaveBeenCalled();
+        // Must return success
+        expect(result.content[0].text).toBe("ok");
     });
 });
 
