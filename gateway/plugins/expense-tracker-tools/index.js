@@ -622,5 +622,83 @@ export default definePluginEntry({
                 return { content: [{ type: "text", text }] };
             },
         });
+
+        api.registerTool({
+            name: "budget_resolve_merchant",
+            description:
+                "Resolve a raw merchant name to a canonical payee using memory, keywords, or web search.",
+            parameters: Type.Object({
+                merchant: Type.String({
+                    description: "Raw merchant name from transaction",
+                }),
+                budget_id: Type.Optional(
+                    Type.String({
+                        description:
+                            "Budget file name (e.g. 'Darren SGD', 'Darren MYR')",
+                    }),
+                ),
+            }),
+            async execute(_id, params) {
+                const body = JSON.stringify(params || {});
+                const res = await fetch(`${API_BASE}/tools/resolve-merchant`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body,
+                });
+                const text = await res.text();
+                return { content: [{ type: "text", text }] };
+            },
+        });
+
+        api.registerTool({
+            name: "budget_update_transaction",
+            description:
+                "Update an existing transaction's fields. At least one field must be provided. Payee and category are validated against live lists.",
+            parameters: Type.Object({
+                id: Type.String({
+                    description: "Transaction UUID from Actual Budget",
+                }),
+                budget_id: Type.Optional(
+                    Type.String({ description: "Budget file name" }),
+                ),
+                payee_name: Type.Optional(
+                    Type.String({
+                        description:
+                            "New payee name (rejected if not in payee list)",
+                    }),
+                ),
+                notes: Type.Optional(
+                    Type.String({ description: "Updated notes" }),
+                ),
+                amount: Type.Optional(
+                    Type.Number({ description: "Updated amount in cents" }),
+                ),
+                date: Type.Optional(
+                    Type.String({ description: "Updated date YYYY-MM-DD" }),
+                ),
+                category_id: Type.Optional(
+                    Type.String({
+                        description:
+                            "Updated category UUID (rejected if not in category list)",
+                    }),
+                ),
+                account_id: Type.Optional(
+                    Type.String({ description: "Updated account UUID" }),
+                ),
+            }),
+            async execute(_id, params) {
+                const body = JSON.stringify(params || {});
+                const res = await fetch(
+                    `${API_BASE}/tools/update-transaction`,
+                    {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body,
+                    },
+                );
+                const text = await res.text();
+                return { content: [{ type: "text", text }] };
+            },
+        });
     },
 });

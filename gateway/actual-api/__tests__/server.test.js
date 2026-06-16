@@ -3,6 +3,7 @@ jest.mock("fs", () => ({ mkdirSync: jest.fn() }));
 const mockApp = {
     get: jest.fn(),
     post: jest.fn(),
+    patch: jest.fn(),
     delete: jest.fn(),
     use: jest.fn(),
     listen: jest.fn(),
@@ -365,6 +366,75 @@ describe("Route handlers", () => {
         expect(res.json).toHaveBeenCalledWith({
             status: "deleted",
             id: "del-1",
+        });
+    });
+
+    describe("PATCH /transactions/:id", () => {
+        it("passes partial fields to actual.updateTransaction", async () => {
+            const handler = findHandler("patch", "/transactions/:id");
+            const req = mockReq({
+                params: { id: "txn-5" },
+                body: { payee: "Food", notes: "test" },
+            });
+            const res = mockRes();
+
+            await handler(req, res);
+
+            expect(actual.updateTransaction).toHaveBeenCalledWith("txn-5", {
+                payee: "Food",
+                notes: "test",
+            });
+        });
+
+        it("returns { status: 'updated', id } on success", async () => {
+            const handler = findHandler("patch", "/transactions/:id");
+            const req = mockReq({
+                params: { id: "txn-6" },
+                body: { payee: "Coffee" },
+            });
+            const res = mockRes();
+
+            await handler(req, res);
+
+            expect(res.json).toHaveBeenCalledWith({
+                status: "updated",
+                id: "txn-6",
+            });
+        });
+
+        it("returns 400 when body has no updatable fields", async () => {
+            const handler = findHandler("patch", "/transactions/:id");
+            const req = mockReq({
+                params: { id: "txn-7" },
+                body: {},
+            });
+            const res = mockRes();
+
+            await handler(req, res);
+
+            expect(res.status).toHaveBeenCalledWith(400);
+            expect(res.json).toHaveBeenCalledWith({
+                error: "No fields to update",
+            });
+        });
+
+        it("returns 500 on API error", async () => {
+            actual.updateTransaction.mockRejectedValue(
+                new Error("Update failed"),
+            );
+            const handler = findHandler("patch", "/transactions/:id");
+            const req = mockReq({
+                params: { id: "txn-8" },
+                body: { notes: "boom" },
+            });
+            const res = mockRes();
+
+            await handler(req, res);
+
+            expect(res.status).toHaveBeenCalledWith(500);
+            expect(res.json).toHaveBeenCalledWith({
+                error: "Update failed",
+            });
         });
     });
 });

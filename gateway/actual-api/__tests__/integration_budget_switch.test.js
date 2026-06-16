@@ -60,6 +60,7 @@ jest.mock("express", () => {
     const app = {
         get: jest.fn(),
         post: jest.fn(),
+        patch: jest.fn(),
         delete: jest.fn(),
         use: jest.fn(),
         listen: jest.fn((_port, _host, cb) => {

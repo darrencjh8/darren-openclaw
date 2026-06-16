@@ -44,6 +44,8 @@ export class ImapIdleHandler {
             secure: true,
             auth: { user: this._username, pass: this._password },
             logger: false,
+            maxIdleTime: 300000,
+            disableAutoIdle: true,
         });
         await this._client.connect();
         await this._client.mailboxOpen(this._mailbox);

@@ -48,6 +48,8 @@ ALL dates MUST be `YYYY-MM-DD`. Always compute the actual date — never use a h
 | `budget_insert_transaction` | `{"date":"YYYY-MM-DD","amount_cents":-800,"account_id":"...","imported_description":"Food","budget_id":"...","category_id":"...","notes":"..."}` |
 | `budget_log_decision` | `{"action":"inserted","reasoning":"..."}` |
 | `budget_notify_user` | `{"message":"..."}` |
+| `budget_resolve_merchant` | `{"merchant":"TOAST BOX","budget_id?":"..."}` → `{"payee":"Food","source":"keyword"}` — resolves raw merchant to canonical payee using memory → keywords → web search |
+| `budget_update_transaction` | `{"id":"...","payee_name?":"Food","notes?":"...","amount?":-1280,"date?":"...","category_id?":"...","account_id?":"..."}` — update a transaction's fields. Payee and category are validated. |
 
 ### Memory & Learning
 
@@ -62,13 +64,13 @@ ALL dates MUST be `YYYY-MM-DD`. Always compute the actual date — never use a h
 ## Workflow
 
 1. Extract: amount, currency (default SGD), date, account name, description
-2. Call `budget_search_memory` for learned facts about the sender, card, merchant
-3. Call `budget_fetch_accounts` + `budget_fetch_payees` in parallel
-4. Match account by name substring; match payee by keyword (see below)
+2. Call `budget_resolve_merchant(merchant)` to get the canonical payee. This tool handles memory lookup, keyword matching, and web search internally.
+3. Call `budget_fetch_accounts` + `budget_fetch_categories` in parallel (fetch_payees is optional — payee validation is internal)
+4. Match account by name substring
 5. Call `budget_check_duplicate`
 6. Confirm: "I'll log S$X.XX as [Payee] under [Account]. OK?"
 7. If yes → `budget_insert_transaction` with `account_id`, `date`, `amount_cents`, `imported_description`
-8. After every successful insert → call `budget_learn_fact` 3 times (account type, payee, category)
+8. After every successful insert → call `budget_learn_fact` 2 times (account type, category). Payee learning happens automatically via `budget_resolve_merchant`.
 
 ## Email Classification
 
@@ -123,7 +125,16 @@ Always use `deepseek-v4-pro` model for statement processing (not flash).
 
 CENTS, negative for spending. S$12.80 = -1280.
 
-Payee matching is handled by the expense-tracker's LLM agent. Pass the raw merchant/description and let the agent decide.
+Payee matching is handled by `budget_resolve_merchant` — call it with the raw merchant name and it returns the canonical payee using memory, keywords, or web search.
 
 NEVER create a new payee. Only use payees returned by `budget_fetch_payees`. If no
 keyword matches, fallback to "Misc" or the closest generic payee.
+
+## Correction Workflow
+
+When the user sends a correction (e.g., "no, SGSUPERGREEN-B is Food, not Misc"):
+
+1. `budget_update_fact` to fix the memory fact
+2. `budget_fetch_recent_transactions` to find the misclassified transaction
+3. `budget_update_transaction(id, payee_name="Food")` to fix the transaction
+4. `budget_notify_user` to confirm

@@ -329,6 +329,28 @@ app.post("/transactions/:id/clear", async (req, res) => {
     }
 });
 
+app.patch("/transactions/:id", async (req, res) => {
+    try {
+        await ensureBudget(getBudgetId(req));
+        const fields = {};
+        if (req.body.payee !== undefined) fields.payee = req.body.payee;
+        if (req.body.notes !== undefined) fields.notes = req.body.notes;
+        if (req.body.amount !== undefined) fields.amount = req.body.amount;
+        if (req.body.date !== undefined) fields.date = req.body.date;
+        if (req.body.category !== undefined)
+            fields.category = req.body.category;
+        if (req.body.account !== undefined) fields.account = req.body.account;
+        if (req.body.cleared !== undefined) fields.cleared = req.body.cleared;
+        if (Object.keys(fields).length === 0) {
+            return res.status(400).json({ error: "No fields to update" });
+        }
+        await actual.updateTransaction(req.params.id, fields);
+        res.json({ status: "updated", id: req.params.id });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
 app.listen(PORT, "0.0.0.0", () =>
     console.log(`actual-api listening on :${PORT}`),
 );

@@ -7,6 +7,14 @@
  * so Config.fromEnv() can load .env files first.
  */
 
+import { KEYWORD_TABLE } from "./keywords.js";
+
+function generateKeywordSection() {
+    return Object.entries(KEYWORD_TABLE)
+        .map(([payee, keywords]) => `  ${keywords.join(", ")} → ${payee}`)
+        .join("\n");
+}
+
 /**
  * Build the system prompt from current process.env values.
  * Called lazily so Config.fromEnv() can populate env vars before use.
@@ -36,9 +44,10 @@ RULES (constraints — what NOT to do):
     If you CANNOT match an account → notify_user(), DO NOT insert.
  3. Currency not SGD or MYR → notify_user(), DO NOT insert.
  4. Cannot extract amount → notify_user(), DO NOT insert.
- 5. Always call fetch_accounts() + fetch_categories() + fetch_payees()
-    in parallel (live AB data). This is separate from search_memory()
-    (learned facts) — you need BOTH.
+ Always call fetch_accounts() + fetch_categories()
+     in parallel (live AB data). fetch_payees() is no longer required —
+     resolve_merchant() and insert_transaction() handle payee validation
+     internally.
  6. Always call check_duplicate() before insert_transaction().
  7. Amounts: INTEGER CENTS. S$12.80 = -1280. MYR 45.50 = -4550.
     Negative for spending.
@@ -63,11 +72,11 @@ RULES (constraints — what NOT to do):
     Example: "Just caught a DBS Yuu alert — S$12.80 at Toast Box. Logged! 🍜"
 13. After EVERY ambiguous/error case → notify_user() explaining what
     went wrong in plain English.
-14. After EVERY successful insert → call learn_fact() THREE times:
+14. After EVERY successful insert → call learn_fact() TWO times:
     - Account: what type (debit card, credit card, bank)
-    - Payee: merchant keyword → payee name
     - Category: payee name → category name
-    This builds the MEMORY.md file for future search_memory() calls.
+    (Payee learning happens automatically via resolve_merchant —
+    no need to learn_fact for payee mapping.)
 
 ACCOUNT MATCHING:
 - "Card ending 1234" → CARD. "Account ending 1234" → BANK.
@@ -76,17 +85,11 @@ ACCOUNT MATCHING:
 - Credit cards: names with Card, Cashback, Platinum, Revolution,
   Altitude, Journeys, Ladies, Evol, Absolute, Reward, Visa
 - Use search_memory() FIRST — learned facts override heuristics.
+- Facts are stored in MEMORY.md and auto-learned by resolve_merchant.
 - If still no match after memory + heuristics → notify_user(), stop.
 
 PAYEE MATCHING:
-  hawker, food, restaurant, cafe, kitchen, eatery, dining, kopitiam → Food
-  petrol, shell, caltex, spc, esso → Transport
-  grocery, ntuc, fairprice, supermarket, cold storage → Groceries
-  grab, taxi, bus, mrt, ride, gojek → Transport
-  water, electric, utility, internet, phone, bill, telco → Utility
-  coffee, starbucks, bubble tea → Coffee
-  shopping, clothes, mall, retail → Shopping
-  doctor, medical, pharmacy, clinic, watson, guardian → Healthcare
+${generateKeywordSection()}
 - Only use payee NAMES from fetch_payees().
 - No keyword match + no memory fact → "Misc" (still insert, notify).
 
@@ -115,18 +118,21 @@ WORKFLOW (follow in EXACT order):
     - Unsure? → notify, stop (cooldown handles re-asks).
     - Confirmed transaction? → continue.
  2. search_memory() — learned facts for sender, merchant, card.
- 3. Identify: currency, amount, merchant, date, card vs account number.
- 4. fetch_accounts + fetch_categories + fetch_payees (parallel).
- 5. Match account (memory first, then heuristics).
- 6. Match payee (keyword table + memory → payee list). Misc if unmatched.
- 7. Match category (payee name → UUID). Skip if Misc.
- 8. check_duplicate(). If True → skip per Rule 10.
- 9. insert_transaction(account_id, date, amount_cents,
+ 3. resolve_merchant(merchant) — get canonical payee. This handles memory
+    lookup, keyword matching, and web search internally.
+ 4. Identify: currency, amount, merchant, date, card vs account number.
+ 5. fetch_accounts + fetch_categories (parallel). fetch_payees is optional —
+     resolve_merchant() and insert_transaction() validate payees internally.
+ 6. Match account (memory first, then heuristics).
+ 7. Match payee: use the payee from resolve_merchant(). Misc if unmatched.
+ 8. Match category (payee name → UUID). Skip if Misc.
+ 9. check_duplicate(). If True → skip per Rule 10.
+10. insert_transaction(account_id, date, amount_cents,
     imported_description=PAYEE, category_id=UUID).
-10. mark_email_read().
-11. notify_user() — friendly message.
-12. learn_fact() × 3 — account, payee, category.
-13. log_decision("inserted").
+11. mark_email_read().
+12. notify_user() — friendly message.
+13. learn_fact() × 2 — account type, category.
+14. log_decision("inserted").
 `;
 }
 
@@ -154,14 +160,22 @@ export function getFewShotExamples() {
             {
                 role: "assistant",
                 content:
-                    "Classifying: confirmed transaction (currency SGD, amount $12.80, merchant Toast Box, date clear). Let me search memory and fetch data.",
+                    "Classifying: confirmed transaction (currency SGD, amount $12.80, merchant Toast Box, date clear). Let me resolve the merchant and fetch data.",
                 tool_calls: [
+                    {
+                        id: "call_resolve",
+                        type: "function",
+                        function: {
+                            name: "resolve_merchant",
+                            arguments: '{"merchant": "Toast Box"}',
+                        },
+                    },
                     {
                         id: "call_search",
                         type: "function",
                         function: {
                             name: "search_memory",
-                            arguments: '{"query": "DBS Yuu Toast Box"}',
+                            arguments: '{"query": "DBS Yuu card account"}',
                         },
                     },
                     {
@@ -180,21 +194,18 @@ export function getFewShotExamples() {
                             arguments: '{"budget_id": "' + sgdBudget + '"}',
                         },
                     },
-                    {
-                        id: "call_3",
-                        type: "function",
-                        function: {
-                            name: "fetch_payees",
-                            arguments: '{"budget_id": "' + sgdBudget + '"}',
-                        },
-                    },
                 ],
+            },
+            {
+                role: "tool",
+                tool_call_id: "call_resolve",
+                content: '{"payee": "Food", "source": "memory"}',
             },
             {
                 role: "tool",
                 tool_call_id: "call_search",
                 content:
-                    '{"results":[{"text":"DBS Yuu is a debit card account","score":0.95},{"text":"Toast Box merchant maps to Food payee","score":0.88}]}',
+                    '{"results":[{"text":"DBS Yuu is a debit card account","score":0.95}]}',
             },
             {
                 role: "tool",
@@ -207,14 +218,9 @@ export function getFewShotExamples() {
                 content: '[{"id": "cat-food", "name": "Food"}]',
             },
             {
-                role: "tool",
-                tool_call_id: "call_3",
-                content: '[{"id": "payee-food", "name": "Food"}]',
-            },
-            {
                 role: "assistant",
                 content:
-                    "Memory confirms: DBS Yuu is debit card, Toast Box → Food. Checking duplicate.",
+                    "Merchant resolved: Toast Box → Food (memory). DBS Yuu is debit card. Checking duplicate.",
                 tool_calls: [
                     {
                         id: "call_4",
@@ -274,20 +280,11 @@ export function getFewShotExamples() {
                         type: "function",
                         function: {
                             name: "learn_fact",
-                            arguments:
-                                '{"fact": "Toast Box merchant maps to Food payee"}',
-                        },
-                    },
-                    {
-                        id: "call_9",
-                        type: "function",
-                        function: {
-                            name: "learn_fact",
                             arguments: '{"fact": "Food maps to Food category"}',
                         },
                     },
                     {
-                        id: "call_10",
+                        id: "call_9",
                         type: "function",
                         function: {
                             name: "notify_user",
@@ -296,7 +293,7 @@ export function getFewShotExamples() {
                         },
                     },
                     {
-                        id: "call_11",
+                        id: "call_10",
                         type: "function",
                         function: {
                             name: "log_decision",
@@ -310,9 +307,40 @@ export function getFewShotExamples() {
             { role: "tool", tool_call_id: "call_8", content: "true" },
             { role: "tool", tool_call_id: "call_9", content: "true" },
             { role: "tool", tool_call_id: "call_10", content: "true" },
-            { role: "tool", tool_call_id: "call_11", content: "true" },
         ],
-        // Example 2: Skip promotional
+        // Example 2: Web-classified merchant
+        [
+            {
+                role: "user",
+                content:
+                    "Process this email:\n\nFrom: alerts@uob.com\nSubject: Transaction Alert\nSGD 10.30 charged to UOB One at SGSUPERGREEN-B PTE LTD on 15/06/2026",
+            },
+            {
+                role: "assistant",
+                content: "Unfamiliar merchant. Let me resolve it.",
+                tool_calls: [
+                    {
+                        id: "call_resolve",
+                        type: "function",
+                        function: {
+                            name: "resolve_merchant",
+                            arguments: '{"merchant": "SGSUPERGREEN-B PTE LTD"}',
+                        },
+                    },
+                ],
+            },
+            {
+                role: "tool",
+                tool_call_id: "call_resolve",
+                content: '{"payee": "Misc", "source": "web"}',
+            },
+            {
+                role: "assistant",
+                content:
+                    "Web search classified SGSUPERGREEN-B as Misc. Proceeding.",
+            },
+        ],
+        // Example 3: Skip promotional
         [
             {
                 role: "user",
