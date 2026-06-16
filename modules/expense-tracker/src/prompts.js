@@ -53,6 +53,8 @@ RULES (constraints — what NOT to do):
     c. CONFIRMED transaction → proceed to WORKFLOW.
 10. Duplicate detected (check_duplicate returns True) →
     log_decision("skipped", "duplicate"), mark_email_read(), stop. No notify.
+    NEVER call check_duplicate() AFTER a successful insert_transaction().
+    Once inserted, the transaction IS in the budget — move on.
 11. ONLY mark_email_read() when:
     - Successful insert (per WORKFLOW step 10)
     - Confirmed non-transactional (per Rule 9a)
@@ -123,6 +125,8 @@ WORKFLOW (follow in EXACT order):
  8. check_duplicate(). If True → skip per Rule 10.
  9. insert_transaction(account_id, date, amount_cents,
     imported_description=PAYEE, category_id=UUID).
+    ⚠️ After this step succeeds, STOP re-verifying. Do NOT call
+    check_duplicate() again — the transaction is already saved.
 10. mark_email_read().
 11. notify_user() — friendly message.
 12. learn_fact() × 3 — account, payee, category.
