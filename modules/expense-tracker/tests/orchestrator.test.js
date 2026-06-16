@@ -37,6 +37,7 @@ describe("AgentOrchestrator", () => {
         const tools = {
             setEmailContext: vi.fn(),
             getToolSchemas: vi.fn(() => []),
+            getLlmToolSchemas: vi.fn(() => []),
             executeTool: vi.fn(),
         };
         const orch = new AgentOrchestrator(config, tools);
@@ -49,6 +50,7 @@ describe("AgentOrchestrator", () => {
         const tools = {
             setEmailContext: vi.fn(),
             getToolSchemas: vi.fn(() => []),
+            getLlmToolSchemas: vi.fn(() => []),
             executeTool: vi.fn(),
         };
         const orch = new AgentOrchestrator(config, tools);
@@ -63,6 +65,7 @@ describe("AgentOrchestrator", () => {
         const tools = {
             setEmailContext: vi.fn(),
             getToolSchemas: vi.fn(() => []),
+            getLlmToolSchemas: vi.fn(() => []),
             executeTool: vi.fn(),
         };
         const orch = new AgentOrchestrator(config, tools);
@@ -78,6 +81,7 @@ describe("AgentOrchestrator", () => {
         const tools = {
             setEmailContext: vi.fn(),
             getToolSchemas: vi.fn(() => []),
+            getLlmToolSchemas: vi.fn(() => []),
             executeTool: vi.fn(),
         };
         const orch = new AgentOrchestrator(config, tools);
@@ -94,17 +98,22 @@ describe("AgentOrchestrator", () => {
         const tools = {
             setEmailContext: vi.fn(),
             getToolSchemas: vi.fn(() => []),
+            getLlmToolSchemas: vi.fn(() => []),
             executeTool: vi.fn(async () => true),
         };
         const orch = new AgentOrchestrator(config, tools);
 
-        // Mock the LLM chat to return a "skipped" response
+        // Mock the LLM to return JSON with action: "skip"
         orch._llm.chat = vi.fn(async () => ({
             choices: [
                 {
                     finish_reason: "stop",
                     message: {
-                        content: "This is a promotional email, skipping.",
+                        content: JSON.stringify({
+                            action: "skip",
+                            reasoning: "Promotional email",
+                            notify_message: "Skipped promo",
+                        }),
                     },
                 },
             ],
@@ -115,14 +124,15 @@ describe("AgentOrchestrator", () => {
 
         const result = await orch.processEmail("test-002", rawEmail);
         expect(result).toBeDefined();
-        expect(result.action).toBe("completed");
+        expect(result.action).toBe("skipped");
     });
 
-    it("returns error on unexpected finish_reason", async () => {
+    it("returns error when LLM returns malformed JSON", async () => {
         const config = makeConfig();
         const tools = {
             setEmailContext: vi.fn(),
             getToolSchemas: vi.fn(() => []),
+            getLlmToolSchemas: vi.fn(() => []),
             executeTool: vi.fn(),
         };
         const orch = new AgentOrchestrator(config, tools);
@@ -130,15 +140,17 @@ describe("AgentOrchestrator", () => {
         orch._llm.chat = vi.fn(async () => ({
             choices: [
                 {
-                    finish_reason: "length",
-                    message: {},
+                    finish_reason: "stop",
+                    message: {
+                        content: "Not JSON, just random text.",
+                    },
                 },
             ],
         }));
 
         const result = await orch.processEmail("test-003", "Some email");
         expect(result.action).toBe("error");
-        expect(result.details).toContain("Unexpected finish_reason");
+        expect(result.details).toContain("Failed to parse");
     });
 
     it("returns error when max tool iterations exceeded", async () => {
@@ -146,6 +158,9 @@ describe("AgentOrchestrator", () => {
         const tools = {
             setEmailContext: vi.fn(),
             getToolSchemas: vi.fn(() => [
+                { function: { name: "search_memory" } },
+            ]),
+            getLlmToolSchemas: vi.fn(() => [
                 { function: { name: "search_memory" } },
             ]),
             executeTool: vi.fn(async () => ({ results: [] })),
@@ -174,7 +189,7 @@ describe("AgentOrchestrator", () => {
 
         const result = await orch.processEmail("test-004", "Email content");
         expect(result.action).toBe("error");
-        expect(result.details).toContain("Max tool iterations exceeded");
+        expect(result.details).toContain("Phase 1 returned no output");
     });
 });
 
