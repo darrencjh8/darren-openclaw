@@ -44,6 +44,7 @@ export class ImapIdleHandler {
             secure: true,
             auth: { user: this._username, pass: this._password },
             logger: false,
+            disableAutoIdle: true,
         });
         await this._client.connect();
         await this._client.mailboxOpen(this._mailbox);
@@ -160,9 +161,74 @@ export class ImapIdleHandler {
                         );
                     }
                 }
-                // Wait for new mail via IDLE, timeout as keepalive
-                await this._client.idle({
-                    timeoutMs: this.IDLE_TIMEOUT * 1000,
+                // Wait for new mail. Per imapflow's official API docs
+                // (https://imapflow.com/docs/api/imapflow-client):
+                // - idle() does NOT accept arguments (timeoutMs was silently ignored)
+                // - maxIdleTime is designed to *restart* IDLE, not return from it
+                // - The proper pattern is to listen for the 'exists' event and
+                //   break IDLE by calling another command (e.g. noop()).
+                //
+                // We start IDLE for real-time push, and use a keepalive noop()
+                // to break out periodically (every IDLE_TIMEOUT seconds) so the
+                // loop can call fetchUnread() and detect any missed messages.
+                await new Promise((resolve, reject) => {
+                    let settled = false;
+                    const onExists = () => {
+                        if (settled) return;
+                        settled = true;
+                        cleanup();
+                        // Break IDLE so idle() resolves and the loop continues
+                        this._client?.noop()?.catch(() => {});
+                        resolve();
+                    };
+                    const keepalive = setTimeout(() => {
+                        if (settled) return;
+                        settled = true;
+                        cleanup();
+                        console.log(
+                            JSON.stringify({
+                                event: "imap_keepalive",
+                                msg: "Keepalive NOOP to break IDLE",
+                            }),
+                        );
+                        // Break IDLE with a NOOP so the loop can poll for changes
+                        this._client?.noop()?.catch(() => {});
+                        resolve();
+                    }, this.IDLE_TIMEOUT * 1000);
+
+                    const cleanup = () => {
+                        clearTimeout(keepalive);
+                        if (this._client) {
+                            this._client.removeListener?.("exists", onExists);
+                            this._client.removeListener?.("expunge", onExists);
+                        }
+                    };
+
+                    if (!this._client) {
+                        cleanup();
+                        resolve();
+                        return;
+                    }
+                    // Register event listeners for real-time push (mocks may lack EventEmitter)
+                    this._client.on?.("exists", onExists);
+                    this._client.on?.("expunge", onExists);
+                    // Start IDLE for server push notifications.
+                    // In production: idle() resolves when noop() breaks it.
+                    // In tests with mocks: idle() may resolve immediately.
+                    this._client.idle().then(
+                        () => {
+                            if (settled) return;
+                            settled = true;
+                            cleanup();
+                            resolve();
+                        },
+                        (e) => {
+                            if (settled) return;
+                            settled = true;
+                            cleanup();
+                            reject(e);
+                        },
+                    );
                 });
             } catch (e) {
                 console.warn(
