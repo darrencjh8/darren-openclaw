@@ -124,6 +124,7 @@ export class AgentOrchestrator {
             if (!assistantMsg.content) delete assistantMsg.content;
             messages.push(assistantMsg);
 
+            let inserted = false;
             for (const tc of toolCalls) {
                 const func = tc.function || {};
                 const name = func.name || "";
@@ -150,6 +151,19 @@ export class AgentOrchestrator {
                     tool_call_id: tc.id || "",
                     content: resultStr,
                 });
+
+                // Once insert_transaction succeeds, stop — don't let the
+                // LLM continue iterating and re-verify duplicates.
+                if (name === "insert_transaction") {
+                    inserted = true;
+                }
+            }
+
+            if (inserted) {
+                return {
+                    action: "completed",
+                    details: `Transaction inserted`,
+                };
             }
         }
 
