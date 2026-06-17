@@ -130,30 +130,18 @@ function createTools(server, registry) {
     );
 }
 
-export async function createMcpServer(registry, app) {
+export function createMcpServer(registry, app) {
     const server = new McpServer({
         name: "expense-tracker",
         version: "1.0.0",
     });
     createTools(server, registry);
 
-    const transport = new StreamableHTTPServerTransport();
-    await server.connect(transport);
-
     // Single endpoint: GET for SSE fallback, POST for messages
+    // Transport created per-request (stateless), server instance shared
     app.all("/mcp", async (req, res) => {
-        try {
-            await transport.handleRequest(req, res);
-        } catch (e) {
-            console.error(
-                JSON.stringify({
-                    event: "mcp_error",
-                    error: e.message,
-                    stack: e.stack,
-                }),
-            );
-            if (!res.headersSent) res.status(500).json({ error: e.message });
-        }
+        const transport = new StreamableHTTPServerTransport(req, res);
+        await server.connect(transport);
     });
 
     console.log(

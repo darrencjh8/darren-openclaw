@@ -174,17 +174,19 @@ async function main() {
 
     const app = express();
 
-    // JSON body parser — skip /mcp (StreamableHTTP needs raw body)
+    // Body parser: raw Buffer for /mcp (StreamableHTTP), JSON for everything else
     app.use((req, res, next) => {
-        if (req.path === "/mcp") return next();
-        express.json({ limit: "10mb" })(req, res, next);
+        if (req.path === "/mcp") {
+            return express.raw({ type: "*/*", limit: "10mb" })(req, res, next);
+        }
+        return express.json({ limit: "10mb" })(req, res, next);
     });
 
     // Health check
     app.get("/health", (_req, res) => res.json({ status: "ok" }));
 
     // Register MCP StreamableHTTP BEFORE listening — hermes depends on it
-    await createMcpServer(registry, app);
+    createMcpServer(registry, app);
 
     // Register all tool endpoints
     const toolNames = [
