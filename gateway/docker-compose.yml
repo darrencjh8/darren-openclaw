@@ -140,14 +140,11 @@ services:
                 condition: service_healthy
         ports:
             - "8642:8642"
-            - "9119:9119"
             - "8644:8644"
         volumes:
             - ~/.hermes:/opt/data
             - ../modules/expense-tracker/data:/opt/data/expense-tracker-data:ro
             - ..:/workspace
-        environment:
-            - HERMES_DASHBOARD=1
         env_file:
             - ../modules/hermes/.env
         shm_size: 1g
