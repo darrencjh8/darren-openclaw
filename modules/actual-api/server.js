@@ -184,6 +184,22 @@ app.use(express.json());
 
 app.get("/health", (req, res) => res.json({ status: "ok" }));
 
+app.get("/budgets", async (req, res) => {
+    try {
+        await init();
+        const budgets = await retryWithBackoff(() => actual.getBudgets());
+        res.json(
+            budgets.map((b) => ({
+                name: b.name,
+                groupId: b.groupId || null,
+                cloudFileId: b.cloudFileId || null,
+            })),
+        );
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
 app.get("/accounts", async (req, res) => {
     try {
         await ensureBudget(getBudgetId(req));
@@ -274,7 +290,28 @@ app.post("/transactions", async (req, res) => {
         await ensureBudget(getBudgetId(req));
         const txn = buildTransaction(req.body);
         const ids = await actual.addTransactions(txn.account, [txn]);
-        res.json({ id: ids[0], amount: txn.amount });
+        res.json({
+            id: ids[0],
+            account: txn.account,
+            date: txn.date,
+            amount: txn.amount,
+            payee_name: txn.payee_name,
+            notes: txn.notes,
+            category: txn.category || null,
+            cleared: txn.cleared,
+        });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+app.get("/transactions/:id", async (req, res) => {
+    try {
+        await ensureBudget(getBudgetId(req));
+        const txn = await actual.getTransaction(req.params.id);
+        if (!txn)
+            return res.status(404).json({ error: "Transaction not found" });
+        res.json(txn);
     } catch (e) {
         res.status(500).json({ error: e.message });
     }

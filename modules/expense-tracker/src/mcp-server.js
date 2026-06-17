@@ -8,9 +8,15 @@ import { z } from "zod";
 
 function createTools(server, registry) {
     server.tool(
+        "fetch_budgets",
+        "List all available budgets from Actual Budget. Returns name, groupId, and cloudFileId for each. Use the returned name as budget_id in subsequent calls.",
+        {},
+        async () => tx(await registry.executeTool("fetch_budgets", {})),
+    );
+    server.tool(
         "fetch_context",
-        'Get accounts, categories, and payees in one call. budget_id: "" for default.',
-        { budget_id: z.string().default("") },
+        "Get accounts, categories, and payees in one call.",
+        { budget_id: z.string().min(1) },
         async (a) => {
             const [accounts, categories, payees] = await Promise.all([
                 registry.executeTool("fetch_accounts", a),
@@ -22,9 +28,10 @@ function createTools(server, registry) {
     );
     server.tool(
         "fetch_recent_transactions",
-        "Get recent transactions",
+        "Fetch transactions from Actual Budget. Pass id to fetch a single transaction, or account_id + days to fetch recent ones.",
         {
-            budget_id: z.string().default(""),
+            budget_id: z.string().min(1),
+            id: z.string().optional(),
             account_id: z.string().optional(),
             days: z.number().optional().default(30),
         },
@@ -33,11 +40,11 @@ function createTools(server, registry) {
     );
     server.tool(
         "insert_transaction",
-        "Insert transaction into AB. Dedup checked internally — returns {status: duplicate} if exists.",
+        "Insert transaction into AB. Dedup checked internally — returns {status: duplicate} if exists. Returns the created transaction with id.",
         {
-            budget_id: z.string(),
-            account_id: z.string(),
-            date: z.string(),
+            budget_id: z.string().min(1),
+            account_id: z.string().min(1),
+            date: z.string().min(1),
             amount_cents: z.number().int(),
             imported_description: z.string().optional(),
             category_id: z.string().optional(),
@@ -47,10 +54,10 @@ function createTools(server, registry) {
     );
     server.tool(
         "update_transaction",
-        "Update existing transaction",
+        "Update existing transaction. Payee and category are validated against live lists.",
         {
-            id: z.string(),
-            budget_id: z.string(),
+            id: z.string().min(1),
+            budget_id: z.string().min(1),
             payee_name: z.string().optional(),
             notes: z.string().optional(),
             amount: z.number().optional(),
@@ -81,7 +88,7 @@ function createTools(server, registry) {
     server.tool(
         "resolve_merchant",
         "Resolve merchant to payee using memory, keywords, Brave search, and AI classification. Returns {payee, source}.",
-        { merchant: z.string() },
+        { merchant: z.string().min(1), budget_id: z.string().min(1) },
         async (a) => tx(await registry.executeTool("resolve_merchant", a)),
     );
     // ── Memory management ──────────────────────────────────────

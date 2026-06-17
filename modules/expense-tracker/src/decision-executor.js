@@ -73,6 +73,7 @@ export async function executeDecision(llmOutput, tools) {
             amount_cents: llmOutput.amount_cents || 0,
             account_id: accountId,
             payee_name: payeeName,
+            budget_id: llmOutput.budget_id || "",
         });
 
         const summary = `${llmOutput.currency || "SGD"} ${Math.abs(llmOutput.amount_cents || 0) / 100} at ${llmOutput.merchant || payeeName} → ${payeeName}`;

@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # =============================================================================
 # Hermes Agent — Deploy Script
-# Validates all required environment variables, builds + deploys via Compose.
+# Validates all required environment variables, builds + deploys hermes,
+# expense-tracker, and actual-api via Compose.
 #
 # Usage: ./scripts/deploy-hermes.sh
 # =============================================================================
@@ -118,9 +119,11 @@ echo ""
 mkdir -p "$HOME/.hermes"
 
 cd "$GATEWAY_DIR"
-echo "--- Deploying Hermes ---"
-docker compose build hermes
-docker compose up -d hermes
+echo "--- Building services ---"
+docker compose build hermes expense-tracker actual-api
+echo ""
+echo "--- Deploying ---"
+docker compose up -d hermes expense-tracker actual-api
 
 # ---- Health check ----
 echo ""
