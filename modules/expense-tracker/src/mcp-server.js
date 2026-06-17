@@ -131,15 +131,15 @@ function createTools(server, registry) {
 }
 
 export function createMcpServer(registry, app) {
-    const server = new McpServer({
-        name: "expense-tracker",
-        version: "1.0.0",
-    });
-    createTools(server, registry);
-
     // Single endpoint: GET for SSE fallback, POST for messages
-    // Transport created per-request (stateless), server instance shared
+    // Each request gets its own McpServer + transport (stateless by design)
     app.all("/mcp", async (req, res) => {
+        const server = new McpServer({
+            name: "expense-tracker",
+            version: "1.0.0",
+        });
+        createTools(server, registry);
+
         const transport = new StreamableHTTPServerTransport(req, res);
         await server.connect(transport);
     });
