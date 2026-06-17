@@ -54,7 +54,7 @@ services:
             - ../modules/expense-tracker/.env:/app/.env:ro
         environment:
             - ACTUAL_API_URL=http://actual-api:3000
-            - NOTIFY_URL=http://hermes:8644/webhook/expense
+            - NOTIFY_URL=http://hermes:8644/webhooks/expense
             - HERMES_WEBHOOK_SECRET=${HERMES_WEBHOOK_SECRET}
         restart: unless-stopped
         healthcheck:

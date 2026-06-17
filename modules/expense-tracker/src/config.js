@@ -30,7 +30,8 @@ export class Config {
         this.imapUsername = env.IMAP_USERNAME || "";
         this.imapPassword = env.IMAP_PASSWORD || "";
         this.imapMailbox = env.IMAP_MAILBOX || "INBOX";
-        this.notifyUrl = env.NOTIFY_URL || "http://hermes:8644/webhook/expense";
+        this.notifyUrl =
+            env.NOTIFY_URL || "http://hermes:8644/webhooks/expense";
         this.notifySecret = env.HERMES_WEBHOOK_SECRET || "";
         this.userName = env.USER_NAME || "there";
         this.systemPromptExtra = env.SYSTEM_PROMPT_EXTRA || "";
