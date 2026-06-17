@@ -8,7 +8,7 @@ import { ImapFlow } from "imapflow";
 import { simpleParser } from "mailparser";
 
 export class ImapIdleHandler {
-    IDLE_TIMEOUT = 300;
+    IDLE_TIMEOUT = 30; // seconds (production: 300)
     RECONNECT_DELAY = 5;
 
     /**
