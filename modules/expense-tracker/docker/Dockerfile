@@ -1,11 +1,8 @@
 FROM node:22-slim
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    tesseract-ocr \
     poppler-utils \
-    python3 \
-    make \
-    gcc \
+    qpdf \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
