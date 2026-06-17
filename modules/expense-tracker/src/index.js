@@ -178,6 +178,9 @@ async function main() {
     // Health check
     app.get("/health", (_req, res) => res.json({ status: "ok" }));
 
+    // Register MCP SSE BEFORE listening — hermes depends on it
+    createMcpServer(registry, app);
+
     // Register all tool endpoints
     const toolNames = [
         "search_memory",
@@ -185,6 +188,7 @@ async function main() {
         "list_facts",
         "update_fact",
         "delete_fact",
+        "fetch_budgets",
         "fetch_accounts",
         "fetch_categories",
         "fetch_payees",
@@ -228,11 +232,10 @@ async function main() {
                     data: { port },
                 }),
             );
-            // Start IMAP idle loop + MCP server in background
+            // Start IMAP idle loop in background
             imapHandler.idleLoop(onNewEmail).catch((err) => {
                 console.error("IMAP idle loop error:", err);
             });
-            createMcpServer(registry, app);
             resolve(server);
         });
         server.on("error", reject);
