@@ -1003,15 +1003,21 @@ export class ToolRegistry {
             return true;
         }
         const url = `${this._config.notifyUrl}`;
+        const body = JSON.stringify({ message });
         const headers = { "Content-Type": "application/json" };
         if (this._config.notifySecret) {
-            headers["X-Gitlab-Token"] = this._config.notifySecret;
+            const crypto = await import("crypto");
+            const sig = crypto
+                .createHmac("sha256", this._config.notifySecret)
+                .update(body)
+                .digest("hex");
+            headers["X-Webhook-Signature"] = sig;
         }
         try {
             const r = await fetch(url, {
                 method: "POST",
                 headers,
-                body: JSON.stringify({ message }),
+                body,
             });
             if (!r.ok) return false;
             if (this._emailMsgId) this._cooldown.record(this._emailMsgId);
