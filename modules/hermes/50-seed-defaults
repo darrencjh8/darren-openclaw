@@ -54,5 +54,5 @@ if not any(j.get("name") == "memory-backup" for j in jobs):
     with open(jobs_path, "w") as f:
         json.dump(jobs, f, indent=2)
     print("cron: memory-backup seeded")
-'
+' || true
 fi
