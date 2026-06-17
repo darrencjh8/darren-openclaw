@@ -1005,7 +1005,7 @@ export class ToolRegistry {
         const url = `${this._config.notifyUrl}`;
         const headers = { "Content-Type": "application/json" };
         if (this._config.notifySecret) {
-            headers["X-Webhook-Secret"] = this._config.notifySecret;
+            headers["X-Gitlab-Token"] = this._config.notifySecret;
         }
         try {
             const r = await fetch(url, {

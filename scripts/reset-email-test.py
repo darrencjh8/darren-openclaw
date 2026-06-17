@@ -7,11 +7,11 @@ import subprocess
 import time
 
 # --- Config ---
-DEDUP_DB = "/home/darren/worktrees/darren-openclaw/vivid-crater/darren-openclaw/modules/expense-tracker/data/dedup.db"
-COMPOSE_DIR = (
-    "/home/darren/worktrees/darren-openclaw/vivid-crater/darren-openclaw/modules"
+DEDUP_DB = (
+    "/home/darren/workspace/darren-openclaw/modules/expense-tracker/data/dedup.db"
 )
-ENV_FILE = "hermes/.env"
+COMPOSE_DIR = "/home/darren/workspace/darren-openclaw/gateway"
+ENV_FILE = "../modules/hermes/.env"
 TEST_UID = b"128"
 IMAP_HOST = "imap.zoho.com"
 IMAP_PORT = 993
