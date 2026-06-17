@@ -123,7 +123,7 @@ echo "--- Building services ---"
 docker compose build hermes expense-tracker actual-api
 echo ""
 echo "--- Deploying ---"
-docker compose up -d --force-recreate hermes expense-tracker actual-api
+docker compose up -d hermes expense-tracker actual-api
 
 # ---- Health check ----
 echo ""

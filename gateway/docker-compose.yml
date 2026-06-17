@@ -140,6 +140,7 @@ services:
         depends_on:
             expense-tracker:
                 condition: service_healthy
+                restart: true
         ports:
             - "8642:8642"
             - "9119:9119"
