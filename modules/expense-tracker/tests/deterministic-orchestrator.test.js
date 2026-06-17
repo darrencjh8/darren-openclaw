@@ -1192,14 +1192,13 @@ describe("Option B: submit_decision tool for schema-enforced Phase 1 output", ()
         expect(output.action).toBe("insert");
     });
 
-    it("DeepSeekClient.chat() passes tool_choice when provided", async () => {
+    it("DeepSeekClient.chat() passes tool_choice and omits thinking when provided", async () => {
         const { DeepSeekClient } = await import("../src/orchestrator.js");
         const mockCreate = vi.fn(async () => ({
             choices: [{ message: { content: "ok" } }],
         }));
 
         const client = new DeepSeekClient({ deepseekApiKey: "sk-test" });
-        // Replace the internal OpenAI client's create method
         client._client.chat = { completions: { create: mockCreate } };
 
         const toolChoice = {
@@ -1213,14 +1212,13 @@ describe("Option B: submit_decision tool for schema-enforced Phase 1 output", ()
             toolChoice,
         );
 
-        expect(mockCreate).toHaveBeenCalledWith(
-            expect.objectContaining({
-                tool_choice: toolChoice,
-            }),
-        );
+        const callArgs = mockCreate.mock.calls[0][0];
+        expect(callArgs.tool_choice).toEqual(toolChoice);
+        // thinking must NOT be present — DeepSeek rejects thinking + explicit tool_choice
+        expect(callArgs.thinking).toBeUndefined();
     });
 
-    it("DeepSeekClient.chat() defaults tool_choice to auto when tools provided", async () => {
+    it("DeepSeekClient.chat() defaults tool_choice to auto and includes thinking", async () => {
         const { DeepSeekClient } = await import("../src/orchestrator.js");
         const mockCreate = vi.fn(async () => ({
             choices: [{ message: { content: "ok" } }],
@@ -1234,10 +1232,8 @@ describe("Option B: submit_decision tool for schema-enforced Phase 1 output", ()
             [{ type: "function", function: { name: "search_memory" } }],
         );
 
-        expect(mockCreate).toHaveBeenCalledWith(
-            expect.objectContaining({
-                tool_choice: "auto",
-            }),
-        );
+        const callArgs = mockCreate.mock.calls[0][0];
+        expect(callArgs.tool_choice).toBe("auto");
+        expect(callArgs.thinking).toEqual({ type: "adaptive" });
     });
 });

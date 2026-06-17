@@ -36,8 +36,12 @@ export class DeepSeekClient {
             model: this._model,
             messages,
             temperature: 0.1,
-            thinking: { type: "adaptive" },
         };
+        // Only enable thinking for "auto" mode (info-gathering).
+        // Explicit tool_choice (submit_decision) does not support thinking.
+        if (!toolChoice || toolChoice === "auto") {
+            kwargs.thinking = { type: "adaptive" };
+        }
         if (tools) {
             kwargs.tools = tools;
             kwargs.tool_choice = toolChoice || "auto";
