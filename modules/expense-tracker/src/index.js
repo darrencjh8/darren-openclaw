@@ -173,7 +173,12 @@ async function main() {
     }
 
     const app = express();
-    app.use(express.json({ limit: "10mb" }));
+
+    // JSON body parser — skip /mcp (StreamableHTTP needs raw body)
+    app.use((req, res, next) => {
+        if (req.path === "/mcp") return next();
+        express.json({ limit: "10mb" })(req, res, next);
+    });
 
     // Health check
     app.get("/health", (_req, res) => res.json({ status: "ok" }));
