@@ -1,0 +1,88 @@
+model:
+    provider: deepseek
+    default: deepseek-v4-pro
+    api_key: ${DEEPSEEK_API_KEY}
+
+agent:
+    reasoning_effort: medium
+    disabled_toolsets:
+        - image_gen
+        - tts
+        - moa
+
+fallback_providers:
+    - provider: gemini
+      model: gemini-3.1-flash-lite
+      api_key: ${GEMINI_API_KEY}
+
+delegation:
+    max_spawn_depth: 1
+    max_iterations: 100
+    model: deepseek-v4-flash
+
+approvals:
+    mode: smart
+    timeout: 60
+    cron_mode: deny
+
+memory:
+    memory_enabled: true
+    user_profile_enabled: true
+    write_approval: true
+
+skills:
+    guard_agent_created: true
+
+terminal:
+    backend: local
+    persistent_shell: true
+    cwd: /workspace
+
+auxiliary:
+    vision:
+        provider: gemini
+        model: gemini-3.1-flash-lite
+    web_extract:
+        provider: deepseek
+        model: deepseek-v4-flash
+        extra_body:
+            thinking:
+                type: disabled
+    compression:
+        provider: deepseek
+        model: deepseek-v4-flash
+        extra_body:
+            thinking:
+                type: disabled
+    approval:
+        provider: deepseek
+        model: deepseek-v4-flash
+        extra_body:
+            thinking:
+                type: disabled
+
+timezone: Asia/Kuala_Lumpur
+
+mcp_servers:
+    expense-tracker:
+        url: http://expense-tracker:8080/sse
+        transport: sse
+        tools:
+            exclude: []
+        supports_parallel_tool_calls: false
+
+platforms:
+    webhook:
+        enabled: true
+        extra:
+            port: 8644
+            secret: ${HERMES_WEBHOOK_SECRET}
+            routes:
+                expense:
+                    secret: ${HERMES_WEBHOOK_SECRET}
+                    prompt: "{SOUL_MD}\n\n{message}"
+                    skills:
+                        - expense-tracker
+                    deliver: telegram
+                    deliver_extra:
+                        chat_id: "${TELEGRAM_HOME_CHANNEL}"

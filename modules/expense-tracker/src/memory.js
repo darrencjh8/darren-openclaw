@@ -25,8 +25,10 @@ const MEMORY_TEMPLATE = `# Long-Term Memory
 export class MemoryStore {
     /**
      * @param {string} path - Path to MEMORY.md
+     * @param {number} [maxFacts=200] - Auto-compact when facts exceed this
+     * @param {number} [compactTo=150] - Keep this many facts after compaction
      */
-    constructor(path = "data/MEMORY.md") {
+    constructor(path = "data/MEMORY.md", maxFacts = 300, compactTo = 250) {
         this.path = path;
         this._facts = [];
         this._model = null;
@@ -34,6 +36,8 @@ export class MemoryStore {
         this._embeddingCache = new Map();
         this._initialized = false;
         this._dedupSet = new Set();
+        this._maxFacts = maxFacts;
+        this._compactTo = compactTo;
         this._init();
     }
 
@@ -94,7 +98,14 @@ export class MemoryStore {
         this._facts.push(fact);
         this._rewriteFile();
 
-        return { added: true, skipped: false };
+        // Auto-compact if over threshold
+        let compacted = false;
+        if (this._facts.length > this._maxFacts) {
+            compacted = true;
+            this._compact();
+        }
+
+        return { added: true, skipped: false, compacted };
     }
 
     remove(matchText) {
@@ -136,6 +147,72 @@ export class MemoryStore {
             }
         }
         return { updated: false, found: false };
+    }
+
+    // ── compaction ───────────────────────────────────────────────
+
+    /**
+     * Compact memory: deduplicate subsumed facts and trim to compactTo.
+     * Keeps the most specific (longest) facts and the newest ones.
+     *
+     * Strategy:
+     *  1. Remove facts that are substrings of other facts (keep longer)
+     *  2. If still over compactTo, trim oldest payee-mapping facts first
+     *  3. Then trim oldest general facts
+     */
+    compact() {
+        const before = this._facts.length;
+        this._compact();
+        const after = this._facts.length;
+        return { before, after, removed: before - after };
+    }
+
+    _compact() {
+        // Step 1: Remove subsumed facts (keep longer version)
+        const remaining = [];
+        const sorted = [...this._facts].sort((a, b) => b.length - a.length);
+        for (const fact of sorted) {
+            const lower = fact.toLowerCase();
+            const subsumed = remaining.some((r) =>
+                r.toLowerCase().includes(lower),
+            );
+            if (!subsumed) remaining.push(fact);
+        }
+
+        // Step 2: Trim to compactTo — remove oldest first
+        if (remaining.length > this._compactTo) {
+            // Keep payee mappings ("maps to") over general facts
+            const mappings = remaining.filter((f) =>
+                f.toLowerCase().includes("maps to"),
+            );
+            const general = remaining.filter(
+                (f) => !f.toLowerCase().includes("maps to"),
+            );
+            // Trim general facts first, then mappings if needed
+            let toDrop = remaining.length - this._compactTo;
+            const keepGeneral = general.slice(Math.min(toDrop, general.length));
+            toDrop -= general.length - keepGeneral.length;
+            const keepMappings = mappings.slice(
+                Math.min(toDrop, mappings.length),
+            );
+            remaining.length = 0;
+            remaining.push(...keepGeneral, ...keepMappings);
+        }
+
+        this._facts = remaining;
+        this._dedupSet.clear();
+        for (const f of this._facts) {
+            this._dedupSet.add(f.trim().toLowerCase());
+        }
+        this._rewriteFile();
+    }
+
+    get stats() {
+        return {
+            count: this._facts.length,
+            maxFacts: this._maxFacts,
+            compactTo: this._compactTo,
+        };
     }
 
     // ── file I/O ──────────────────────────────────────────────────

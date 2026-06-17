@@ -10,7 +10,13 @@ import { ToolRegistry, StatementJournal } from "./tools.js";
 import { AgentOrchestrator } from "./orchestrator.js";
 import { ImapIdleHandler } from "./imap.js";
 import { classifyEmail, dispatchEmail } from "./classify.js";
+import { createMcpServer } from "./mcp-server.js";
 import { DedupJournal } from "./dedup.js";
+
+const HERMES_WEBHOOK_URL =
+    process.env.HERMES_WEBHOOK_URL || "http://hermes:8644/webhooks/expense";
+const HERMES_WEBHOOK_SECRET =
+    process.env.HERMES_WEBHOOK_SECRET || "expense-tracker-webhook";
 import { StatementProcessor } from "./statement/orchestrator.js";
 import { existsSync } from "fs";
 
@@ -92,17 +98,78 @@ async function main() {
         cfg.imapMailbox,
     );
 
-    const classify = (rawEmail, subject, sender) =>
-        classifyEmail(rawEmail, subject, sender, cfg.deepseekApiKey);
-
     async function onNewEmail(msg) {
-        await dispatchEmail(
-            msg,
-            classify,
-            orchestrator,
-            imapHandler,
-            statementProcessor,
-        );
+        let result = null;
+        try {
+            result = await dispatchEmail(
+                msg,
+                (raw, subject, sender) =>
+                    classifyEmail(raw, subject, sender, cfg.deepseekApiKey),
+                orchestrator,
+                imapHandler,
+                statementProcessor,
+            );
+        } catch (err) {
+            registry.setEmailContext(msg.msg_id, msg.raw_email, imapHandler);
+            try {
+                await registry.executeTool("notify_user", {
+                    message: `Error processing email "${msg.subject || ""}": ${err.message}`,
+                });
+            } catch {}
+            throw err;
+        }
+
+        // Send result to Hermes for Telegram delivery
+        if (result) {
+            const subject = msg.subject || "";
+            const formatted = formatResult(result, subject);
+            if (formatted) {
+                try {
+                    await sendWebhook({
+                        event: "expense_processed",
+                        subject,
+                        action: result.action,
+                        details: result.details || "",
+                        message: formatted,
+                        timestamp: new Date().toISOString(),
+                    });
+                } catch {}
+            }
+        }
+    }
+
+    function formatResult(result, subject) {
+        const action = result.action || "error";
+        const details = result.details || "";
+        switch (action) {
+            case "inserted":
+                return `Transaction recorded: ${details}`;
+            case "duplicate":
+                return `Duplicate transaction skipped: ${details}`;
+            case "notified":
+                return `Could not process "${subject}": ${details}. User should review inbox and categorize manually.`;
+            case "skipped":
+                return null;
+            default:
+                return `Error processing "${subject}": ${details}`;
+        }
+    }
+
+    async function sendWebhook(payload) {
+        const crypto = await import("crypto");
+        const body = JSON.stringify(payload);
+        const signature = crypto
+            .createHmac("sha256", HERMES_WEBHOOK_SECRET)
+            .update(body)
+            .digest("hex");
+        await fetch(HERMES_WEBHOOK_URL, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                "X-Webhook-Signature": signature,
+            },
+            body,
+        });
     }
 
     const app = express();
@@ -161,10 +228,11 @@ async function main() {
                     data: { port },
                 }),
             );
-            // Start IMAP idle loop in background (non-blocking)
+            // Start IMAP idle loop + MCP server in background
             imapHandler.idleLoop(onNewEmail).catch((err) => {
                 console.error("IMAP idle loop error:", err);
             });
+            createMcpServer(registry, app);
             resolve(server);
         });
         server.on("error", reject);

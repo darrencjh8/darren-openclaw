@@ -136,5 +136,9 @@ export async function dispatchEmail(
 
     // "transaction" emails (and "statement" when no statementProcessor)
     // route through the transaction orchestrator.
-    await orchestrator.processEmail(msg.msg_id, msg.raw_email, imapHandler);
+    return await orchestrator.processEmail(
+        msg.msg_id,
+        msg.raw_email,
+        imapHandler,
+    );
 }

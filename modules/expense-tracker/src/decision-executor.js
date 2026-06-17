@@ -38,7 +38,10 @@ export async function executeDecision(llmOutput, tools) {
             reasoning: llmOutput.reasoning || "",
             timestamp: new Date().toISOString(),
         });
-        return { action: "skipped" };
+        return {
+            action: "skipped",
+            details: `Skipped email "${llmOutput.merchant || llmOutput.raw_description || "unknown"}" — ${llmOutput.reasoning?.slice(0, 100) || "not an expense"}`,
+        };
     }
 
     if (action === "unsure") {
@@ -51,8 +54,13 @@ export async function executeDecision(llmOutput, tools) {
             reasoning: llmOutput.reasoning || "",
             timestamp: new Date().toISOString(),
         });
-        // DO NOT mark as read — user needs to review
-        return { action: "notified" };
+        const amt = llmOutput.amount_cents
+            ? `${llmOutput.currency || "SGD"} ${Math.abs(llmOutput.amount_cents) / 100}`
+            : "unknown amount";
+        return {
+            action: "notified",
+            details: `Could not confidently process "${llmOutput.merchant || llmOutput.raw_description || "transaction"}" (${amt}). ${llmOutput.reasoning?.slice(0, 150) || ""}`,
+        };
     }
 
     if (action === "insert") {
@@ -67,6 +75,7 @@ export async function executeDecision(llmOutput, tools) {
             payee_name: payeeName,
         });
 
+        const summary = `${llmOutput.currency || "SGD"} ${Math.abs(llmOutput.amount_cents || 0) / 100} at ${llmOutput.merchant || payeeName} → ${payeeName}`;
         if (isDuplicate) {
             await tools.executeTool("mark_email_read", {});
             await tools.executeTool("log_decision", {
@@ -74,7 +83,7 @@ export async function executeDecision(llmOutput, tools) {
                 reasoning: llmOutput.reasoning || "",
                 timestamp: new Date().toISOString(),
             });
-            return { action: "duplicate" };
+            return { action: "duplicate", details: summary };
         }
 
         // Step 2: Insert transaction (CRITICAL: only mark read if this succeeds)
@@ -129,7 +138,7 @@ export async function executeDecision(llmOutput, tools) {
             timestamp: new Date().toISOString(),
         });
 
-        return { action: "inserted" };
+        return { action: "inserted", details: summary };
     }
 
     return { action: "error", details: `Unknown action: ${action}` };

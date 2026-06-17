@@ -54,7 +54,18 @@ services:
             - ../modules/expense-tracker/.env:/app/.env:ro
         environment:
             - ACTUAL_API_URL=http://actual-api:3000
+            - OPENCLAW_GATEWAY_URL=http://openclaw:18789
         restart: unless-stopped
+        healthcheck:
+            test:
+                [
+                    "CMD-SHELL",
+                    'node -e ''require("http").get("http://localhost:8080/health",function(r){process.exit(r.statusCode===200?0:1)})''',
+                ]
+            interval: 10s
+            timeout: 5s
+            retries: 3
+            start_period: 20s
 
     actual-api:
         build:
@@ -117,6 +128,30 @@ services:
             - KTMB_DB_PATH=/app/data/ktmb_jobs.db
             - KTMB_NOTIFY_URL=http://openclaw:18789/api/notify
         restart: unless-stopped
+
+    hermes:
+        build:
+            context: ../modules/hermes
+            dockerfile: Dockerfile
+        container_name: hermes
+        restart: unless-stopped
+        command: gateway run
+        depends_on:
+            expense-tracker:
+                condition: service_healthy
+        ports:
+            - "8642:8642"
+            - "9119:9119"
+            - "8644:8644"
+        volumes:
+            - ~/.hermes:/opt/data
+            - ~/workspace:/workspace
+            - ../modules/expense-tracker/data:/opt/data/expense-tracker-data:ro
+        env_file:
+            - ../modules/hermes/.env
+        environment:
+            - HERMES_DASHBOARD=1
+        shm_size: 1g
 
 volumes:
     openclaw_data:

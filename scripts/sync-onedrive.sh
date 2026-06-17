@@ -9,6 +9,12 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 CONF_DIR="$ROOT/modules/onedrive-sync/config/onedrive"
 TOKEN="$CONF_DIR/refresh_token"
 
+# Resolve ONEDRIVE_CLIENT_ID from portfolio-tracker .env
+PT_ENV="$ROOT/modules/portfolio-tracker/.env"
+if [ -f "$PT_ENV" ]; then
+  export ONEDRIVE_CLIENT_ID=$(grep -E '^ONEDRIVE_CLIENT_ID=' "$PT_ENV" | head -1 | cut -d'=' -f2- | tr -d '"' | tr -d "'")
+fi
+
 mkdir -p "$CONF_DIR"
 
 if [ -f "$TOKEN" ]; then
@@ -22,7 +28,7 @@ else
   echo "=== OneDrive: No refresh token found. Starting interactive OAuth ==="
   echo ""
   echo "Open this URL, log in, and paste the redirect URI:"
-  echo "https://login.microsoftonline.com/common/oauth2/v2.0/authorize?client_id=d50ca740-c83f-4d1b-b616-12c519384f0c&scope=Files.ReadWrite%20Files.ReadWrite.All%20Sites.ReadWrite.All%20offline_access&response_type=code&prompt=login&redirect_uri=https://login.microsoftonline.com/common/oauth2/nativeclient"
+  echo "https://login.microsoftonline.com/common/oauth2/v2.0/authorize?client_id=${ONEDRIVE_CLIENT_ID}&scope=Files.ReadWrite%20Files.ReadWrite.All%20Sites.ReadWrite.All%20offline_access&response_type=code&prompt=login&redirect_uri=https://login.microsoftonline.com/common/oauth2/nativeclient"
   echo ""
   echo -n "Paste redirect URI: "
   read -r REDIRECT_URI

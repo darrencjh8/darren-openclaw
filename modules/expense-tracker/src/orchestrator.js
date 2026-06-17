@@ -31,16 +31,19 @@ export class DeepSeekClient {
         }
     }
 
-    async chat(messages, tools) {
+    async chat(messages, tools, toolChoice) {
         const kwargs = {
             model: this._model,
             messages,
             temperature: 0.1,
-            thinking: { type: "adaptive" },
         };
         if (tools) {
             kwargs.tools = tools;
-            kwargs.tool_choice = "auto";
+            kwargs.tool_choice = toolChoice || "auto";
+        }
+        // DeepSeek: don't send thinking param when tool_choice is explicit
+        if (!toolChoice || toolChoice === "auto") {
+            kwargs.thinking = { type: "adaptive" };
         }
 
         const retryDelays = [1000, 2000, 4000];
@@ -88,6 +91,30 @@ export class AgentOrchestrator {
      * @returns {Promise<{action: string, details?: string}>}
      */
     async processEmail(msgId, rawEmail, imapHandler) {
+        try {
+            return await this._processEmailInternal(
+                msgId,
+                rawEmail,
+                imapHandler,
+            );
+        } catch (e) {
+            console.error(
+                JSON.stringify({
+                    event: "process_email_error",
+                    error: e.message,
+                }),
+            );
+            try {
+                this._tools.setEmailContext(msgId, rawEmail, imapHandler);
+                await this._tools.executeTool("notify_user", {
+                    message: `Error processing email: ${e.message}`,
+                });
+            } catch {}
+            throw e;
+        }
+    }
+
+    async _processEmailInternal(msgId, rawEmail, imapHandler) {
         this._tools.setEmailContext(msgId, rawEmail, imapHandler);
 
         // Extract email content
@@ -102,7 +129,7 @@ export class AgentOrchestrator {
         }
 
         // ═══════════════════════════════════════════════════════════
-        // Phase 1: LLM ANALYSIS (info-gathering tools only)
+        // Phase 1: LLM ANALYSIS (info-gathering tools + submit_decision)
         // ═══════════════════════════════════════════════════════════
         const messages = this._buildPhase1Messages(emailText);
         const llmTools = this._tools.getLlmToolSchemas();
@@ -120,33 +147,45 @@ export class AgentOrchestrator {
                 }),
             );
             await this._tools.executeTool("notify_user", {
-                message:
-                    "I couldn't understand an email in your inbox. " +
-                    "Please review it manually in your email client.",
+                message: `Couldn't understand this transaction email. ${e.message}`,
             });
-            await this._tools.executeTool("mark_email_read", {});
-            await this._tools.executeTool("log_decision", {
-                action: "error",
-                reasoning: `Phase 1 parse failed: ${e.message}`,
-                timestamp: new Date().toISOString(),
-            });
-            return { action: "notified" };
+            return {
+                action: "notified",
+                details: `Phase 1 failed: ${e.message}`,
+            };
         }
 
         if (!llmOutput || !llmOutput.action) {
-            // LLM returned valid JSON but missing required fields
             await this._tools.executeTool("notify_user", {
-                message:
-                    "I received an incomplete response while processing " +
-                    "an email. Please review it manually.",
+                message: "Couldn't understand this transaction email.",
             });
-            await this._tools.executeTool("mark_email_read", {});
-            await this._tools.executeTool("log_decision", {
-                action: "error",
-                reasoning: "Phase 1 output missing action field",
-                timestamp: new Date().toISOString(),
-            });
-            return { action: "notified" };
+            return {
+                action: "notified",
+                details: "Phase 1 returned no action",
+            };
+        }
+
+        // Validate date is plausible (within 15 days of today)
+        if (llmOutput.date && llmOutput.action === "insert") {
+            const txDate = new Date(llmOutput.date);
+            const today = new Date();
+            const diffDays = Math.abs((today - txDate) / (1000 * 60 * 60 * 24));
+            if (isNaN(txDate.getTime()) || diffDays > 15) {
+                console.warn(
+                    JSON.stringify({
+                        event: "date_validation_failed",
+                        llm_date: llmOutput.date,
+                        diff_days: Math.round(diffDays),
+                    }),
+                );
+                await this._tools.executeTool("notify_user", {
+                    message: `Suspicious date detected: ${llmOutput.date}. The transaction date appears incorrect — please review manually.`,
+                });
+                return {
+                    action: "notified",
+                    details: `Date validation failed: "${llmOutput.date}" is ${Math.round(diffDays)} days from today. LLM may have hallucinated.`,
+                };
+            }
         }
 
         // If LLM says skip or unsure, go straight to Phase 2
@@ -244,12 +283,15 @@ export class AgentOrchestrator {
     }
 
     /**
-     * Phase 1: Run the LLM with info-gathering tools until it returns
-     * a structured JSON response or runs out of iterations.
+     * Phase 1: Run the LLM with info-gathering tools, then force a
+     * schema-enforced decision via the submit_decision tool (Phase 1b).
      */
     async _runPhase1(messages, llmTools) {
-        const MAX_PHASE1_ITERATIONS = 3; // Allow tool calls + final JSON
+        const MAX_PHASE1_ITERATIONS = 5;
 
+        // ═══════════════════════════════════════════════════════════
+        // Phase 1a: Info gathering loop
+        // ═══════════════════════════════════════════════════════════
         for (let i = 0; i < MAX_PHASE1_ITERATIONS; i++) {
             const response = await this._llm.chat(messages, llmTools);
             const choice = (response.choices || [{}])[0];
@@ -264,16 +306,42 @@ export class AgentOrchestrator {
 
             const toolCalls = message.tool_calls;
 
-            // No tool calls → LLM is returning its final JSON
+            // No tool calls → LLM is done gathering info, proceed to Phase 1b
             if (!toolCalls && message.content) {
-                // Store search_memory results for Phase 1.5
                 this._tools._lastSearchMemoryResults =
                     this._extractSearchMemoryResults(messages);
-                return this._parsePhase1Output(message.content);
+                break;
             }
 
             // Execute tool calls and feed results back
             if (toolCalls) {
+                // If LLM calls submit_decision during info gathering,
+                // extract the decision immediately — don't execute it.
+                const submitCall = toolCalls.find(
+                    (tc) => tc.function?.name === "submit_decision",
+                );
+                if (submitCall) {
+                    try {
+                        const decision = JSON.parse(
+                            submitCall.function?.arguments || "{}",
+                        );
+                        if (decision.action) {
+                            // Normalize common LLM field name mistakes
+                            if (!decision.merchant && decision.merchant_name)
+                                decision.merchant = decision.merchant_name;
+                            if (decision.amount && !decision.amount_cents) {
+                                decision.amount_cents =
+                                    decision.amount < 0
+                                        ? decision.amount
+                                        : -Math.round(decision.amount * 100);
+                            }
+                            this._tools._lastSearchMemoryResults =
+                                this._extractSearchMemoryResults(messages);
+                            return decision;
+                        }
+                    } catch {}
+                }
+
                 const assistantMsg = {
                     role: "assistant",
                     content: message.content,
@@ -312,10 +380,38 @@ export class AgentOrchestrator {
             }
         }
 
-        // Max iterations reached — try to parse last message as JSON
-        const lastMsg = messages[messages.length - 1];
-        if (lastMsg?.role === "assistant" && lastMsg.content) {
-            return this._parsePhase1Output(lastMsg.content);
+        // ═══════════════════════════════════════════════════════════
+        // Phase 1b: Force structured decision via submit_decision tool
+        // ═══════════════════════════════════════════════════════════
+        const submitTool = this._tools.getSubmitDecisionTool();
+        const response = await this._llm.chat(
+            messages,
+            [submitTool],
+            "required",
+        );
+        const choice = (response.choices || [{}])[0];
+        const message = choice.message || {};
+        const toolCalls = message.tool_calls;
+
+        if (toolCalls && toolCalls.length > 0) {
+            const tc = toolCalls[0];
+            const func = tc.function || {};
+            let args = {};
+            try {
+                args = JSON.parse(func.arguments || "{}");
+            } catch {}
+            console.log(
+                JSON.stringify({
+                    event: "phase1_decision",
+                    args,
+                }),
+            );
+            return args;
+        }
+
+        // Fallback: try parsing message content as JSON
+        if (message.content) {
+            return this._parsePhase1Output(message.content);
         }
         return null;
     }
@@ -380,7 +476,7 @@ export class AgentOrchestrator {
     }
 
     /**
-     * Validate that an account_id exists, is active, and matches currency.
+     * Validate that an account_id exists AND is open (not closed/offbudget).
      */
     async _validateAccountId(accountId, budgetId) {
         try {
@@ -389,17 +485,16 @@ export class AgentOrchestrator {
             });
             if (Array.isArray(accounts)) {
                 const match = accounts.find((a) => a.id === accountId);
-                if (!match) return false;
-                // Reject closed accounts
+                if (!match) return false; // doesn't exist
                 if (match.closed) {
                     console.warn(
                         JSON.stringify({
                             event: "account_validation_closed",
                             account_id: accountId,
-                            name: match.name,
+                            account_name: match.name,
                         }),
                     );
-                    return false;
+                    return false; // closed account
                 }
                 return true;
             }

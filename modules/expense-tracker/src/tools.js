@@ -495,6 +495,68 @@ const TOOLS = [
         },
     },
     {
+        name: "submit_decision",
+        description:
+            "Submit the final structured decision for this email. ALL required fields MUST be filled. Call this after you have gathered all necessary information.",
+        schema: {
+            type: "object",
+            properties: {
+                action: {
+                    type: "string",
+                    enum: ["insert", "skip", "unsure"],
+                    description: "Decision action",
+                },
+                merchant: {
+                    type: "string",
+                    description: "Raw merchant name from email",
+                },
+                amount_cents: {
+                    type: "integer",
+                    description:
+                        "Amount in integer cents, negative for spending",
+                },
+                date: {
+                    type: "string",
+                    description: "Transaction date YYYY-MM-DD",
+                },
+                currency: {
+                    type: "string",
+                    description: "SGD or MYR",
+                },
+                account_id: {
+                    type: "string",
+                    description: "Account UUID from fetch_accounts",
+                },
+                account_name: {
+                    type: "string",
+                    description: "Human-readable account name",
+                },
+                budget_id: { type: "string", description: "Budget file name" },
+                raw_description: {
+                    type: "string",
+                    description: "Full transaction description",
+                },
+                notes: { type: "string", description: "Extra context" },
+                reasoning: {
+                    type: "string",
+                    description: "Why you made this decision",
+                },
+                notify_message: {
+                    type: "string",
+                    description: "Friendly one-sentence notification message",
+                },
+            },
+            required: [
+                "action",
+                "merchant",
+                "amount_cents",
+                "date",
+                "currency",
+                "account_id",
+            ],
+        },
+    },
+    {
         name: "log_decision",
         description: "Log the final decision for this email.",
         schema: {
@@ -631,6 +693,21 @@ export class ToolRegistry {
         }));
     }
 
+    /**
+     * Get only the submit_decision tool schema (for Phase 1b forced call).
+     */
+    getSubmitDecisionTool() {
+        const t = TOOL_MAP["submit_decision"];
+        return {
+            type: "function",
+            function: {
+                name: t.name,
+                description: t.description,
+                parameters: t.schema,
+            },
+        };
+    }
+
     async executeTool(name, args) {
         const handler = this[`_handle_${name.replace(/-/g, "_")}`];
         if (!handler) throw new Error(`Unknown tool: ${name}`);
@@ -651,8 +728,17 @@ export class ToolRegistry {
     }
 
     async _handle_list_facts() {
-        if (!this._memory) return { facts: [] };
-        return { facts: this._memory.listFacts() };
+        if (!this._memory)
+            return {
+                facts: [],
+                stats: { count: 0, maxFacts: 0, compactTo: 0 },
+            };
+        return { facts: this._memory.listFacts(), stats: this._memory.stats };
+    }
+
+    async _handle_compact_facts() {
+        if (!this._memory) return { before: 0, after: 0, removed: 0 };
+        return this._memory.compact();
     }
 
     async _handle_update_fact({ old_text, new_text }) {
@@ -672,7 +758,10 @@ export class ToolRegistry {
     // ── AB API tools ──────────────────────────────────────────────
 
     async _handle_fetch_accounts({ budget_id = "" }) {
-        return this._get("/accounts", budget_id);
+        const accounts = await this._get("/accounts", budget_id);
+        if (!Array.isArray(accounts)) return accounts;
+        // Filter out closed accounts — LLM should only see active ones
+        return accounts.filter((a) => !a.closed);
     }
 
     async _handle_fetch_categories({ budget_id = "" }) {
@@ -943,6 +1032,12 @@ export class ToolRegistry {
             console.log(JSON.stringify(entry));
         }
         return true;
+    }
+
+    async _handle_submit_decision(args) {
+        // No-op handler — the decision is extracted from the tool call
+        // arguments by the orchestrator in _runPhase1.
+        return { accepted: true };
     }
 
     async _handle_extract_email_content({ include_headers = false } = {}) {
