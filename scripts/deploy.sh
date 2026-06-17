@@ -185,8 +185,9 @@ elif [ ! -f "$ONEDRIVE_TOKEN" ]; then
   cd "$ROOT/modules/onedrive-sync"
   mkdir -p "$ONEDRIVE_CONF_DIR"
 
-  # Construct the Microsoft OAuth URL (client_id is from the onedrive docker image)
-  AUTH_URL="https://login.microsoftonline.com/common/oauth2/v2.0/authorize?client_id=d50ca740-c83f-4d1b-b616-12c519384f0c&scope=Files.ReadWrite%20Files.ReadWrite.All%20Sites.ReadWrite.All%20offline_access&response_type=code&prompt=login&redirect_uri=https://login.microsoftonline.com/common/oauth2/nativeclient"
+  # Construct the Microsoft OAuth URL
+  export ONEDRIVE_CLIENT_ID=$(env_get ONEDRIVE_CLIENT_ID "$PT_ENV")
+  AUTH_URL="https://login.microsoftonline.com/common/oauth2/v2.0/authorize?client_id=${ONEDRIVE_CLIENT_ID}&scope=Files.ReadWrite%20Files.ReadWrite.All%20Sites.ReadWrite.All%20offline_access&response_type=code&prompt=login&redirect_uri=https://login.microsoftonline.com/common/oauth2/nativeclient"
 
   echo "Open this URL in your browser, log in, and after the redirect to a blank"
   echo "page, paste the ENTIRE URL from the address bar back here:"

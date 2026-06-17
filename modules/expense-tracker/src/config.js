@@ -4,7 +4,6 @@ import { fileURLToPath } from "url";
 import { getSystemPrompt } from "./prompts.js";
 
 const REQUIRED_ENV_VARS = [
-    "DEEPSEEK_API_KEY",
     "ACTUAL_BUDGET_URL",
     "ACTUAL_BUDGET_PASSWORD",
     "ACTUAL_BUDGET_FILE",
@@ -32,7 +31,7 @@ export class Config {
         this.imapPassword = env.IMAP_PASSWORD || "";
         this.imapMailbox = env.IMAP_MAILBOX || "INBOX";
         this.openclawGatewayUrl =
-            env.OPENCLAW_GATEWAY_URL || "http://openclaw:18800";
+            env.OPENCLAW_GATEWAY_URL || "http://openclaw:18789";
         this.openclawGatewayToken = env.OPENCLAW_GATEWAY_TOKEN || "";
         this.userName = env.USER_NAME || "there";
         this.systemPromptExtra = env.SYSTEM_PROMPT_EXTRA || "";

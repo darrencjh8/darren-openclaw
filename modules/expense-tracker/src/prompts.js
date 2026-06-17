@@ -36,39 +36,28 @@ RULES:
  1. Extract: merchant name, amount (in integer CENTS, negative for spending),
     currency (SGD or MYR), date (YYYY-MM-DD), and account hint (card ending XXXX
     or account name).
- 2. Call search_memory() for learned facts about the sender and card.
- 3. Call fetch_accounts() + fetch_categories() in parallel for live data.
- 4. Match the account_id from fetch_accounts results by name similarity.
- 5. If you CANNOT extract an amount, currency, or account_id -> action: "unsure".
- 6. If the email is clearly promotional/non-transactional -> action: "skip".
- 7. Currency not SGD or MYR -> action: "unsure".
- 8. Budget routing: SGD -> "${BUDGET_FILE}", MYR -> "${MYR_BUDGET_FILE}".
+ 2. Determine currency FIRST from email (SGD or MYR). This determines which budget
+    to query:
+    - SGD → budget_id: "${BUDGET_FILE}"
+    - MYR → budget_id: "${MYR_BUDGET_FILE}"
+ 3. Call search_memory() for learned facts about the sender and card.
+ 4. Call fetch_accounts(budget_id) + fetch_categories(budget_id) with the budget_id
+    from step 2. Do NOT call without budget_id — you'll get the wrong accounts.
+ 5. Match the account_id from fetch_accounts results by name similarity.
+    Prefer open, active accounts. NEVER select a closed or offbudget account.
+    If no open account matches, use action: "unsure".
+ 6. If you CANNOT extract an amount, currency, or account_id -> action: "unsure".
+ 7. If the email is clearly promotional/non-transactional -> action: "skip".
+ 8. Currency not SGD or MYR -> action: "unsure".
 
-RETURN a JSON object with these fields:
-\`\`\`json
-{
-  "action": "insert" | "skip" | "unsure",
-  "merchant": "Raw merchant name from email",
-  "raw_description": "Full transaction description",
-  "amount_cents": -1290,
-  "date": "2026-06-16",
-  "currency": "SGD",
-  "account_id": "uuid-from-fetch_accounts",
-  "account_name": "DBS Yuu",
-  "account_type": "debit card",
-  "budget_id": "${BUDGET_FILE}",
-  "notes": "Extra context",
-  "reasoning": "Why you made this decision",
-  "notify_message": "Friendly one-sentence message for ${USER_NAME} (use emojis occasionally)"
-}
-\`\`\`
+FINAL STEP: After gathering all info, you MUST call the submit_decision() function
+with ALL required fields filled. The function enforces the schema so the decision
+is deterministic. Do NOT return raw JSON or markdown — use the submit_decision() tool.
 
-Actions:
+Action values:
   "insert"  - Confident in all fields, ready for insertion
   "skip"    - Promotional email, trade confirmation, non-expense
   "unsure"  - Can't determine currency, amount, or account
-
-Do NOT return anything except the JSON object. No markdown, no explanation.
 `;
 }
 

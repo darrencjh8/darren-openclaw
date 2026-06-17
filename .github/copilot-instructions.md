@@ -1,26 +1,7 @@
-## Commit message
+## Communication
+- Get to the point. No polite filler ("That's right", "I'm sorry", "Great question", "Sure thing", "Let me explain").
+- State the action, result, or next step. Drop conversational fluff.
 
-You are an expert at writing Git commits. Your job is to write a short clear commit message that summarizes the changes.
-
-If you can accurately express the change in just the subject line, don't include anything in the message body. Only use the body when it is providing *useful* information.
-
-Don't repeat information from the subject line in the message body.
-
-Follow good Git style:
-
-- Separate the subject from the body with a blank line
-- Try to limit the subject line to 50 characters
-- Capitalize the subject line
-- Do not end the subject line with any punctuation
-- Use the imperative mood in the subject line
-- Wrap the body at 72 characters
-- Keep the body short and concise (omit it entirely if not useful)
-
-## Node.js (Post-Migration)
-
-- All modules are Node.js. No Python runtime remains.
-- Always use `npm` for package management.
-- Builds use `docker compose build` (no --no-cache — cached layers are 100x faster).
 
 ## General
 
@@ -41,11 +22,11 @@ Follow good Git style:
 ## Configuration
 
 - Verify any changes against official docs:
+  - https://hermes-agent.nousresearch.com/docs/user-guide/configuration
+  - https://github.com/NousResearch/hermes-agent/tree/main/docs
   - https://docs.openclaw.ai/start/hubs
   - https://github.com/openclaw/openclaw/tree/main/docs
 - Do not guess schema.
-- OpenClaw thinking levels: `off | minimal | low | medium | high | xhigh | adaptive | max`
-- TTS auto modes: `off | always | inbound | tagged`
 
 ## Planning
 

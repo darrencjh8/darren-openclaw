@@ -8,7 +8,7 @@ import { ImapFlow } from "imapflow";
 import { simpleParser } from "mailparser";
 
 export class ImapIdleHandler {
-    IDLE_TIMEOUT = 300;
+    IDLE_TIMEOUT = 15; // fast retry, dedup prevents re-processing
     RECONNECT_DELAY = 5;
 
     /**
@@ -159,6 +159,8 @@ export class ImapIdleHandler {
                                 error: e.message,
                             }),
                         );
+                        if (this._dedup)
+                            this._dedup.recordProcessed(msg.msg_id);
                     }
                 }
                 // Wait for new mail. Per imapflow's official API docs

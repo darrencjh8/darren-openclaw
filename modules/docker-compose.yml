@@ -1,0 +1,64 @@
+services:
+    hermes:
+        build: ./hermes
+        container_name: hermes
+        restart: unless-stopped
+        command: hermes gateway run
+        depends_on:
+            expense-tracker:
+                condition: service_healthy
+        ports:
+            - "8642:8642"
+            - "8644:8644"
+            - "9119:9119"
+        volumes:
+            - hermes_data:/opt/data
+            - /var/run/docker.sock:/var/run/docker.sock
+        env_file:
+            - ./hermes/.env
+        environment:
+            - HERMES_DASHBOARD=1
+
+    expense-tracker:
+        build:
+            context: ./expense-tracker
+            dockerfile: docker/Dockerfile
+        container_name: expense-tracker
+        ports:
+            - "127.0.0.1:8080:8080"
+        volumes:
+            - ./expense-tracker/data:/app/data
+        env_file:
+            - ./expense-tracker/.env
+        environment:
+            - ACTUAL_API_URL=http://actual-api:3000
+            - OPENCLAW_GATEWAY_URL=http://openclaw:18789
+        restart: unless-stopped
+        healthcheck:
+            test:
+                [
+                    "CMD",
+                    "node",
+                    "-e",
+                    "fetch('http://localhost:8080/health').then(r=>r.ok?process.exit(0):process.exit(1))",
+                ]
+            interval: 5s
+            timeout: 3s
+            retries: 3
+            start_period: 5s
+
+    actual-api:
+        build:
+            context: ./actual-api
+            dockerfile: Dockerfile
+        container_name: actual-api
+        ports:
+            - "127.0.0.1:3000:3000"
+        env_file:
+            - ./hermes/.env
+        environment:
+            - BUDGET_SWITCH_DELAY_MS=5000
+        restart: unless-stopped
+
+volumes:
+    hermes_data:

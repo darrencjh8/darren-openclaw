@@ -121,8 +121,7 @@ export class Config {
             env.ONEDRIVE_REFRESH_TOKEN_PATH ||
             "/app/config/onedrive_refresh_token";
         this.onedriveDataDir = env.ONEDRIVE_DATA_DIR || "/data/onedrive";
-        this.onedriveClientId =
-            env.ONEDRIVE_CLIENT_ID || "d50ca740-c83f-4d1b-b616-12c519384f0c";
+        this.onedriveClientId = env.ONEDRIVE_CLIENT_ID;
     }
 
     static fromEnv() {

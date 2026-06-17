@@ -82,4 +82,12 @@ export class DedupJournal {
     recordProcessed(uid) {
         this._stmtInsertUid.run(uid, new Date().toISOString());
     }
+
+    /** Delete processed_uids entries older than 60 minutes */
+    cleanupProcessedUids() {
+        const cutoff = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+        this._db
+            .prepare("DELETE FROM processed_uids WHERE processed_at < ?")
+            .run(cutoff);
+    }
 }

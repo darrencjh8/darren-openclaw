@@ -13,9 +13,6 @@ WORKDIR /app
 COPY package.json .
 RUN npm install --production
 
-# Pre-download the WASM embeddings model at build time
-RUN node -e "import('@xenova/transformers').then(async ({ pipeline }) => { await pipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2'); console.log('Model cached'); })"
-
 COPY src/ ./src/
 
 RUN mkdir -p /app/data

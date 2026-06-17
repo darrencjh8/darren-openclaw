@@ -17,9 +17,7 @@ async function getAccessToken() {
     const refreshTokenPath =
         process.env.ONEDRIVE_REFRESH_TOKEN_PATH ||
         "/app/config/onedrive_refresh_token";
-    const clientId =
-        process.env.ONEDRIVE_CLIENT_ID ||
-        "d50ca740-c83f-4d1b-b616-12c519384f0c";
+    const clientId = process.env.ONEDRIVE_CLIENT_ID;
 
     if (!existsSync(refreshTokenPath)) {
         throw new Error(
