@@ -32,7 +32,7 @@ export class Config {
         this.imapPassword = env.IMAP_PASSWORD || "";
         this.imapMailbox = env.IMAP_MAILBOX || "INBOX";
         this.openclawGatewayUrl =
-            env.OPENCLAW_GATEWAY_URL || "http://openclaw:18800";
+            env.OPENCLAW_GATEWAY_URL || "http://openclaw:18789";
         this.openclawGatewayToken = env.OPENCLAW_GATEWAY_TOKEN || "";
         this.userName = env.USER_NAME || "there";
         this.systemPromptExtra = env.SYSTEM_PROMPT_EXTRA || "";

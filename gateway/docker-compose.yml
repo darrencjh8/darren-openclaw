@@ -54,6 +54,7 @@ services:
             - ../modules/expense-tracker/.env:/app/.env:ro
         environment:
             - ACTUAL_API_URL=http://actual-api:3000
+            - OPENCLAW_GATEWAY_URL=http://openclaw:18789
         restart: unless-stopped
 
     actual-api:
