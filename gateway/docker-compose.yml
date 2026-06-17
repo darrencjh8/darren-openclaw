@@ -135,6 +135,7 @@ services:
             dockerfile: Dockerfile
         container_name: hermes
         restart: unless-stopped
+        command: gateway run
         depends_on:
             expense-tracker:
                 condition: service_healthy
