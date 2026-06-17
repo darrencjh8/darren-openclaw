@@ -146,7 +146,18 @@ export async function createMcpServer(registry, app) {
     // Single endpoint handles GET (SSE streaming) and POST (direct responses)
     // req.body must be pre-parsed JSON — express.json() is configured in index.js
     app.all("/mcp", async (req, res) => {
-        await transport.handleRequest(req, res, req.body);
+        try {
+            await transport.handleRequest(req, res, req.body);
+        } catch (e) {
+            console.error(
+                JSON.stringify({
+                    event: "mcp_error",
+                    error: e.message,
+                    stack: e.stack?.slice(0, 500),
+                }),
+            );
+            if (!res.headersSent) res.status(500).json({ error: e.message });
+        }
     });
 
     console.log(
