@@ -86,18 +86,29 @@ export async function executeDecision(llmOutput, tools) {
             return { action: "duplicate", details: summary };
         }
 
-        // Step 2: Insert transaction
-        await tools.executeTool("insert_transaction", {
-            account_id: accountId,
-            date: llmOutput.date || new Date().toISOString().slice(0, 10),
-            amount_cents: llmOutput.amount_cents || 0,
-            imported_description: payeeName,
-            category_id: llmOutput.category_id || undefined,
-            notes: llmOutput.notes || "",
-            budget_id: llmOutput.budget_id || "",
-        });
+        // Step 2: Insert transaction (CRITICAL: only mark read if this succeeds)
+        try {
+            await tools.executeTool("insert_transaction", {
+                account_id: accountId,
+                date: llmOutput.date || new Date().toISOString().slice(0, 10),
+                amount_cents: llmOutput.amount_cents || 0,
+                imported_description: payeeName,
+                category_id: llmOutput.category_id || undefined,
+                notes: llmOutput.notes || "",
+                budget_id: llmOutput.budget_id || "",
+            });
+        } catch (e) {
+            console.error(
+                JSON.stringify({
+                    event: "insert_failed",
+                    error: e.message,
+                }),
+            );
+            // Do NOT mark as read — email stays unread for retry
+            return { action: "error", details: `Insert failed: ${e.message}` };
+        }
 
-        // Step 3: Mark as read
+        // Step 3: Mark as read (only after confirmed insert)
         await tools.executeTool("mark_email_read", {});
 
         // Step 4: Notify user

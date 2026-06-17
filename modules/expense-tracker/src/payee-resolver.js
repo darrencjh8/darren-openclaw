@@ -47,10 +47,26 @@ export async function resolvePayeeDeterministic(
         return { payee: keywordPayee, source: "keyword" };
     }
 
-    // Step 3: Last resort — web search + LLM classify
+    // Step 3: Last resort — web search + LLM classify (with 10s timeout)
     if (resolveMerchantFn) {
-        const result = await resolveMerchantFn(merchant, budgetId || "");
-        return { payee: result.payee || "Misc", source: result.source || "fallback" };
+        try {
+            const result = await Promise.race([
+                resolveMerchantFn(merchant, budgetId || ""),
+                new Promise((_, reject) =>
+                    setTimeout(
+                        () => reject(new Error("RESOLVE_TIMEOUT")),
+                        10000,
+                    ),
+                ),
+            ]);
+            return {
+                payee: result.payee || "Misc",
+                source: result.source || "fallback",
+            };
+        } catch {
+            // Timeout or error — fallback to Misc
+            return { payee: "Misc", source: "fallback" };
+        }
     }
 
     // No resolve function provided → fallback

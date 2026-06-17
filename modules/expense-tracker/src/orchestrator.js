@@ -138,6 +138,8 @@ export class AgentOrchestrator {
         try {
             llmOutput = await this._runPhase1(messages, llmTools);
         } catch (e) {
+            // Parse failure or LLM error — notify user, mark as read to
+            // prevent poison-pill reprocessing, log the error.
             console.error(
                 JSON.stringify({
                     event: "phase1_error",
@@ -195,7 +197,31 @@ export class AgentOrchestrator {
         // Phase 1.5: DETERMINISTIC PAYEE RESOLUTION
         // ═══════════════════════════════════════════════════════════
         try {
-            const memoryResults = this._tools._lastSearchMemoryResults || [];
+            // If LLM skipped search_memory, auto-call it now (mandatory)
+            let memoryResults = this._tools._lastSearchMemoryResults || [];
+            if (memoryResults.length === 0) {
+                try {
+                    const result = await this._tools.executeTool(
+                        "search_memory",
+                        {
+                            query:
+                                llmOutput.merchant ||
+                                llmOutput.raw_description ||
+                                "",
+                        },
+                    );
+                    memoryResults = result.results || [];
+                    console.log(
+                        JSON.stringify({
+                            event: "search_memory_fallback",
+                            merchant: llmOutput.merchant,
+                        }),
+                    );
+                } catch {
+                    // search_memory failed — continue with empty results
+                }
+            }
+
             const payeeResult = await resolvePayeeDeterministic(
                 llmOutput.merchant || llmOutput.raw_description || "",
                 memoryResults,

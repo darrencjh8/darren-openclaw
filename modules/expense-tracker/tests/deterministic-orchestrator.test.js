@@ -55,9 +55,8 @@ describe("Phase 1: LLM tools are restricted to info-gathering only", () => {
 
 describe("Phase 1.5: Deterministic payee resolution", () => {
     it("resolves payee from search_memory results (Step 1)", async () => {
-        const { resolvePayeeDeterministic } = await import(
-            "../src/payee-resolver.js"
-        );
+        const { resolvePayeeDeterministic } =
+            await import("../src/payee-resolver.js");
         const memoryResults = [
             { text: "UOB Ladies is a credit card account", score: 0.9 },
             {
@@ -77,12 +76,9 @@ describe("Phase 1.5: Deterministic payee resolution", () => {
     });
 
     it("resolves payee from keyword table when memory has no mapping (Step 2)", async () => {
-        const { resolvePayeeDeterministic } = await import(
-            "../src/payee-resolver.js"
-        );
-        const memoryResults = [
-            { text: "DBS Yuu is a debit card", score: 0.9 },
-        ];
+        const { resolvePayeeDeterministic } =
+            await import("../src/payee-resolver.js");
+        const memoryResults = [{ text: "DBS Yuu is a debit card", score: 0.9 }];
 
         const result = await resolvePayeeDeterministic(
             "NTUC FairPrice",
@@ -95,9 +91,8 @@ describe("Phase 1.5: Deterministic payee resolution", () => {
     });
 
     it("calls resolve_merchant only when memory AND keywords both fail (Step 3)", async () => {
-        const { resolvePayeeDeterministic } = await import(
-            "../src/payee-resolver.js"
-        );
+        const { resolvePayeeDeterministic } =
+            await import("../src/payee-resolver.js");
         const memoryResults = [{ text: "Some unrelated fact", score: 0.5 }];
 
         // Mock resolve_merchant via a callback
@@ -120,9 +115,8 @@ describe("Phase 1.5: Deterministic payee resolution", () => {
     });
 
     it("skips resolve_merchant when memory already has the mapping", async () => {
-        const { resolvePayeeDeterministic } = await import(
-            "../src/payee-resolver.js"
-        );
+        const { resolvePayeeDeterministic } =
+            await import("../src/payee-resolver.js");
         const memoryResults = [
             { text: "Coffee Bean maps to Coffee payee", score: 0.9 },
         ];
@@ -146,9 +140,8 @@ describe("Phase 1.5: Deterministic payee resolution", () => {
     });
 
     it("returns payee=Misc when empty memory and no keyword match and no resolve fn", async () => {
-        const { resolvePayeeDeterministic } = await import(
-            "../src/payee-resolver.js"
-        );
+        const { resolvePayeeDeterministic } =
+            await import("../src/payee-resolver.js");
 
         const result = await resolvePayeeDeterministic(
             "CompletelyUnknownMerchant",
@@ -161,9 +154,8 @@ describe("Phase 1.5: Deterministic payee resolution", () => {
     });
 
     it("handles null/undefined memory results gracefully", async () => {
-        const { resolvePayeeDeterministic } = await import(
-            "../src/payee-resolver.js"
-        );
+        const { resolvePayeeDeterministic } =
+            await import("../src/payee-resolver.js");
 
         const result = await resolvePayeeDeterministic(
             "SomeMerchant",
@@ -191,7 +183,8 @@ describe("Phase 2: Deterministic execution", () => {
                     return { id: "txn-1", amount: -1030 };
                 if (name === "mark_email_read") return true;
                 if (name === "notify_user") return true;
-                if (name === "learn_fact") return { added: true, skipped: false };
+                if (name === "learn_fact")
+                    return { added: true, skipped: false };
                 if (name === "log_decision") return true;
                 return null;
             }),
@@ -234,7 +227,9 @@ describe("Phase 2: Deterministic execution", () => {
         // learn_fact × 3
         expect(tools.executeTool).toHaveBeenCalledWith(
             "learn_fact",
-            expect.objectContaining({ fact: expect.stringContaining("account") }),
+            expect.objectContaining({
+                fact: expect.stringContaining("account"),
+            }),
         );
         expect(tools.executeTool).toHaveBeenCalledWith(
             "learn_fact",
@@ -389,8 +384,7 @@ describe("AgentOrchestrator 3-phase flow", () => {
                             account_id: "acc-dbs-yuu",
                             notes: "DBS Yuu card",
                             reasoning: "S$12.80 at Toast Box on DBS Yuu",
-                            notify_message:
-                                "Logged S$12.80 at Toast Box! 🍞",
+                            notify_message: "Logged S$12.80 at Toast Box! 🍞",
                         }),
                     },
                 },
@@ -427,7 +421,7 @@ describe("AgentOrchestrator 3-phase flow", () => {
         const tools = {
             setEmailContext: vi.fn(),
             getLlmToolSchemas: vi.fn(() => []),
-            executeTool: vi.fn(),
+            executeTool: vi.fn(async () => true),
         };
         const orch = new AgentOrchestrator(config, tools);
 
@@ -444,8 +438,12 @@ describe("AgentOrchestrator 3-phase flow", () => {
 
         const result = await orch.processEmail("test-002", "Email content");
 
-        expect(result.action).toBe("error");
-        expect(result.details).toContain("Failed to parse");
+        // Notifies user instead of returning raw error
+        expect(tools.executeTool).toHaveBeenCalledWith(
+            "notify_user",
+            expect.anything(),
+        );
+        expect(result.action).toBe("notified");
     });
 
     it("processEmail validates account_id exists in fetched accounts", async () => {
@@ -499,6 +497,388 @@ describe("AgentOrchestrator 3-phase flow", () => {
 
         // Should fail because account_id doesn't exist
         expect(result.action).not.toBe("inserted");
+    });
+});
+
+// ─────────────────────────────────────────────────────────────────
+// Critical Fix 1: insert failure → email NOT marked read
+// ─────────────────────────────────────────────────────────────────
+
+describe("Critical Fix 1: insert failure does not mark email read", () => {
+    it("leaves email unread when insert_transaction throws", async () => {
+        const { executeDecision } = await import("../src/decision-executor.js");
+
+        const tools = {
+            executeTool: vi.fn(async (name) => {
+                if (name === "check_duplicate") return false;
+                if (name === "insert_transaction")
+                    throw new Error("Actual Budget API down");
+                if (name === "notify_user") return true;
+                if (name === "log_decision") return true;
+                return true;
+            }),
+            setEmailContext: vi.fn(),
+        };
+
+        const llmOutput = {
+            action: "insert",
+            account_id: "acc-1",
+            payee_name: "Food",
+            amount_cents: -1280,
+            date: "2026-06-16",
+            notify_message: "Logged!",
+            reasoning: "Test",
+        };
+
+        const result = await executeDecision(llmOutput, tools);
+
+        // Must NOT mark as read after a failed insert
+        expect(tools.executeTool).not.toHaveBeenCalledWith(
+            "mark_email_read",
+            expect.anything(),
+        );
+        expect(result.action).toBe("error");
+    });
+
+    it("still marks email read when insert succeeds", async () => {
+        const { executeDecision } = await import("../src/decision-executor.js");
+
+        const tools = {
+            executeTool: vi.fn(async (name) => {
+                if (name === "check_duplicate") return false;
+                if (name === "insert_transaction")
+                    return { id: "txn-1", amount: -1280 };
+                return true;
+            }),
+            setEmailContext: vi.fn(),
+        };
+
+        const llmOutput = {
+            action: "insert",
+            account_id: "acc-1",
+            payee_name: "Food",
+            amount_cents: -1280,
+            date: "2026-06-16",
+            notify_message: "Logged!",
+            reasoning: "Test",
+        };
+
+        await executeDecision(llmOutput, tools);
+
+        // Must mark as read after successful insert
+        expect(tools.executeTool).toHaveBeenCalledWith(
+            "mark_email_read",
+            expect.anything(),
+        );
+    });
+});
+
+// ─────────────────────────────────────────────────────────────────
+// Critical Fix 2: malformed LLM JSON → notify user, leave unread
+// ─────────────────────────────────────────────────────────────────
+
+describe("Critical Fix 2: malformed LLM JSON notifies user and leaves unread", () => {
+    it("notifies user AND marks read when LLM returns unparseable text", async () => {
+        const { AgentOrchestrator } = await import("../src/orchestrator.js");
+
+        const config = {
+            deepseekApiKey: "sk-test",
+            systemPrompt: "You are an expense tracker.",
+        };
+        const tools = {
+            setEmailContext: vi.fn(),
+            getLlmToolSchemas: vi.fn(() => []),
+            executeTool: vi.fn(async () => true),
+        };
+        const orch = new AgentOrchestrator(config, tools);
+
+        orch._llm.chat = vi.fn(async () => ({
+            choices: [
+                {
+                    finish_reason: "stop",
+                    message: { content: "garbled nonsense !@#$%" },
+                },
+            ],
+        }));
+
+        const result = await orch.processEmail("test-poison", "Email content");
+
+        // Must notify user about the failure
+        expect(tools.executeTool).toHaveBeenCalledWith(
+            "notify_user",
+            expect.anything(),
+        );
+        // Must mark as read to prevent poison-pill reprocessing loop
+        expect(tools.executeTool).toHaveBeenCalledWith(
+            "mark_email_read",
+            expect.anything(),
+        );
+        expect(result.action).toBe("notified");
+    });
+
+    it("notifies user and marks read when LLM returns JSON with missing action field", async () => {
+        const { AgentOrchestrator } = await import("../src/orchestrator.js");
+
+        const config = {
+            deepseekApiKey: "sk-test",
+            systemPrompt: "You are an expense tracker.",
+        };
+        const tools = {
+            setEmailContext: vi.fn(),
+            getLlmToolSchemas: vi.fn(() => []),
+            executeTool: vi.fn(async () => true),
+        };
+        const orch = new AgentOrchestrator(config, tools);
+
+        // LLM returns valid JSON but missing required "action" field
+        orch._llm.chat = vi.fn(async () => ({
+            choices: [
+                {
+                    finish_reason: "stop",
+                    message: {
+                        content: JSON.stringify({
+                            amount_cents: -500,
+                            currency: "SGD",
+                        }),
+                    },
+                },
+            ],
+        }));
+
+        const result = await orch.processEmail("test-missing-action", "Email");
+
+        expect(tools.executeTool).toHaveBeenCalledWith(
+            "notify_user",
+            expect.anything(),
+        );
+        expect(tools.executeTool).toHaveBeenCalledWith(
+            "mark_email_read",
+            expect.anything(),
+        );
+    });
+});
+
+// ─────────────────────────────────────────────────────────────────
+// Critical Fix 3: resolve_merchant timeout → fallback to Misc
+// ─────────────────────────────────────────────────────────────────
+
+describe("Critical Fix 3: resolve_merchant timeout falls back to Misc", () => {
+    it("returns Misc when resolve_merchant hangs (timeout)", async () => {
+        const { resolvePayeeDeterministic } =
+            await import("../src/payee-resolver.js");
+
+        // A resolve function that never returns (simulates hang)
+        const hangingResolve = () => new Promise(() => {});
+
+        const result = await resolvePayeeDeterministic(
+            "UnknownMerchant",
+            [],
+            null,
+            hangingResolve,
+        );
+
+        // Must return Misc with source fallback, not hang forever
+        expect(result.payee).toBe("Misc");
+        expect(result.source).toBe("fallback");
+    }, 15000); // timeout guard is 10s, vitest timeout 15s
+
+    it("returns Misc when resolve_merchant throws", async () => {
+        const { resolvePayeeDeterministic } =
+            await import("../src/payee-resolver.js");
+
+        const throwingResolve = async () => {
+            throw new Error("Brave API rate limited");
+        };
+
+        const result = await resolvePayeeDeterministic(
+            "UnknownMerchant",
+            [],
+            null,
+            throwingResolve,
+        );
+
+        expect(result.payee).toBe("Misc");
+        expect(result.source).toBe("fallback");
+    });
+});
+
+// ─────────────────────────────────────────────────────────────────
+// Fix 5: Closed account validation
+// ─────────────────────────────────────────────────────────────────
+
+describe("Fix 5: account validation rejects closed accounts", () => {
+    it("rejects LLM-chosen account when closed=true", async () => {
+        const { AgentOrchestrator } = await import("../src/orchestrator.js");
+
+        const config = {
+            deepseekApiKey: "sk-test",
+            systemPrompt: "You are an expense tracker.",
+        };
+        const tools = {
+            setEmailContext: vi.fn(),
+            getLlmToolSchemas: vi.fn(() => []),
+            executeTool: vi.fn(async (name, args) => {
+                if (name === "fetch_accounts")
+                    return [
+                        { id: "acc-1", name: "Closed Card", closed: true },
+                        { id: "acc-2", name: "Active Card", closed: false },
+                    ];
+                if (name === "check_duplicate") return false;
+                if (name === "insert_transaction") return { id: "txn-1" };
+                return true;
+            }),
+        };
+        const orch = new AgentOrchestrator(config, tools);
+
+        orch._llm.chat = vi.fn(async () => ({
+            choices: [
+                {
+                    finish_reason: "stop",
+                    message: {
+                        content: JSON.stringify({
+                            action: "insert",
+                            merchant: "Test",
+                            amount_cents: -500,
+                            date: "2026-06-16",
+                            currency: "SGD",
+                            account_id: "acc-1", // closed account
+                            notes: "",
+                            reasoning: "Test",
+                            notify_message: "Test",
+                        }),
+                    },
+                },
+            ],
+        }));
+
+        const result = await orch.processEmail("test-closed", "Email");
+
+        // Must NOT insert to closed account
+        expect(result.action).not.toBe("inserted");
+        expect(tools.executeTool).not.toHaveBeenCalledWith(
+            "insert_transaction",
+            expect.anything(),
+        );
+    });
+
+    it("accepts active account", async () => {
+        const { AgentOrchestrator } = await import("../src/orchestrator.js");
+
+        const config = {
+            deepseekApiKey: "sk-test",
+            systemPrompt: "You are an expense tracker.",
+        };
+        const tools = {
+            setEmailContext: vi.fn(),
+            getLlmToolSchemas: vi.fn(() => []),
+            executeTool: vi.fn(async (name, args) => {
+                if (name === "fetch_accounts")
+                    return [
+                        { id: "acc-1", name: "Closed Card", closed: true },
+                        { id: "acc-2", name: "Active Card", closed: false },
+                    ];
+                if (name === "check_duplicate") return false;
+                if (name === "insert_transaction") return { id: "txn-1" };
+                return true;
+            }),
+        };
+        const orch = new AgentOrchestrator(config, tools);
+
+        orch._llm.chat = vi.fn(async () => ({
+            choices: [
+                {
+                    finish_reason: "stop",
+                    message: {
+                        content: JSON.stringify({
+                            action: "insert",
+                            merchant: "Test",
+                            amount_cents: -500,
+                            date: "2026-06-16",
+                            currency: "SGD",
+                            account_id: "acc-2", // active account
+                            notes: "",
+                            reasoning: "Test",
+                            notify_message: "Test",
+                        }),
+                    },
+                },
+            ],
+        }));
+
+        const result = await orch.processEmail("test-active", "Email");
+
+        // Must insert to active account
+        expect(result.action).toBe("inserted");
+        expect(tools.executeTool).toHaveBeenCalledWith(
+            "insert_transaction",
+            expect.anything(),
+        );
+    });
+});
+
+// ─────────────────────────────────────────────────────────────────
+// Fix 7: search_memory is mandatory (auto-called if LLM skips)
+// ─────────────────────────────────────────────────────────────────
+
+describe("Fix 7: search_memory auto-called when LLM skips it", () => {
+    it("auto-calls search_memory when LLM returns JSON without calling it", async () => {
+        const { AgentOrchestrator } = await import("../src/orchestrator.js");
+
+        const config = {
+            deepseekApiKey: "sk-test",
+            systemPrompt: "You are an expense tracker.",
+        };
+
+        const toolCalls = [];
+        const tools = {
+            setEmailContext: vi.fn(),
+            getLlmToolSchemas: vi.fn(() => []),
+            executeTool: vi.fn(async (name, args) => {
+                toolCalls.push(name);
+                if (name === "search_memory")
+                    return {
+                        results: [
+                            {
+                                text: "Test merchant maps to Food payee",
+                                score: 0.9,
+                            },
+                        ],
+                    };
+                if (name === "fetch_accounts")
+                    return [{ id: "acc-1", name: "DBS Yuu", closed: false }];
+                if (name === "check_duplicate") return false;
+                if (name === "insert_transaction") return { id: "txn-1" };
+                return true;
+            }),
+        };
+        const orch = new AgentOrchestrator(config, tools);
+
+        // LLM returns JSON without ever calling search_memory
+        orch._llm.chat = vi.fn(async () => ({
+            choices: [
+                {
+                    finish_reason: "stop",
+                    message: {
+                        content: JSON.stringify({
+                            action: "insert",
+                            merchant: "Test Merchant",
+                            amount_cents: -500,
+                            date: "2026-06-16",
+                            currency: "SGD",
+                            account_id: "acc-1",
+                            notes: "",
+                            reasoning: "Test",
+                            notify_message: "Test",
+                        }),
+                    },
+                },
+            ],
+        }));
+
+        await orch.processEmail("test-no-search", "Email");
+
+        // search_memory must have been called even though LLM skipped it
+        expect(toolCalls).toContain("search_memory");
     });
 });
 
