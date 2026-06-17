@@ -1,9 +1,9 @@
 /**
- * MCP Server — SSE transport (v1 SDK, compatible with Hermes).
+ * MCP Server — StreamableHTTP transport (stateless, no persistent connections).
  * Memory tools excluded — handled natively by Hermes.
  */
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
+import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { z } from "zod";
 
 function createTools(server, registry) {
@@ -131,29 +131,25 @@ function createTools(server, registry) {
 }
 
 export function createMcpServer(registry, app) {
-    let transport = null;
-
-    app.get("/sse", async (req, res) => {
-        const server = new McpServer({
-            name: "expense-tracker",
-            version: "1.0.0",
-        });
-        createTools(server, registry);
-        transport = new SSEServerTransport("/messages", res);
-        await server.connect(transport);
-        console.log(JSON.stringify({ event: "mcp_sse_connected" }));
+    const server = new McpServer({
+        name: "expense-tracker",
+        version: "1.0.0",
     });
+    createTools(server, registry);
 
-    app.post("/messages", async (req, res) => {
-        if (transport) {
-            await transport.handlePostMessage(req, res, req.body);
-        } else {
-            res.status(503).json({ error: "No active SSE connection" });
-        }
+    const transport = new StreamableHTTPServerTransport();
+    server.connect(transport); // fire-and-forget — StreamableHTTP doesn't need persistent setup
+
+    // Single endpoint: GET for SSE fallback, POST for messages
+    app.all("/mcp", async (req, res) => {
+        await transport.handleRequest(req, res);
     });
 
     console.log(
-        JSON.stringify({ event: "mcp_server_ready", transport: "sse" }),
+        JSON.stringify({
+            event: "mcp_server_ready",
+            transport: "streamable-http",
+        }),
     );
 }
 
