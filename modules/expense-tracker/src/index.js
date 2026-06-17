@@ -173,14 +173,7 @@ async function main() {
     }
 
     const app = express();
-
-    // Body parser: raw Buffer for /mcp (StreamableHTTP), JSON for everything else
-    app.use((req, res, next) => {
-        if (req.path === "/mcp") {
-            return express.raw({ type: "*/*", limit: "10mb" })(req, res, next);
-        }
-        return express.json({ limit: "10mb" })(req, res, next);
-    });
+    app.use(express.json({ limit: "10mb" }));
 
     // Health check
     app.get("/health", (_req, res) => res.json({ status: "ok" }));

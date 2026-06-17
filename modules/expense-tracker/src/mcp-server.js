@@ -144,7 +144,7 @@ export async function createMcpServer(registry, app) {
     await server.connect(transport);
 
     // Single endpoint handles GET (SSE streaming) and POST (direct responses)
-    // req.body must be the raw Buffer — express.raw() is configured in index.js
+    // req.body must be pre-parsed JSON — express.json() is configured in index.js
     app.all("/mcp", async (req, res) => {
         await transport.handleRequest(req, res, req.body);
     });
