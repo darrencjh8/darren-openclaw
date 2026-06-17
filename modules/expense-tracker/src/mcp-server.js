@@ -142,7 +142,18 @@ export async function createMcpServer(registry, app) {
 
     // Single endpoint: GET for SSE fallback, POST for messages
     app.all("/mcp", async (req, res) => {
-        await transport.handleRequest(req, res);
+        try {
+            await transport.handleRequest(req, res);
+        } catch (e) {
+            console.error(
+                JSON.stringify({
+                    event: "mcp_error",
+                    error: e.message,
+                    stack: e.stack,
+                }),
+            );
+            if (!res.headersSent) res.status(500).json({ error: e.message });
+        }
     });
 
     console.log(
