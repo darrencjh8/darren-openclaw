@@ -12,8 +12,18 @@ EXPENSE_DIR="${EXPENSE_TRACKER_DATA:-}"
 
 if [ ! -d "$CLONE_DIR/.git" ]; then
     git clone "$REPO_URL" "$CLONE_DIR"
+    cd "$CLONE_DIR"
+    # Handle empty repo (no commits yet)
+    if ! git rev-parse --verify main >/dev/null 2>&1; then
+        git checkout -b main
+        HAS_REMOTE=false
+    else
+        HAS_REMOTE=true
+    fi
 else
-    git -C "$CLONE_DIR" pull origin main
+    cd "$CLONE_DIR"
+    git pull origin main 2>/dev/null || true
+    HAS_REMOTE=true
 fi
 
 cp "$SRC_DIR/MEMORY.md" "$SRC_DIR/USER.md" "$CLONE_DIR/" 2>/dev/null || true
@@ -23,8 +33,24 @@ if [ -n "$EXPENSE_DIR" ] && [ -f "$EXPENSE_DIR/mappings.json" ]; then
 fi
 
 cd "$CLONE_DIR"
-if ! git diff --quiet; then
-    git add MEMORY.md USER.md
+# Check if there are changes (handles empty repo with no HEAD)
+if ! git rev-parse HEAD >/dev/null 2>&1; then
+    HAS_CHANGES=true
+elif ! git diff --quiet; then
+    HAS_CHANGES=true
+elif [ -n "$(git ls-files --others --exclude-standard)" ]; then
+    HAS_CHANGES=true
+else
+    HAS_CHANGES=false
+fi
+
+if [ "$HAS_CHANGES" = true ]; then
+    git add MEMORY.md USER.md expense-tracker/ 2>/dev/null || true
     git commit -m "$(date -Iseconds)"
-    git push origin main
+    if [ "$HAS_REMOTE" = true ]; then
+        git push origin main
+    else
+        git push -u origin main
+        HAS_REMOTE=true
+    fi
 fi
