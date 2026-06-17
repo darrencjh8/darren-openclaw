@@ -660,7 +660,143 @@ describe("Critical Fix 2: malformed LLM JSON notifies user and leaves unread", (
 });
 
 // ─────────────────────────────────────────────────────────────────
-// Critical Fix 3: resolve_merchant timeout → fallback to Misc
+// Global error handling: every error notifies the user
+// ─────────────────────────────────────────────────────────────────
+
+describe("Global error handling: every error notifies the user", () => {
+    it("processEmail catch-all notifies user on unexpected Phase 1.5 errors", async () => {
+        const { AgentOrchestrator } = await import("../src/orchestrator.js");
+
+        const config = { deepseekApiKey: "sk-test" };
+        let notifyCalls = [];
+        const tools = {
+            setEmailContext: vi.fn(),
+            getLlmToolSchemas: vi.fn(() => []),
+            executeTool: vi.fn(async (name, args) => {
+                if (name === "notify_user") notifyCalls.push(args.message);
+                if (name === "check_duplicate")
+                    throw new Error("Simulated Phase 2 crash");
+                return true;
+            }),
+        };
+        const orch = new AgentOrchestrator(config, tools);
+
+        orch._llm.chat = vi.fn(async () => ({
+            choices: [
+                {
+                    finish_reason: "stop",
+                    message: {
+                        content: JSON.stringify({
+                            action: "insert",
+                            merchant: "Test",
+                            amount_cents: -500,
+                            date: "2026-06-16",
+                            currency: "SGD",
+                            account_id: "acc-1",
+                        }),
+                    },
+                },
+            ],
+        }));
+
+        await expect(orch.processEmail("test-crash", "Email")).rejects.toThrow(
+            "Simulated Phase 2 crash",
+        );
+
+        expect(notifyCalls.length).toBeGreaterThan(0);
+        expect(notifyCalls[0]).toContain("unexpected error");
+    });
+
+    it("processEmail catch-all does NOT mark email read on error", async () => {
+        const { AgentOrchestrator } = await import("../src/orchestrator.js");
+
+        const config = { deepseekApiKey: "sk-test" };
+        const tools = {
+            setEmailContext: vi.fn(),
+            getLlmToolSchemas: vi.fn(() => []),
+            executeTool: vi.fn(async (name) => {
+                if (name === "notify_user") return true;
+                throw new Error("Boom");
+            }),
+        };
+        const orch = new AgentOrchestrator(config, tools);
+
+        orch._llm.chat = vi.fn(async () => ({
+            choices: [
+                {
+                    finish_reason: "stop",
+                    message: {
+                        content: JSON.stringify({
+                            action: "insert",
+                            merchant: "Test",
+                            amount_cents: -500,
+                            date: "2026-06-16",
+                            currency: "SGD",
+                            account_id: "acc-1",
+                        }),
+                    },
+                },
+            ],
+        }));
+
+        await expect(
+            orch.processEmail("test-no-markread", "Email"),
+        ).rejects.toThrow("Boom");
+
+        expect(tools.executeTool).not.toHaveBeenCalledWith(
+            "mark_email_read",
+            expect.anything(),
+        );
+    });
+
+    it("processEmail catch-all logs the error decision", async () => {
+        const { AgentOrchestrator } = await import("../src/orchestrator.js");
+
+        const config = { deepseekApiKey: "sk-test" };
+        const tools = {
+            setEmailContext: vi.fn(),
+            getLlmToolSchemas: vi.fn(() => []),
+            executeTool: vi.fn(async (name) => {
+                if (name === "notify_user") return true;
+                throw new Error("Kaboom");
+            }),
+        };
+        const orch = new AgentOrchestrator(config, tools);
+
+        orch._llm.chat = vi.fn(async () => ({
+            choices: [
+                {
+                    finish_reason: "stop",
+                    message: {
+                        content: JSON.stringify({
+                            action: "insert",
+                            merchant: "Test",
+                            amount_cents: -500,
+                            date: "2026-06-16",
+                            currency: "SGD",
+                            account_id: "acc-1",
+                        }),
+                    },
+                },
+            ],
+        }));
+
+        await expect(orch.processEmail("test-log", "Email")).rejects.toThrow(
+            "Kaboom",
+        );
+
+        expect(tools.executeTool).toHaveBeenCalledWith(
+            "log_decision",
+            expect.objectContaining({
+                action: "error",
+                reasoning: expect.stringContaining("Kaboom"),
+            }),
+        );
+    });
+});
+
+// ─────────────────────────────────────────────────────────────────
+// Option B: submit_decision tool for schema-enforced Phase 1 output
 // ─────────────────────────────────────────────────────────────────
 
 describe("Critical Fix 3: resolve_merchant timeout falls back to Misc", () => {
