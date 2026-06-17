@@ -265,6 +265,83 @@ const TOOLS = [
         },
     },
     {
+        name: "submit_decision",
+        description:
+            "Submit your final transaction decision. Call this AFTER gathering all info. " +
+            "The API enforces all required fields — every field in 'required' MUST be provided.",
+        schema: {
+            type: "object",
+            properties: {
+                action: {
+                    type: "string",
+                    enum: ["insert", "skip", "unsure"],
+                    description:
+                        "insert=confident in all fields, skip=promotional/non-expense, unsure=incomplete info",
+                },
+                merchant: {
+                    type: "string",
+                    description: "Raw merchant name from the email",
+                },
+                raw_description: {
+                    type: "string",
+                    description: "Full transaction description from the email",
+                },
+                amount_cents: {
+                    type: "integer",
+                    description:
+                        "Amount in integer cents, negative for spending",
+                },
+                date: {
+                    type: "string",
+                    description: "Transaction date in YYYY-MM-DD format",
+                },
+                currency: {
+                    type: "string",
+                    enum: ["SGD", "MYR"],
+                    description: "Currency code",
+                },
+                account_id: {
+                    type: "string",
+                    description: "UUID from fetch_accounts results",
+                },
+                account_name: {
+                    type: "string",
+                    description: "Human-readable account name (e.g. DBS Yuu)",
+                },
+                account_type: {
+                    type: "string",
+                    description: "debit card, credit card, or bank account",
+                },
+                budget_id: {
+                    type: "string",
+                    description: "Budget file name from config",
+                },
+                notes: {
+                    type: "string",
+                    description:
+                        "Extra context or notes about this transaction",
+                },
+                reasoning: {
+                    type: "string",
+                    description: "Why you made this decision",
+                },
+                notify_message: {
+                    type: "string",
+                    description:
+                        "Friendly one-sentence notification message for the user",
+                },
+            },
+            required: [
+                "action",
+                "merchant",
+                "amount_cents",
+                "date",
+                "currency",
+                "account_id",
+            ],
+        },
+    },
+    {
         name: "fetch_payees",
         description: "Fetch all payees from Actual Budget.",
         schema: {
@@ -631,6 +708,23 @@ export class ToolRegistry {
         }));
     }
 
+    /**
+     * Get the submit_decision tool schema for schema-enforced Phase 1 output.
+     * Returns null if the tool is not registered (backward compat).
+     */
+    getSubmitDecisionTool() {
+        const tool = TOOL_MAP["submit_decision"];
+        if (!tool) return null;
+        return {
+            type: "function",
+            function: {
+                name: tool.name,
+                description: tool.description,
+                parameters: tool.schema,
+            },
+        };
+    }
+
     async executeTool(name, args) {
         const handler = this[`_handle_${name.replace(/-/g, "_")}`];
         if (!handler) throw new Error(`Unknown tool: ${name}`);
@@ -638,6 +732,16 @@ export class ToolRegistry {
     }
 
     // ── Memory tools ──────────────────────────────────────────────
+
+    /**
+     * submit_decision is a schema-enforcement tool only.
+     * It is never actually executed — the orchestrator extracts
+     * the decision directly from the tool call arguments.
+     * This handler exists for tool registry completeness.
+     */
+    async _handle_submit_decision(args) {
+        return { received: true, action: args.action };
+    }
 
     async _handle_search_memory({ query }) {
         if (!this._memory) return { results: [] };

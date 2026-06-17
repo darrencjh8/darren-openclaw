@@ -59,7 +59,24 @@ describe("Config", () => {
 
     it("uses default gateway URL", () => {
         const config = new Config(requiredEnv);
-        expect(config.openclawGatewayUrl).toBe("http://openclaw:18800");
+        expect(config.openclawGatewayUrl).toBe("http://openclaw:18789");
+    });
+
+    it("default gateway URL uses correct port 18789 not 18800", () => {
+        const config = new Config(requiredEnv);
+        // The openclaw gateway HTTP API is on port 18789, not 18800.
+        // Port 18800 is not accessible from other Docker containers.
+        // Regression test for: notify_user silently failing with ECONNREFUSED.
+        expect(config.openclawGatewayUrl).toContain(":18789");
+        expect(config.openclawGatewayUrl).not.toContain(":18800");
+    });
+
+    it("respects OPENCLAW_GATEWAY_URL override", () => {
+        const config = new Config({
+            ...requiredEnv,
+            OPENCLAW_GATEWAY_URL: "http://custom:9999",
+        });
+        expect(config.openclawGatewayUrl).toBe("http://custom:9999");
     });
 
     it("all fields populated with custom values", () => {

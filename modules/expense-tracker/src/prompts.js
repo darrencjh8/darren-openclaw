@@ -45,31 +45,17 @@ RULES:
  7. Currency not SGD or MYR -> action: "unsure".
  8. Budget routing: SGD -> "${BUDGET_FILE}", MYR -> "${MYR_BUDGET_FILE}".
 
-RETURN a JSON object with these fields:
-\`\`\`json
-{
-  "action": "insert" | "skip" | "unsure",
-  "merchant": "Raw merchant name from email",
-  "raw_description": "Full transaction description",
-  "amount_cents": -1290,
-  "date": "2026-06-16",
-  "currency": "SGD",
-  "account_id": "uuid-from-fetch_accounts",
-  "account_name": "DBS Yuu",
-  "account_type": "debit card",
-  "budget_id": "${BUDGET_FILE}",
-  "notes": "Extra context",
-  "reasoning": "Why you made this decision",
-  "notify_message": "Friendly one-sentence message for ${USER_NAME} (use emojis occasionally)"
-}
-\`\`\`
+FINAL STEP: After gathering all info, you MUST call the submit_decision()
+function with your structured decision. The API enforces all required fields —
+you cannot submit without action, merchant, amount_cents, date, currency,
+and account_id.
 
 Actions:
   "insert"  - Confident in all fields, ready for insertion
   "skip"    - Promotional email, trade confirmation, non-expense
   "unsure"  - Can't determine currency, amount, or account
 
-Do NOT return anything except the JSON object. No markdown, no explanation.
+Do NOT return text — always call submit_decision() to submit your answer.
 `;
 }
 

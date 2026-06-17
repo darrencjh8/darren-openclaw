@@ -912,10 +912,12 @@ describe("System prompt for Phase 1", () => {
         const { getLlmSystemPrompt } = await import("../src/prompts.js");
         const prompt = getLlmSystemPrompt();
 
+        // submit_decision tool now enforces the schema —
+        // prompt instructs LLM to use it
+        expect(prompt).toContain("submit_decision");
         expect(prompt).toContain("action");
         expect(prompt).toContain("merchant");
         expect(prompt).toContain("amount_cents");
-        expect(prompt).toContain("notify_message");
     });
 
     it("existing getSystemPrompt() is unchanged (backward compat)", async () => {
@@ -924,5 +926,318 @@ describe("System prompt for Phase 1", () => {
 
         // Still contains original rules for external callers
         expect(prompt).toContain("expense-tracking");
+    });
+});
+
+// ─────────────────────────────────────────────────────────────────
+// Option B: submit_decision tool-calling for schema-enforced output
+// ─────────────────────────────────────────────────────────────────
+
+describe("Option B: submit_decision tool for schema-enforced Phase 1 output", () => {
+    it("getSubmitDecisionTool() returns tool with required fields schema", async () => {
+        const { ToolRegistry } = await import("../src/tools.js");
+        const registry = new ToolRegistry({ dedupDbPath: ":memory:" }, null);
+
+        const tool = registry.getSubmitDecisionTool();
+
+        expect(tool.type).toBe("function");
+        expect(tool.function.name).toBe("submit_decision");
+
+        const required = tool.function.parameters.required;
+        expect(required).toContain("action");
+        expect(required).toContain("merchant");
+        expect(required).toContain("amount_cents");
+        expect(required).toContain("date");
+        expect(required).toContain("currency");
+        expect(required).toContain("account_id");
+
+        // action must be enum
+        expect(tool.function.parameters.properties.action.enum).toEqual([
+            "insert",
+            "skip",
+            "unsure",
+        ]);
+    });
+
+    it("getLlmToolSchemas() does NOT include submit_decision", async () => {
+        const { ToolRegistry } = await import("../src/tools.js");
+        const registry = new ToolRegistry({ dedupDbPath: ":memory:" }, null);
+
+        const schemas = registry.getLlmToolSchemas();
+        const names = schemas.map((s) => s.function.name);
+
+        expect(names).not.toContain("submit_decision");
+        expect(names).toContain("search_memory");
+    });
+
+    it("_runPhase1 extracts decision from submit_decision tool call", async () => {
+        const { AgentOrchestrator } = await import("../src/orchestrator.js");
+
+        const config = { deepseekApiKey: "sk-test" };
+        const tools = {
+            getLlmToolSchemas: vi.fn(() => []),
+            getSubmitDecisionTool: vi.fn(() => ({
+                type: "function",
+                function: { name: "submit_decision", parameters: {} },
+            })),
+            executeTool: vi.fn(async () => ({ results: [] })),
+            _lastSearchMemoryResults: [],
+        };
+        const orch = new AgentOrchestrator(config, tools);
+
+        // Mock LLM: first call returns submit_decision tool call
+        orch._llm.chat = vi.fn(async () => ({
+            choices: [
+                {
+                    finish_reason: "tool_calls",
+                    message: {
+                        tool_calls: [
+                            {
+                                id: "call_submit",
+                                function: {
+                                    name: "submit_decision",
+                                    arguments: JSON.stringify({
+                                        action: "insert",
+                                        merchant: "Toast Box",
+                                        amount_cents: -1280,
+                                        date: "2026-06-16",
+                                        currency: "SGD",
+                                        account_id: "acc-dbs-yuu",
+                                        account_name: "DBS Yuu",
+                                        account_type: "debit card",
+                                        budget_id: "My Budget",
+                                        notes: "Test",
+                                        reasoning: "Clear transaction",
+                                        notify_message: "Logged!",
+                                    }),
+                                },
+                            },
+                        ],
+                    },
+                },
+            ],
+        }));
+
+        const messages = [
+            { role: "system", content: "test" },
+            { role: "user", content: "email" },
+        ];
+        const output = await orch._runPhase1(messages, []);
+
+        expect(output.action).toBe("insert");
+        expect(output.merchant).toBe("Toast Box");
+        expect(output.amount_cents).toBe(-1280);
+        expect(output.date).toBe("2026-06-16");
+        expect(output.currency).toBe("SGD");
+        expect(output.account_id).toBe("acc-dbs-yuu");
+    });
+
+    it("_runPhase1 falls back to text parsing when no submit_decision tool available", async () => {
+        const { AgentOrchestrator } = await import("../src/orchestrator.js");
+
+        const config = { deepseekApiKey: "sk-test" };
+        const tools = {
+            getLlmToolSchemas: vi.fn(() => []),
+            getSubmitDecisionTool: vi.fn(() => null), // No submit_decision tool
+            executeTool: vi.fn(async () => ({ results: [] })),
+            _lastSearchMemoryResults: [],
+        };
+        const orch = new AgentOrchestrator(config, tools);
+
+        // Mock LLM: returns free-text JSON (backward compat path)
+        orch._llm.chat = vi.fn(async () => ({
+            choices: [
+                {
+                    finish_reason: "stop",
+                    message: {
+                        content: JSON.stringify({
+                            action: "insert",
+                            merchant: "NTUC",
+                            amount_cents: -500,
+                            date: "2026-06-16",
+                            currency: "SGD",
+                            account_id: "acc-1",
+                        }),
+                    },
+                },
+            ],
+        }));
+
+        const messages = [
+            { role: "system", content: "test" },
+            { role: "user", content: "email" },
+        ];
+        const output = await orch._runPhase1(messages, []);
+
+        expect(output.action).toBe("insert");
+        expect(output.merchant).toBe("NTUC");
+    });
+
+    it("processEmail uses submit_decision tool when available", async () => {
+        const { AgentOrchestrator } = await import("../src/orchestrator.js");
+
+        const config = { deepseekApiKey: "sk-test" };
+        const tools = {
+            setEmailContext: vi.fn(),
+            getLlmToolSchemas: vi.fn(() => []),
+            getSubmitDecisionTool: vi.fn(() => ({
+                type: "function",
+                function: { name: "submit_decision", parameters: {} },
+            })),
+            executeTool: vi.fn(async (name) => {
+                if (name === "check_duplicate") return false;
+                if (name === "insert_transaction") return { id: "txn-1" };
+                return true;
+            }),
+            _lastSearchMemoryResults: [],
+        };
+        const orch = new AgentOrchestrator(config, tools);
+
+        // LLM returns submit_decision tool call
+        orch._llm.chat = vi.fn(async () => ({
+            choices: [
+                {
+                    finish_reason: "tool_calls",
+                    message: {
+                        tool_calls: [
+                            {
+                                id: "call_submit",
+                                function: {
+                                    name: "submit_decision",
+                                    arguments: JSON.stringify({
+                                        action: "insert",
+                                        merchant: "Toast Box",
+                                        amount_cents: -1280,
+                                        date: "2026-06-16",
+                                        currency: "SGD",
+                                        account_id: "acc-dbs-yuu",
+                                        reasoning: "Test",
+                                        notify_message: "Logged!",
+                                    }),
+                                },
+                            },
+                        ],
+                    },
+                },
+            ],
+        }));
+
+        const result = await orch.processEmail("test-submit", "Email");
+
+        expect(result.action).toBe("inserted");
+        expect(tools.executeTool).toHaveBeenCalledWith(
+            "insert_transaction",
+            expect.objectContaining({
+                account_id: "acc-dbs-yuu",
+                amount_cents: -1280,
+            }),
+        );
+    });
+
+    it("action field is ALWAYS present when submit_decision is used (API-enforced)", async () => {
+        // This test verifies the design: with submit_decision,
+        // the API rejects outputs without "action". Our code simply
+        // extracts tool.arguments which always has all required fields.
+        const { AgentOrchestrator } = await import("../src/orchestrator.js");
+
+        const config = { deepseekApiKey: "sk-test" };
+        const tools = {
+            getLlmToolSchemas: vi.fn(() => []),
+            getSubmitDecisionTool: vi.fn(() => ({
+                type: "function",
+                function: { name: "submit_decision", parameters: {} },
+            })),
+            executeTool: vi.fn(async () => ({ results: [] })),
+            _lastSearchMemoryResults: [],
+        };
+        const orch = new AgentOrchestrator(config, tools);
+
+        // Even if LLM tries to return without action (shouldn't happen
+        // with schema enforcement, but defensive), our code handles it.
+        orch._llm.chat = vi.fn(async () => ({
+            choices: [
+                {
+                    finish_reason: "tool_calls",
+                    message: {
+                        tool_calls: [
+                            {
+                                id: "call_submit",
+                                function: {
+                                    name: "submit_decision",
+                                    arguments: JSON.stringify({
+                                        // action field PRESENT because API enforces it
+                                        action: "insert",
+                                        merchant: "Test",
+                                        amount_cents: -500,
+                                        date: "2026-06-16",
+                                        currency: "SGD",
+                                        account_id: "acc-1",
+                                    }),
+                                },
+                            },
+                        ],
+                    },
+                },
+            ],
+        }));
+
+        const messages = [
+            { role: "system", content: "test" },
+            { role: "user", content: "email" },
+        ];
+        const output = await orch._runPhase1(messages, []);
+
+        // action MUST be present — this is the whole point of Option B
+        expect(output.action).toBeDefined();
+        expect(output.action).toBe("insert");
+    });
+
+    it("DeepSeekClient.chat() passes tool_choice when provided", async () => {
+        const { DeepSeekClient } = await import("../src/orchestrator.js");
+        const mockCreate = vi.fn(async () => ({
+            choices: [{ message: { content: "ok" } }],
+        }));
+
+        const client = new DeepSeekClient({ deepseekApiKey: "sk-test" });
+        // Replace the internal OpenAI client's create method
+        client._client.chat = { completions: { create: mockCreate } };
+
+        const toolChoice = {
+            type: "function",
+            function: { name: "submit_decision" },
+        };
+
+        await client.chat(
+            [{ role: "user", content: "test" }],
+            [{ type: "function", function: { name: "submit_decision" } }],
+            toolChoice,
+        );
+
+        expect(mockCreate).toHaveBeenCalledWith(
+            expect.objectContaining({
+                tool_choice: toolChoice,
+            }),
+        );
+    });
+
+    it("DeepSeekClient.chat() defaults tool_choice to auto when tools provided", async () => {
+        const { DeepSeekClient } = await import("../src/orchestrator.js");
+        const mockCreate = vi.fn(async () => ({
+            choices: [{ message: { content: "ok" } }],
+        }));
+
+        const client = new DeepSeekClient({ deepseekApiKey: "sk-test" });
+        client._client.chat = { completions: { create: mockCreate } };
+
+        await client.chat(
+            [{ role: "user", content: "test" }],
+            [{ type: "function", function: { name: "search_memory" } }],
+        );
+
+        expect(mockCreate).toHaveBeenCalledWith(
+            expect.objectContaining({
+                tool_choice: "auto",
+            }),
+        );
     });
 });

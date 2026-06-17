@@ -31,7 +31,7 @@ export class DeepSeekClient {
         }
     }
 
-    async chat(messages, tools) {
+    async chat(messages, tools, toolChoice) {
         const kwargs = {
             model: this._model,
             messages,
@@ -40,7 +40,7 @@ export class DeepSeekClient {
         };
         if (tools) {
             kwargs.tools = tools;
-            kwargs.tool_choice = "auto";
+            kwargs.tool_choice = toolChoice || "auto";
         }
 
         const retryDelays = [1000, 2000, 4000];
@@ -244,12 +244,17 @@ export class AgentOrchestrator {
     }
 
     /**
-     * Phase 1: Run the LLM with info-gathering tools until it returns
-     * a structured JSON response or runs out of iterations.
+     * Phase 1: Run the LLM with info-gathering tools, then force
+     * a schema-enforced submit_decision tool call for the final output.
+     * Falls back to free-text JSON parsing when submit_decision is unavailable.
      */
     async _runPhase1(messages, llmTools) {
-        const MAX_PHASE1_ITERATIONS = 3; // Allow tool calls + final JSON
+        const MAX_PHASE1_ITERATIONS = 3;
+        const submitDecisionTool = this._tools.getSubmitDecisionTool
+            ? this._tools.getSubmitDecisionTool()
+            : null;
 
+        // ── Phase 1a: Info-gathering loop ─────────────────────
         for (let i = 0; i < MAX_PHASE1_ITERATIONS; i++) {
             const response = await this._llm.chat(messages, llmTools);
             const choice = (response.choices || [{}])[0];
@@ -264,7 +269,7 @@ export class AgentOrchestrator {
 
             const toolCalls = message.tool_calls;
 
-            // No tool calls → LLM is returning its final JSON
+            // No tool calls → LLM is returning its final JSON (backward compat)
             if (!toolCalls && message.content) {
                 // Store search_memory results for Phase 1.5
                 this._tools._lastSearchMemoryResults =
@@ -309,6 +314,47 @@ export class AgentOrchestrator {
                         content: resultStr,
                     });
                 }
+            }
+        }
+
+        // ── Phase 1b: Schema-enforced decision via submit_decision ──
+        if (submitDecisionTool) {
+            // Force the LLM to call submit_decision with all required fields
+            const finalResponse = await this._llm.chat(
+                messages,
+                [submitDecisionTool],
+                {
+                    type: "function",
+                    function: { name: "submit_decision" },
+                },
+            );
+            const finalChoice = (finalResponse.choices || [{}])[0];
+            const finalMsg = finalChoice.message || {};
+            const finalToolCalls = finalMsg.tool_calls;
+
+            if (finalToolCalls && finalToolCalls.length > 0) {
+                const submitCall = finalToolCalls.find(
+                    (tc) =>
+                        tc.function && tc.function.name === "submit_decision",
+                );
+                if (submitCall) {
+                    try {
+                        const decision = JSON.parse(
+                            submitCall.function.arguments || "{}",
+                        );
+                        // Store search_memory results for Phase 1.5
+                        this._tools._lastSearchMemoryResults =
+                            this._extractSearchMemoryResults(messages);
+                        return decision;
+                    } catch {
+                        // Parse failed — fall through to error handling
+                    }
+                }
+            }
+
+            // submit_decision didn't fire — try parsing content as JSON
+            if (finalMsg.content) {
+                return this._parsePhase1Output(finalMsg.content);
             }
         }
 
