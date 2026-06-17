@@ -130,18 +130,23 @@ function createTools(server, registry) {
     );
 }
 
-export function createMcpServer(registry, app) {
-    // Single endpoint: GET for SSE fallback, POST for messages
-    // Each request gets its own McpServer + transport (stateless by design)
-    app.all("/mcp", async (req, res) => {
-        const server = new McpServer({
-            name: "expense-tracker",
-            version: "1.0.0",
-        });
-        createTools(server, registry);
+export async function createMcpServer(registry, app) {
+    const server = new McpServer({
+        name: "expense-tracker",
+        version: "1.0.0",
+    });
+    createTools(server, registry);
 
-        const transport = new StreamableHTTPServerTransport(req, res);
-        await server.connect(transport);
+    // Stateless transport — no session IDs, each request is independent
+    const transport = new StreamableHTTPServerTransport({
+        sessionIdGenerator: undefined,
+    });
+    await server.connect(transport);
+
+    // Single endpoint handles GET (SSE streaming) and POST (direct responses)
+    // req.body must be the raw Buffer — express.raw() is configured in index.js
+    app.all("/mcp", async (req, res) => {
+        await transport.handleRequest(req, res, req.body);
     });
 
     console.log(

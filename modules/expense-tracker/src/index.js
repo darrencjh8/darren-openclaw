@@ -186,7 +186,7 @@ async function main() {
     app.get("/health", (_req, res) => res.json({ status: "ok" }));
 
     // Register MCP StreamableHTTP BEFORE listening — hermes depends on it
-    createMcpServer(registry, app);
+    await createMcpServer(registry, app);
 
     // Register all tool endpoints
     const toolNames = [
