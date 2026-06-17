@@ -146,7 +146,6 @@ services:
         volumes:
             - ~/.hermes:/opt/data
             - ../modules/expense-tracker/data:/opt/data/expense-tracker-data:ro
-            - ..:/workspace
         env_file:
             - ../modules/hermes/.env
         environment:

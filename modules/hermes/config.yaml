@@ -36,7 +36,6 @@ skills:
 terminal:
     backend: local
     persistent_shell: true
-    cwd: /workspace
 
 auxiliary:
     vision:
