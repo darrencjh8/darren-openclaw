@@ -178,8 +178,8 @@ async function main() {
     // Health check
     app.get("/health", (_req, res) => res.json({ status: "ok" }));
 
-    // Register MCP SSE BEFORE listening — hermes depends on it
-    createMcpServer(registry, app);
+    // Register MCP StreamableHTTP BEFORE listening — hermes depends on it
+    await createMcpServer(registry, app);
 
     // Register all tool endpoints
     const toolNames = [

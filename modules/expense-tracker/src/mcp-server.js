@@ -130,7 +130,7 @@ function createTools(server, registry) {
     );
 }
 
-export function createMcpServer(registry, app) {
+export async function createMcpServer(registry, app) {
     const server = new McpServer({
         name: "expense-tracker",
         version: "1.0.0",
@@ -138,7 +138,7 @@ export function createMcpServer(registry, app) {
     createTools(server, registry);
 
     const transport = new StreamableHTTPServerTransport();
-    server.connect(transport); // fire-and-forget — StreamableHTTP doesn't need persistent setup
+    await server.connect(transport);
 
     // Single endpoint: GET for SSE fallback, POST for messages
     app.all("/mcp", async (req, res) => {
