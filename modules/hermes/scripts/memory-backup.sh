@@ -13,6 +13,8 @@ EXPENSE_DIR="${EXPENSE_TRACKER_DATA:-}"
 if [ ! -d "$CLONE_DIR/.git" ]; then
     git clone "$REPO_URL" "$CLONE_DIR"
     cd "$CLONE_DIR"
+    git config user.email "hermes@darren.dev"
+    git config user.name "Friday (Hermes Memory)"
     # Handle empty repo (no commits yet)
     if ! git rev-parse --verify main >/dev/null 2>&1; then
         git checkout -b main
