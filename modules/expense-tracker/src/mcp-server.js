@@ -1,9 +1,9 @@
 /**
- * MCP Server — StreamableHTTP transport (stateless, no persistent connections).
+ * MCP Server — SSE transport (v1 SDK, compatible with Hermes).
  * Memory tools excluded — handled natively by Hermes.
  */
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
+import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
 import { z } from "zod";
 
 function createTools(server, registry) {
@@ -130,48 +130,30 @@ function createTools(server, registry) {
     );
 }
 
-export async function createMcpServer(registry, app) {
-    const server = new McpServer({
-        name: "expense-tracker",
-        version: "1.0.0",
-    });
-    createTools(server, registry);
+export function createMcpServer(registry, app) {
+    let transport = null;
 
-    // Stateless transport — no session IDs, each request is independent
-    const transport = new StreamableHTTPServerTransport({
-        sessionIdGenerator: undefined,
+    app.get("/sse", async (req, res) => {
+        const server = new McpServer({
+            name: "expense-tracker",
+            version: "1.0.0",
+        });
+        createTools(server, registry);
+        transport = new SSEServerTransport("/messages", res);
+        await server.connect(transport);
+        console.log(JSON.stringify({ event: "mcp_sse_connected" }));
     });
-    await server.connect(transport);
 
-    // Single endpoint handles GET (SSE streaming) and POST (direct responses)
-    // req.body must be pre-parsed JSON — express.json() is configured in index.js
-    app.all("/mcp", async (req, res, next) => {
-        console.error(
-            JSON.stringify({
-                event: "mcp_req",
-                method: req.method,
-                bodyType: typeof req.body,
-            }),
-        );
-        try {
-            await transport.handleRequest(req, res, req.body);
-        } catch (e) {
-            console.error(
-                JSON.stringify({
-                    event: "mcp_error",
-                    error: e.message,
-                    stack: e.stack?.slice(0, 500),
-                }),
-            );
-            if (!res.headersSent) res.status(500).json({ error: e.message });
+    app.post("/messages", async (req, res) => {
+        if (transport) {
+            await transport.handlePostMessage(req, res, req.body);
+        } else {
+            res.status(503).json({ error: "No active SSE connection" });
         }
     });
 
     console.log(
-        JSON.stringify({
-            event: "mcp_server_ready",
-            transport: "streamable-http",
-        }),
+        JSON.stringify({ event: "mcp_server_ready", transport: "sse" }),
     );
 }
 

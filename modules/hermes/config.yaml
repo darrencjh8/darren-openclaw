@@ -65,7 +65,8 @@ timezone: Asia/Kuala_Lumpur
 
 mcp_servers:
     expense-tracker:
-        url: http://expense-tracker:8080/mcp
+        url: http://expense-tracker:8080/sse
+        transport: sse
         tools:
             exclude: []
         supports_parallel_tool_calls: false
