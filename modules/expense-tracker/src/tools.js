@@ -1002,11 +1002,10 @@ export class ToolRegistry {
         ) {
             return true;
         }
-        const url = `${this._config.openclawGatewayUrl}/api/notify`;
+        const url = `${this._config.notifyUrl}`;
         const headers = { "Content-Type": "application/json" };
-        if (this._config.openclawGatewayToken) {
-            headers["Authorization"] =
-                `Bearer ${this._config.openclawGatewayToken}`;
+        if (this._config.notifySecret) {
+            headers["X-Webhook-Secret"] = this._config.notifySecret;
         }
         try {
             const r = await fetch(url, {

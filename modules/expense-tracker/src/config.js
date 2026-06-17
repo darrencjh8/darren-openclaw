@@ -30,9 +30,8 @@ export class Config {
         this.imapUsername = env.IMAP_USERNAME || "";
         this.imapPassword = env.IMAP_PASSWORD || "";
         this.imapMailbox = env.IMAP_MAILBOX || "INBOX";
-        this.openclawGatewayUrl =
-            env.OPENCLAW_GATEWAY_URL || "http://openclaw:18789";
-        this.openclawGatewayToken = env.OPENCLAW_GATEWAY_TOKEN || "";
+        this.notifyUrl = env.NOTIFY_URL || "http://hermes:8644/webhook/expense";
+        this.notifySecret = env.HERMES_WEBHOOK_SECRET || "";
         this.userName = env.USER_NAME || "there";
         this.systemPromptExtra = env.SYSTEM_PROMPT_EXTRA || "";
         this.dedupDbPath = env.DEDUP_DB_PATH || "data/dedup.db";

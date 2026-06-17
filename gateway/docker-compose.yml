@@ -54,7 +54,8 @@ services:
             - ../modules/expense-tracker/.env:/app/.env:ro
         environment:
             - ACTUAL_API_URL=http://actual-api:3000
-            - OPENCLAW_GATEWAY_URL=http://openclaw:18789
+            - NOTIFY_URL=http://hermes:8644/webhook/expense
+            - HERMES_WEBHOOK_SECRET=${HERMES_WEBHOOK_SECRET}
         restart: unless-stopped
         healthcheck:
             test:
