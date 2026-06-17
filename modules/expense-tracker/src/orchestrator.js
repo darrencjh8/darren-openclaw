@@ -359,6 +359,12 @@ export class AgentOrchestrator {
         // ── Phase 1b: Schema-enforced decision via submit_decision ──
         if (submitDecisionTool) {
             // Force the LLM to call submit_decision with all required fields
+            console.log(
+                JSON.stringify({
+                    event: "phase1b_submitting",
+                    tool: "submit_decision",
+                }),
+            );
             const finalResponse = await this._llm.chat(
                 messages,
                 [submitDecisionTool],
@@ -369,6 +375,16 @@ export class AgentOrchestrator {
             );
             const finalChoice = (finalResponse.choices || [{}])[0];
             const finalMsg = finalChoice.message || {};
+            console.log(
+                JSON.stringify({
+                    event: "phase1b_response",
+                    has_tool_calls: !!(
+                        finalMsg.tool_calls && finalMsg.tool_calls.length
+                    ),
+                    has_content: !!finalMsg.content,
+                    finish_reason: finalChoice.finish_reason,
+                }),
+            );
             const finalToolCalls = finalMsg.tool_calls;
 
             if (finalToolCalls && finalToolCalls.length > 0) {
