@@ -145,6 +145,7 @@ services:
             - "8644:8644"
         volumes:
             - ~/.hermes:/opt/data
+            - ~/workspace:/workspace
             - ../modules/expense-tracker/data:/opt/data/expense-tracker-data:ro
         env_file:
             - ../modules/hermes/.env
