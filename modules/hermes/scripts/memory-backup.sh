@@ -47,7 +47,7 @@ else
 fi
 
 if [ "$HAS_CHANGES" = true ]; then
-    git add MEMORY.md USER.md expense-tracker/ 2>/dev/null || true
+    git add -A
     git commit -m "$(date -Iseconds)"
     if [ "$HAS_REMOTE" = true ]; then
         git push origin main
