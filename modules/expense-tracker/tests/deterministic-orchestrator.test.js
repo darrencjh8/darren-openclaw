@@ -578,7 +578,7 @@ describe("Critical Fix 1: insert failure does not mark email read", () => {
 // ─────────────────────────────────────────────────────────────────
 
 describe("Critical Fix 2: malformed LLM JSON notifies user and leaves unread", () => {
-    it("notifies user AND marks read when LLM returns unparseable text", async () => {
+    it("notifies user and leaves unread when LLM returns unparseable text", async () => {
         const { AgentOrchestrator } = await import("../src/orchestrator.js");
 
         const config = {
@@ -608,15 +608,15 @@ describe("Critical Fix 2: malformed LLM JSON notifies user and leaves unread", (
             "notify_user",
             expect.anything(),
         );
-        // Must mark as read to prevent poison-pill reprocessing loop
-        expect(tools.executeTool).toHaveBeenCalledWith(
+        // Must NOT mark as read — email stays unread for retry after fix
+        expect(tools.executeTool).not.toHaveBeenCalledWith(
             "mark_email_read",
             expect.anything(),
         );
         expect(result.action).toBe("notified");
     });
 
-    it("notifies user and marks read when LLM returns JSON with missing action field", async () => {
+    it("notifies user and leaves unread when LLM returns JSON with missing action field", async () => {
         const { AgentOrchestrator } = await import("../src/orchestrator.js");
 
         const config = {
@@ -651,7 +651,8 @@ describe("Critical Fix 2: malformed LLM JSON notifies user and leaves unread", (
             "notify_user",
             expect.anything(),
         );
-        expect(tools.executeTool).toHaveBeenCalledWith(
+        // Must NOT mark as read — email stays unread for retry after fix
+        expect(tools.executeTool).not.toHaveBeenCalledWith(
             "mark_email_read",
             expect.anything(),
         );

@@ -379,7 +379,8 @@ describe("ImapIdleHandler idleLoop UID pre-check", () => {
 
         await handler.idleLoop(callback);
         expect(callback).toHaveBeenCalledOnce();
-        expect(dedup.recordProcessed).not.toHaveBeenCalled();
+        // Error callbacks now record UID to prevent infinite retry loops
+        expect(dedup.recordProcessed).toHaveBeenCalled();
     });
 
     it("handles multiple messages mixing new and recent", async () => {

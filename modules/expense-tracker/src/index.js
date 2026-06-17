@@ -96,13 +96,40 @@ async function main() {
         classifyEmail(rawEmail, subject, sender, cfg.deepseekApiKey);
 
     async function onNewEmail(msg) {
-        await dispatchEmail(
-            msg,
-            classify,
-            orchestrator,
-            imapHandler,
-            statementProcessor,
-        );
+        try {
+            await dispatchEmail(
+                msg,
+                classify,
+                orchestrator,
+                imapHandler,
+                statementProcessor,
+            );
+        } catch (e) {
+            // Unexpected error in dispatch — notify user so they know something failed
+            console.error(
+                JSON.stringify({
+                    event: "on_new_email_error",
+                    subject: msg.subject,
+                    error: e.message,
+                }),
+            );
+            try {
+                // Set context so notify_user works even without a full email parse
+                registry.setEmailContext(
+                    msg.msg_id,
+                    msg.raw_email,
+                    imapHandler,
+                );
+                await registry.executeTool("notify_user", {
+                    message:
+                        `I ran into an error processing an email "${(msg.subject || "").slice(0, 80)}". ` +
+                        "I'll retry on the next check. Please review your inbox if this persists.",
+                });
+            } catch {
+                // notify itself failed — nothing more we can do
+            }
+            throw e; // Re-throw so IMAP idle loop records the UID
+        }
     }
 
     const app = express();

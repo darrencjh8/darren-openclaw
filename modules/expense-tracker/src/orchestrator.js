@@ -94,6 +94,41 @@ export class AgentOrchestrator {
     async processEmail(msgId, rawEmail, imapHandler) {
         this._tools.setEmailContext(msgId, rawEmail, imapHandler);
 
+        try {
+            return await this._processEmailInternal(
+                msgId,
+                rawEmail,
+                imapHandler,
+            );
+        } catch (e) {
+            // Catch-all for unexpected errors (Phase 1.5 failures, API errors, etc.)
+            console.error(
+                JSON.stringify({
+                    event: "process_email_error",
+                    error: e.message,
+                    stack: e.stack?.slice(0, 500),
+                }),
+            );
+            try {
+                await this._tools.executeTool("notify_user", {
+                    message:
+                        `I ran into an unexpected error processing an email: ${e.message.slice(0, 200)}. ` +
+                        "Please check the logs and review your inbox manually.",
+                });
+            } catch {
+                // notify_user itself failed — nothing more we can do
+            }
+            await this._tools.executeTool("log_decision", {
+                action: "error",
+                reasoning: `Unexpected error: ${e.message}`,
+                timestamp: new Date().toISOString(),
+            });
+            // Do NOT mark as read — let the email stay unread for retry
+            throw e; // Re-throw so IMAP handler can record the UID (prevents infinite loop)
+        }
+    }
+
+    async _processEmailInternal(msgId, rawEmail, imapHandler) {
         // Extract email content
         let emailText = "";
         try {
@@ -128,12 +163,12 @@ export class AgentOrchestrator {
                     "I couldn't understand an email in your inbox. " +
                     "Please review it manually in your email client.",
             });
-            await this._tools.executeTool("mark_email_read", {});
             await this._tools.executeTool("log_decision", {
                 action: "error",
                 reasoning: `Phase 1 parse failed: ${e.message}`,
                 timestamp: new Date().toISOString(),
             });
+            // Do NOT mark as read — email stays unread for retry after fix
             return { action: "notified" };
         }
 
@@ -144,12 +179,12 @@ export class AgentOrchestrator {
                     "I received an incomplete response while processing " +
                     "an email. Please review it manually.",
             });
-            await this._tools.executeTool("mark_email_read", {});
             await this._tools.executeTool("log_decision", {
                 action: "error",
                 reasoning: "Phase 1 output missing action field",
                 timestamp: new Date().toISOString(),
             });
+            // Do NOT mark as read — email stays unread for retry after fix
             return { action: "notified" };
         }
 

@@ -159,6 +159,10 @@ export class ImapIdleHandler {
                                 error: e.message,
                             }),
                         );
+                        // Record UID to prevent infinite retry loops.
+                        // User was already notified by onNewEmail / processEmail.
+                        if (this._dedup)
+                            this._dedup.recordProcessed(msg.msg_id);
                     }
                 }
                 // Wait for new mail. Per imapflow's official API docs
