@@ -96,6 +96,16 @@ services:
         env_file:
             - ../modules/portfolio-tracker/.env
         restart: unless-stopped
+        healthcheck:
+            test:
+                [
+                    "CMD-SHELL",
+                    'node -e ''require("http").get("http://localhost:8081/health",function(r){process.exit(r.statusCode===200?0:1)})''',
+                ]
+            interval: 10s
+            timeout: 5s
+            retries: 3
+            start_period: 30s
 
     image-gen:
         build:
@@ -139,6 +149,9 @@ services:
         command: gateway run
         depends_on:
             expense-tracker:
+                condition: service_healthy
+                restart: true
+            portfolio-tracker:
                 condition: service_healthy
                 restart: true
         ports:
