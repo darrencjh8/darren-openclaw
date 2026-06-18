@@ -217,7 +217,7 @@ describe("ImapIdleHandler fetchUnread", () => {
 });
 
 describe("ImapIdleHandler markRead", () => {
-    it("sets Seen flag on the message", async () => {
+    it("sets Seen flag by UID (string converted to number)", async () => {
         const handler = new ImapIdleHandler(
             "imap.example.com",
             993,
@@ -231,12 +231,14 @@ describe("ImapIdleHandler markRead", () => {
         handler._client = mockClient;
 
         await handler.markRead("42");
-        expect(mockClient.messageFlagsAdd).toHaveBeenCalledWith({ uid: "42" }, [
-            "\\Seen",
-        ]);
+        expect(mockClient.messageFlagsAdd).toHaveBeenCalledWith(
+            42,
+            ["\\Seen"],
+            { uid: true },
+        );
     });
 
-    it("handles integer msgId by converting to string", async () => {
+    it("sets Seen flag by UID (number passed through)", async () => {
         const handler = new ImapIdleHandler(
             "imap.example.com",
             993,
@@ -250,9 +252,28 @@ describe("ImapIdleHandler markRead", () => {
         handler._client = mockClient;
 
         await handler.markRead(42);
-        expect(mockClient.messageFlagsAdd).toHaveBeenCalledWith({ uid: 42 }, [
-            "\\Seen",
-        ]);
+        expect(mockClient.messageFlagsAdd).toHaveBeenCalledWith(
+            42,
+            ["\\Seen"],
+            { uid: true },
+        );
+    });
+
+    it("returns early without API call when msgId is non-numeric", async () => {
+        const handler = new ImapIdleHandler(
+            "imap.example.com",
+            993,
+            "user@example.com",
+            "pass",
+        );
+
+        const mockClient = {
+            messageFlagsAdd: vi.fn(async () => {}),
+        };
+        handler._client = mockClient;
+
+        await handler.markRead("not-a-number");
+        expect(mockClient.messageFlagsAdd).not.toHaveBeenCalled();
     });
 
     it("handles errors gracefully (no client)", async () => {

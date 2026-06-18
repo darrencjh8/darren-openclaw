@@ -52,6 +52,29 @@ process.on("beforeExit", (code) => {
 });
 
 async function main() {
+    // Patch console.log/error to auto-inject timestamps into JSON log lines
+    const _log = console.log.bind(console);
+    const _error = console.error.bind(console);
+    const timestamped =
+        (orig) =>
+        (...args) => {
+            if (
+                args.length === 1 &&
+                typeof args[0] === "string" &&
+                args[0].startsWith("{")
+            ) {
+                try {
+                    const obj = JSON.parse(args[0]);
+                    if (!obj.timestamp)
+                        obj.timestamp = new Date().toISOString();
+                    return orig(JSON.stringify(obj));
+                } catch {}
+            }
+            return orig(...args);
+        };
+    console.log = timestamped(_log);
+    console.error = timestamped(_error);
+
     const cfg = Config.fromEnv();
     console.log(
         JSON.stringify({

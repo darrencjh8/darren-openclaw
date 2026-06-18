@@ -88,7 +88,10 @@ export class ImapIdleHandler {
     async markRead(msgId) {
         if (!this._client) return;
         try {
-            await this._client.messageFlagsAdd({ uid: msgId }, ["\\Seen"]);
+            // msgId is stored as string from fetchUnread — convert to number for UID-based ops
+            const uid = Number(msgId);
+            if (Number.isNaN(uid)) return;
+            await this._client.messageFlagsAdd(uid, ["\\Seen"], { uid: true });
         } catch {
             /* ignore */
         }
