@@ -11,6 +11,7 @@ import { AgentOrchestrator } from "./orchestrator.js";
 import { ImapIdleHandler } from "./imap.js";
 import { classifyEmail, dispatchEmail } from "./classify.js";
 import { createMcpServer } from "./mcp-server.js";
+import { installTimestampedLogging } from "./logging.js";
 import { DedupJournal } from "./dedup.js";
 
 const HERMES_WEBHOOK_URL =
@@ -52,28 +53,8 @@ process.on("beforeExit", (code) => {
 });
 
 async function main() {
-    // Patch console.log/error to auto-inject timestamps into JSON log lines
-    const _log = console.log.bind(console);
-    const _error = console.error.bind(console);
-    const timestamped =
-        (orig) =>
-        (...args) => {
-            if (
-                args.length === 1 &&
-                typeof args[0] === "string" &&
-                args[0].startsWith("{")
-            ) {
-                try {
-                    const obj = JSON.parse(args[0]);
-                    if (!obj.timestamp)
-                        obj.timestamp = new Date().toISOString();
-                    return orig(JSON.stringify(obj));
-                } catch {}
-            }
-            return orig(...args);
-        };
-    console.log = timestamped(_log);
-    console.error = timestamped(_error);
+    // Auto-inject timestamps into all JSON log lines
+    installTimestampedLogging();
 
     const cfg = Config.fromEnv();
     console.log(
