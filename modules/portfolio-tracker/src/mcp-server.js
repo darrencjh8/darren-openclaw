@@ -1,11 +1,11 @@
 /**
- * MCP Server — Streamable HTTP transport (stateful, per-session).
- * Pattern: https://github.com/ferrants/mcp-streamable-http-typescript-server
+ * MCP Server — SSE transport for portfolio-tracker.
+ * Exposes 6 tools: sync, OneDrive auth + IO.
+ * Follows expense-tracker MCP pattern (spec 021).
  */
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
-import { randomUUID } from "node:crypto";
+import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
 import { z } from "zod";
 import { existsSync } from "fs";
 import { pullFromOneDrive, pushToOneDrive } from "./onedrive.js";
@@ -20,7 +20,7 @@ function createTools(server, registry) {
     );
     server.tool(
         "portfolio_onedrive_auth_url",
-        "Get Microsoft OAuth URL for OneDrive authorization.",
+        "Get Microsoft OAuth URL for OneDrive one-time authorization.",
         {},
         async () => {
             try {
@@ -44,7 +44,7 @@ function createTools(server, registry) {
     );
     server.tool(
         "portfolio_onedrive_status",
-        "Check OneDrive authorization by validating refresh token.",
+        "Check OneDrive authorization by validating refresh token against Microsoft.",
         {},
         async () => {
             const tokenPath =
@@ -118,89 +118,29 @@ function createTools(server, registry) {
 }
 
 export function createMcpServer(registry, app) {
-    const transports = {};
+    let transport = null;
 
-    app.post("/mcp", async (req, res) => {
-        try {
-            const sessionId = req.headers["mcp-session-id"];
-            let transport;
-
-            if (sessionId && transports[sessionId]) {
-                transport = transports[sessionId];
-            } else if (!sessionId) {
-                const server = new McpServer({
-                    name: "portfolio-tracker",
-                    version: "1.0.0",
-                });
-                createTools(server, registry);
-                transport = new StreamableHTTPServerTransport({
-                    sessionIdGenerator: () => randomUUID(),
-                    enableJsonResponse: true,
-                    onsessioninitialized: (sid) => {
-                        transports[sid] = transport;
-                    },
-                });
-                transport.onclose = () => {
-                    const sid = transport.sessionId;
-                    if (sid) delete transports[sid];
-                };
-                await server.connect(transport);
-            } else {
-                res.status(400).json({
-                    jsonrpc: "2.0",
-                    error: {
-                        code: -32000,
-                        message: "Bad Request: invalid session",
-                    },
-                    id: null,
-                });
-                return;
-            }
-            await transport.handleRequest(req, res, req.body);
-        } catch (e) {
-            console.error(
-                JSON.stringify({ event: "mcp_error", error: e.message }),
-            );
-            if (!res.headersSent)
-                res.status(500).json({
-                    jsonrpc: "2.0",
-                    error: { code: -32603, message: "Internal server error" },
-                    id: null,
-                });
-        }
+    app.get("/sse", async (_req, res) => {
+        const server = new McpServer({
+            name: "portfolio-tracker",
+            version: "1.0.0",
+        });
+        createTools(server, registry);
+        transport = new SSEServerTransport("/messages", res);
+        await server.connect(transport);
+        console.log(JSON.stringify({ event: "mcp_sse_connected" }));
     });
 
-    app.get("/mcp", async (req, res) => {
-        const sessionId = req.headers["mcp-session-id"];
-        if (!sessionId || !transports[sessionId]) {
-            res.status(400).end("Invalid session");
-            return;
-        }
-        try {
-            await transports[sessionId].handleRequest(req, res);
-        } catch (e) {
-            if (!res.headersSent) res.status(500).end();
-        }
-    });
-
-    app.delete("/mcp", async (req, res) => {
-        const sessionId = req.headers["mcp-session-id"];
-        if (!sessionId || !transports[sessionId]) {
-            res.status(400).end("Invalid session");
-            return;
-        }
-        try {
-            await transports[sessionId].handleRequest(req, res);
-        } catch (e) {
-            if (!res.headersSent) res.status(500).end();
+    app.post("/messages", async (req, res) => {
+        if (transport) {
+            await transport.handlePostMessage(req, res, req.body);
+        } else {
+            res.status(503).json({ error: "No active SSE connection" });
         }
     });
 
     console.log(
-        JSON.stringify({
-            event: "mcp_server_ready",
-            transport: "streamable-http",
-        }),
+        JSON.stringify({ event: "mcp_server_ready", transport: "sse" }),
     );
 }
 
