@@ -158,11 +158,22 @@ export function createMcpServer(registry, app) {
 
     // POST /messages — handles all MCP protocol messages
     app.post("/messages", async (req, res) => {
+        console.log(
+            JSON.stringify({
+                event: "mcp_request",
+                method: req.body?.method,
+                id: req.body?.id,
+            }),
+        );
         try {
             await transport.handleRequest(req, res, req.body);
         } catch (e) {
             console.error(
-                JSON.stringify({ event: "mcp_error", error: e.message }),
+                JSON.stringify({
+                    event: "mcp_error",
+                    error: e.message,
+                    stack: e.stack?.slice(0, 500),
+                }),
             );
             if (!res.headersSent) {
                 res.status(500).json({ error: e.message });
