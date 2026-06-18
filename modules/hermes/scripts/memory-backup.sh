@@ -35,6 +35,23 @@ if [ -n "$EXPENSE_DIR" ]; then
     cp "$EXPENSE_DIR/mappings.json" "$CLONE_DIR/expense-tracker/" 2>/dev/null || true
 fi
 
+# ---- Kanban backup (SQL dump — safe on live WAL DB) ----
+if command -v sqlite3 >/dev/null 2>&1; then
+    mkdir -p "$CLONE_DIR/kanban"
+
+    # Default board
+    if [ -f /opt/data/kanban.db ]; then
+        sqlite3 /opt/data/kanban.db ".dump" > "$CLONE_DIR/kanban/kanban.sql" 2>/dev/null || true
+    fi
+
+    # Named boards
+    for board_db in /opt/data/kanban/boards/*/kanban.db; do
+        [ -f "$board_db" ] || continue
+        slug=$(basename "$(dirname "$board_db")")
+        sqlite3 "$board_db" ".dump" > "$CLONE_DIR/kanban/${slug}.sql" 2>/dev/null || true
+    done
+fi
+
 cd "$CLONE_DIR"
 # Check if there are changes (handles empty repo with no HEAD)
 if ! git rev-parse HEAD >/dev/null 2>&1; then

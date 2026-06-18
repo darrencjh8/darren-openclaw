@@ -60,6 +60,31 @@ auxiliary:
         extra_body:
             thinking:
                 type: disabled
+    kanban_decomposer:
+        provider: deepseek
+        model: deepseek-v4-pro
+    triage_specifier:
+        provider: deepseek
+        model: deepseek-v4-flash
+        extra_body:
+            thinking:
+                type: disabled
+    profile_describer:
+        provider: deepseek
+        model: deepseek-v4-flash
+        extra_body:
+            thinking:
+                type: disabled
+
+kanban:
+    dispatch_in_gateway: true
+    dispatch_interval_seconds: 60
+    auto_decompose: true
+    auto_decompose_per_tick: 3
+    auto_promote_children: true
+    failure_limit: 2
+    max_in_progress: 4
+    max_in_progress_per_profile: 2
 
 timezone: Asia/Kuala_Lumpur
 
