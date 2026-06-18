@@ -10,6 +10,9 @@ agent:
         - tts
         - moa
 
+display:
+    show_reasoning: true
+
 fallback_providers:
     - provider: gemini
       model: gemini-3.1-flash-lite
