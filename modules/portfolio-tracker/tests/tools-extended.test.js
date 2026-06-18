@@ -600,4 +600,53 @@ describe("ToolRegistry — _computeSyncAll with flex pull", () => {
 
         expect(bridge.importIbkr).not.toHaveBeenCalled();
     });
+
+    it("skips balance sync with actionable message when bridge is null", async () => {
+        // Create registry WITHOUT a bridge (null)
+        const cfgNoBridge = new Config(REQUIRED_ENV);
+        const dedup2 = new DedupJournal(
+            join(tmpdir(), `dedup-${crypto.randomBytes(4).toString("hex")}.db`),
+        );
+        const memory2 = new MemoryStore(
+            join(
+                tmpdir(),
+                `mappings-${crypto.randomBytes(4).toString("hex")}.json`,
+            ),
+        );
+        const registryNoBridge = new ToolRegistry(
+            cfgNoBridge,
+            dedup2,
+            memory2,
+            null,
+        );
+
+        vi.spyOn(registryNoBridge, "_updateSheet").mockResolvedValue({
+            cells_written: 10,
+            errors: [],
+        });
+
+        const result = await registryNoBridge._computeSyncAll();
+
+        // All targets should be skipped with the right error
+        expect(result.sync_targets.length).toBe(3);
+        for (const t of result.sync_targets) {
+            expect(t.status).toBe("skipped");
+            expect(t.error).toContain("OneDrive not synced");
+            expect(t.error).toContain("/onedrive setup");
+        }
+    });
+
+    it("syncs balances when bridge is available", async () => {
+        pullFlexXml.mockResolvedValue({
+            success: false,
+            error: "Not configured",
+        });
+
+        const result = await registry._computeSyncAll();
+
+        expect(result.sync_targets.length).toBeGreaterThan(0);
+        for (const t of result.sync_targets) {
+            expect(t.status).toBe("updated");
+        }
+    });
 });
