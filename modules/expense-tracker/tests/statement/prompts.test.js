@@ -292,8 +292,8 @@ describe("STATEMENT_PROMPT env var edge cases", () => {
     });
 
     it("uses custom budget file names when env vars are set", async () => {
-        vi.stubEnv("ACTUAL_BUDGET_FILE", "Custom Budget");
-        vi.stubEnv("MYR_BUDGET_FILE", "Custom MYR Budget");
+        vi.stubEnv("ACTUAL_PRIMARY_BUDGET_FILE", "Custom Budget");
+        vi.stubEnv("ACTUAL_SECONDARY_BUDGET_FILE", "Custom MYR Budget");
         vi.resetModules();
 
         // Dynamic import to get a fresh module evaluation with stubbed env vars
@@ -306,8 +306,8 @@ describe("STATEMENT_PROMPT env var edge cases", () => {
     });
 
     it("handles empty string env vars by falling back to defaults", async () => {
-        vi.stubEnv("ACTUAL_BUDGET_FILE", "");
-        vi.stubEnv("MYR_BUDGET_FILE", "");
+        vi.stubEnv("ACTUAL_PRIMARY_BUDGET_FILE", "");
+        vi.stubEnv("ACTUAL_SECONDARY_BUDGET_FILE", "");
         vi.resetModules();
 
         const fresh = await import("../../src/statement/prompts.js");

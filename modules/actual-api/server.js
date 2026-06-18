@@ -6,8 +6,8 @@ const PORT = process.env.PORT || 3000;
 const SERVER_URL =
     process.env.ACTUAL_BUDGET_SERVER_URL || process.env.ACTUAL_BUDGET_URL;
 const PASSWORD = process.env.ACTUAL_BUDGET_PASSWORD;
-const BUDGET_FILE = process.env.ACTUAL_BUDGET_FILE;
-const MYR_BUDGET_FILE = process.env.MYR_BUDGET_FILE || "";
+const PRIMARY_BUDGET_FILE = process.env.ACTUAL_PRIMARY_BUDGET_FILE;
+const SECONDARY_BUDGET_FILE = process.env.ACTUAL_SECONDARY_BUDGET_FILE || "";
 const DATA_DIR = process.env.DATA_DIR || "/tmp/actual-data";
 const BUDGET_SWITCH_DELAY_MS = parseInt(
     process.env.BUDGET_SWITCH_DELAY_MS || "2000",
@@ -15,6 +15,11 @@ const BUDGET_SWITCH_DELAY_MS = parseInt(
 );
 
 mkdirSync(DATA_DIR, { recursive: true });
+
+if (!PRIMARY_BUDGET_FILE) {
+    console.error("ERROR: ACTUAL_PRIMARY_BUDGET_FILE is required but not set");
+    process.exit(1);
+}
 
 // Catch unhandled rejections from @actual-app/api internal sync
 // The library sometimes throws unhandled rejections during background sync
@@ -81,8 +86,9 @@ async function init() {
         );
         const budgets = await retryWithBackoff(() => actual.getBudgets());
         const budget =
-            budgets.find((b) => b.name === BUDGET_FILE) || budgets[0];
-        if (!budget) throw new Error(`Budget "${BUDGET_FILE}" not found`);
+            budgets.find((b) => b.name === PRIMARY_BUDGET_FILE) || budgets[0];
+        if (!budget)
+            throw new Error(`Budget "${PRIMARY_BUDGET_FILE}" not found`);
         activeSyncId = budget.groupId || budget.cloudFileId;
         await retryWithBackoff(() =>
             actual.downloadBudget(activeSyncId, { password: PASSWORD }),
@@ -110,12 +116,8 @@ async function ensureBudget(budgetIdOrName) {
             b.name === budgetIdOrName,
     );
     if (!target) {
-        if (
-            MYR_BUDGET_FILE &&
-            (budgetIdOrName.includes("MYR") ||
-                budgetIdOrName === MYR_BUDGET_FILE)
-        ) {
-            target = budgets.find((b) => b.name === MYR_BUDGET_FILE);
+        if (SECONDARY_BUDGET_FILE && budgetIdOrName === SECONDARY_BUDGET_FILE) {
+            target = budgets.find((b) => b.name === SECONDARY_BUDGET_FILE);
         }
     }
     if (!target) return;
@@ -183,6 +185,22 @@ const app = express();
 app.use(express.json());
 
 app.get("/health", (req, res) => res.json({ status: "ok" }));
+
+app.get("/budgets", async (req, res) => {
+    try {
+        await init();
+        const budgets = await retryWithBackoff(() => actual.getBudgets());
+        res.json(
+            budgets.map((b) => ({
+                name: b.name,
+                groupId: b.groupId || null,
+                cloudFileId: b.cloudFileId || null,
+            })),
+        );
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
 
 app.get("/accounts", async (req, res) => {
     try {
@@ -274,7 +292,28 @@ app.post("/transactions", async (req, res) => {
         await ensureBudget(getBudgetId(req));
         const txn = buildTransaction(req.body);
         const ids = await actual.addTransactions(txn.account, [txn]);
-        res.json({ id: ids[0], amount: txn.amount });
+        res.json({
+            id: ids[0],
+            account: txn.account,
+            date: txn.date,
+            amount: txn.amount,
+            payee_name: txn.payee_name,
+            notes: txn.notes,
+            category: txn.category || null,
+            cleared: txn.cleared,
+        });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+app.get("/transactions/:id", async (req, res) => {
+    try {
+        await ensureBudget(getBudgetId(req));
+        const txn = await actual.getTransaction(req.params.id);
+        if (!txn)
+            return res.status(404).json({ error: "Transaction not found" });
+        res.json(txn);
     } catch (e) {
         res.status(500).json({ error: e.message });
     }

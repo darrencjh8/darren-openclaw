@@ -2,39 +2,23 @@
 
 Process bank transaction alerts into Actual Budget. Trigger: email from UOB, CIMB, Maybank, transaction alert, spent, charged, receipt, payment.
 
-## Memory architecture
+## Pipeline (4-phase memory-first design)
 
-- **Payee mappings** (merchant → payee): handled entirely by `resolve_merchant` — it checks its own memory first, then keywords, then web search, and auto-learns from keyword/web resolutions. Do NOT duplicate payee mappings in Hermes `memory_store`.
-- **Hermes memory** (`memory_store`): use only for facts about senders, card types, account preferences, or user corrections (e.g. "this sender is always UOB One Card", "user said XYZ merchant should be mapped to ABC payee").
+The expense-tracker orchestrator handles ALL phases internally. Hermes only routes emails — the orchestrator does field extraction, memory lookup, LLM audit with live data cross-referencing, web search fallback, and execution.
 
-## Pipeline (follow in order)
+**Phase 1a — Field Extraction:** LLM extracts merchant, amount, date, currency from raw email. `reasoning=disabled`, no tools.
 
-**Step 1 — Fetch context:**
-- Call `mcp_expense_tracker_fetch_context` with `budget_id: ""`
-- Returns: `{accounts: [...], categories: [...], payees: [...]}`
+**Phase 1b — Deterministic Mapping:** Currency → budget_id. 3× search_memory for payee/account/category candidates.
 
-**Step 2 — Resolve merchant:**
-- Call `mcp_expense_tracker_resolve_merchant` with the raw merchant name from the email
-- Returns: `{payee: "<name>", source: "memory|keyword|web|fallback"}`
-- `resolve_merchant` checks memory, keywords, and web search internally — do NOT call `web_search` or `memory_store` for payee lookup
+**Phase 2 — LLM Audit:** Cross-references memory hints against live accounts/categories/payees via `fetch_context`. `reasoning=adaptive`. Leaves blank if unsure. V2 validation gate blanks invalid fields, retries ≤ 3×.
 
-**Step 3 — Insert (if resolved):**
-- If `payee` is NOT `"Misc"`:
-  - Call `mcp_expense_tracker_insert_transaction` with:
-    - `account_id`: first account from Step 1
-    - `date`: YYYY-MM-DD
-    - `amount_cents`: int, negative for spending
-    - `payee_name`: from Step 2
-    - `category_id`: lookup from Step 1 payees (match by payee name)
-    - `imported_description`: raw merchant name from email
-  - If `{status: "duplicate"}`:
-    - Call `mcp_expense_tracker_mark_email_read`
-    - Reply: "⚡ Duplicate: `<merchant>` → `<payee>` | $`<amount>` — already tracked."
-  - If insert succeeded:
-    - Call `mcp_expense_tracker_mark_email_read`
-    - Reply: "✅ Tracked: `<merchant>` → `<payee>` | $`<amount>` | source: `<source>`"
+**Phase 3 — Web Search:** Runs `resolve_merchant` (memory → web search → classification) for missing payee/category. V3 gate validates, retries ≤ 2×. Only runs if payee/category blank after Phase 2.
 
-**Step 4 — Unresolved (if Misc):**
-- If `payee` is `"Misc"`:
-  - Call `mcp_expense_tracker_mark_email_read`
-  - Reply: "❓ Unknown merchant: `<merchant>` | $`<amount>`. Reply with the correct payee to categorize it."
+**Phase 4 — Execute:** Insert with duplicate check, notify, learn facts. Skip for non-transactions. Notify on exhaustion.
+
+## Key design principles
+
+- **Leave blank > guess:** LLM leaves fields empty when unsure. Code handles blanks with web search or user notification.
+- **Validation gates:** Every LLM-chosen field validated against live data. Invalid values blanked before retry. No hallucination amplification.
+- **Memory-first:** Memory hints gathered before LLM audit. LLM cross-references hints against live data.
+- **No keyword table:** Payee matching is memory + web search. No hardcoded keyword→payee mappings.

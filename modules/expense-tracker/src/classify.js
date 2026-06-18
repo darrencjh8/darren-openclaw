@@ -5,6 +5,7 @@
 
 import OpenAI from "openai";
 import { extractEmailContent } from "./extractors.js";
+import { logger } from "./logging.js";
 
 export const CLASSIFICATION_PROMPT = `\
 Classify this email as "statement", "transaction", or "skip". Respond with ONLY one word.
@@ -109,16 +110,14 @@ export async function dispatchEmail(
     );
 
     if (classification === "skip") {
-        console.log(
-            JSON.stringify({
-                event: "skipping_non_expense_email",
-                data: {
-                    subject: msg.subject || "",
-                    from: msg.from || "",
-                    msg_id: msg.msg_id || "",
-                },
-            }),
-        );
+        logger.info({
+            event: "skipping_non_expense_email",
+            data: {
+                subject: msg.subject || "",
+                from: msg.from || "",
+                msg_id: msg.msg_id || "",
+            },
+        });
         if (imapHandler?.markRead) {
             await imapHandler.markRead(msg.msg_id);
         }

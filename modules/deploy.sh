@@ -4,14 +4,16 @@
 # Validates all required environment variables, builds + deploys hermes,
 # expense-tracker, and actual-api via Compose.
 #
-# Usage: ./scripts/deploy-hermes.sh
+# Usage: ./modules/deploy.sh
 # =============================================================================
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 HERMES_DIR="$ROOT/modules/hermes"
 HERMES_ENV="$HERMES_DIR/.env"
-GATEWAY_DIR="$ROOT/gateway"
+ET_DIR="$ROOT/modules/expense-tracker"
+ET_ENV="$ET_DIR/.env"
+MODULES_DIR="$ROOT/modules"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -26,9 +28,9 @@ env_get() {
 }
 
 check_required() {
-  local name="$1"
+  local name="$1" file="${2:-$HERMES_ENV}"
   local val
-  val=$(env_get "$name" "$HERMES_ENV")
+  val=$(env_get "$name" "$file")
   if [ -z "$val" ]; then
     echo -e "  ${RED}✗ MISSING: $name${NC}"
     missing=$((missing + 1))
@@ -101,6 +103,24 @@ echo ""
 echo "--- Optional Tools ---"
 check_optional "FIRECRAWL_API_KEY"
 
+echo ""
+echo "--- Actual Budget (expense-tracker) ---"
+check_required "DEEPSEEK_API_KEY" "$ET_ENV"
+check_required "ACTUAL_BUDGET_URL" "$ET_ENV"
+check_required "ACTUAL_BUDGET_PASSWORD" "$ET_ENV"
+check_required "ACTUAL_PRIMARY_CURRENCY" "$ET_ENV"
+check_required "ACTUAL_SECONDARY_CURRENCY" "$ET_ENV"
+check_required "ACTUAL_PRIMARY_BUDGET_FILE" "$ET_ENV"
+check_required "ACTUAL_SECONDARY_BUDGET_FILE" "$ET_ENV"
+
+echo ""
+echo "--- IMAP + Notify (expense-tracker) ---"
+check_required "IMAP_HOST" "$ET_ENV"
+check_required "IMAP_USERNAME" "$ET_ENV"
+check_required "IMAP_PASSWORD" "$ET_ENV"
+check_required "NOTIFY_URL" "$ET_ENV"
+check_required "HERMES_WEBHOOK_SECRET" "$ET_ENV"
+
 # ---- Result ----
 echo ""
 echo "========================================"
@@ -118,7 +138,7 @@ echo ""
 # ---- Deploy via Compose ----
 mkdir -p "$HOME/.hermes"
 
-cd "$GATEWAY_DIR"
+cd "$MODULES_DIR"
 echo "--- Building services ---"
 docker compose build hermes expense-tracker actual-api
 echo ""

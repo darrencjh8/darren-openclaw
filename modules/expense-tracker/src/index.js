@@ -11,74 +11,62 @@ import { AgentOrchestrator } from "./orchestrator.js";
 import { ImapIdleHandler } from "./imap.js";
 import { classifyEmail, dispatchEmail } from "./classify.js";
 import { createMcpServer } from "./mcp-server.js";
+import { logger } from "./logging.js";
 import { DedupJournal } from "./dedup.js";
 
 const HERMES_WEBHOOK_URL =
     process.env.HERMES_WEBHOOK_URL || "http://hermes:8644/webhooks/expense";
-const HERMES_WEBHOOK_SECRET =
-    process.env.HERMES_WEBHOOK_SECRET || "expense-tracker-webhook";
+const HERMES_WEBHOOK_SECRET = process.env.HERMES_WEBHOOK_SECRET;
 import { StatementProcessor } from "./statement/orchestrator.js";
 import { existsSync } from "fs";
 
 // ── Crash diagnostics ──────────────────────────────────────────────
 
 process.on("unhandledRejection", (reason) => {
-    console.error(
-        JSON.stringify({
-            event: "fatal_unhandled_rejection",
-            error: String(reason),
-        }),
-    );
+    logger.error({
+        event: "fatal_unhandled_rejection",
+        error: String(reason),
+    });
     process.exit(1);
 });
 
 process.on("uncaughtException", (err) => {
-    console.error(
-        JSON.stringify({
-            event: "fatal_uncaught_exception",
-            error: err.message,
-        }),
-    );
+    logger.error({
+        event: "fatal_uncaught_exception",
+        error: err.message,
+    });
     process.exit(1);
 });
 
 process.on("beforeExit", (code) => {
-    console.error(
-        JSON.stringify({
-            event: "process_before_exit",
-            code,
-        }),
-    );
+    logger.error({
+        event: "process_before_exit",
+        code,
+    });
 });
 
 async function main() {
     const cfg = Config.fromEnv();
-    console.log(
-        JSON.stringify({
-            event: "starting",
-            timestamp: new Date().toISOString(),
-        }),
-    );
+    logger.info({
+        event: "starting",
+        timestamp: new Date().toISOString(),
+    });
 
     // Initialize memory — migrate from mappings.json if MEMORY.md doesn't exist yet
     const memory = new MemoryStore(cfg.memoryPath);
     if (memory.listFacts().length === 0) {
         const mappingsPath = "data/mappings.json";
         if (existsSync(mappingsPath)) {
-            console.log(
-                JSON.stringify({ event: "migrating_mappings_to_memory" }),
-            );
+            logger.info({ event: "migrating_mappings_to_memory" });
             MemoryStore.migrateFromMappings(mappingsPath, cfg.memoryPath);
             // Reload after migration (avoids second WASM model load)
             memory.reload();
         }
     }
-    console.log(
-        JSON.stringify({
-            event: "memory_initialized",
-            data: { facts: memory.listFacts().length },
-        }),
-    );
+    logger.info({
+        event: "memory_initialized",
+        data: { facts: memory.listFacts().length },
+    });
 
     const registry = new ToolRegistry(cfg, memory);
     const orchestrator = new AgentOrchestrator(cfg, registry);
@@ -178,6 +166,9 @@ async function main() {
     // Health check
     app.get("/health", (_req, res) => res.json({ status: "ok" }));
 
+    // Register MCP SSE BEFORE listening — hermes depends on it
+    createMcpServer(registry, app);
+
     // Register all tool endpoints
     const toolNames = [
         "search_memory",
@@ -185,6 +176,7 @@ async function main() {
         "list_facts",
         "update_fact",
         "delete_fact",
+        "fetch_budgets",
         "fetch_accounts",
         "fetch_categories",
         "fetch_payees",
@@ -222,17 +214,14 @@ async function main() {
     const port = 8080;
     return new Promise((resolve, reject) => {
         const server = app.listen(port, "0.0.0.0", () => {
-            console.log(
-                JSON.stringify({
-                    event: "health_check_started",
-                    data: { port },
-                }),
-            );
-            // Start IMAP idle loop + MCP server in background
-            imapHandler.idleLoop(onNewEmail).catch((err) => {
-                console.error("IMAP idle loop error:", err);
+            logger.info({
+                event: "health_check_started",
+                data: { port },
             });
-            createMcpServer(registry, app);
+            // Start IMAP idle loop in background
+            imapHandler.idleLoop(onNewEmail).catch((err) => {
+                logger.error({ event: "imap_idle_error", error: err.message });
+            });
             resolve(server);
         });
         server.on("error", reject);
@@ -241,9 +230,9 @@ async function main() {
 
 main()
     .then(() => {
-        console.log(JSON.stringify({ event: "ready" }));
+        logger.info({ event: "ready" });
     })
     .catch((err) => {
-        console.error("Failed to start:", err);
+        logger.error({ event: "startup_failed", error: err.message });
         process.exit(1);
     });

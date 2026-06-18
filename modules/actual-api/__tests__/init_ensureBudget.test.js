@@ -53,7 +53,7 @@ describe("init", () => {
         api.init.mockResolvedValue(undefined);
         api.getBudgets.mockResolvedValue([makeBudget({ name: "MyBudget" })]);
         api.downloadBudget.mockResolvedValue(undefined);
-        process.env.ACTUAL_BUDGET_FILE = "MyBudget";
+        process.env.ACTUAL_PRIMARY_BUDGET_FILE = "MyBudget";
 
         const { init } = require("../server");
         await init();
@@ -107,7 +107,7 @@ describe("init", () => {
 
     test("finds budget by BUDGET_FILE name", async () => {
         const api = actual();
-        process.env.ACTUAL_BUDGET_FILE = "Test SGD";
+        process.env.ACTUAL_PRIMARY_BUDGET_FILE = "Test SGD";
         api.init.mockResolvedValue(undefined);
         api.getBudgets.mockResolvedValue([
             makeBudget({ name: "Test MYR", groupId: "myr-1" }),
@@ -125,7 +125,7 @@ describe("init", () => {
 
     test("falls back to first budget when name does not match", async () => {
         const api = actual();
-        process.env.ACTUAL_BUDGET_FILE = "NonExistent";
+        process.env.ACTUAL_PRIMARY_BUDGET_FILE = "NonExistent";
         api.init.mockResolvedValue(undefined);
         api.getBudgets.mockResolvedValue([
             makeBudget({ name: "First Budget", groupId: "first-1" }),
@@ -276,10 +276,10 @@ describe("ensureBudget", () => {
         );
     });
 
-    test("returns silently when budget not found and no MYR fallback", async () => {
+    test("returns silently when budget not found and no secondary fallback", async () => {
         await primeInit();
         const api = actual();
-        process.env.MYR_BUDGET_FILE = "";
+        process.env.ACTUAL_SECONDARY_BUDGET_FILE = "";
         api.getBudgets.mockResolvedValue([
             makeBudget({ name: "SGD", groupId: "sgd-1" }),
         ]);
@@ -333,8 +333,8 @@ describe("ensureBudget", () => {
         expect(api.downloadBudget).toHaveBeenCalledTimes(3);
     });
 
-    test("MYR fallback via exact MYR_BUDGET_FILE name", async () => {
-        process.env.MYR_BUDGET_FILE = "Test MYR";
+    test("secondary fallback via exact ACTUAL_SECONDARY_BUDGET_FILE name", async () => {
+        process.env.ACTUAL_SECONDARY_BUDGET_FILE = "Test MYR";
         await primeInit("Test SGD");
         const api = actual();
         api.getBudgets.mockResolvedValue([
@@ -349,24 +349,8 @@ describe("ensureBudget", () => {
         );
     });
 
-    test("MYR fallback via substring containing 'MYR'", async () => {
-        process.env.MYR_BUDGET_FILE = "Test MYR";
-        await primeInit("Test SGD");
-        const api = actual();
-        api.getBudgets.mockResolvedValue([
-            makeBudget({ name: "Test SGD", groupId: "sgd-sync" }),
-            makeBudget({ name: "Test MYR", groupId: "myr-sync" }),
-        ]);
-        const { ensureBudget } = loadServer();
-        await ensureBudget("some_MYR_id");
-        expect(api.downloadBudget).toHaveBeenCalledWith(
-            "myr-sync",
-            expect.any(Object),
-        );
-    });
-
-    test("MYR fallback triggered but MYR budget not found — returns silently", async () => {
-        process.env.MYR_BUDGET_FILE = "Test MYR";
+    test("secondary fallback triggered but budget not found — returns silently", async () => {
+        process.env.ACTUAL_SECONDARY_BUDGET_FILE = "Test MYR";
         await primeInit("Test SGD");
         const api = actual();
         api.getBudgets.mockResolvedValue([

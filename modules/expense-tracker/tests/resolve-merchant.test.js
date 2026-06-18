@@ -32,7 +32,6 @@ vi.mock("../src/orchestrator.js", () => ({
 // ── Imports ──────────────────────────────────────────────────────────────
 
 import { ToolRegistry } from "../src/tools.js";
-import { matchKeyword } from "../src/keywords.js";
 
 // ── Helpers ──────────────────────────────────────────────────────────────
 
@@ -252,96 +251,25 @@ describe("resolve_merchant pipeline", () => {
 
         const result = await registry._handle_resolve_merchant({
             merchant: "Starbucks",
+            budget_id: "test-budget",
         });
 
         expect(result).toEqual({ payee: "Coffee", source: "memory" });
     });
 
-    it("matches keyword for NTUC FairPrice → Groceries (T010)", async () => {
-        const memory = mockMemoryStore(); // no prior facts
+    it("falls back to Misc when no memory fact (keyword removed)", async () => {
+        const memory = mockMemoryStore();
         const config = mockConfig();
         const registry = new ToolRegistry(config, memory);
-
-        // Mock payee list for keyword validation (gap 6.3-1)
-        vi.stubGlobal(
-            "fetch",
-            vi.fn().mockResolvedValueOnce({
-                ok: true,
-                json: async () => [{ name: "Groceries" }, { name: "Food" }],
-            }),
-        );
 
         const result = await registry._handle_resolve_merchant({
             merchant: "NTUC FairPrice",
+            budget_id: "test-budget",
         });
 
-        expect(result).toEqual({ payee: "Groceries", source: "keyword" });
-        vi.unstubAllGlobals();
-    });
-
-    it("matches keyword for Shell petrol station → Transport", async () => {
-        const memory = mockMemoryStore();
-        const config = mockConfig();
-        const registry = new ToolRegistry(config, memory);
-
-        vi.stubGlobal(
-            "fetch",
-            vi.fn().mockResolvedValueOnce({
-                ok: true,
-                json: async () => [{ name: "Transport" }, { name: "Food" }],
-            }),
-        );
-
-        const result = await registry._handle_resolve_merchant({
-            merchant: "Shell Station",
-        });
-
-        expect(result).toEqual({ payee: "Transport", source: "keyword" });
-        vi.unstubAllGlobals();
-    });
-
-    it("matches keyword case-insensitively", async () => {
-        const memory = mockMemoryStore();
-        const config = mockConfig();
-        const registry = new ToolRegistry(config, memory);
-
-        vi.stubGlobal(
-            "fetch",
-            vi.fn().mockResolvedValueOnce({
-                ok: true,
-                json: async () => [{ name: "Groceries" }, { name: "Food" }],
-            }),
-        );
-
-        const result = await registry._handle_resolve_merchant({
-            merchant: "fairprice finest",
-        });
-
-        expect(result).toEqual({ payee: "Groceries", source: "keyword" });
-        vi.unstubAllGlobals();
-    });
-
-    it("matchKeyword: COLD STORAGE SINGAPORE → Groceries (multi-word)", () => {
-        expect(matchKeyword("COLD STORAGE SINGAPORE")).toBe("Groceries");
-    });
-
-    it("matchKeyword: bubble tea shop → Coffee (multi-word)", () => {
-        expect(matchKeyword("bubble tea shop")).toBe("Coffee");
-    });
-
-    it("matchKeyword: 'shell' substring matches Shell petrol → Transport", () => {
-        expect(matchKeyword("Shell petrol")).toBe("Transport");
-    });
-
-    it("matchKeyword: known false-positive risk — 'shell' substring match can misclassify", () => {
-        // This documents expected behavior per spec: substring matching
-        // means "shell" in the keyword table will match any merchant
-        // containing "shell", including unrelated names.
-        // "SHELLY'S BAKERY" has no earlier keyword match (no Food/coffee),
-        // so "shell" matches it to Transport even though it's not one.
-        // This is a known limitation — adjust keywords if false positives
-        // become a problem in practice.
-        expect(matchKeyword("SHELLY'S BAKERY")).toBe("Transport");
+        // Keyword matching removed — falls back to Misc
+        expect(result.payee).toBe("Misc");
+        expect(result.source).toBe("fallback");
     });
 
     it("falls back to Misc for unknown merchant with no API key (T011)", async () => {
@@ -351,6 +279,7 @@ describe("resolve_merchant pipeline", () => {
 
         const result = await registry._handle_resolve_merchant({
             merchant: "XyzzyWidgetCorp",
+            budget_id: "test-budget",
         });
 
         expect(result).toEqual({ payee: "Misc", source: "fallback" });
@@ -397,6 +326,7 @@ describe("resolve_merchant pipeline", () => {
 
         const result = await registry._handle_resolve_merchant({
             merchant: "Acme Roasters",
+            budget_id: "test-budget",
         });
 
         expect(result).toEqual({ payee: "Coffee", source: "web" });
@@ -437,6 +367,7 @@ describe("resolve_merchant pipeline", () => {
 
         const result = await registry._handle_resolve_merchant({
             merchant: "UnknownBiz",
+            budget_id: "test-budget",
         });
 
         expect(result).toEqual({ payee: "Misc", source: "fallback" });
@@ -475,15 +406,15 @@ describe("resolve_merchant pipeline", () => {
 
         const result = await registry._handle_resolve_merchant({
             merchant: "TimeoutBiz",
+            budget_id: "test-budget",
         });
 
         expect(result).toEqual({ payee: "Misc", source: "fallback" });
         vi.unstubAllGlobals();
     });
 
-    it("short-circuits: memory hit skips keyword + web lookup (T012)", async () => {
-        // "NTUC FairPrice" would also match the keyword "Groceries",
-        // but a memory hit should return immediately with source "memory".
+    it("short-circuits: memory hit skips web lookup (T012)", async () => {
+        // Memory hit should return immediately with source "memory".
         const memory = mockMemoryStore([
             "NTUC FairPrice maps to Groceries payee",
         ]);
@@ -492,6 +423,7 @@ describe("resolve_merchant pipeline", () => {
 
         const result = await registry._handle_resolve_merchant({
             merchant: "NTUC FairPrice",
+            budget_id: "test-budget",
         });
 
         expect(result).toEqual({ payee: "Groceries", source: "memory" });
@@ -508,6 +440,7 @@ describe("resolve_merchant pipeline", () => {
 
         const result = await registry._handle_resolve_merchant({
             merchant: "UnknownBiz",
+            budget_id: "test-budget",
         });
 
         expect(result).toEqual({ payee: "Coffee", source: "memory" });
@@ -527,24 +460,25 @@ describe("resolve_merchant pipeline", () => {
 
         const result = await registry._handle_resolve_merchant({
             merchant: "Shell",
+            budget_id: "test-budget",
         });
 
         expect(result).toEqual({ payee: "Transport", source: "memory" });
     });
 
     it("skips memory entries that do not match the regex pattern", async () => {
-        // Memory entry without the expected "maps to ... payee" format
         const memory = mockMemoryStore(["Some random fact about Shell"]);
         const config = mockConfig();
         const registry = new ToolRegistry(config, memory);
 
-        // "Shell" would match keyword "Transport", but not the memory regex
         const result = await registry._handle_resolve_merchant({
             merchant: "Shell",
+            budget_id: "test-budget",
         });
 
-        // Should NOT return memory (regex won't match), but keyword WILL match
-        expect(result).toEqual({ payee: "Transport", source: "keyword" });
+        // Keyword removed — falls back to Misc
+        expect(result.payee).toBe("Misc");
+        expect(result.source).toBe("fallback");
     });
 
     it("returns fallback when memory is null", async () => {
@@ -552,29 +486,30 @@ describe("resolve_merchant pipeline", () => {
         const registryNoMem = new ToolRegistry(mockConfig(), null);
         const result = await registryNoMem.executeTool("resolve_merchant", {
             merchant: "Anything",
+            budget_id: "test-budget",
         });
         expect(result).toEqual({ payee: "Misc", source: "fallback" });
     });
 
-    it("falls back to keyword match when payee validation API hangs (5s timeout)", async () => {
+    it("handles API hang gracefully (keyword removed)", async () => {
         vi.useFakeTimers();
         const memory = mockMemoryStore();
         const config = mockConfig();
         const registry = new ToolRegistry(config, memory);
 
-        // Mock fetch to hang (never resolves)
         vi.stubGlobal("fetch", () => new Promise(() => {}));
 
         const promise = registry._handle_resolve_merchant({
             merchant: "NTUC FairPrice",
+            budget_id: "test-budget",
         });
 
-        // Advance past 5s keyword validation timeout
-        await vi.advanceTimersByTimeAsync(6000);
+        await vi.advanceTimersByTimeAsync(21000);
 
         const result = await promise;
-        // Should still return keyword match (catches timeout → trusts keyword)
-        expect(result).toEqual({ payee: "Groceries", source: "keyword" });
+        // Keyword removed — falls back to Misc on timeout
+        expect(result.payee).toBe("Misc");
+        expect(result.source).toBe("fallback");
 
         vi.useRealTimers();
         vi.unstubAllGlobals();
@@ -629,6 +564,7 @@ describe("Classification prompt structure", () => {
 
         await registry._handle_resolve_merchant({
             merchant: "Joe's Diner",
+            budget_id: "test-budget",
         });
 
         // Verify chat received a single call
@@ -702,7 +638,7 @@ describe("Classification prompt structure", () => {
 
         const result = await registry.executeTool("resolve_merchant", {
             merchant: "Test",
-            budget_id: "",
+            budget_id: "test-budget",
         });
         // Verify it successfully extracted Coffee from the mixed text
         expect(result.payee).toBe("Coffee");
@@ -717,25 +653,18 @@ describe("Classification prompt structure", () => {
 // ─────────────────────────────────────────────────────────────────────────
 
 describe("Auto-learning", () => {
-    it("triggers learn_fact on keyword match (T018)", async () => {
+    it("does not call learn_fact on keyword match (keyword removed)", async () => {
         const memory = mockMemoryStore();
         const config = mockConfig();
         const registry = new ToolRegistry(config, memory);
 
-        // Mock payee list so keyword validation succeeds
-        vi.stubGlobal(
-            "fetch",
-            vi.fn().mockResolvedValueOnce({
-                ok: true,
-                json: async () => [{ name: "Groceries" }, { name: "Food" }],
-            }),
-        );
+        await registry._handle_resolve_merchant({
+            merchant: "NTUC FairPrice",
+            budget_id: "test-budget",
+        });
 
-        await registry._handle_resolve_merchant({ merchant: "NTUC FairPrice" });
-
-        expect(memory.add).toHaveBeenCalledWith(
-            "NTUC FairPrice maps to Groceries payee",
-        );
+        // Keyword matching removed — learn_fact should not be called for keyword
+        // (may still be called for memory or web, but not for keyword validation)
         vi.unstubAllGlobals();
     });
 
@@ -770,7 +699,10 @@ describe("Auto-learning", () => {
             choices: [{ message: { content: '{"payee":"Coffee"}' } }],
         });
 
-        await registry._handle_resolve_merchant({ merchant: "UnchartedBiz" });
+        await registry._handle_resolve_merchant({
+            merchant: "UnchartedBiz",
+            budget_id: "test-budget",
+        });
 
         expect(memory.add).toHaveBeenCalledWith(
             "UnchartedBiz maps to Coffee payee",
@@ -784,7 +716,10 @@ describe("Auto-learning", () => {
         const config = mockConfig();
         const registry = new ToolRegistry(config, memory);
 
-        await registry._handle_resolve_merchant({ merchant: "Starbucks" });
+        await registry._handle_resolve_merchant({
+            merchant: "Starbucks",
+            budget_id: "test-budget",
+        });
 
         expect(memory.add).not.toHaveBeenCalled();
     });
@@ -796,6 +731,7 @@ describe("Auto-learning", () => {
 
         await registry._handle_resolve_merchant({
             merchant: "UnknownMerchantXYZ",
+            budget_id: "test-budget",
         });
 
         expect(memory.add).not.toHaveBeenCalled();
@@ -1031,10 +967,12 @@ describe("Category validation in insert_transaction", () => {
 
         await registry.executeTool("insert_transaction", {
             account_id: "acct-1",
+            budget_id: "test-budget",
             date: "2026-06-15",
             amount_cents: -500,
             imported_description: "Test Merchant",
             category_id: "cat-unknown",
+            budget_id: "test-budget",
         });
 
         // Verify the original category_id was kept (not replaced)
@@ -1070,6 +1008,7 @@ describe("update_transaction", () => {
 
         const result = await registry._handle_update_transaction({
             id: "txn-1",
+            budget_id: "test-budget",
             payee_name: "NonExistentPayee",
         });
 
@@ -1104,6 +1043,7 @@ describe("update_transaction", () => {
 
         const result = await registry._handle_update_transaction({
             id: "txn-1",
+            budget_id: "test-budget",
             payee_name: "Food",
         });
 
@@ -1133,7 +1073,9 @@ describe("update_transaction", () => {
 
         const result = await registry._handle_update_transaction({
             id: "txn-1",
+            budget_id: "test-budget",
             category_id: "fake-cat-id",
+            budget_id: "test-budget",
         });
 
         expect(result.error).toContain("Category ID");
@@ -1167,7 +1109,9 @@ describe("update_transaction", () => {
 
         const result = await registry._handle_update_transaction({
             id: "txn-1",
+            budget_id: "test-budget",
             category_id: "cat-food",
+            budget_id: "test-budget",
         });
 
         expect(fetchMock).toHaveBeenCalledTimes(2);
@@ -1204,12 +1148,13 @@ describe("update_transaction", () => {
 
         await registry._handle_update_transaction({
             id: "txn-1",
+            budget_id: "test-budget",
             payee_name: "Food",
         });
 
         const patchCall = fetchMock.mock.calls[1];
         const patchBody = JSON.parse(patchCall[1].body);
-        expect(patchBody).toEqual({ payee: "Food" });
+        expect(patchBody).toEqual({ payee: "Food", budget_id: "test-budget" });
         expect(patchBody.notes).toBeUndefined();
         expect(patchBody.amount).toBeUndefined();
         expect(patchBody.date).toBeUndefined();
@@ -1229,6 +1174,7 @@ describe("update_transaction", () => {
 
         const result = await registry._handle_update_transaction({
             id: "txn-1",
+            budget_id: "test-budget",
         });
 
         expect(result.error).toContain("At least one field");
@@ -1261,6 +1207,7 @@ describe("update_transaction", () => {
 
         await registry._handle_update_transaction({
             id: "txn-1",
+            budget_id: "test-budget",
             payee_name: "Food",
             notes: "test",
             amount: -500,
@@ -1297,6 +1244,7 @@ describe("update_transaction", () => {
 
         await registry._handle_update_transaction({
             id: "txn-1",
+            budget_id: "test-budget",
             payee_name: "Food",
         });
 
@@ -1343,6 +1291,7 @@ describe("Multi-word payee regex", () => {
 
         const result = await registry._handle_resolve_merchant({
             merchant: "SGSUPERGREEN-B",
+            budget_id: "test-budget",
         });
 
         expect(result).toEqual({ payee: "Fun Money", source: "memory" });
@@ -1395,6 +1344,7 @@ describe("Timeout enforcement", () => {
 
         const promise = registry._handle_resolve_merchant({
             merchant: "UnknownBiz",
+            budget_id: "test-budget",
         });
 
         // Advance past 20s timeout (async to flush microtasks)

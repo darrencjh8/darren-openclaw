@@ -84,7 +84,7 @@ export class MemoryStore {
         return !!this._model;
     }
 
-    add(fact) {
+    async add(fact) {
         fact = fact.trim();
         if (!fact)
             return { added: false, skipped: false, reason: "empty fact" };
@@ -92,6 +92,22 @@ export class MemoryStore {
         const normalized = fact.toLowerCase();
         if (this._dedupSet.has(normalized)) {
             return { added: false, skipped: true, reason: "duplicate" };
+        }
+
+        // Semantic dedup: check cosine similarity against existing facts
+        if (this._model) {
+            try {
+                const newEmb = await this._getOrComputeEmbedding(fact);
+                for (const existing of this._facts) {
+                    const existingEmb = await this._getOrComputeEmbedding(existing);
+                    const similarity = this._cosineSimilarity(newEmb, existingEmb);
+                    if (similarity > 0.95) {
+                        return { added: false, skipped: true, reason: "semantic duplicate" };
+                    }
+                }
+            } catch {
+                // Semantic dedup failed — fall through to string dedup
+            }
         }
 
         this._dedupSet.add(normalized);

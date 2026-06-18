@@ -9,8 +9,8 @@ import Database from "better-sqlite3";
 import { simpleParser } from "mailparser";
 import { DedupJournal } from "./dedup.js";
 import { extractPdfFromBuffer } from "./extractors.js";
-import { matchKeyword } from "./keywords.js";
 import { DeepSeekClient } from "./orchestrator.js";
+import { logger, getLogger } from "./logging.js";
 
 const ACTUAL_API_URL = process.env.ACTUAL_API_URL || "http://localhost:3000";
 
@@ -249,11 +249,18 @@ const TOOLS = [
         },
     },
     {
+        name: "fetch_budgets",
+        description:
+            "List all available budgets from Actual Budget. Returns name, groupId, and cloudFileId for each. Use the name as budget_id in subsequent calls.",
+        schema: { type: "object", properties: {} },
+    },
+    {
         name: "fetch_accounts",
         description: "Fetch all active accounts from Actual Budget.",
         schema: {
             type: "object",
-            properties: { budget_id: { type: "string", default: "" } },
+            properties: { budget_id: { type: "string" } },
+            required: ["budget_id"],
         },
     },
     {
@@ -261,7 +268,8 @@ const TOOLS = [
         description: "Fetch all active categories from Actual Budget.",
         schema: {
             type: "object",
-            properties: { budget_id: { type: "string", default: "" } },
+            properties: { budget_id: { type: "string" } },
+            required: ["budget_id"],
         },
     },
     {
@@ -269,56 +277,74 @@ const TOOLS = [
         description: "Fetch all payees from Actual Budget.",
         schema: {
             type: "object",
-            properties: { budget_id: { type: "string", default: "" } },
+            properties: { budget_id: { type: "string" } },
+            required: ["budget_id"],
+        },
+    },
+    {
+        name: "fetch_context",
+        description:
+            "Fetch all accounts, categories, and payees in a single call. Use this for Phase 2 audit.",
+        schema: {
+            type: "object",
+            properties: { budget_id: { type: "string" } },
+            required: ["budget_id"],
         },
     },
     {
         name: "fetch_recent_transactions",
         description:
-            "Fetch recent transactions for a specific account. Auto-discovers budget ID from config if not provided.",
+            "Fetch transactions from Actual Budget. Pass id to fetch a single transaction, or account_id + days to fetch recent ones.",
         schema: {
             type: "object",
             properties: {
                 budget_id: {
                     type: "string",
-                    description: "Budget ID (optional)",
-                    default: "",
+                    description: "Budget file name (required)",
                 },
-                account_id: { type: "string", default: "" },
+                id: {
+                    type: "string",
+                    description: "Fetch a single transaction by its ID",
+                },
+                account_id: {
+                    type: "string",
+                    description:
+                        "Account ID for recent-transactions query (ignored if id is set)",
+                },
                 days: {
                     type: "integer",
-                    description: "Days to look back",
+                    description: "Days to look back (default 7)",
                     default: 7,
                 },
             },
+            required: ["budget_id"],
         },
     },
     {
         name: "insert_transaction",
-        description: "Insert a new transaction into Actual Budget.",
+        description:
+            "Insert a new transaction into Actual Budget. Returns the created transaction with id.",
         schema: {
             type: "object",
             properties: {
-                budget_id: { type: "string", default: "" },
-                account_id: { type: "string", default: "" },
+                budget_id: { type: "string" },
+                account_id: { type: "string" },
                 date: {
                     type: "string",
                     description: "YYYY-MM-DD",
-                    default: "",
                 },
                 amount_cents: {
                     type: "integer",
                     description: "Negative for spending",
-                    default: 0,
                 },
                 imported_description: {
                     type: "string",
                     description: "Merchant name",
-                    default: "",
                 },
-                category_id: { type: "string", default: "" },
-                notes: { type: "string", default: "" },
+                category_id: { type: "string" },
+                notes: { type: "string" },
             },
+            required: ["budget_id", "account_id", "date", "amount_cents"],
         },
     },
     {
@@ -331,9 +357,15 @@ const TOOLS = [
                 amount_cents: { type: "integer" },
                 account_id: { type: "string" },
                 payee_name: { type: "string" },
-                budget_id: { type: "string", default: "" },
+                budget_id: { type: "string" },
             },
-            required: ["date", "amount_cents", "account_id", "payee_name"],
+            required: [
+                "date",
+                "amount_cents",
+                "account_id",
+                "payee_name",
+                "budget_id",
+            ],
         },
     },
     {
@@ -373,11 +405,10 @@ const TOOLS = [
                 },
                 budget_id: {
                     type: "string",
-                    description: "Budget ID (optional)",
-                    default: "",
+                    description: "Budget file name (required)",
                 },
             },
-            required: ["ab_transaction_id"],
+            required: ["ab_transaction_id", "budget_id"],
         },
     },
     {
@@ -401,11 +432,10 @@ const TOOLS = [
                 },
                 budget_id: {
                     type: "string",
-                    description: "Budget ID (optional)",
-                    default: "",
+                    description: "Budget file name (required)",
                 },
             },
-            required: ["account_id", "date_from", "date_to"],
+            required: ["account_id", "date_from", "date_to", "budget_id"],
         },
     },
     {
@@ -434,8 +464,7 @@ const TOOLS = [
                 },
                 budget_id: {
                     type: "string",
-                    description: "Budget ID (optional)",
-                    default: "",
+                    description: "Budget file name (required)",
                 },
                 total_amount_cents: {
                     type: "integer",
@@ -457,6 +486,7 @@ const TOOLS = [
                 "period_end",
                 "matched_count",
                 "outlier_count",
+                "budget_id",
             ],
         },
     },
@@ -553,6 +583,7 @@ const TOOLS = [
                 "date",
                 "currency",
                 "account_id",
+                "budget_id",
             ],
         },
     },
@@ -611,9 +642,9 @@ const TOOLS = [
                     type: "string",
                     description: "Raw merchant name from transaction",
                 },
-                budget_id: { type: "string", default: "" },
+                budget_id: { type: "string" },
             },
-            required: ["merchant"],
+            required: ["merchant", "budget_id"],
         },
     },
     {
@@ -624,7 +655,7 @@ const TOOLS = [
             type: "object",
             properties: {
                 id: { type: "string" },
-                budget_id: { type: "string", default: "" },
+                budget_id: { type: "string" },
                 payee_name: { type: "string" },
                 notes: { type: "string" },
                 amount: { type: "number" },
@@ -632,7 +663,7 @@ const TOOLS = [
                 category_id: { type: "string" },
                 account_id: { type: "string" },
             },
-            required: ["id"],
+            required: ["id", "budget_id"],
         },
     },
 ];
@@ -694,6 +725,23 @@ export class ToolRegistry {
     }
 
     /**
+     * Get only the fetch_context tool schema for Phase 2 LLM (audit phase).
+     */
+    getPhase2ToolSchemas() {
+        const t = TOOL_MAP["fetch_context"];
+        return [
+            {
+                type: "function",
+                function: {
+                    name: t.name,
+                    description: t.description,
+                    parameters: t.schema,
+                },
+            },
+        ];
+    }
+
+    /**
      * Get only the submit_decision tool schema (for Phase 1b forced call).
      */
     getSubmitDecisionTool() {
@@ -724,7 +772,7 @@ export class ToolRegistry {
     async _handle_learn_fact({ fact }) {
         if (!this._memory)
             return { added: false, skipped: false, reason: "no memory store" };
-        return this._memory.add(fact);
+        return await this._memory.add(fact);
     }
 
     async _handle_list_facts() {
@@ -757,29 +805,72 @@ export class ToolRegistry {
 
     // ── AB API tools ──────────────────────────────────────────────
 
-    async _handle_fetch_accounts({ budget_id = "" }) {
+    async _handle_fetch_budgets() {
+        return this._get("/budgets", "");
+    }
+
+    async _handle_fetch_accounts({ budget_id }) {
+        if (!budget_id) return { error: "budget_id is required" };
         const accounts = await this._get("/accounts", budget_id);
         if (!Array.isArray(accounts)) return accounts;
         // Filter out closed accounts — LLM should only see active ones
         return accounts.filter((a) => !a.closed);
     }
 
-    async _handle_fetch_categories({ budget_id = "" }) {
+    async _handle_fetch_categories({ budget_id }) {
+        if (!budget_id) return { error: "budget_id is required" };
         return this._get("/categories", budget_id);
     }
 
-    async _handle_fetch_payees({ budget_id = "" }) {
+    async _handle_fetch_payees({ budget_id }) {
+        if (!budget_id) return { error: "budget_id is required" };
         return this._get("/payees", budget_id);
     }
 
+    async _handle_fetch_context({ budget_id }) {
+        if (!budget_id) return { error: "budget_id is required" };
+        const [accounts, categories, payees] = await Promise.all([
+            this._get("/accounts", budget_id),
+            this._get("/categories", budget_id),
+            this._get("/payees", budget_id),
+        ]);
+        const activeAccounts = Array.isArray(accounts)
+            ? accounts.filter((a) => !a.closed)
+            : accounts;
+        return { accounts: activeAccounts, categories, payees };
+    }
+
     async _handle_fetch_recent_transactions({
-        budget_id = "",
-        account_id = "",
+        budget_id,
+        id,
+        account_id,
         days = 7,
     }) {
+        if (!budget_id) return { error: "budget_id is required" };
+        // Fetch single transaction by ID
+        if (id) {
+            const txn = await this._get(
+                `/transactions/${encodeURIComponent(id)}`,
+                budget_id,
+            );
+            if (txn && !txn.error) {
+                txn.budget_id = budget_id;
+            }
+            return txn;
+        }
+        // Fetch recent transactions
         const params = {};
         if (account_id) params.account_id = account_id;
-        return this._get("/transactions", budget_id, params);
+        if (days) {
+            const since = new Date();
+            since.setDate(since.getDate() - days);
+            params.since_date = since.toISOString().slice(0, 10);
+        }
+        const txns = await this._get("/transactions", budget_id, params);
+        if (Array.isArray(txns)) {
+            return txns.map((t) => ({ ...t, budget_id }));
+        }
+        return txns;
     }
 
     async _validate_payee(payee_name, budget_id = "") {
@@ -809,17 +900,21 @@ export class ToolRegistry {
     }
 
     async _handle_insert_transaction(args) {
+        const budget_id = args.budget_id;
+        if (!budget_id) return { error: "budget_id is required" };
+        if (!args.account_id) return { error: "account_id is required" };
+        if (!args.date) return { error: "date is required" };
+        if (!args.amount_cents && args.amount_cents !== 0)
+            return { error: "amount_cents is required" };
+
         const payee_name = await this._validate_payee(
             args.imported_description || "",
-            args.budget_id || "",
+            budget_id,
         );
         let categoryId = args.category_id || null;
         if (categoryId) {
             try {
-                const categories = await this._get(
-                    "/categories",
-                    args.budget_id || "",
-                );
+                const categories = await this._get("/categories", budget_id);
                 const match = Array.isArray(categories)
                     ? categories.find((c) => c.id === categoryId)
                     : null;
@@ -837,23 +932,27 @@ export class ToolRegistry {
         const result = await this._post(
             "/transactions",
             {
-                account: args.account_id || "",
-                date: args.date || new Date().toISOString().slice(0, 10),
+                account: args.account_id,
+                date: args.date,
                 amount: args.amount_cents || 0,
                 payee_name: payee_name,
                 notes: args.notes || "",
                 cleared: false,
                 ...(categoryId ? { category: categoryId } : {}),
             },
-            args.budget_id || "",
+            budget_id,
         );
         // Record in dedup journal AFTER successful insert (not before)
         this._dedup.record(
-            args.date || new Date().toISOString().slice(0, 10),
+            args.date,
             args.amount_cents || 0,
-            args.account_id || "",
+            args.account_id,
             payee_name,
         );
+        // Inject budget_id into result for LLM context
+        if (result && !result.error) {
+            result.budget_id = budget_id;
+        }
         return result;
     }
 
@@ -862,7 +961,7 @@ export class ToolRegistry {
         amount_cents,
         account_id,
         payee_name,
-        budget_id = "",
+        budget_id,
     }) {
         // Check local dedup first, then AB API
         if (
@@ -912,8 +1011,9 @@ export class ToolRegistry {
     async _handle_reconcile_transaction({
         ab_transaction_id,
         statement_ref = "",
-        budget_id = "",
+        budget_id,
     }) {
+        if (!budget_id) return { error: "budget_id is required" };
         const body = {};
         if (statement_ref) body.notes = statement_ref;
         return this._post(
@@ -927,8 +1027,9 @@ export class ToolRegistry {
         account_id,
         date_from,
         date_to,
-        budget_id = "",
+        budget_id,
     }) {
+        if (!budget_id) return { error: "budget_id is required" };
         return this._get("/transactions", budget_id, {
             account_id,
             cleared: "false",
@@ -945,7 +1046,7 @@ export class ToolRegistry {
         period_end,
         matched_count,
         outlier_count,
-        budget_id = "",
+        budget_id,
         total_amount_cents,
         due_date,
         currency = "SGD",
@@ -953,9 +1054,10 @@ export class ToolRegistry {
         if (!this._statementJournal) {
             throw new Error("Statement journal not configured");
         }
+        const bid = budget_id || this._config.primaryBudgetFile;
         const sid = this._statementJournal.recordStatement(
             account_id,
-            budget_id || this._config.actualBudgetFile,
+            bid,
             period_start,
             period_end,
             matched_count,
@@ -1002,17 +1104,22 @@ export class ToolRegistry {
         ) {
             return true;
         }
-        const url = `${this._config.openclawGatewayUrl}/api/notify`;
+        const url = `${this._config.notifyUrl}`;
+        const body = JSON.stringify({ message });
         const headers = { "Content-Type": "application/json" };
-        if (this._config.openclawGatewayToken) {
-            headers["Authorization"] =
-                `Bearer ${this._config.openclawGatewayToken}`;
+        if (this._config.notifySecret) {
+            const crypto = await import("crypto");
+            const sig = crypto
+                .createHmac("sha256", this._config.notifySecret)
+                .update(body)
+                .digest("hex");
+            headers["X-Webhook-Signature"] = sig;
         }
         try {
             const r = await fetch(url, {
                 method: "POST",
                 headers,
-                body: JSON.stringify({ message }),
+                body,
             });
             if (!r.ok) return false;
             if (this._emailMsgId) this._cooldown.record(this._emailMsgId);
@@ -1029,7 +1136,7 @@ export class ToolRegistry {
             timestamp: new Date().toISOString(),
         };
         if (this._config.logLevel !== "ERROR") {
-            console.log(JSON.stringify(entry));
+            logger.info(entry);
         }
         return true;
     }
@@ -1116,9 +1223,9 @@ export class ToolRegistry {
     }
 
     async _handle_resolve_merchant({ merchant, budget_id }) {
+        if (!budget_id) return { error: "budget_id is required" };
         if (!this._memory) return { payee: "Misc", source: "fallback" };
-
-        // Step 1: Check memory for existing mapping
+        const budgetId = budget_id;
         try {
             const memResults = await this._memory.search(merchant);
             if (memResults && memResults.length > 0) {
@@ -1128,45 +1235,10 @@ export class ToolRegistry {
                 }
             }
         } catch {
-            // Memory search failed — fall through to keyword step
+            // Memory search failed — fall through to web search
         }
 
-        // Step 2: Keyword matching
-        const keywordMatch = matchKeyword(merchant);
-        if (keywordMatch) {
-            // Validate keyword-resolved payee exists in live payee list (5s timeout)
-            try {
-                const payees = await Promise.race([
-                    this._get("/payees", budget_id || ""),
-                    new Promise((_, reject) =>
-                        setTimeout(() => reject(new Error("timeout")), 5000),
-                    ),
-                ]);
-                const valid =
-                    Array.isArray(payees) &&
-                    payees.some(
-                        (p) =>
-                            p.name &&
-                            p.name.toLowerCase() === keywordMatch.toLowerCase(),
-                    );
-                if (!valid) {
-                    // Keyword payee not in live list — fall through to web search
-                } else {
-                    await this._memory.add(
-                        merchant + " maps to " + keywordMatch + " payee",
-                    );
-                    return { payee: keywordMatch, source: "keyword" };
-                }
-            } catch {
-                // Payee list fetch failed — trust the keyword match and learn
-                await this._memory.add(
-                    merchant + " maps to " + keywordMatch + " payee",
-                );
-                return { payee: keywordMatch, source: "keyword" };
-            }
-        }
-
-        // Step 3: Web search + AI classification (20s timeout per FR-008)
+        // Step 2: Web search + AI classification (20s timeout per FR-008)
         if (this._config.braveSearchApiKey) {
             try {
                 const result = await Promise.race([
@@ -1177,7 +1249,7 @@ export class ToolRegistry {
                         const payee = await this._classify_merchant(
                             merchant,
                             results,
-                            budget_id,
+                            budgetId,
                         );
                         return payee;
                     })(),
@@ -1196,7 +1268,7 @@ export class ToolRegistry {
             }
         }
 
-        // Step 4: Fallback
+        // Step 3: Fallback
         return { payee: "Misc", source: "fallback" };
     }
 
@@ -1285,7 +1357,8 @@ export class ToolRegistry {
             category_id,
             account_id,
         } = args;
-        const budgetId = budget_id || "";
+        if (!budget_id) return { error: "budget_id is required" };
+        const budgetId = budget_id;
 
         // Build fields to update
         const fields = {};

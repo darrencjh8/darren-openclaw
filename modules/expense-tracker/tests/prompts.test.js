@@ -40,12 +40,16 @@ describe("getSystemPrompt", () => {
         expect(prompt).toContain("MEMORY.md");
     });
 
-    it("injects SGD budget name from env", () => {
+    it("injects default SGD budget name when no env set", () => {
         expect(prompt).toContain('budget "My Budget"');
     });
 
-    it("injects MYR budget name from env", () => {
+    it("injects default MYR budget name when no env set", () => {
         expect(prompt).toContain('"My MYR Budget"');
+    });
+
+    it("injects default currency values when no env set", () => {
+        expect(prompt).toContain("Currency not SGD or MYR");
     });
 
     it("injects USER_NAME from env", () => {
@@ -120,14 +124,16 @@ describe("prompt budget name resolution", () => {
         }
     });
 
-    it("picks up ACTUAL_BUDGET_FILE from process.env set after module load", () => {
-        // Simulate what Config.fromEnv() does — set env vars after imports
-        process.env.ACTUAL_BUDGET_FILE = "Darren SGD";
-        process.env.MYR_BUDGET_FILE = "Darren MYR";
+    it("picks up ACTUAL_PRIMARY_BUDGET_FILE and ACTUAL_SECONDARY_BUDGET_FILE from env", () => {
+        process.env.ACTUAL_PRIMARY_BUDGET_FILE = "Primary Budget";
+        process.env.ACTUAL_SECONDARY_BUDGET_FILE = "Secondary Budget";
+        process.env.ACTUAL_PRIMARY_CURRENCY = "USD";
+        process.env.ACTUAL_SECONDARY_CURRENCY = "EUR";
 
         const prompt = getSystemPrompt();
-        expect(prompt).toContain('budget "Darren SGD"');
-        expect(prompt).toContain('"Darren MYR"');
+        expect(prompt).toContain('budget "Primary Budget"');
+        expect(prompt).toContain('"Secondary Budget"');
+        expect(prompt).toContain("Currency not USD or EUR");
 
         const examples = getFewShotExamples();
         const ex1 = examples[0];
@@ -135,17 +141,42 @@ describe("prompt budget name resolution", () => {
             .find((m) => m.role === "assistant" && m.tool_calls)
             ?.tool_calls?.find((tc) => tc.function?.name === "fetch_accounts")
             ?.function?.arguments;
-        expect(fetchAcctsArgs).toContain('"Darren SGD"');
+        expect(fetchAcctsArgs).toContain('"Primary Budget"');
     });
 
-    it("falls back to defaults when env vars are not set", () => {
-        // Ensure env vars are cleared
+    it("ignores legacy ACTUAL_BUDGET_FILE / MYR_BUDGET_FILE (no fallback)", () => {
+        // Old env vars should be ignored — only new names are read
+        delete process.env.ACTUAL_PRIMARY_BUDGET_FILE;
+        delete process.env.ACTUAL_SECONDARY_BUDGET_FILE;
+        delete process.env.ACTUAL_PRIMARY_CURRENCY;
+        delete process.env.ACTUAL_SECONDARY_CURRENCY;
+        process.env.ACTUAL_BUDGET_FILE = "Legacy SGD";
+        process.env.MYR_BUDGET_FILE = "Legacy MYR";
+
+        const prompt = getSystemPrompt();
+        // Falls back to hardcoded defaults since new vars are unset
+        expect(prompt).toContain('budget "My Budget"');
+        expect(prompt).toContain('"My MYR Budget"');
+        expect(prompt).toContain("Currency not SGD or MYR");
+
+        // No legacy names should leak into output
+        expect(prompt).not.toContain("Legacy SGD");
+        expect(prompt).not.toContain("Legacy MYR");
+    });
+
+    it("falls back to defaults when all env vars are not set", () => {
+        // Clear both new and legacy names
+        delete process.env.ACTUAL_PRIMARY_BUDGET_FILE;
+        delete process.env.ACTUAL_SECONDARY_BUDGET_FILE;
         delete process.env.ACTUAL_BUDGET_FILE;
         delete process.env.MYR_BUDGET_FILE;
+        delete process.env.ACTUAL_PRIMARY_CURRENCY;
+        delete process.env.ACTUAL_SECONDARY_CURRENCY;
 
         const prompt = getSystemPrompt();
         expect(prompt).toContain('budget "My Budget"');
         expect(prompt).toContain('"My MYR Budget"');
+        expect(prompt).toContain("Currency not SGD or MYR");
 
         const examples = getFewShotExamples();
         const ex1 = examples[0];
@@ -154,5 +185,45 @@ describe("prompt budget name resolution", () => {
             ?.tool_calls?.find((tc) => tc.function?.name === "fetch_accounts")
             ?.function?.arguments;
         expect(fetchAcctsArgs).toContain('"My Budget"');
+    });
+});
+
+describe("Phase 1a prompt (new 4-phase design)", () => {
+    it("getPhase1aPrompt returns extraction-only prompt", async () => {
+        const { getPhase1aPrompt } = await import("../src/prompts.js");
+        const prompt = getPhase1aPrompt();
+        expect(prompt).toContain("extract structured data");
+        expect(prompt).toContain("merchant");
+        expect(prompt).toContain("amount_cents");
+        expect(prompt).toContain("currency");
+        expect(prompt).not.toContain("fetch_context");
+        expect(prompt).not.toContain("search_memory");
+    });
+
+    it("getPhase2Prompt includes memory hints and leave-blank instruction", async () => {
+        const { getPhase2Prompt } = await import("../src/prompts.js");
+        const output = {
+            merchant: "Toast Box",
+            amount_cents: -1280,
+            date: "2026-06-18",
+            currency: "SGD",
+            budget_id: "My Budget",
+            memory_payee: "Food",
+            memory_account: null,
+            memory_category: "Groceries",
+        };
+        const prompt = getPhase2Prompt(output, "");
+        expect(prompt).toContain('payee="Food"');
+        expect(prompt).not.toContain("account=");
+        expect(prompt).toContain('category="Groceries"');
+        expect(prompt).toContain("LEAVING FIELDS BLANK");
+        expect(prompt).toContain("fetch_context");
+    });
+
+    it("Phase 1a prompt includes skip detection for non-transactions", async () => {
+        const { getPhase1aPrompt } = await import("../src/prompts.js");
+        const prompt = getPhase1aPrompt();
+        expect(prompt).toContain('"skip"');
+        expect(prompt).toContain("NOT a transaction");
     });
 });

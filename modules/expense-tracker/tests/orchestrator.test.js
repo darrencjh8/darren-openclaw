@@ -38,7 +38,16 @@ describe("AgentOrchestrator", () => {
             setEmailContext: vi.fn(),
             getToolSchemas: vi.fn(() => []),
             getLlmToolSchemas: vi.fn(() => []),
+            getPhase2ToolSchemas: vi.fn(() => []),
             executeTool: vi.fn(),
+            getSubmitDecisionTool: vi.fn(() => ({
+                type: "function",
+                function: {
+                    name: "submit_decision",
+                    description: "Submit the final structured decision",
+                    parameters: {},
+                },
+            })),
         };
         const orch = new AgentOrchestrator(config, tools);
         expect(orch).toBeDefined();
@@ -51,7 +60,16 @@ describe("AgentOrchestrator", () => {
             setEmailContext: vi.fn(),
             getToolSchemas: vi.fn(() => []),
             getLlmToolSchemas: vi.fn(() => []),
+            getPhase2ToolSchemas: vi.fn(() => []),
             executeTool: vi.fn(),
+            getSubmitDecisionTool: vi.fn(() => ({
+                type: "function",
+                function: {
+                    name: "submit_decision",
+                    description: "Submit the final structured decision",
+                    parameters: {},
+                },
+            })),
         };
         const orch = new AgentOrchestrator(config, tools);
         const messages = orch._buildMessages("Test email content");
@@ -66,7 +84,16 @@ describe("AgentOrchestrator", () => {
             setEmailContext: vi.fn(),
             getToolSchemas: vi.fn(() => []),
             getLlmToolSchemas: vi.fn(() => []),
+            getPhase2ToolSchemas: vi.fn(() => []),
             executeTool: vi.fn(),
+            getSubmitDecisionTool: vi.fn(() => ({
+                type: "function",
+                function: {
+                    name: "submit_decision",
+                    description: "Submit the final structured decision",
+                    parameters: {},
+                },
+            })),
         };
         const orch = new AgentOrchestrator(config, tools);
         const messages = orch._buildMessages("Test email content");
@@ -76,21 +103,28 @@ describe("AgentOrchestrator", () => {
         );
     });
 
-    it("_buildMessages includes few-shot examples between system and user", () => {
+    it("_buildMessages has system and user messages (no few-shot examples in new pipeline)", () => {
         const config = makeConfig();
         const tools = {
             setEmailContext: vi.fn(),
             getToolSchemas: vi.fn(() => []),
             getLlmToolSchemas: vi.fn(() => []),
+            getPhase2ToolSchemas: vi.fn(() => []),
             executeTool: vi.fn(),
+            getSubmitDecisionTool: vi.fn(() => ({
+                type: "function",
+                function: {
+                    name: "submit_decision",
+                    description: "Submit the final structured decision",
+                    parameters: {},
+                },
+            })),
         };
         const orch = new AgentOrchestrator(config, tools);
         const messages = orch._buildMessages("Test");
         const roles = messages.map((m) => m.role);
         expect(roles[0]).toBe("system");
         expect(roles[roles.length - 1]).toBe("user");
-        // Few-shot examples should include user/assistant/tool roles in between
-        expect(roles).toContain("assistant");
     });
 
     it("processes email happy path — promotional skip", async () => {
@@ -99,7 +133,16 @@ describe("AgentOrchestrator", () => {
             setEmailContext: vi.fn(),
             getToolSchemas: vi.fn(() => []),
             getLlmToolSchemas: vi.fn(() => []),
+            getPhase2ToolSchemas: vi.fn(() => []),
             executeTool: vi.fn(async () => true),
+            getSubmitDecisionTool: vi.fn(() => ({
+                type: "function",
+                function: {
+                    name: "submit_decision",
+                    description: "Submit the final structured decision",
+                    parameters: {},
+                },
+            })),
         };
         const orch = new AgentOrchestrator(config, tools);
 
@@ -133,7 +176,16 @@ describe("AgentOrchestrator", () => {
             setEmailContext: vi.fn(),
             getToolSchemas: vi.fn(() => []),
             getLlmToolSchemas: vi.fn(() => []),
+            getPhase2ToolSchemas: vi.fn(() => []),
             executeTool: vi.fn(async () => true),
+            getSubmitDecisionTool: vi.fn(() => ({
+                type: "function",
+                function: {
+                    name: "submit_decision",
+                    description: "Submit the final structured decision",
+                    parameters: {},
+                },
+            })),
         };
         const orch = new AgentOrchestrator(config, tools);
 
@@ -157,42 +209,31 @@ describe("AgentOrchestrator", () => {
         expect(result.action).toBe("notified");
     });
 
-    it("returns error when max tool iterations exceeded", async () => {
+    it("notifies when LLM returns no parseable JSON (old loop is gone)", async () => {
         const config = makeConfig();
         const tools = {
             setEmailContext: vi.fn(),
-            getToolSchemas: vi.fn(() => [
-                { function: { name: "search_memory" } },
-            ]),
-            getLlmToolSchemas: vi.fn(() => [
-                { function: { name: "search_memory" } },
-            ]),
-            executeTool: vi.fn(async () => ({ results: [] })),
+            getToolSchemas: vi.fn(() => []),
+            getLlmToolSchemas: vi.fn(() => []),
+            getPhase2ToolSchemas: vi.fn(() => []),
+            executeTool: vi.fn(async () => true),
+            getSubmitDecisionTool: vi.fn(() => ({
+                type: "function",
+                function: {
+                    name: "submit_decision",
+                    description: "Submit the final structured decision",
+                    parameters: {},
+                },
+            })),
         };
         const orch = new AgentOrchestrator(config, tools);
 
-        // Always return tool_calls — never a final JSON response
+        // Phase 1a LLM returns no content → parse fails → null → notified
         orch._llm.chat = vi.fn(async () => ({
-            choices: [
-                {
-                    finish_reason: "tool_calls",
-                    message: {
-                        tool_calls: [
-                            {
-                                id: "call_1",
-                                function: {
-                                    name: "search_memory",
-                                    arguments: '{"query":"test"}',
-                                },
-                            },
-                        ],
-                    },
-                },
-            ],
+            choices: [{ finish_reason: "stop", message: {} }],
         }));
 
         const result = await orch.processEmail("test-004", "Email content");
-        // Now notifies user and marks read instead of returning error
         expect(tools.executeTool).toHaveBeenCalledWith(
             "notify_user",
             expect.anything(),

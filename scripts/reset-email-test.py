@@ -1,23 +1,54 @@
 #!/usr/bin/env python3
-"""Clear dedup, restart Hermes + expense-tracker, then mark test email unread."""
+"""Clear dedup, restart Hermes + expense-tracker, then mark test email unread.
+
+Secrets (IMAP_PASSWORD, etc.) are loaded from hermes/.env — never hardcoded.
+"""
 
 import imaplib
+import os
 import sqlite3
 import subprocess
 import time
 
-# --- Config ---
-DEDUP_DB = "/home/darren/worktrees/darren-openclaw/vivid-crater/darren-openclaw/modules/expense-tracker/data/dedup.db"
-COMPOSE_DIR = (
-    "/home/darren/worktrees/darren-openclaw/vivid-crater/darren-openclaw/modules"
-)
-ENV_FILE = "hermes/.env"
+# --- Paths (relative to this script) ---
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+REPO_ROOT = os.path.dirname(SCRIPT_DIR)  # one level up from scripts/
+
+COMPOSE_DIR = os.path.join(REPO_ROOT, "gateway")
+HERMES_ENV = os.path.join(REPO_ROOT, "modules", "hermes", ".env")
+EXPENSE_TRACKER_ENV = os.path.join(REPO_ROOT, "modules", "expense-tracker", ".env")
+DEDUP_DB = os.path.join(REPO_ROOT, "modules", "expense-tracker", "data", "dedup.db")
+
+
+# --- Load .env ---
+def load_env(path):
+    """Minimal dotenv parser — no extra dependencies."""
+    if not os.path.isfile(path):
+        raise FileNotFoundError(f".env not found: {path}")
+    with open(path) as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, _, value = line.partition("=")
+            key, value = key.strip(), value.strip()
+            # Strip quotes
+            if len(value) >= 2 and value[0] == value[-1] and value[0] in ('"', "'"):
+                value = value[1:-1]
+            if key not in os.environ:
+                os.environ[key] = value
+
+
+load_env(HERMES_ENV)
+load_env(EXPENSE_TRACKER_ENV)
+
+# --- Config (secrets from env, safe defaults for non-secrets) ---
+IMAP_HOST = os.environ.get("IMAP_HOST", "imap.zoho.com")
+IMAP_PORT = int(os.environ.get("IMAP_PORT", "993"))
+IMAP_USER = os.environ["IMAP_USERNAME"]
+IMAP_PASS = os.environ["IMAP_PASSWORD"]
+MAILBOX = os.environ.get("IMAP_MAILBOX", "INBOX")
 TEST_UID = b"128"
-IMAP_HOST = "imap.zoho.com"
-IMAP_PORT = 993
-IMAP_USER = "darrenclaw@zohomail.com"
-IMAP_PASS = "vJg6ecAS61Bi"
-MAILBOX = "INBOX"
 
 # --- Step 1: Clear dedup ---
 print("1. Clearing dedup...")
@@ -28,14 +59,14 @@ conn.commit()
 conn.close()
 print("   done")
 
-# --- Step 2: Restart containers (compose handles ordering via health check) ---
+# --- Step 2: Restart containers ---
 print("2. Recreating containers...")
 subprocess.run(
     [
         "docker",
         "compose",
         "--env-file",
-        ENV_FILE,
+        HERMES_ENV,
         "up",
         "-d",
         "--force-recreate",

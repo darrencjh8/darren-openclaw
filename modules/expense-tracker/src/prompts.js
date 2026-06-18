@@ -7,12 +7,96 @@
  * so Config.fromEnv() can load .env files first.
  */
 
-import { KEYWORD_TABLE } from "./keywords.js";
+/**
+ * Phase 1a: LLM Extract prompt — simple field extraction, reasoning=disabled.
+ * No tools. No execution. Just extract merchant, amount, date, currency.
+ */
+export function getPhase1aPrompt() {
+    const PRIMARY_CURRENCY = process.env.ACTUAL_PRIMARY_CURRENCY || "SGD";
+    const SECONDARY_CURRENCY = process.env.ACTUAL_SECONDARY_CURRENCY || "MYR";
 
-function generateKeywordSection() {
-    return Object.entries(KEYWORD_TABLE)
-        .map(([payee, keywords]) => `  ${keywords.join(", ")} → ${payee}`)
-        .join("\n");
+    return `\
+You extract structured data from bank transaction alert emails.
+
+RULES:
+1. Extract: merchant name, amount (in integer CENTS, negative for spending),
+   currency (${PRIMARY_CURRENCY} or ${SECONDARY_CURRENCY}), date (YYYY-MM-DD).
+2. Currency: S$ / SGD → "${PRIMARY_CURRENCY}", RM / MYR → "${SECONDARY_CURRENCY}".
+3. Amount: S$12.80 = -1280, RM 45.50 = -4550. ALWAYS integer cents, negative.
+4. Date: extract from email timestamp or transaction mention.
+5. If the email is clearly NOT a transaction (promo, trade confirmation, OTP),
+   return: { "skip": true, "reasoning": "..." }
+
+Respond ONLY with valid JSON (no markdown, no code fences):
+{
+  "merchant": "Toast Box",
+  "amount_cents": -1280,
+  "date": "2026-06-18",
+  "currency": "SGD",
+  "raw_description": "S$12.80 at Toast Box"
+}`;
+}
+
+/**
+ * Phase 2: LLM Audit prompt — cross-reference memory hints against live data.
+ * Receives memory candidates from Phase 1b + calls fetch_context for live data.
+ */
+export function getPhase2Prompt(phase1bOutput, emailText) {
+    const PRIMARY_CURRENCY = process.env.ACTUAL_PRIMARY_CURRENCY || "SGD";
+    const SECONDARY_CURRENCY = process.env.ACTUAL_SECONDARY_CURRENCY || "MYR";
+
+    const hints = [];
+    if (phase1bOutput.memory_payee)
+        hints.push(`payee="${phase1bOutput.memory_payee}"`);
+    if (phase1bOutput.memory_account)
+        hints.push(`account="${phase1bOutput.memory_account}"`);
+    if (phase1bOutput.memory_category)
+        hints.push(`category="${phase1bOutput.memory_category}"`);
+
+    const hintText =
+        hints.length > 0
+            ? `\nMemory suggests: ${hints.join(", ")}. Verify against live data below.`
+            : "\nNo memory hints available — rely entirely on live data.";
+
+    return `\
+You are an expense-tracking auditor. You cross-reference extracted fields
+and memory hints against LIVE Actual Budget data to produce a final decision.
+
+EXTRACTED FIELDS:
+- Merchant: "${phase1bOutput.merchant || "unknown"}"
+- Amount: ${phase1bOutput.amount_cents ?? "?"} cents (${PRIMARY_CURRENCY}/${SECONDARY_CURRENCY})
+- Date: ${phase1bOutput.date || "?"}
+- Currency: ${phase1bOutput.currency || "?"}
+- Budget: "${phase1bOutput.budget_id || "?"}"${hintText}
+
+RULES:
+1. Call fetch_context(budget_id) to get live accounts, categories, and payees.
+2. Match the best account_id from live accounts (prefer open, non-closed).
+3. Match payee_name from live payees (use memory hint if available).
+4. Match category_id from live categories.
+5. LEAVING FIELDS BLANK IS BETTER THAN GUESSING. If unsure about any field,
+   leave it as "" (empty string). The code handles missing fields with web search.
+6. If email is clearly NOT a transaction, set action: "skip".
+7. notify_message: friendly one-liner. Example:
+   "I found a S$12.80 transaction at Toast Box, logged it safely for you!"
+
+Respond ONLY with valid JSON:
+{
+  "action": "insert" or "skip",
+  "merchant": "Toast Box",
+  "amount_cents": -1280,
+  "date": "2026-06-18",
+  "currency": "SGD",
+  "account_id": "uuid-or-empty",
+  "account_name": "DBS Yuu",
+  "category_id": "uuid-or-empty",
+  "category_name": "Food",
+  "payee_name": "Toast Box",
+  "budget_id": "My Budget",
+  "notes": "",
+  "reasoning": "Matched Toast Box to Food payee, DBS Yuu account",
+  "notify_message": "I found a S$12.80 transaction at Toast Box, logged it safely for you!"
+}`;
 }
 
 /**
@@ -24,8 +108,12 @@ function generateKeywordSection() {
  */
 export function getLlmSystemPrompt() {
     const USER_NAME = process.env.USER_NAME || "there";
-    const BUDGET_FILE = process.env.ACTUAL_BUDGET_FILE || "My Budget";
-    const MYR_BUDGET_FILE = process.env.MYR_BUDGET_FILE || "My MYR Budget";
+    const PRIMARY_CURRENCY = process.env.ACTUAL_PRIMARY_CURRENCY || "SGD";
+    const SECONDARY_CURRENCY = process.env.ACTUAL_SECONDARY_CURRENCY || "MYR";
+    const PRIMARY_BUDGET_FILE =
+        process.env.ACTUAL_PRIMARY_BUDGET_FILE || "My Budget";
+    const SECONDARY_BUDGET_FILE =
+        process.env.ACTUAL_SECONDARY_BUDGET_FILE || "My MYR Budget";
 
     return `\
 You are an expense-tracking agent. Your ONLY job is to extract structured data
@@ -34,12 +122,12 @@ transactions, notify users, or resolve merchants — code handles that.
 
 RULES:
  1. Extract: merchant name, amount (in integer CENTS, negative for spending),
-    currency (SGD or MYR), date (YYYY-MM-DD), and account hint (card ending XXXX
+    currency (${PRIMARY_CURRENCY} or ${SECONDARY_CURRENCY}), date (YYYY-MM-DD), and account hint (card ending XXXX
     or account name).
- 2. Determine currency FIRST from email (SGD or MYR). This determines which budget
+ 2. Determine currency FIRST from email (${PRIMARY_CURRENCY} or ${SECONDARY_CURRENCY}). This determines which budget
     to query:
-    - SGD → budget_id: "${BUDGET_FILE}"
-    - MYR → budget_id: "${MYR_BUDGET_FILE}"
+    - ${PRIMARY_CURRENCY} → budget_id: "${PRIMARY_BUDGET_FILE}"
+    - ${SECONDARY_CURRENCY} → budget_id: "${SECONDARY_BUDGET_FILE}"
  3. Call search_memory() for learned facts about the sender and card.
  4. Call fetch_accounts(budget_id) + fetch_categories(budget_id) with the budget_id
     from step 2. Do NOT call without budget_id — you'll get the wrong accounts.
@@ -48,7 +136,7 @@ RULES:
     If no open account matches, use action: "unsure".
  6. If you CANNOT extract an amount, currency, or account_id -> action: "unsure".
  7. If the email is clearly promotional/non-transactional -> action: "skip".
- 8. Currency not SGD or MYR -> action: "unsure".
+ 8. Currency not ${PRIMARY_CURRENCY} or ${SECONDARY_CURRENCY} -> action: "unsure".
 
 FINAL STEP: After gathering all info, you MUST call the submit_decision() function
 with ALL required fields filled. The function enforces the schema so the decision
@@ -69,11 +157,15 @@ Action values:
  */
 export function getSystemPrompt() {
     const USER_NAME = process.env.USER_NAME || "there";
-    const MYR_BUDGET_FILE = process.env.MYR_BUDGET_FILE || "";
-    const BUDGET_FILE = process.env.ACTUAL_BUDGET_FILE || "";
+    const PRIMARY_CURRENCY = process.env.ACTUAL_PRIMARY_CURRENCY || "SGD";
+    const SECONDARY_CURRENCY = process.env.ACTUAL_SECONDARY_CURRENCY || "MYR";
+    const PRIMARY_BUDGET_FILE =
+        process.env.ACTUAL_PRIMARY_BUDGET_FILE || "My Budget";
+    const SECONDARY_BUDGET_FILE =
+        process.env.ACTUAL_SECONDARY_BUDGET_FILE || "My MYR Budget";
 
-    const sgdBudget = BUDGET_FILE || "My Budget";
-    const myrBudget = MYR_BUDGET_FILE || "My MYR Budget";
+    const primaryBudget = PRIMARY_BUDGET_FILE || "My Budget";
+    const secondaryBudget = SECONDARY_BUDGET_FILE || "My MYR Budget";
 
     return `\
 You are an expense-tracking agent connected to Actual Budget. Your job is to
@@ -88,7 +180,7 @@ RULES (constraints — what NOT to do):
     If you CANNOT match a payee → fallback to "Misc", insert WITHOUT
     category_id, then notify_user() explaining the fallback.
     If you CANNOT match an account → notify_user(), DO NOT insert.
- 3. Currency not SGD or MYR → notify_user(), DO NOT insert.
+ 3. Currency not ${PRIMARY_CURRENCY} or ${SECONDARY_CURRENCY} → notify_user(), DO NOT insert.
  4. Cannot extract amount → notify_user(), DO NOT insert.
  Always call fetch_accounts() + fetch_categories()
      in parallel (live AB data). fetch_payees() is no longer required —
@@ -137,9 +229,9 @@ ACCOUNT MATCHING:
 - If still no match after memory + heuristics → notify_user(), stop.
 
 PAYEE MATCHING:
-${generateKeywordSection()}
-- Only use payee NAMES from fetch_payees().
-- No keyword match + no memory fact → "Misc" (still insert, notify).
+- Payee matching is handled by memory and web search. No keyword table.
+- Use payee NAMES from fetch_payees().
+- No match + no memory fact - leave payee_name blank.
 
 CATEGORY MATCHING:
 - Payee name → category name → UUID from fetch_categories().
@@ -147,11 +239,11 @@ CATEGORY MATCHING:
 - If payee is "Misc" → skip category_id.
 
 CURRENCY ROUTING:
-- SGD → budget "${sgdBudget}" by name
-- MYR → budget "${myrBudget}" by name
+- ${PRIMARY_CURRENCY} → budget "${primaryBudget}" by name
+- ${SECONDARY_CURRENCY} → budget "${secondaryBudget}" by name
 - Pass budget_id as the budget FILE NAME when calling tools
-  (e.g. "${sgdBudget}" or "${myrBudget}").
-- For MYR emails: use the MYR budget for ALL tool calls.
+  (e.g. "${primaryBudget}" or "${secondaryBudget}").
+- For ${SECONDARY_CURRENCY} emails: use the ${SECONDARY_CURRENCY} budget for ALL tool calls.
 
 USER CORRECTIONS (via Telegram → Gateway):
 - When the user sends a correction ("X should be Y", "forget X"),
@@ -193,11 +285,15 @@ WORKFLOW (follow in EXACT order):
  * @returns {Array}
  */
 export function getFewShotExamples() {
-    const MYR_BUDGET_FILE = process.env.MYR_BUDGET_FILE || "";
-    const BUDGET_FILE = process.env.ACTUAL_BUDGET_FILE || "";
+    const PRIMARY_CURRENCY = process.env.ACTUAL_PRIMARY_CURRENCY || "SGD";
+    const SECONDARY_CURRENCY = process.env.ACTUAL_SECONDARY_CURRENCY || "MYR";
+    const PRIMARY_BUDGET_FILE =
+        process.env.ACTUAL_PRIMARY_BUDGET_FILE || "My Budget";
+    const SECONDARY_BUDGET_FILE =
+        process.env.ACTUAL_SECONDARY_BUDGET_FILE || "My MYR Budget";
 
-    const sgdBudget = BUDGET_FILE || "My Budget";
-    const myrBudget = MYR_BUDGET_FILE || "My MYR Budget";
+    const primaryBudget = PRIMARY_BUDGET_FILE || "My Budget";
+    const secondaryBudget = SECONDARY_BUDGET_FILE || "My MYR Budget";
 
     return [
         // Example 1: Happy path — DBS SGD alert with memory lookup
@@ -233,7 +329,7 @@ export function getFewShotExamples() {
                         type: "function",
                         function: {
                             name: "fetch_accounts",
-                            arguments: '{"budget_id": "' + sgdBudget + '"}',
+                            arguments: '{"budget_id": "' + primaryBudget + '"}',
                         },
                     },
                     {
@@ -241,7 +337,7 @@ export function getFewShotExamples() {
                         type: "function",
                         function: {
                             name: "fetch_categories",
-                            arguments: '{"budget_id": "' + sgdBudget + '"}',
+                            arguments: '{"budget_id": "' + primaryBudget + '"}',
                         },
                     },
                 ],
@@ -294,8 +390,8 @@ export function getFewShotExamples() {
                         function: {
                             name: "insert_transaction",
                             arguments:
-                                '{"budget_id": "' +
-                                sgdBudget +
+                                '"budget_id": "' +
+                                primaryBudget +
                                 '", "account_id": "acct-dbs-yuu", "date": "2026-06-04", "amount_cents": -1280, "imported_description": "Food", "category_id": "cat-food", "notes": "Toast Box | DBS alert SGD"}',
                         },
                     },
@@ -431,7 +527,11 @@ export function getFewShotExamples() {
             {
                 role: "assistant",
                 content:
-                    "Classifying per Rule 9b: unsure — currency is THB (not SGD or MYR). Per Rule 3, notify and stop. NOT marking as read.",
+                    "Classifying per Rule 9b: unsure — currency is THB (not " +
+                    PRIMARY_CURRENCY +
+                    " or " +
+                    SECONDARY_CURRENCY +
+                    "). Per Rule 3, notify and stop. NOT marking as read.",
                 tool_calls: [
                     {
                         id: "call_1",
@@ -439,7 +539,11 @@ export function getFewShotExamples() {
                         function: {
                             name: "notify_user",
                             arguments:
-                                '{"message": "Got THB 500 at Bangkok Cafe — only SGD and MYR supported. Skipping this one."}',
+                                '{"message": "Got THB 500 at Bangkok Cafe — only ' +
+                                PRIMARY_CURRENCY +
+                                " and " +
+                                SECONDARY_CURRENCY +
+                                ' supported. Skipping this one."}',
                         },
                     },
                     {

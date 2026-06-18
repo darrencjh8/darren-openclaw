@@ -438,3 +438,209 @@ describe("Route handlers", () => {
         });
     });
 });
+
+describe("GET /budgets", () => {
+    const actual = require("@actual-app/api");
+
+    function findHandler(method, path) {
+        const call = mockApp[method].mock.calls.find(([p]) => p === path);
+        return call ? call[1] : null;
+    }
+
+    function mockReq(overrides = {}) {
+        return { query: {}, body: null, params: {}, ...overrides };
+    }
+
+    function mockRes() {
+        return {
+            json: jest.fn().mockReturnThis(),
+            status: jest.fn().mockReturnThis(),
+        };
+    }
+
+    beforeEach(() => {
+        actual.init.mockReset();
+        actual.getBudgets.mockReset();
+        actual.init.mockResolvedValue(undefined);
+    });
+
+    test("returns formatted budget list", async () => {
+        actual.getBudgets.mockResolvedValue([
+            { name: "My Budget", groupId: "g1", cloudFileId: "c1" },
+            { name: "MYR Budget", groupId: "g2", cloudFileId: null },
+        ]);
+        const handler = findHandler("get", "/budgets");
+        const res = mockRes();
+
+        await handler(mockReq(), res);
+
+        expect(res.json).toHaveBeenCalledWith([
+            { name: "My Budget", groupId: "g1", cloudFileId: "c1" },
+            { name: "MYR Budget", groupId: "g2", cloudFileId: null },
+        ]);
+    });
+
+    test("returns 500 on API error", async () => {
+        actual.getBudgets.mockRejectedValue(new Error("Boom"));
+        const handler = findHandler("get", "/budgets");
+        const res = mockRes();
+
+        await handler(mockReq(), res);
+
+        expect(res.status).toHaveBeenCalledWith(500);
+        expect(res.json).toHaveBeenCalledWith({ error: "Boom" });
+    });
+});
+
+describe("GET /transactions/:id", () => {
+    const actual = require("@actual-app/api");
+
+    function findHandler(method, path) {
+        const call = mockApp[method].mock.calls.find(([p]) => p === path);
+        return call ? call[1] : null;
+    }
+
+    function mockReq(overrides = {}) {
+        return { query: {}, body: null, params: {}, ...overrides };
+    }
+
+    function mockRes() {
+        return {
+            json: jest.fn().mockReturnThis(),
+            status: jest.fn().mockReturnThis(),
+        };
+    }
+
+    beforeEach(() => {
+        actual.init.mockReset();
+        actual.getBudgets.mockReset();
+        actual.downloadBudget.mockReset();
+        actual.getTransaction.mockReset();
+        actual.init.mockResolvedValue(undefined);
+    });
+
+    test("returns single transaction by ID", async () => {
+        actual.getTransaction.mockResolvedValue({
+            id: "txn-42",
+            date: "2026-06-17",
+            amount: -1280,
+            payee: "Toast Box",
+        });
+        const handler = findHandler("get", "/transactions/:id");
+        const res = mockRes();
+
+        await handler(mockReq({ params: { id: "txn-42" } }), res);
+
+        expect(res.json).toHaveBeenCalledWith({
+            id: "txn-42",
+            date: "2026-06-17",
+            amount: -1280,
+            payee: "Toast Box",
+        });
+    });
+
+    test("returns 404 when transaction not found", async () => {
+        actual.getTransaction.mockResolvedValue(null);
+        const handler = findHandler("get", "/transactions/:id");
+        const res = mockRes();
+
+        await handler(mockReq({ params: { id: "missing" } }), res);
+
+        expect(res.status).toHaveBeenCalledWith(404);
+        expect(res.json).toHaveBeenCalledWith({
+            error: "Transaction not found",
+        });
+    });
+
+    test("returns 500 on API error", async () => {
+        actual.getTransaction.mockRejectedValue(new Error("DB down"));
+        const handler = findHandler("get", "/transactions/:id");
+        const res = mockRes();
+
+        await handler(mockReq({ params: { id: "err" } }), res);
+
+        expect(res.status).toHaveBeenCalledWith(500);
+        expect(res.json).toHaveBeenCalledWith({ error: "DB down" });
+    });
+});
+
+describe("POST /transactions enriched response", () => {
+    const actual = require("@actual-app/api");
+
+    function findHandler(method, path) {
+        const call = mockApp[method].mock.calls.find(([p]) => p === path);
+        return call ? call[1] : null;
+    }
+
+    function mockReq(overrides = {}) {
+        return { query: {}, body: null, params: {}, ...overrides };
+    }
+
+    function mockRes() {
+        return {
+            json: jest.fn().mockReturnThis(),
+            status: jest.fn().mockReturnThis(),
+        };
+    }
+
+    beforeEach(() => {
+        actual.init.mockReset();
+        actual.getBudgets.mockReset();
+        actual.downloadBudget.mockReset();
+        actual.addTransactions.mockReset();
+        actual.init.mockResolvedValue(undefined);
+        actual.getBudgets.mockResolvedValue([
+            { name: "TestBudget", groupId: "g1" },
+        ]);
+        actual.downloadBudget.mockResolvedValue(undefined);
+        actual.addTransactions.mockResolvedValue(["new-id-99"]);
+    });
+
+    test("returns full transaction with id, account, date, amount, payee_name, notes, category, cleared", async () => {
+        const handler = findHandler("post", "/transactions");
+        const res = mockRes();
+
+        await handler(
+            mockReq({
+                body: {
+                    account: "acc-1",
+                    date: "2026-06-17",
+                    amount: -425,
+                    payee_name: "BUS/MRT",
+                    notes: "Transport",
+                    category: "cat-transport",
+                },
+            }),
+            res,
+        );
+
+        expect(res.json).toHaveBeenCalledWith({
+            id: "new-id-99",
+            account: "acc-1",
+            date: "2026-06-17",
+            amount: -425,
+            payee_name: "BUS/MRT",
+            notes: "Transport",
+            category: "cat-transport",
+            cleared: false,
+        });
+    });
+
+    test("category is null when not provided", async () => {
+        const handler = findHandler("post", "/transactions");
+        const res = mockRes();
+
+        await handler(
+            mockReq({
+                body: {
+                    account: "acc-1",
+                    date: "2026-06-17",
+                    amount: -100,
+                },
+            }),
+            res,
+        );
+
+        expect(res.json.mock.calls[0][0].category).toBeNull();
+    });
+});

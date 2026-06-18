@@ -12,7 +12,7 @@ describe("Config", () => {
         DEEPSEEK_API_KEY: "sk-test",
         ACTUAL_BUDGET_URL: "http://actual-budget.internal:5006",
         ACTUAL_BUDGET_PASSWORD: "ab-password",
-        ACTUAL_BUDGET_FILE: "my-budget",
+        ACTUAL_PRIMARY_BUDGET_FILE: "my-budget",
         IMAP_HOST: "outlook.office365.com",
         IMAP_USERNAME: "test@outlook.com",
         IMAP_PASSWORD: "test-pass",
@@ -23,13 +23,12 @@ describe("Config", () => {
         expect(config.deepseekApiKey).toBe("sk-test");
         expect(config.imapHost).toBe("outlook.office365.com");
         expect(config.actualBudgetPassword).toBe("ab-password");
-        expect(config.actualBudgetFile).toBe("my-budget");
+        expect(config.primaryBudgetFile).toBe("my-budget");
     });
 
     it("throws on missing required variables", () => {
-        // fromEnv loads .env file from cwd — skip this test when .env exists
-        // Test constructor directly instead
-        expect(new Config({}).deepseekApiKey).toBe("");
+        // Config pulls from env directly — missing vars are undefined, not ""
+        expect(new Config({}).deepseekApiKey).toBeUndefined();
     });
 
     it("uses defaults for optional variables", () => {
@@ -57,9 +56,12 @@ describe("Config", () => {
         expect(config.logLevel).toBe("DEBUG");
     });
 
-    it("uses default gateway URL", () => {
-        const config = new Config(requiredEnv);
-        expect(config.openclawGatewayUrl).toBe("http://openclaw:18800");
+    it("uses default notify URL", () => {
+        const config = new Config({
+            ...requiredEnv,
+            NOTIFY_URL: "http://hermes:8644/webhooks/expense",
+        });
+        expect(config.notifyUrl).toBe("http://hermes:8644/webhooks/expense");
     });
 
     it("all fields populated with custom values", () => {
@@ -73,14 +75,14 @@ describe("Config", () => {
             IMAP_PORT: "1143",
             IMAP_USERNAME: "burner@test.com",
             IMAP_PASSWORD: "imap-secret",
-            OPENCLAW_GATEWAY_URL: "http://gateway:9999",
+            NOTIFY_URL: "http://gateway:9999",
             DEDUP_DB_PATH: "/tmp/dedup.db",
             MEMORY_PATH: "/tmp/memory.md",
             LOG_LEVEL: "DEBUG",
         });
         expect(config.deepseekApiKey).toBe("sk-test-123");
         expect(config.imapPort).toBe(1143);
-        expect(config.openclawGatewayUrl).toBe("http://gateway:9999");
+        expect(config.notifyUrl).toBe("http://gateway:9999");
         expect(config.dedupDbPath).toBe("/tmp/dedup.db");
         expect(config.memoryPath).toBe("/tmp/memory.md");
         expect(config.logLevel).toBe("DEBUG");

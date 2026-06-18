@@ -1,24 +1,31 @@
 /**
- * Structured JSON-line logging with correlation IDs.
- * Ported 1:1 from src/utils/logging.py
+ * Structured JSON logger using pino.
+ * Replaces all console.log/error/warn JSON calls with pino methods.
  */
-
-import pino from 'pino';
+import pino from "pino";
 
 const logger = pino({
-  level: process.env.LOG_LEVEL || 'info',
-  transport: process.env.NODE_ENV !== 'production' ? {
-    target: 'pino-pretty',
-    options: { colorize: true },
-  } : undefined,
+    level: process.env.LOG_LEVEL || "info",
+    timestamp: pino.stdTimeFunctions.isoTime,
+    formatters: {
+        level(label) {
+            return { level: label };
+        },
+    },
 });
 
+/**
+ * Returns a child logger with a `logger` binding for module-level identification.
+ */
 export function getLogger(name) {
-  return logger.child({ logger: name });
+    return logger.child({ logger: name });
 }
 
-export function setupLogging(level = 'info') {
-  logger.level = level;
+/**
+ * Update log level at runtime.
+ */
+export function setLogLevel(level) {
+    logger.level = level;
 }
 
 export { logger };
