@@ -777,6 +777,11 @@ export class ToolRegistry {
 
             for (const t of targets) {
                 try {
+                    if (!this._ppBridge) {
+                        t.status = "skipped";
+                        t.error = "PP bridge not available";
+                        continue;
+                    }
                     const updateResult = await this._ppBridge.updateBalance({
                         accountId: t.account_id,
                         amount: t.amount,
