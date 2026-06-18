@@ -9,6 +9,10 @@ mkdir -p /opt/data/scripts
 cp -r /opt/hermes-defaults/scripts/* /opt/data/scripts/
 chmod +x /opt/data/scripts/*.sh
 
+# Ensure cron-run directories are owned by hermes (gateway runs as hermes)
+mkdir -p /opt/data/memories-backup
+chown -R hermes:hermes /opt/data/memories-backup 2>/dev/null || true
+
 python3 -c '
 import os, re
 for path in ["/opt/data/config.yaml", "/opt/data/SOUL.md"]:
