@@ -11,6 +11,7 @@ import { DedupJournal } from "./dedup.js";
 import { extractPdfFromBuffer } from "./extractors.js";
 import { matchKeyword } from "./keywords.js";
 import { DeepSeekClient } from "./orchestrator.js";
+import { logger, getLogger } from "./logging.js";
 
 const ACTUAL_API_URL = process.env.ACTUAL_API_URL || "http://localhost:3000";
 
@@ -1096,7 +1097,7 @@ export class ToolRegistry {
             timestamp: new Date().toISOString(),
         };
         if (this._config.logLevel !== "ERROR") {
-            console.log(JSON.stringify(entry));
+            logger.info(entry);
         }
         return true;
     }

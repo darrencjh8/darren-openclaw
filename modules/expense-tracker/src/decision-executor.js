@@ -28,6 +28,8 @@
  * @param {object} tools - ToolRegistry instance with executeTool()
  * @returns {Promise<{action: string, details?: string}>}
  */
+import { logger } from "./logging.js";
+
 export async function executeDecision(llmOutput, tools) {
     const { action } = llmOutput;
 
@@ -99,12 +101,7 @@ export async function executeDecision(llmOutput, tools) {
                 budget_id: llmOutput.budget_id || "",
             });
         } catch (e) {
-            console.error(
-                JSON.stringify({
-                    event: "insert_failed",
-                    error: e.message,
-                }),
-            );
+            logger.error({ event: "insert_failed", error: e.message });
             // Do NOT mark as read — email stays unread for retry
             return { action: "error", details: `Insert failed: ${e.message}` };
         }

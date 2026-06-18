@@ -1,40 +1,31 @@
 /**
- * Auto-inject timestamps into JSON log lines.
- * Patches console.log / console.error to add `timestamp` field to every JSON object log.
+ * Structured JSON logger using pino.
+ * Replaces all console.log/error/warn JSON calls with pino methods.
  */
+import pino from "pino";
+
+const logger = pino({
+    level: process.env.LOG_LEVEL || "info",
+    timestamp: pino.stdTimeFunctions.isoTime,
+    formatters: {
+        level(label) {
+            return { level: label };
+        },
+    },
+});
 
 /**
- * Creates a wrapper that injects `timestamp` into JSON-stringified log lines.
- * Non-JSON arguments pass through unchanged.
+ * Returns a child logger with a `logger` binding for module-level identification.
  */
-export function createTimestampedLogger(originalFn) {
-    return (...args) => {
-        if (
-            args.length === 1 &&
-            typeof args[0] === "string" &&
-            args[0].startsWith("{")
-        ) {
-            try {
-                const obj = JSON.parse(args[0]);
-                if (!obj.timestamp) {
-                    obj.timestamp = new Date().toISOString();
-                }
-                return originalFn(JSON.stringify(obj));
-            } catch {
-                // Not valid JSON — pass through unchanged
-            }
-        }
-        return originalFn(...args);
-    };
+export function getLogger(name) {
+    return logger.child({ logger: name });
 }
 
 /**
- * Patch console.log and console.error to auto-inject timestamps.
- * Call once at startup.
+ * Update log level at runtime.
  */
-export function installTimestampedLogging() {
-    const _log = console.log.bind(console);
-    const _error = console.error.bind(console);
-    console.log = createTimestampedLogger(_log);
-    console.error = createTimestampedLogger(_error);
+export function setLogLevel(level) {
+    logger.level = level;
 }
+
+export { logger };

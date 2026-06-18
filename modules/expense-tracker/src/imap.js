@@ -6,6 +6,7 @@
 
 import { ImapFlow } from "imapflow";
 import { simpleParser } from "mailparser";
+import { logger } from "./logging.js";
 
 export class ImapIdleHandler {
     IDLE_TIMEOUT = 15; // fast retry, dedup prevents re-processing
@@ -99,69 +100,57 @@ export class ImapIdleHandler {
 
     async idleLoop(callback) {
         this._running = true;
-        console.log(
-            JSON.stringify({
-                event: "imap_idle_starting",
-                host: this._host,
-                port: this._port,
-                mailbox: this._mailbox,
-            }),
-        );
+        logger.info({
+            event: "imap_idle_starting",
+            host: this._host,
+            port: this._port,
+            mailbox: this._mailbox,
+        });
         while (this._running) {
             try {
                 if (!this._client) {
-                    console.log(
-                        JSON.stringify({
-                            event: "imap_connecting",
-                            host: this._host,
-                            port: this._port,
-                            mailbox: this._mailbox,
-                        }),
-                    );
+                    logger.info({
+                        event: "imap_connecting",
+                        host: this._host,
+                        port: this._port,
+                        mailbox: this._mailbox,
+                    });
                     await this.connect();
-                    console.log(JSON.stringify({ event: "imap_connected" }));
+                    logger.info({ event: "imap_connected" });
                 }
                 const unread = await this.fetchUnread();
                 if (unread.length > 0) {
-                    console.log(
-                        JSON.stringify({
-                            event: "imap_unread_found",
-                            count: unread.length,
-                        }),
-                    );
+                    logger.info({
+                        event: "imap_unread_found",
+                        count: unread.length,
+                    });
                 }
                 for (const msg of unread) {
                     if (
                         this._dedup &&
                         this._dedup.isRecentlyProcessed(msg.msg_id)
                     ) {
-                        console.log(
-                            JSON.stringify({
-                                event: "imap_recently_skipped",
-                                uid: msg.msg_id,
-                                subject: msg.subject,
-                            }),
-                        );
+                        logger.info({
+                            event: "imap_recently_skipped",
+                            uid: msg.msg_id,
+                            subject: msg.subject,
+                        });
                         continue;
                     }
                     try {
-                        console.log(
-                            JSON.stringify({
-                                event: "imap_processing",
-                                subject: msg.subject,
-                                from: msg.from,
-                            }),
-                        );
+                        logger.info({
+                            event: "imap_processing",
+                            subject: msg.subject,
+                            from: msg.from,
+                        });
                         await callback(msg);
                         if (this._dedup)
                             this._dedup.recordProcessed(msg.msg_id);
                     } catch (e) {
-                        console.error(
-                            JSON.stringify({
-                                event: "imap_callback_error",
-                                error: e.message,
-                            }),
-                        );
+                        logger.error({
+                            event: "imap_callback_error",
+                            error: e.message,
+                        });
                         if (this._dedup)
                             this._dedup.recordProcessed(msg.msg_id);
                     }
@@ -190,12 +179,10 @@ export class ImapIdleHandler {
                         if (settled) return;
                         settled = true;
                         cleanup();
-                        console.log(
-                            JSON.stringify({
-                                event: "imap_keepalive",
-                                msg: "Keepalive NOOP to break IDLE",
-                            }),
-                        );
+                        logger.info({
+                            event: "imap_keepalive",
+                            msg: "Keepalive NOOP to break IDLE",
+                        });
                         // Break IDLE with a NOOP so the loop can poll for changes
                         this._client?.noop()?.catch(() => {});
                         resolve();
@@ -236,13 +223,11 @@ export class ImapIdleHandler {
                     );
                 });
             } catch (e) {
-                console.warn(
-                    JSON.stringify({
-                        event: "imap_error",
-                        error: e.message,
-                        retry_in_s: this.RECONNECT_DELAY,
-                    }),
-                );
+                logger.warn({
+                    event: "imap_error",
+                    error: e.message,
+                    retry_in_s: this.RECONNECT_DELAY,
+                });
                 await new Promise((r) =>
                     setTimeout(r, this.RECONNECT_DELAY * 1000),
                 );
@@ -252,6 +237,6 @@ export class ImapIdleHandler {
                 this._client = null;
             }
         }
-        console.log(JSON.stringify({ event: "imap_idle_stopped" }));
+        logger.info({ event: "imap_idle_stopped" });
     }
 }

@@ -11,6 +11,7 @@ import OpenAI from "openai";
 import { getFewShotExamples, getLlmSystemPrompt } from "./prompts.js";
 import { extractEmailContent } from "./extractors.js";
 import { resolvePayeeDeterministic } from "./payee-resolver.js";
+import { logger } from "./logging.js";
 import { executeDecision } from "./decision-executor.js";
 
 export class DeepSeekClient {
@@ -98,12 +99,7 @@ export class AgentOrchestrator {
                 imapHandler,
             );
         } catch (e) {
-            console.error(
-                JSON.stringify({
-                    event: "process_email_error",
-                    error: e.message,
-                }),
-            );
+            logger.error({ event: "process_email_error", error: e.message });
             try {
                 this._tools.setEmailContext(msgId, rawEmail, imapHandler);
                 await this._tools.executeTool("notify_user", {
@@ -140,12 +136,7 @@ export class AgentOrchestrator {
         } catch (e) {
             // Parse failure or LLM error — notify user, mark as read to
             // prevent poison-pill reprocessing, log the error.
-            console.error(
-                JSON.stringify({
-                    event: "phase1_error",
-                    error: e.message,
-                }),
-            );
+            logger.error({ event: "phase1_error", error: e.message });
             await this._tools.executeTool("notify_user", {
                 message: `Couldn't understand this transaction email. ${e.message}`,
             });
@@ -171,13 +162,11 @@ export class AgentOrchestrator {
             const today = new Date();
             const diffDays = Math.abs((today - txDate) / (1000 * 60 * 60 * 24));
             if (isNaN(txDate.getTime()) || diffDays > 15) {
-                console.warn(
-                    JSON.stringify({
-                        event: "date_validation_failed",
-                        llm_date: llmOutput.date,
-                        diff_days: Math.round(diffDays),
-                    }),
-                );
+                logger.warn({
+                    event: "date_validation_failed",
+                    llm_date: llmOutput.date,
+                    diff_days: Math.round(diffDays),
+                });
                 await this._tools.executeTool("notify_user", {
                     message: `Suspicious date detected: ${llmOutput.date}. The transaction date appears incorrect — please review manually.`,
                 });
@@ -211,12 +200,10 @@ export class AgentOrchestrator {
                         },
                     );
                     memoryResults = result.results || [];
-                    console.log(
-                        JSON.stringify({
-                            event: "search_memory_fallback",
-                            merchant: llmOutput.merchant,
-                        }),
-                    );
+                    logger.info({
+                        event: "search_memory_fallback",
+                        merchant: llmOutput.merchant,
+                    });
                 } catch {
                     // search_memory failed — continue with empty results
                 }
@@ -236,21 +223,14 @@ export class AgentOrchestrator {
             llmOutput.payee_name = payeeResult.payee;
             llmOutput.payee_source = payeeResult.source;
 
-            console.log(
-                JSON.stringify({
-                    event: "payee_resolved",
-                    merchant: llmOutput.merchant,
-                    payee: payeeResult.payee,
-                    source: payeeResult.source,
-                }),
-            );
+            logger.info({
+                event: "payee_resolved",
+                merchant: llmOutput.merchant,
+                payee: payeeResult.payee,
+                source: payeeResult.source,
+            });
         } catch (e) {
-            console.warn(
-                JSON.stringify({
-                    event: "payee_resolution_failed",
-                    error: e.message,
-                }),
-            );
+            logger.warn({ event: "payee_resolution_failed", error: e.message });
             llmOutput.payee_name = "Misc";
         }
 
@@ -261,12 +241,10 @@ export class AgentOrchestrator {
                 llmOutput.budget_id || "",
             );
             if (!valid) {
-                console.warn(
-                    JSON.stringify({
-                        event: "account_validation_failed",
-                        account_id: llmOutput.account_id,
-                    }),
-                );
+                logger.warn({
+                    event: "account_validation_failed",
+                    account_id: llmOutput.account_id,
+                });
                 // Treat as unsure — notify user, don't insert
                 llmOutput.action = "unsure";
                 llmOutput.notify_message =
@@ -363,14 +341,12 @@ export class AgentOrchestrator {
                         typeof result === "string"
                             ? result
                             : JSON.stringify(result);
-                    console.log(
-                        JSON.stringify({
-                            event: "tool_call",
-                            tool: name,
-                            args,
-                            result_snippet: resultStr.slice(0, 300),
-                        }),
-                    );
+                    logger.info({
+                        event: "tool_call",
+                        tool: name,
+                        args,
+                        result_snippet: resultStr.slice(0, 300),
+                    });
                     messages.push({
                         role: "tool",
                         tool_call_id: tc.id || "",
@@ -400,12 +376,7 @@ export class AgentOrchestrator {
             try {
                 args = JSON.parse(func.arguments || "{}");
             } catch {}
-            console.log(
-                JSON.stringify({
-                    event: "phase1_decision",
-                    args,
-                }),
-            );
+            logger.info({ event: "phase1_decision", args });
             return args;
         }
 
@@ -487,13 +458,11 @@ export class AgentOrchestrator {
                 const match = accounts.find((a) => a.id === accountId);
                 if (!match) return false; // doesn't exist
                 if (match.closed) {
-                    console.warn(
-                        JSON.stringify({
-                            event: "account_validation_closed",
-                            account_id: accountId,
-                            account_name: match.name,
-                        }),
-                    );
+                    logger.warn({
+                        event: "account_validation_closed",
+                        account_id: accountId,
+                        account_name: match.name,
+                    });
                     return false; // closed account
                 }
                 return true;

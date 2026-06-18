@@ -9,6 +9,7 @@
 
 import OpenAI from "openai";
 import { extractEmailContent } from "../extractors.js";
+import { logger } from "../logging.js";
 import { STATEMENT_PROMPT } from "./prompts.js";
 
 const MAX_TOOL_ITERATIONS = 20;
@@ -213,17 +214,15 @@ export class StatementProcessor {
                                 : JSON.stringify(result),
                     });
 
-                    console.log(
-                        JSON.stringify({
-                            event: "statement_tool_exec",
-                            tool: name,
-                            args,
-                            result:
-                                typeof result === "string"
-                                    ? result.slice(0, 200)
-                                    : JSON.stringify(result).slice(0, 200),
-                        }),
-                    );
+                    logger.info({
+                        event: "statement_tool_exec",
+                        tool: name,
+                        args,
+                        result:
+                            typeof result === "string"
+                                ? result.slice(0, 200)
+                                : JSON.stringify(result).slice(0, 200),
+                    });
                 }
             }
 
@@ -241,12 +240,10 @@ export class StatementProcessor {
                 details: "Max tool iterations exceeded",
             };
         } catch (e) {
-            console.error(
-                JSON.stringify({
-                    event: "statement_processing_failed",
-                    error: e.message,
-                }),
-            );
+            logger.error({
+                event: "statement_processing_failed",
+                error: e.message,
+            });
             await this._ensureEmailRead();
             try {
                 await this._tools.executeTool("notify_user", {
@@ -262,16 +259,12 @@ export class StatementProcessor {
     async _ensureEmailRead() {
         try {
             await this._tools.executeTool("mark_email_read", {});
-            console.log(
-                JSON.stringify({ event: "statement_marked_email_read" }),
-            );
+            logger.info({ event: "statement_marked_email_read" });
         } catch (e) {
-            console.warn(
-                JSON.stringify({
-                    event: "statement_mark_read_failed",
-                    error: e.message,
-                }),
-            );
+            logger.warn({
+                event: "statement_mark_read_failed",
+                error: e.message,
+            });
         }
     }
 

@@ -1,70 +1,64 @@
 /**
- * Tests for timestamped logging wrapper.
+ * Tests for pino-based structured logger.
  */
-import { describe, test, expect, vi, beforeEach, afterEach } from "vitest";
-import { createTimestampedLogger } from "../src/logging.js";
+import { describe, test, expect } from "vitest";
+import pino from "pino";
+import { logger, getLogger, setLogLevel } from "../src/logging.js";
 
-describe("createTimestampedLogger", () => {
-    let output;
-
-    beforeEach(() => {
-        output = [];
+describe("logger", () => {
+    test("is a pino instance", () => {
+        expect(logger).toBeDefined();
+        expect(typeof logger.info).toBe("function");
+        expect(typeof logger.error).toBe("function");
+        expect(typeof logger.warn).toBe("function");
+        expect(typeof logger.debug).toBe("function");
     });
 
-    function makeLogger() {
-        return createTimestampedLogger((...args) => {
-            output.push(args);
-        });
-    }
-
-    test("injects timestamp into JSON log line without one", () => {
-        const log = makeLogger();
-        log(JSON.stringify({ event: "test", value: 42 }));
-        expect(output).toHaveLength(1);
-        const parsed = JSON.parse(output[0][0]);
-        expect(parsed.event).toBe("test");
-        expect(parsed.value).toBe(42);
-        expect(typeof parsed.timestamp).toBe("string");
-        expect(parsed.timestamp).toMatch(
-            /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/,
-        );
+    test("accepts object without throwing", () => {
+        // Pino accepts objects directly — no JSON.stringify needed
+        expect(() => logger.info({ event: "test", value: 42 })).not.toThrow();
     });
 
-    test("preserves existing timestamp", () => {
-        const log = makeLogger();
-        const existing = "2026-01-01T00:00:00.000Z";
-        log(JSON.stringify({ event: "test", timestamp: existing }));
-        const parsed = JSON.parse(output[0][0]);
-        expect(parsed.timestamp).toBe(existing);
+    test("accepts string message", () => {
+        expect(() => logger.info("plain string")).not.toThrow();
+    });
+});
+
+describe("getLogger", () => {
+    test("returns a child logger with the given name binding", () => {
+        const child = getLogger("test-module");
+        expect(child).toBeDefined();
+        expect(typeof child.info).toBe("function");
+        // Child logger has bindings
+        expect(child.bindings()).toHaveProperty("logger", "test-module");
     });
 
-    test("passes through non-JSON string unchanged", () => {
-        const log = makeLogger();
-        log("plain text message");
-        expect(output).toEqual([["plain text message"]]);
+    test("returns different child loggers for different names", () => {
+        const a = getLogger("a");
+        const b = getLogger("b");
+        expect(a.bindings().logger).toBe("a");
+        expect(b.bindings().logger).toBe("b");
     });
+});
 
-    test("passes through string that looks like JSON but is invalid", () => {
-        const log = makeLogger();
-        log("{broken json");
-        expect(output).toEqual([["{broken json"]]);
+describe("setLogLevel", () => {
+    test("changes the logger level", () => {
+        const original = logger.level;
+        setLogLevel("error");
+        expect(logger.level).toBe("error");
+        setLogLevel("silent");
+        expect(logger.level).toBe("silent");
+        // Restore
+        logger.level = original;
     });
+});
 
-    test("passes through non-string argument", () => {
-        const log = makeLogger();
-        log(42);
-        expect(output).toEqual([[42]]);
-    });
-
-    test("passes through multiple arguments", () => {
-        const log = makeLogger();
-        log("a", "b", "c");
-        expect(output).toEqual([["a", "b", "c"]]);
-    });
-
-    test("does not inject timestamp when string doesn't start with {", () => {
-        const log = makeLogger();
-        log('  {"event":"test"}'); // leading whitespace
-        expect(output[0][0]).toBe('  {"event":"test"}');
+describe("pino configuration", () => {
+    test("isoTime timestamp includes ISO date", () => {
+        const ts = pino.stdTimeFunctions.isoTime;
+        const result = ts();
+        // pino's isoTime returns '"time":"2026-06-18T..."' as a JSON fragment
+        expect(result).toContain("time");
+        expect(result).toMatch(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/);
     });
 });

@@ -5,6 +5,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
 import { z } from "zod";
+import { logger } from "./logging.js";
 
 function createTools(server, registry) {
     server.tool(
@@ -141,7 +142,7 @@ export function createMcpServer(registry, app) {
         createTools(server, registry);
         transport = new SSEServerTransport("/messages", res);
         await server.connect(transport);
-        console.log(JSON.stringify({ event: "mcp_sse_connected" }));
+        logger.info({ event: "mcp_sse_connected" });
     });
 
     app.post("/messages", async (req, res) => {
@@ -152,9 +153,7 @@ export function createMcpServer(registry, app) {
         }
     });
 
-    console.log(
-        JSON.stringify({ event: "mcp_server_ready", transport: "sse" }),
-    );
+    logger.info({ event: "mcp_server_ready", transport: "sse" });
 }
 
 function tx(result) {
