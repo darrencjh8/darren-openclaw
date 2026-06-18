@@ -92,6 +92,8 @@ kanban:
     failure_limit: 2
     max_in_progress: 4
     max_in_progress_per_profile: 2
+    orchestrator_profile: project-manager
+    default_assignee: quality-assurance
 
 timezone: Asia/Kuala_Lumpur
 
