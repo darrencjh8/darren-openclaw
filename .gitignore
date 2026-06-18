@@ -29,7 +29,7 @@ build/
 Thumbs.db
 
 # Node
-node_modules/
+**/node_modules/
 
 # Personal metadata (Actual Budget IDs, encryption keys)
 **/metadata.json

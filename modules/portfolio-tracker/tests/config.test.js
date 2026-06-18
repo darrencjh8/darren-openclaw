@@ -12,6 +12,7 @@ const REQUIRED_ENV = {
     ACTUAL_BUDGET_FILE: "Test-SGD-Budget",
     PP_XML_PATH: "/data/portfolio.xml",
     PP_JAR_PATH: "/app/pp-cli.jar",
+    ONEDRIVE_CLIENT_ID: "test-client-id",
 };
 
 describe("Config — required fields", () => {
@@ -246,9 +247,7 @@ describe("Config — OneDrive", () => {
             "/app/config/onedrive_refresh_token",
         );
         expect(cfg.onedriveDataDir).toBe("/data/onedrive");
-        expect(cfg.onedriveClientId).toBe(
-            "d50ca740-c83f-4d1b-b616-12c519384f0c",
-        );
+        expect(cfg.onedriveClientId).toBe("test-client-id");
     });
 });
 

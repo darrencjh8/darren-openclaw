@@ -9,7 +9,6 @@ import Database from "better-sqlite3";
 import { simpleParser } from "mailparser";
 import { DedupJournal } from "./dedup.js";
 import { extractPdfFromBuffer } from "./extractors.js";
-import { matchKeyword } from "./keywords.js";
 import { DeepSeekClient } from "./orchestrator.js";
 import { logger, getLogger } from "./logging.js";
 
@@ -276,6 +275,16 @@ const TOOLS = [
     {
         name: "fetch_payees",
         description: "Fetch all payees from Actual Budget.",
+        schema: {
+            type: "object",
+            properties: { budget_id: { type: "string" } },
+            required: ["budget_id"],
+        },
+    },
+    {
+        name: "fetch_context",
+        description:
+            "Fetch all accounts, categories, and payees in a single call. Use this for Phase 2 audit.",
         schema: {
             type: "object",
             properties: { budget_id: { type: "string" } },
@@ -716,6 +725,23 @@ export class ToolRegistry {
     }
 
     /**
+     * Get only the fetch_context tool schema for Phase 2 LLM (audit phase).
+     */
+    getPhase2ToolSchemas() {
+        const t = TOOL_MAP["fetch_context"];
+        return [
+            {
+                type: "function",
+                function: {
+                    name: t.name,
+                    description: t.description,
+                    parameters: t.schema,
+                },
+            },
+        ];
+    }
+
+    /**
      * Get only the submit_decision tool schema (for Phase 1b forced call).
      */
     getSubmitDecisionTool() {
@@ -746,7 +772,7 @@ export class ToolRegistry {
     async _handle_learn_fact({ fact }) {
         if (!this._memory)
             return { added: false, skipped: false, reason: "no memory store" };
-        return this._memory.add(fact);
+        return await this._memory.add(fact);
     }
 
     async _handle_list_facts() {
@@ -799,6 +825,19 @@ export class ToolRegistry {
     async _handle_fetch_payees({ budget_id }) {
         if (!budget_id) return { error: "budget_id is required" };
         return this._get("/payees", budget_id);
+    }
+
+    async _handle_fetch_context({ budget_id }) {
+        if (!budget_id) return { error: "budget_id is required" };
+        const [accounts, categories, payees] = await Promise.all([
+            this._get("/accounts", budget_id),
+            this._get("/categories", budget_id),
+            this._get("/payees", budget_id),
+        ]);
+        const activeAccounts = Array.isArray(accounts)
+            ? accounts.filter((a) => !a.closed)
+            : accounts;
+        return { accounts: activeAccounts, categories, payees };
     }
 
     async _handle_fetch_recent_transactions({
@@ -1196,45 +1235,10 @@ export class ToolRegistry {
                 }
             }
         } catch {
-            // Memory search failed — fall through to keyword step
+            // Memory search failed — fall through to web search
         }
 
-        // Step 2: Keyword matching
-        const keywordMatch = matchKeyword(merchant);
-        if (keywordMatch) {
-            // Validate keyword-resolved payee exists in live payee list (5s timeout)
-            try {
-                const payees = await Promise.race([
-                    this._get("/payees", budgetId),
-                    new Promise((_, reject) =>
-                        setTimeout(() => reject(new Error("timeout")), 5000),
-                    ),
-                ]);
-                const valid =
-                    Array.isArray(payees) &&
-                    payees.some(
-                        (p) =>
-                            p.name &&
-                            p.name.toLowerCase() === keywordMatch.toLowerCase(),
-                    );
-                if (!valid) {
-                    // Keyword payee not in live list — fall through to web search
-                } else {
-                    await this._memory.add(
-                        merchant + " maps to " + keywordMatch + " payee",
-                    );
-                    return { payee: keywordMatch, source: "keyword" };
-                }
-            } catch {
-                // Payee list fetch failed — trust the keyword match and learn
-                await this._memory.add(
-                    merchant + " maps to " + keywordMatch + " payee",
-                );
-                return { payee: keywordMatch, source: "keyword" };
-            }
-        }
-
-        // Step 3: Web search + AI classification (20s timeout per FR-008)
+        // Step 2: Web search + AI classification (20s timeout per FR-008)
         if (this._config.braveSearchApiKey) {
             try {
                 const result = await Promise.race([
@@ -1264,7 +1268,7 @@ export class ToolRegistry {
             }
         }
 
-        // Step 4: Fallback
+        // Step 3: Fallback
         return { payee: "Misc", source: "fallback" };
     }
 

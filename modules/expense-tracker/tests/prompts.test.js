@@ -187,3 +187,43 @@ describe("prompt budget name resolution", () => {
         expect(fetchAcctsArgs).toContain('"My Budget"');
     });
 });
+
+describe("Phase 1a prompt (new 4-phase design)", () => {
+    it("getPhase1aPrompt returns extraction-only prompt", async () => {
+        const { getPhase1aPrompt } = await import("../src/prompts.js");
+        const prompt = getPhase1aPrompt();
+        expect(prompt).toContain("extract structured data");
+        expect(prompt).toContain("merchant");
+        expect(prompt).toContain("amount_cents");
+        expect(prompt).toContain("currency");
+        expect(prompt).not.toContain("fetch_context");
+        expect(prompt).not.toContain("search_memory");
+    });
+
+    it("getPhase2Prompt includes memory hints and leave-blank instruction", async () => {
+        const { getPhase2Prompt } = await import("../src/prompts.js");
+        const output = {
+            merchant: "Toast Box",
+            amount_cents: -1280,
+            date: "2026-06-18",
+            currency: "SGD",
+            budget_id: "My Budget",
+            memory_payee: "Food",
+            memory_account: null,
+            memory_category: "Groceries",
+        };
+        const prompt = getPhase2Prompt(output, "");
+        expect(prompt).toContain('payee="Food"');
+        expect(prompt).not.toContain("account=");
+        expect(prompt).toContain('category="Groceries"');
+        expect(prompt).toContain("LEAVING FIELDS BLANK");
+        expect(prompt).toContain("fetch_context");
+    });
+
+    it("Phase 1a prompt includes skip detection for non-transactions", async () => {
+        const { getPhase1aPrompt } = await import("../src/prompts.js");
+        const prompt = getPhase1aPrompt();
+        expect(prompt).toContain('"skip"');
+        expect(prompt).toContain("NOT a transaction");
+    });
+});

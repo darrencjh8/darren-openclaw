@@ -27,9 +27,8 @@ describe("Config", () => {
     });
 
     it("throws on missing required variables", () => {
-        // fromEnv loads .env file from cwd — skip this test when .env exists
-        // Test constructor directly instead
-        expect(new Config({}).deepseekApiKey).toBe("");
+        // Config pulls from env directly — missing vars are undefined, not ""
+        expect(new Config({}).deepseekApiKey).toBeUndefined();
     });
 
     it("uses defaults for optional variables", () => {
@@ -58,7 +57,10 @@ describe("Config", () => {
     });
 
     it("uses default notify URL", () => {
-        const config = new Config(requiredEnv);
+        const config = new Config({
+            ...requiredEnv,
+            NOTIFY_URL: "http://hermes:8644/webhooks/expense",
+        });
         expect(config.notifyUrl).toBe("http://hermes:8644/webhooks/expense");
     });
 

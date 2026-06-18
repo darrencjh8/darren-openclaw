@@ -7,12 +7,96 @@
  * so Config.fromEnv() can load .env files first.
  */
 
-import { KEYWORD_TABLE } from "./keywords.js";
+/**
+ * Phase 1a: LLM Extract prompt — simple field extraction, reasoning=disabled.
+ * No tools. No execution. Just extract merchant, amount, date, currency.
+ */
+export function getPhase1aPrompt() {
+    const PRIMARY_CURRENCY = process.env.ACTUAL_PRIMARY_CURRENCY || "SGD";
+    const SECONDARY_CURRENCY = process.env.ACTUAL_SECONDARY_CURRENCY || "MYR";
 
-function generateKeywordSection() {
-    return Object.entries(KEYWORD_TABLE)
-        .map(([payee, keywords]) => `  ${keywords.join(", ")} → ${payee}`)
-        .join("\n");
+    return `\
+You extract structured data from bank transaction alert emails.
+
+RULES:
+1. Extract: merchant name, amount (in integer CENTS, negative for spending),
+   currency (${PRIMARY_CURRENCY} or ${SECONDARY_CURRENCY}), date (YYYY-MM-DD).
+2. Currency: S$ / SGD → "${PRIMARY_CURRENCY}", RM / MYR → "${SECONDARY_CURRENCY}".
+3. Amount: S$12.80 = -1280, RM 45.50 = -4550. ALWAYS integer cents, negative.
+4. Date: extract from email timestamp or transaction mention.
+5. If the email is clearly NOT a transaction (promo, trade confirmation, OTP),
+   return: { "skip": true, "reasoning": "..." }
+
+Respond ONLY with valid JSON (no markdown, no code fences):
+{
+  "merchant": "Toast Box",
+  "amount_cents": -1280,
+  "date": "2026-06-18",
+  "currency": "SGD",
+  "raw_description": "S$12.80 at Toast Box"
+}`;
+}
+
+/**
+ * Phase 2: LLM Audit prompt — cross-reference memory hints against live data.
+ * Receives memory candidates from Phase 1b + calls fetch_context for live data.
+ */
+export function getPhase2Prompt(phase1bOutput, emailText) {
+    const PRIMARY_CURRENCY = process.env.ACTUAL_PRIMARY_CURRENCY || "SGD";
+    const SECONDARY_CURRENCY = process.env.ACTUAL_SECONDARY_CURRENCY || "MYR";
+
+    const hints = [];
+    if (phase1bOutput.memory_payee)
+        hints.push(`payee="${phase1bOutput.memory_payee}"`);
+    if (phase1bOutput.memory_account)
+        hints.push(`account="${phase1bOutput.memory_account}"`);
+    if (phase1bOutput.memory_category)
+        hints.push(`category="${phase1bOutput.memory_category}"`);
+
+    const hintText =
+        hints.length > 0
+            ? `\nMemory suggests: ${hints.join(", ")}. Verify against live data below.`
+            : "\nNo memory hints available — rely entirely on live data.";
+
+    return `\
+You are an expense-tracking auditor. You cross-reference extracted fields
+and memory hints against LIVE Actual Budget data to produce a final decision.
+
+EXTRACTED FIELDS:
+- Merchant: "${phase1bOutput.merchant || "unknown"}"
+- Amount: ${phase1bOutput.amount_cents ?? "?"} cents (${PRIMARY_CURRENCY}/${SECONDARY_CURRENCY})
+- Date: ${phase1bOutput.date || "?"}
+- Currency: ${phase1bOutput.currency || "?"}
+- Budget: "${phase1bOutput.budget_id || "?"}"${hintText}
+
+RULES:
+1. Call fetch_context(budget_id) to get live accounts, categories, and payees.
+2. Match the best account_id from live accounts (prefer open, non-closed).
+3. Match payee_name from live payees (use memory hint if available).
+4. Match category_id from live categories.
+5. LEAVING FIELDS BLANK IS BETTER THAN GUESSING. If unsure about any field,
+   leave it as "" (empty string). The code handles missing fields with web search.
+6. If email is clearly NOT a transaction, set action: "skip".
+7. notify_message: friendly one-liner. Example:
+   "I found a S$12.80 transaction at Toast Box, logged it safely for you!"
+
+Respond ONLY with valid JSON:
+{
+  "action": "insert" or "skip",
+  "merchant": "Toast Box",
+  "amount_cents": -1280,
+  "date": "2026-06-18",
+  "currency": "SGD",
+  "account_id": "uuid-or-empty",
+  "account_name": "DBS Yuu",
+  "category_id": "uuid-or-empty",
+  "category_name": "Food",
+  "payee_name": "Toast Box",
+  "budget_id": "My Budget",
+  "notes": "",
+  "reasoning": "Matched Toast Box to Food payee, DBS Yuu account",
+  "notify_message": "I found a S$12.80 transaction at Toast Box, logged it safely for you!"
+}`;
 }
 
 /**
@@ -145,9 +229,9 @@ ACCOUNT MATCHING:
 - If still no match after memory + heuristics → notify_user(), stop.
 
 PAYEE MATCHING:
-${generateKeywordSection()}
-- Only use payee NAMES from fetch_payees().
-- No keyword match + no memory fact → "Misc" (still insert, notify).
+- Payee matching is handled by memory and web search. No keyword table.
+- Use payee NAMES from fetch_payees().
+- No match + no memory fact - leave payee_name blank.
 
 CATEGORY MATCHING:
 - Payee name → category name → UUID from fetch_categories().

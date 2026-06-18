@@ -121,6 +121,11 @@ export class Config {
             env.ONEDRIVE_REFRESH_TOKEN_PATH ||
             "/app/config/onedrive_refresh_token";
         this.onedriveDataDir = env.ONEDRIVE_DATA_DIR || "/data/onedrive";
+        if (!env.ONEDRIVE_CLIENT_ID) {
+            throw new Error(
+                "Missing required environment variable: ONEDRIVE_CLIENT_ID",
+            );
+        }
         this.onedriveClientId = env.ONEDRIVE_CLIENT_ID;
     }
 

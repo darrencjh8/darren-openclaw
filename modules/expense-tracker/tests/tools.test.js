@@ -152,6 +152,37 @@ describe("ToolRegistry", () => {
         expect(body).toEqual(original);
         expect(body.budget_id).toBeUndefined();
     });
+
+    it("fetch_context returns accounts, categories, and payees in parallel", async () => {
+        const { vi } = await import("vitest");
+        const cfg = new Config(testEnv);
+        const registry = new ToolRegistry(cfg);
+
+        const accounts = [{ id: "a1", name: "DBS Yuu", closed: false }, { id: "a2", name: "OCBC Closed", closed: true }];
+        const categories = [{ id: "c1", name: "Food" }];
+        const payees = [{ id: "p1", name: "Coffee" }];
+
+        const origFetch = global.fetch;
+        let callCount = 0;
+        global.fetch = vi.fn(async (url) => {
+            callCount++;
+            if (url.includes("/accounts")) return { ok: true, json: async () => accounts };
+            if (url.includes("/categories")) return { ok: true, json: async () => categories };
+            if (url.includes("/payees")) return { ok: true, json: async () => payees };
+            return { ok: false, json: async () => ({}) };
+        });
+
+        try {
+            const result = await registry.executeTool("fetch_context", { budget_id: "test-budget" });
+            expect(result.accounts).toEqual([{ id: "a1", name: "DBS Yuu", closed: false }]);
+            expect(result.categories).toEqual(categories);
+            expect(result.payees).toEqual(payees);
+            expect(callCount).toBe(3);
+        } finally {
+            global.fetch = origFetch;
+        }
+    });
+
 });
 
 describe("NotificationCooldown", () => {

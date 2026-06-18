@@ -273,7 +273,7 @@ describe("MemoryStore", () => {
             expect(cacheSizeBefore).toBeGreaterThan(0);
 
             // Add a new fact
-            store.add("NTUC FairPrice merchant maps to Groceries payee");
+            await store.add("NTUC FairPrice merchant maps to Groceries payee");
 
             // Existing cache entries should still be there
             expect(store._embeddingCache.size).toBeGreaterThanOrEqual(
@@ -285,11 +285,15 @@ describe("MemoryStore", () => {
     // ── Dedup behaviour ─────────────────────────────────────────
 
     describe("dedup", () => {
-        it("rejects exact duplicate facts", () => {
+        it("rejects exact duplicate facts", async () => {
             const store = new MemoryStore(tempMemoryPath);
-            const r1 = store.add("Kopitiam merchant maps to Food payee");
-            expect(r1).toEqual({ added: true, skipped: false });
-            const r2 = store.add("Kopitiam merchant maps to Food payee");
+            const r1 = await store.add("Kopitiam merchant maps to Food payee");
+            expect(r1).toEqual({
+                added: true,
+                skipped: false,
+                compacted: false,
+            });
+            const r2 = await store.add("Kopitiam merchant maps to Food payee");
             expect(r2).toEqual({
                 added: false,
                 skipped: true,
@@ -314,29 +318,37 @@ describe("MemoryStore", () => {
             } catch (_) {}
         });
 
-        it("allows re-adding a fact after it was removed", () => {
+        it("allows re-adding a fact after it was removed", async () => {
             const store = new MemoryStore(tempMemoryPath);
-            store.add("unique test fact");
+            await store.add("unique test fact");
             store.remove("unique test fact");
             expect(
                 store.listFacts().some((f) => f === "unique test fact"),
             ).toBe(false);
-            const r = store.add("unique test fact");
-            expect(r).toEqual({ added: true, skipped: false });
+            const r = await store.add("unique test fact");
+            expect(r).toEqual({
+                added: true,
+                skipped: false,
+                compacted: false,
+            });
         });
 
-        it("maintains dedup set when a fact is updated", () => {
+        it("maintains dedup set when a fact is updated", async () => {
             const store = new MemoryStore(tempMemoryPath);
-            store.add("Toast Box merchant maps to Food payee");
+            await store.add("Toast Box merchant maps to Food payee");
             store.update(
                 "Toast Box",
                 "Toast Box merchant maps to Coffee payee",
             );
             // Old fact can be re-added (key was deleted from dedup set)
-            const r1 = store.add("Toast Box merchant maps to Food payee");
-            expect(r1).toEqual({ added: true, skipped: false });
+            const r1 = await store.add("Toast Box merchant maps to Food payee");
+            expect(r1).toEqual({
+                added: true,
+                skipped: false,
+                compacted: false,
+            });
             // New fact is blocked (key was added to dedup set)
-            const r2 = store.add("Toast Box merchant maps to Coffee payee");
+            const r2 = await store.add("Toast Box merchant maps to Coffee payee");
             expect(r2).toEqual({
                 added: false,
                 skipped: true,
@@ -344,18 +356,18 @@ describe("MemoryStore", () => {
             });
         });
 
-        it("writes facts to disk and cleans up tmp after rewrite", () => {
+        it("writes facts to disk and cleans up tmp after rewrite", async () => {
             const store = new MemoryStore(tempMemoryPath);
-            store.add("disk write test fact");
+            await store.add("disk write test fact");
             const content = readFileSync(tempMemoryPath, "utf8");
             expect(content).toContain("disk write test fact");
             expect(existsSync(tempMemoryPath + ".tmp")).toBe(false);
         });
 
-        it("rejects duplicates of facts loaded from file", () => {
+        it("rejects duplicates of facts loaded from file", async () => {
             const store = new MemoryStore(tempMemoryPath);
             // tempMemoryPath has "DBS Yuu is a debit card account"
-            const r = store.add("DBS Yuu is a debit card account");
+            const r = await store.add("DBS Yuu is a debit card account");
             expect(r).toEqual({
                 added: false,
                 skipped: true,
@@ -363,10 +375,10 @@ describe("MemoryStore", () => {
             });
         });
 
-        it("treats case differences as duplicates", () => {
+        it("treats case differences as duplicates", async () => {
             const store = new MemoryStore(tempMemoryPath);
-            store.add("GRAB MERCHANT maps to Transport payee");
-            const r = store.add("grab merchant maps to transport payee");
+            await store.add("GRAB MERCHANT maps to Transport payee");
+            const r = await store.add("grab merchant maps to transport payee");
             expect(r).toEqual({
                 added: false,
                 skipped: true,
@@ -374,14 +386,14 @@ describe("MemoryStore", () => {
             });
         });
 
-        it("populates dedup set after migration from mappings.json", () => {
+        it("populates dedup set after migration from mappings.json", async () => {
             const memoryPath = join(tmpdir(), `post-migrate-${Date.now()}.md`);
             MemoryStore.migrateFromMappings(mappingsPath, memoryPath);
             const store = new MemoryStore(memoryPath);
             // Should have facts from mappings.json
             expect(store.listFacts().length).toBeGreaterThan(0);
             // Dedup set should be populated — re-adding a migrated fact is rejected
-            const r = store.add("DBS Yuu is a debit card account");
+            const r = await store.add("DBS Yuu is a debit card account");
             expect(r).toEqual({
                 added: false,
                 skipped: true,
@@ -392,7 +404,7 @@ describe("MemoryStore", () => {
             } catch (_) {}
         });
 
-        it("reload() picks up new facts written externally and updates dedup set", () => {
+        it("reload() picks up new facts written externally and updates dedup set", async () => {
             const store = new MemoryStore(emptyMemoryPath);
             expect(store.listFacts().length).toBe(0);
             // Simulate migration: write facts to the file externally
@@ -403,7 +415,7 @@ describe("MemoryStore", () => {
             store.reload();
             expect(store.listFacts().length).toBe(2);
             // Dedup set should now block re-adding reloaded facts
-            const r = store.add("reloaded fact one");
+            const r = await store.add("reloaded fact one");
             expect(r).toEqual({
                 added: false,
                 skipped: true,
@@ -411,12 +423,103 @@ describe("MemoryStore", () => {
             });
         });
 
-        it("_dedupSet is always a Set, never null", () => {
+        it("_dedupSet is always a Set, never null", async () => {
             const store = new MemoryStore(tempMemoryPath);
             expect(store._dedupSet).toBeInstanceOf(Set);
             // add() and update() should not crash (no null dereference)
-            store.add("safety check fact");
+            await store.add("safety check fact");
             store.update("safety", "updated safety fact");
+        });
+    });
+
+
+    describe("semantic dedup", () => {
+        it("rejects semantically similar facts (cosine > 0.95)", async () => {
+            const store = new MemoryStore(emptyMemoryPath);
+            await store.ready();
+
+            const r1 = await store.add("NTUC FairPrice maps to Groceries payee");
+            expect(r1).toEqual({ added: true, skipped: false, compacted: false });
+
+            // Same meaning, different wording — should be caught by semantic dedup
+            const r2 = await store.add("fairprice ntuc maps to groceries payee");
+            expect(r2).toEqual({
+                added: false,
+                skipped: true,
+                reason: "semantic duplicate",
+            });
+        });
+
+        it("accepts semantically different facts", async () => {
+            const store = new MemoryStore(emptyMemoryPath);
+            await store.ready();
+
+            const r1 = await store.add("NTUC maps to Groceries payee");
+            expect(r1.added).toBe(true);
+
+            const r2 = await store.add("Shell maps to Transport payee");
+            expect(r2.added).toBe(true);
+        });
+
+        it("falls back to string dedup when model not loaded", async () => {
+            const store = new MemoryStore(emptyMemoryPath);
+
+            // Without model, semantic dedup unavailable — same text still caught by string dedup
+            const r1 = await store.add("test fact one");
+            expect(r1.added).toBe(true);
+
+            const r2 = await store.add("test fact one");
+            expect(r2).toEqual({
+                added: false,
+                skipped: true,
+                reason: "duplicate",
+            });
+        });
+    });
+
+    describe("compaction", () => {
+        it("returns compacted: true when facts exceed maxFacts", async () => {
+            // Use low maxFacts=5, compactTo=3 to trigger compaction easily
+            const store = new MemoryStore(emptyMemoryPath, 5, 3);
+            // Add 6 facts — 6 > maxFacts=5 triggers compaction
+            for (let i = 1; i <= 5; i++) {
+                const r = await store.add(`fact number ${i}`);
+                expect(r).toEqual({
+                    added: true,
+                    skipped: false,
+                    compacted: false,
+                });
+            }
+            // 6th fact exceeds maxFacts → compacted: true
+            const r6 = await store.add("fact number 6");
+            expect(r6).toEqual({
+                added: true,
+                skipped: false,
+                compacted: true,
+            });
+        });
+
+        it("trims facts to compactTo after compaction", async () => {
+            const store = new MemoryStore(emptyMemoryPath, 5, 3);
+            for (let i = 1; i <= 6; i++) {
+                await store.add(`fact number ${i}`);
+            }
+            // After compaction, facts should be ≤ compactTo=3
+            expect(store.listFacts().length).toBeLessThanOrEqual(3);
+        });
+
+        it("does not compact when exactly at maxFacts", async () => {
+            const store = new MemoryStore(emptyMemoryPath, 3, 2);
+            const r1 = await store.add("fact 1");
+            expect(r1.compacted).toBe(false);
+            const r2 = await store.add("fact 2");
+            expect(r2.compacted).toBe(false);
+            const r3 = await store.add("fact 3");
+            // 3 = maxFacts → no compaction yet
+            expect(r3.compacted).toBe(false);
+            // 4th exceeds maxFacts → compaction triggers
+            const r4 = await store.add("fact 4");
+            expect(r4.compacted).toBe(true);
         });
     });
 });
