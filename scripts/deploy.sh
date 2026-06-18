@@ -3,18 +3,22 @@
 # OpenClaw Deployment Script
 # Validates all required environment variables before starting Docker Compose.
 #
-# Usage: ./scripts/deploy.sh [--non-interactive]
+# Usage: ./scripts/deploy.sh [--non-interactive] [--component <name>]...
 #   --non-interactive  Skip OneDrive auth prompt, assume .env already configured
+#   --component <name>  Deploy only this component (can repeat). Omit to deploy all.
 # =============================================================================
 set -euo pipefail
 
 NON_INTERACTIVE=false
 DOCKER_ARGS=()
-for arg in "$@"; do
-  case "$arg" in
+COMPONENTS=()
+while [[ $# -gt 0 ]]; do
+  case "$1" in
     --non-interactive) NON_INTERACTIVE=true ;;
-    *) DOCKER_ARGS+=("$arg") ;;
+    --component) COMPONENTS+=("$2"); shift ;;
+    *) DOCKER_ARGS+=("$1") ;;
   esac
+  shift
 done
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -167,6 +171,8 @@ echo ""
 
 # ---- onedrive ----
 
+if should_deploy "portfolio-tracker"; then
+
 ONEDRIVE_CONF_DIR="$ROOT/modules/onedrive-sync/config/onedrive"
 ONEDRIVE_TOKEN="$ONEDRIVE_CONF_DIR/refresh_token"
 
@@ -224,7 +230,10 @@ elif [ ! -f "$ONEDRIVE_TOKEN" ]; then
   fi
   echo ""
 fi
+fi  # should_deploy portfolio-tracker
 
+# ---- Portfolio Tracker: Java CLI ----
+if should_deploy "portfolio-tracker"; then
 echo ""
 echo "--- Portfolio Tracker: Java CLI ---"
 if command -v mvn &>/dev/null && [ -d "$PT_DIR/pp-cli" ]; then
@@ -241,6 +250,7 @@ if command -v mvn &>/dev/null && [ -d "$PT_DIR/pp-cli" ]; then
 else
   echo "  ! mvn not found or pp-cli not present — skipping (will use cached JAR if exists)"
 fi
+fi  # should_deploy portfolio-tracker
 
 # ---- pull latest code ----
 
@@ -255,13 +265,29 @@ echo "  ✓ code updated"
 # ---- deploy ----
 
 cd "$MODULES_DIR"
+
+# Check if a component should be deployed
+should_deploy() {
+  [[ ${#COMPONENTS[@]} -eq 0 ]] && return 0  # No filter = deploy all
+  for c in "${COMPONENTS[@]}"; do
+    [[ "$c" == "$1" ]] && return 0
+  done
+  return 1
+}
+
 echo "Starting Cloudflare Warp (VPN for faster Docker pulls)..."
 warp-cli --accept-tos connect 2>/dev/null || true
 sleep 2
 echo "Starting Docker Compose (cached build)..."
 export COMPOSE_DOCKER_CLI_BUILD=1 DOCKER_BUILDKIT=1
-docker compose build
-docker compose up -d "${DOCKER_ARGS[@]}"
+if [[ ${#COMPONENTS[@]} -gt 0 ]]; then
+  echo "  Components: ${COMPONENTS[*]}"
+  docker compose build "${COMPONENTS[@]}"
+  docker compose up -d "${COMPONENTS[@]}"
+else
+  docker compose build
+  docker compose up -d "${DOCKER_ARGS[@]}"
+fi
 
 # ---- plugin registration (one-time, persists on named volume) ----
 
@@ -298,8 +324,12 @@ health_ok() {
 
 failed=0
 health_ok "actual-api"       "http://localhost:3000/health" || failed=$((failed + 1))
+if should_deploy "expense-tracker"; then
 health_ok "expense-tracker"   "http://localhost:8080/health" || failed=$((failed + 1))
+fi
+if should_deploy "portfolio-tracker"; then
 health_ok "portfolio-tracker" "http://localhost:8081/health" || failed=$((failed + 1))
+fi
 
 # Pluggable module health checks (auto-discovered)
 for mod_env in "$ROOT"/modules/*/module.env; do
