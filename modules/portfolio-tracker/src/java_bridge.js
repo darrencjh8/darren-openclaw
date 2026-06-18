@@ -341,6 +341,70 @@ export class PpJavaBridge {
     }
 
     /**
+     * Import IBKR Flex Query XML into Portfolio Performance.
+     * Uses the same IBFlexStatementExtractor as the PP desktop UI.
+     * Handles: trades, dividends, deposits, fees, interest, taxes,
+     * corporate actions, sales tax, FX conversions.
+     * Matches securities by CONID → ISIN → ticker + exchange suffix.
+     * Auto-creates missing securities.
+     *
+     * @param {string} xmlContentB64 - Base64-encoded IBKR flex query XML
+     * @returns {Promise<object>}
+     */
+    async importIbkr(xmlContentB64) {
+        const release = await acquireWriteLock();
+        try {
+            const { writeFileSync, unlinkSync } = await import("fs");
+            const { tmpdir } = await import("os");
+            const { join } = await import("path");
+            const { randomBytes } = await import("crypto");
+
+            const xmlContent = Buffer.from(xmlContentB64, "base64").toString(
+                "utf8",
+            );
+            const tmpFile = join(
+                tmpdir(),
+                `ibkr-flex-${randomBytes(8).toString("hex")}.xml`,
+            );
+            writeFileSync(tmpFile, xmlContent);
+
+            const sgdAccount = process.env.IBKR_PP_SGD_ACCOUNT;
+            const usdAccount = process.env.IBKR_PP_USD_ACCOUNT;
+            const portfolioAccount =
+                process.env.IBKR_PP_PORTFOLIO_ACCOUNT || "";
+
+            if (!sgdAccount) throw new Error("IBKR_PP_SGD_ACCOUNT is required");
+            if (!usdAccount) throw new Error("IBKR_PP_USD_ACCOUNT is required");
+
+            try {
+                const args = [
+                    "import",
+                    "--file",
+                    this._xmlPath,
+                    "--ibkr-xml",
+                    tmpFile,
+                    "--ibkr-sgd-account",
+                    sgdAccount,
+                    "--ibkr-usd-account",
+                    usdAccount,
+                ];
+                if (portfolioAccount) {
+                    args.push("--ibkr-portfolio-account", portfolioAccount);
+                }
+                return await this._runCommand(...args);
+            } finally {
+                try {
+                    unlinkSync(tmpFile);
+                } catch {
+                    /* cleanup best-effort */
+                }
+            }
+        } finally {
+            release();
+        }
+    }
+
+    /**
      * Upload PP file to OneDrive to persist changes.
      * Call after making changes.
      */

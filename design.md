@@ -240,7 +240,7 @@ The production server (`<SERVER_IP>`) runs several host-level services alongside
 ```
 
 See `./chrome-daemon.service` — a template included in the repo for new server setup.
-The `scripts/deploy.sh` creates and enables these services automatically on first run.
+The `modules/deploy.sh` creates and enables these services automatically on first run.
 
 ### Browser CDP Relay Architecture
 
@@ -1039,7 +1039,7 @@ All logs are JSON-line format written to stdout and consumed via `docker compose
   "timestamp": "2026-06-04T13:00:01.082Z",
   "level": "INFO",
   "logger": "src.agent.orchestrator",
-  "correlation_id": "<abc123@mail.example.com>",
+  "correlation_id": "txn-abc123",
   "event": "transaction_inserted",
   "data": {
     "amount_cents": -1280,

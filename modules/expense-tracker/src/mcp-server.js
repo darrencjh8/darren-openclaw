@@ -1,9 +1,11 @@
 /**
- * MCP Server — SSE transport (v1 SDK, compatible with Hermes).
- * Memory tools excluded — handled natively by Hermes.
+ * MCP Server — Streamable HTTP transport (stateful, per-session).
+ * Pattern: same as portfolio-tracker/src/mcp-server.js
+ * Migrated from SSE (broke on container restart — session mismatch).
  */
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
+import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
+import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { logger } from "./logging.js";
 
@@ -139,28 +141,86 @@ function createTools(server, registry) {
 }
 
 export function createMcpServer(registry, app) {
-    let transport = null;
+    const transports = {};
 
-    app.get("/sse", async (req, res) => {
-        const server = new McpServer({
-            name: "expense-tracker",
-            version: "1.0.0",
-        });
-        createTools(server, registry);
-        transport = new SSEServerTransport("/messages", res);
-        await server.connect(transport);
-        logger.info({ event: "mcp_sse_connected" });
-    });
+    app.post("/mcp", async (req, res) => {
+        try {
+            const sessionId = req.headers["mcp-session-id"];
+            let transport;
 
-    app.post("/messages", async (req, res) => {
-        if (transport) {
-            await transport.handlePostMessage(req, res, req.body);
-        } else {
-            res.status(503).json({ error: "No active SSE connection" });
+            if (sessionId && transports[sessionId]) {
+                transport = transports[sessionId];
+            } else if (!sessionId) {
+                const server = new McpServer({
+                    name: "expense-tracker",
+                    version: "1.0.0",
+                });
+                createTools(server, registry);
+                transport = new StreamableHTTPServerTransport({
+                    sessionIdGenerator: () => randomUUID(),
+                    enableJsonResponse: true,
+                    onsessioninitialized: (sid) => {
+                        transports[sid] = transport;
+                    },
+                });
+                transport.onclose = () => {
+                    const sid = transport.sessionId;
+                    if (sid) delete transports[sid];
+                };
+                await server.connect(transport);
+            } else {
+                res.status(400).json({
+                    jsonrpc: "2.0",
+                    error: {
+                        code: -32000,
+                        message: "Bad Request: invalid session",
+                    },
+                    id: null,
+                });
+                return;
+            }
+            await transport.handleRequest(req, res, req.body);
+        } catch (e) {
+            logger.error({
+                event: "mcp_error",
+                error: e.message,
+            });
+            if (!res.headersSent)
+                res.status(500).json({
+                    jsonrpc: "2.0",
+                    error: { code: -32603, message: "Internal server error" },
+                    id: null,
+                });
         }
     });
 
-    logger.info({ event: "mcp_server_ready", transport: "sse" });
+    app.get("/mcp", async (req, res) => {
+        const sessionId = req.headers["mcp-session-id"];
+        if (!sessionId || !transports[sessionId]) {
+            res.status(400).end("Invalid session");
+            return;
+        }
+        try {
+            await transports[sessionId].handleRequest(req, res);
+        } catch (e) {
+            if (!res.headersSent) res.status(500).end();
+        }
+    });
+
+    app.delete("/mcp", async (req, res) => {
+        const sessionId = req.headers["mcp-session-id"];
+        if (!sessionId || !transports[sessionId]) {
+            res.status(400).end("Invalid session");
+            return;
+        }
+        try {
+            await transports[sessionId].handleRequest(req, res);
+        } catch (e) {
+            if (!res.headersSent) res.status(500).end();
+        }
+    });
+
+    logger.info({ event: "mcp_server_ready", transport: "streamable-http" });
 }
 
 function tx(result) {

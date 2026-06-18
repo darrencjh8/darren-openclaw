@@ -15,6 +15,37 @@ import { PpJavaBridge } from "./java_bridge.js";
 import { AgentOrchestrator } from "./orchestrator.js";
 import { ImapIdleHandler } from "./imap.js";
 import { dispatchEmail } from "./classify.js";
+import { createMcpServer } from "./mcp-server.js";
+
+// ── Startup guard: fail fast if critical env vars are missing ──
+function guardEnv() {
+    const critical = [
+        "DEEPSEEK_API_KEY",
+        "ACTUAL_BUDGET_URL",
+        "ACTUAL_BUDGET_PASSWORD",
+        "ACTUAL_PRIMARY_BUDGET_FILE",
+        "ACTUAL_SECONDARY_BUDGET_FILE",
+        "ONEDRIVE_CLIENT_ID",
+        "IBKR_FLEX_TOKEN",
+        "IBKR_FLEX_QUERY_ID",
+        "IBKR_PP_SGD_ACCOUNT",
+        "IBKR_PP_USD_ACCOUNT",
+        "GOOGLE_SERVICE_ACCOUNT_JSON",
+        "GOOGLE_SHEET_ID",
+    ];
+    const missing = critical.filter((k) => !process.env[k]);
+    if (missing.length > 0) {
+        console.error(
+            JSON.stringify({
+                event: "startup_failed",
+                reason: "Missing required environment variables",
+                missing,
+            }),
+        );
+        process.exit(1);
+    }
+}
+guardEnv();
 
 async function main() {
     const cfg = Config.fromEnv();
@@ -160,6 +191,9 @@ async function main() {
     console.log(
         JSON.stringify({ event: "routes_registered", count: routes.length }),
     );
+
+    // Register MCP SSE transport (GET /sse + POST /messages)
+    createMcpServer(registry, app);
 
     // Start IMAP idle loop if IMAP is configured
     const imapConfigured =

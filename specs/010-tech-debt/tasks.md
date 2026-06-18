@@ -68,7 +68,7 @@
 - **Why tech debt:** Spec drift — duplicate of 011-email-pdf-routing T2.2
 
 ### T1.4 — Validate IMAP_MAILBOX in deploy.sh
-- [ ] Add `IMAP_MAILBOX` to portfolio-tracker required vars in `scripts/deploy.sh`
+- [ ] Add `IMAP_MAILBOX` to portfolio-tracker required vars in `modules/deploy.sh`
 - **Why tech debt:** Spec drift — duplicate of 011-email-pdf-routing T1.3
 
 ### T2.1 — Update SYSTEM_PROMPT with Bookend Workflow

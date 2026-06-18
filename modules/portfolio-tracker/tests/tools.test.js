@@ -10,9 +10,10 @@ const REQUIRED_ENV = {
     DEEPSEEK_API_KEY: "sk-test",
     ACTUAL_BUDGET_URL: "http://test:5006",
     ACTUAL_BUDGET_PASSWORD: "pw",
-    ACTUAL_BUDGET_FILE: "test-budget",
+    ACTUAL_PRIMARY_BUDGET_FILE: "test-budget",
     PP_XML_PATH: "/data/portfolio.xml",
     PP_JAR_PATH: "/app/pp-cli.jar",
+    ONEDRIVE_CLIENT_ID: "test-client-id",
 };
 
 describe("Portfolio Tracker", () => {
@@ -24,7 +25,7 @@ describe("Portfolio Tracker", () => {
                 DEEPSEEK_API_KEY: "sk-test",
                 ACTUAL_BUDGET_URL: "http://test:5006",
                 ACTUAL_BUDGET_PASSWORD: "pw",
-                ACTUAL_BUDGET_FILE: "test-budget",
+                ACTUAL_PRIMARY_BUDGET_FILE: "test-budget",
             });
             expect(cfg.deepseekApiKey).toBe("sk-test");
             expect(cfg.ppXmlPath).toBe("/data/portfolio.xml");

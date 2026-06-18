@@ -1,48 +1,4 @@
 services:
-    openclaw:
-        build:
-            context: .
-            dockerfile: Dockerfile
-        ports:
-            - "0.0.0.0:18789:18789"
-            - "0.0.0.0:18800:18800"
-        volumes:
-            - ./openclaw.json:/app/openclaw.json.bk:ro
-            - ./exec-approvals.json:/app/exec-approvals.json:ro
-            - ./workspace/skills:/home/node/.openclaw/workspace/skills:ro
-            - ./AGENTS.md.template:/app/AGENTS.md.template:ro
-            - ./AGENTS.thinker.md.template:/app/AGENTS.thinker.md.template:ro
-            - ./SOUL.md.template:/app/SOUL.md.template:ro
-            - ./USER.md.template:/app/USER.md.template:ro
-            - ./IDENTITY.md.template:/app/IDENTITY.md.template:ro
-            - ./MEMORY.md.template:/app/MEMORY.md.template:ro
-            - ./docker-entrypoint.sh:/app/docker-entrypoint.sh:ro
-            - ../modules/perchance-gen:/app/modules/perchance-gen:ro
-            - ../modules/ktmb/skills:/home/node/skills/ktmb-booking:ro
-            - ./plugins/expense-tracker-tools:/home/node/plugins/expense-tracker-tools:ro
-            - openclaw_home:/app/.openclaw
-            - openclaw_data:/app/data
-            - image_gen_media:/app/.openclaw/workspace/media
-        user: node
-        entrypoint: ["/app/docker-entrypoint.sh"]
-        env_file:
-            - .env
-            - ../modules/portfolio-tracker/.env
-        extra_hosts:
-            - "host.docker.internal:host-gateway"
-        environment:
-            - OPENCLAW_HOME=/app
-            - DISPLAY=:99
-            - DBUS_SESSION_BUS_ADDRESS=unix:path=/tmp/dbus-session
-            - NODE_COMPILE_CACHE=/app/.openclaw/compile-cache
-            - OPENCLAW_NO_RESPAWN=1
-            - CDP_URL=http://172.17.0.1:9223
-            - TZ=Asia/Kuala_Lumpur
-            - OPENCLAW_ALLOW_INSECURE_PRIVATE_WS=1
-            - OPENCLAW_GATEWAY_URL=http://127.0.0.1:18789
-            - OPENCLAW_GATEWAY_TOKEN=${OPENCLAW_GATEWAY_TOKEN}
-        restart: unless-stopped
-
     expense-tracker:
         build:
             context: ../modules/expense-tracker
@@ -89,13 +45,23 @@ services:
         volumes:
             - ../modules/portfolio-tracker/data:/app/data
             - onedrive_data:/data/onedrive:rw
-            - ../modules/onedrive-sync/config/onedrive/refresh_token:/app/config/onedrive_refresh_token:ro
+            - ../modules/onedrive-sync/config/onedrive/refresh_token:/app/config/onedrive_refresh_token:rw
             - ../modules/portfolio-tracker/config/google-service-account.json:/app/config/google-service-account.json:ro
         environment:
             - PP_XML_PATH=/data/onedrive/Portfolio/Portfolio.portfolio
         env_file:
             - ../modules/portfolio-tracker/.env
         restart: unless-stopped
+        healthcheck:
+            test:
+                [
+                    "CMD-SHELL",
+                    'node -e ''require("http").get("http://localhost:8081/health",function(r){process.exit(r.statusCode===200?0:1)})''',
+                ]
+            interval: 10s
+            timeout: 5s
+            retries: 3
+            start_period: 30s
 
     image-gen:
         build:
@@ -141,6 +107,9 @@ services:
             expense-tracker:
                 condition: service_healthy
                 restart: true
+            portfolio-tracker:
+                condition: service_healthy
+                restart: true
         ports:
             - "8642:8642"
             - "9119:9119"
@@ -156,7 +125,5 @@ services:
         shm_size: 1g
 
 volumes:
-    openclaw_data:
-    openclaw_home:
     onedrive_data:
     image_gen_media:

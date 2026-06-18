@@ -18,7 +18,7 @@
   3. **Code change**: `git pull` → `docker compose build <svc>` → `docker compose up -d <svc>`
   4. Sync `.env` before deploying: `scp .env $USER@<SERVER_IP>:~/darren-openclaw/gateway/.env`
   5. After deploy, verify changes in production container.
-- **Deploy script**: `ssh $USER@<SERVER_IP> 'cd ~/darren-openclaw && bash ./scripts/deploy.sh'` — validates env vars, builds, health-checks
+- **Deploy script**: `ssh $USER@<SERVER_IP> 'cd ~/darren-openclaw && bash ./modules/deploy.sh --component all --non-interactive'` — validates env vars, builds, health-checks
 
 ## Configuration
 

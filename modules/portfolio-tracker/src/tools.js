@@ -676,9 +676,44 @@ export class ToolRegistry {
             }
         }
 
+        // Step 1.5: Pull IBKR flex XML and import trades
+        let flexPullResult = null;
+        let flexImportResult = null;
+        if (this._ppBridge) {
+            try {
+                const { pullFlexXml } = await import("./ibkr_flex.js");
+                flexPullResult = await pullFlexXml();
+                console.log(
+                    JSON.stringify({
+                        event: "ibkr-flex-pull",
+                        result: flexPullResult.success,
+                    }),
+                );
+                if (flexPullResult.success && flexPullResult.xml) {
+                    const xmlB64 = Buffer.from(flexPullResult.xml).toString(
+                        "base64",
+                    );
+                    flexImportResult = await this._ppBridge.importIbkr(xmlB64);
+                    console.log(
+                        JSON.stringify({
+                            event: "ibkr-flex-import",
+                            result: flexImportResult,
+                        }),
+                    );
+                }
+            } catch (e) {
+                console.warn(
+                    `IBKR flex pull/import failed (continuing): ${e.message}`,
+                );
+                flexPullResult = { success: false, error: e.message };
+            }
+        }
+
         // Step 2: Fetch AB budgets with retry
-        const _sgdBudget = process.env.ACTUAL_BUDGET_FILE || "SGD Budget";
-        const _myrBudget = process.env.MYR_BUDGET_FILE || "MYR Budget";
+        const _sgdBudget =
+            process.env.ACTUAL_PRIMARY_BUDGET_FILE || "SGD Budget";
+        const _myrBudget =
+            process.env.ACTUAL_SECONDARY_BUDGET_FILE || "MYR Budget";
 
         const fetchBudget = async (budgetName, maxRetries = 3) => {
             const url = `http://actual-api:3000/budget-12m?budget_id=${encodeURIComponent(budgetName)}`;
@@ -742,6 +777,12 @@ export class ToolRegistry {
 
             for (const t of targets) {
                 try {
+                    if (!this._ppBridge) {
+                        t.status = "skipped";
+                        t.error =
+                            "OneDrive not synced — portfolio file not downloaded. Run /onedrive setup in Telegram.";
+                        continue;
+                    }
                     const updateResult = await this._ppBridge.updateBalance({
                         accountId: t.account_id,
                         amount: t.amount,
@@ -796,6 +837,8 @@ export class ToolRegistry {
             sync_targets: results,
             summary: `Synced ${results.filter((r) => r.status === "updated").length}/${results.length} accounts`,
             pull: pullResult,
+            flex_pull: flexPullResult,
+            flex_import: flexImportResult,
             push: pushResult,
             taxonomy_export: taxonomyResult,
             portfolio_status: statusSgd,

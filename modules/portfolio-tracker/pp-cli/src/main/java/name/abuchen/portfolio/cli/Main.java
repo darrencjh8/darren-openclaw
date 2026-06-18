@@ -75,6 +75,14 @@ public class Main {
                 case "query":
                     result = ppc.querySecurity(require(params, "search"));
                     break;
+                case "import":
+                    result = ppc.importIbkr(
+                            new File(require(params, "ibkr-xml")),
+                            params.getOrDefault("ibkr-sgd-account", ""),
+                            params.getOrDefault("ibkr-usd-account", ""),
+                            params.getOrDefault("ibkr-portfolio-account", "")
+                    );
+                    break;
                 default:
                     System.err.println(GSON.toJson(Map.of(
                             "error", "Unknown command: " + command,

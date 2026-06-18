@@ -10,7 +10,7 @@ const REQUIRED_ENV = {
     DEEPSEEK_API_KEY: "sk-test-key-12345",
     ACTUAL_BUDGET_URL: "https://ab.example.com/api",
     ACTUAL_BUDGET_PASSWORD: "super-secret-pw",
-    ACTUAL_BUDGET_FILE: "My SGD Budget",
+    ACTUAL_PRIMARY_BUDGET_FILE: "My SGD Budget",
     PP_XML_PATH: "/data/portfolio.xml",
     PP_JAR_PATH: "/app/pp-cli.jar",
 };
@@ -22,12 +22,12 @@ describe("Config — all 30+ fields", () => {
             DEEPSEEK_API_KEY: "sk-deepseek-123",
             ACTUAL_BUDGET_URL: "https://budget.example.com",
             ACTUAL_BUDGET_PASSWORD: "abc123",
-            ACTUAL_BUDGET_FILE: "Budget-SGD",
+            ACTUAL_PRIMARY_BUDGET_FILE: "Budget-SGD",
             PP_XML_PATH: "/mnt/data/pp/portfolio.xml",
             PP_JAR_PATH: "/opt/pp/pp-cli.jar",
 
             // Optional budget
-            MYR_BUDGET_FILE: "Budget-MYR",
+            ACTUAL_SECONDARY_BUDGET_FILE: "Budget-MYR",
 
             // Google
             GOOGLE_SERVICE_ACCOUNT_JSON: '{"type":"service_account"}',
@@ -39,17 +39,16 @@ describe("Config — all 30+ fields", () => {
 
             // PP
             PP_PASSWORD: "pp-password-123",
-            PP_EMERGENCY_SGD_ACCOUNT: "uuid-es",
-            PP_EMERGENCY_MYR_ACCOUNT: "uuid-em",
-            PP_WARCHEST_SGD_ACCOUNT: "uuid-wc",
+            PP_EMERGENCY_PRIMARY_ACCOUNT: "uuid-es",
+            PP_EMERGENCY_SECONDARY_ACCOUNT: "uuid-em",
+            PP_WARCHEST_PRIMARY_ACCOUNT: "uuid-wc",
 
             // Data paths
             DEDUP_DB_PATH: "/data/custom/dedup.db",
             MAPPINGS_PATH: "/data/custom/mappings.json",
 
-            // Logging & scheduling
+            // Logging
             LOG_LEVEL: "TRACE",
-            PP_SYNC_ALL_CRON: "0 */6 * * *",
             BALANCE_SYNC_MODEL: "deepseek-v3",
 
             // User
@@ -75,8 +74,8 @@ describe("Config — all 30+ fields", () => {
             ONEDRIVE_CLIENT_ID: "custom-client-id",
 
             // AB categories
-            AB_EMERGENCY_SGD_CATEGORY: "Emergency SGD",
-            AB_EMERGENCY_MYR_CATEGORY: "Emergency MYR",
+            AB_EMERGENCY_PRIMARY_CATEGORY: "Emergency SGD",
+            AB_EMERGENCY_SECONDARY_CATEGORY: "Emergency MYR",
             AB_WARCHEST_CATEGORY: "Warchest Fund",
         });
 
@@ -84,12 +83,12 @@ describe("Config — all 30+ fields", () => {
         expect(cfg.deepseekApiKey).toBe("sk-deepseek-123");
         expect(cfg.actualBudgetUrl).toBe("https://budget.example.com");
         expect(cfg.actualBudgetPassword).toBe("abc123");
-        expect(cfg.actualBudgetFile).toBe("Budget-SGD");
+        expect(cfg.primaryBudgetFile).toBe("Budget-SGD");
         expect(cfg.ppXmlPath).toBe("/mnt/data/pp/portfolio.xml");
         expect(cfg.ppJarPath).toBe("/opt/pp/pp-cli.jar");
 
         // Optional budget
-        expect(cfg.myrBudgetFile).toBe("Budget-MYR");
+        expect(cfg.secondaryBudgetFile).toBe("Budget-MYR");
 
         // Google
         expect(cfg.googleServiceAccountJson).toBe('{"type":"service_account"}');
@@ -105,17 +104,16 @@ describe("Config — all 30+ fields", () => {
 
         // PP
         expect(cfg.ppPassword).toBe("pp-password-123");
-        expect(cfg.ppEmergencySgdAccount).toBe("uuid-es");
-        expect(cfg.ppEmergencyMyrAccount).toBe("uuid-em");
-        expect(cfg.ppWarchestSgdAccount).toBe("uuid-wc");
+        expect(cfg.ppEmergencyPrimaryAccount).toBe("uuid-es");
+        expect(cfg.ppEmergencySecondaryAccount).toBe("uuid-em");
+        expect(cfg.ppWarchestPrimaryAccount).toBe("uuid-wc");
 
         // Data paths
         expect(cfg.dedupDbPath).toBe("/data/custom/dedup.db");
         expect(cfg.mappingsPath).toBe("/data/custom/mappings.json");
 
-        // Logging & scheduling
+        // Logging
         expect(cfg.logLevel).toBe("TRACE");
-        expect(cfg.ppSyncAllCron).toBe("0 */6 * * *");
         expect(cfg.balanceSyncModel).toBe("deepseek-v3");
 
         // User
@@ -141,8 +139,8 @@ describe("Config — all 30+ fields", () => {
         expect(cfg.onedriveClientId).toBe("custom-client-id");
 
         // AB categories
-        expect(cfg.abEmergencySgdCategory).toBe("Emergency SGD");
-        expect(cfg.abEmergencyMyrCategory).toBe("Emergency MYR");
+        expect(cfg.abEmergencyPrimaryCategory).toBe("Emergency SGD");
+        expect(cfg.abEmergencySecondaryCategory).toBe("Emergency MYR");
         expect(cfg.abWarchestCategory).toBe("Warchest Fund");
     });
 });
@@ -342,7 +340,7 @@ describe("Config — static fromEnv", () => {
         process.env.DEEPSEEK_API_KEY = "sk-process-test";
         process.env.ACTUAL_BUDGET_URL = "https://proc.example.com";
         process.env.ACTUAL_BUDGET_PASSWORD = "proc-pw";
-        process.env.ACTUAL_BUDGET_FILE = "proc-budget";
+        process.env.ACTUAL_PRIMARY_BUDGET_FILE = "proc-budget";
         process.env.PP_XML_PATH = "/proc/data.xml";
         process.env.PP_JAR_PATH = "/proc/pp.jar";
 
@@ -354,21 +352,6 @@ describe("Config — static fromEnv", () => {
             // Restore original env
             process.env = originalEnv;
         }
-    });
-});
-
-describe("Config — scheduling", () => {
-    it("defaults ppSyncAllCron to daily at 3 AM", () => {
-        const cfg = new Config(REQUIRED_ENV);
-        expect(cfg.ppSyncAllCron).toBe("0 3 * * *");
-    });
-
-    it("accepts custom cron expression", () => {
-        const cfg = new Config({
-            ...REQUIRED_ENV,
-            PP_SYNC_ALL_CRON: "*/30 * * * *",
-        });
-        expect(cfg.ppSyncAllCron).toBe("*/30 * * * *");
     });
 });
 

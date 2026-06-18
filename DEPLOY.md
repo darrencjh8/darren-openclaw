@@ -68,7 +68,7 @@ This creates a `docker-compose.override.yml` in the gateway directory.
 **3. Deploy all services**
 ```bash
 cd ~/darren-openclaw
-./scripts/deploy.sh
+./modules/deploy.sh
 ```
 
 This validates all required env vars for each module, then runs `docker compose up -d` which picks up the override file automatically.
