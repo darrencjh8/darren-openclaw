@@ -1,12 +1,11 @@
 /**
- * MCP Server — Streamable HTTP transport for portfolio-tracker.
+ * MCP Server — SSE transport for portfolio-tracker.
  * Exposes 6 tools: sync, OneDrive auth + IO.
- *
- * Pattern from: https://github.com/ferrants/mcp-streamable-http-typescript-server
+ * Follows expense-tracker MCP pattern (spec 021).
  */
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
+import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
 import { z } from "zod";
 import { existsSync } from "fs";
 import { pullFromOneDrive, pushToOneDrive } from "./onedrive.js";
@@ -55,7 +54,7 @@ function createTools(server, registry) {
 
     server.tool(
         "portfolio_onedrive_status",
-        "Check if OneDrive is authorized by validating the refresh token.",
+        "Check if OneDrive is authorized by validating the refresh token against Microsoft.",
         {},
         async () => {
             const tokenPath =
@@ -67,7 +66,6 @@ function createTools(server, registry) {
                     authorized: false,
                     reason: "Refresh token file not found",
                     action: "Run /onedrive setup to authorize OneDrive",
-                    token_path: tokenPath,
                 });
             }
             try {
@@ -130,48 +128,30 @@ function createTools(server, registry) {
     );
 }
 
-/**
- * Register MCP Streamable HTTP transport on the Express app.
- * Must be called before app.listen().
- */
 export function createMcpServer(registry, app) {
-    // POST /mcp — per the reference: create transport + connect per initialization
-    app.post("/mcp", async (req, res) => {
-        try {
-            const server = new McpServer({
-                name: "portfolio-tracker",
-                version: "1.0.0",
-            });
-            createTools(server, registry);
-            const transport = new StreamableHTTPServerTransport({
-                sessionIdGenerator: undefined,
-                enableJsonResponse: true,
-            });
-            await server.connect(transport);
-            await transport.handleRequest(req, res, req.body);
-        } catch (e) {
-            console.error(
-                JSON.stringify({
-                    event: "mcp_error",
-                    error: e.message,
-                    stack: e.stack,
-                }),
-            );
-            if (!res.headersSent) {
-                res.status(500).json({
-                    jsonrpc: "2.0",
-                    error: { code: -32603, message: "Internal server error" },
-                    id: null,
-                });
-            }
+    let transport = null;
+
+    app.get("/sse", async (_req, res) => {
+        const server = new McpServer({
+            name: "portfolio-tracker",
+            version: "1.0.0",
+        });
+        createTools(server, registry);
+        transport = new SSEServerTransport("/messages", res);
+        await server.connect(transport);
+        console.log(JSON.stringify({ event: "mcp_sse_connected" }));
+    });
+
+    app.post("/messages", async (req, res) => {
+        if (transport) {
+            await transport.handlePostMessage(req, res, req.body);
+        } else {
+            res.status(503).json({ error: "No active SSE connection" });
         }
     });
 
     console.log(
-        JSON.stringify({
-            event: "mcp_server_ready",
-            transport: "streamable-http",
-        }),
+        JSON.stringify({ event: "mcp_server_ready", transport: "sse" }),
     );
 }
 

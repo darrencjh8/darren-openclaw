@@ -192,7 +192,7 @@ async function main() {
         JSON.stringify({ event: "routes_registered", count: routes.length }),
     );
 
-    // Register MCP Streamable HTTP transport (POST /mcp)
+    // Register MCP SSE transport (GET /sse + POST /messages)
     createMcpServer(registry, app);
 
     // Start IMAP idle loop if IMAP is configured
