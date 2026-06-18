@@ -3,9 +3,9 @@
 # OpenClaw Deployment Script
 # Validates all required environment variables before starting Docker Compose.
 #
-# Usage: ./scripts/deploy.sh [--non-interactive] [--component <name>]...
-#   --non-interactive  Skip OneDrive auth prompt, assume .env already configured
-#   --component <name>  Deploy only this component (can repeat). Omit to deploy all.
+# Usage: ./scripts/deploy.sh --component <name> [--component <name>...] [--non-interactive]
+#   --component <name>  Required. One of: all, portfolio-tracker, expense-tracker, hermes, openclaw, actual-api, image-gen, ktmb-booking
+#   --non-interactive    Skip OneDrive auth prompt
 # =============================================================================
 set -euo pipefail
 
@@ -20,6 +20,25 @@ while [[ $# -gt 0 ]]; do
   esac
   shift
 done
+
+if [[ ${#COMPONENTS[@]} -eq 0 ]]; then
+  echo "Usage: ./scripts/deploy.sh --component <name> [--component <name>...] [--non-interactive]"
+  echo ""
+  echo "Available components:"
+  echo "  all                  Deploy all components"
+  echo "  portfolio-tracker    Portfolio tracker + IBKR flex"
+  echo "  expense-tracker      Expense tracker"
+  echo "  hermes               Hermes agent (MCP, cron, Telegram)"
+  echo "  openclaw             OpenClaw gateway"
+  echo "  actual-api           Actual Budget API"
+  echo "  image-gen            Image generation"
+  echo "  ktmb-booking         KTMB train booking"
+  echo ""
+  echo "Example:"
+  echo "  ./scripts/deploy.sh --component portfolio-tracker --component hermes --non-interactive"
+  echo "  ./scripts/deploy.sh --component all"
+  exit 1
+fi
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 MODULES_DIR="$ROOT/modules"
@@ -274,9 +293,8 @@ cd "$MODULES_DIR"
 
 # Check if a component should be deployed
 should_deploy() {
-  [[ ${#COMPONENTS[@]} -eq 0 ]] && return 0  # No filter = deploy all
   for c in "${COMPONENTS[@]}"; do
-    [[ "$c" == "$1" ]] && return 0
+    [[ "$c" == "all" || "$c" == "$1" ]] && return 0
   done
   return 1
 }
@@ -286,13 +304,13 @@ warp-cli --accept-tos connect 2>/dev/null || true
 sleep 2
 echo "Starting Docker Compose (cached build)..."
 export COMPOSE_DOCKER_CLI_BUILD=1 DOCKER_BUILDKIT=1
-if [[ ${#COMPONENTS[@]} -gt 0 ]]; then
+if [[ " ${COMPONENTS[*]} " =~ " all " ]] || [[ ${#COMPONENTS[@]} -eq 1 && "${COMPONENTS[0]}" == "all" ]]; then
+  docker compose build
+  docker compose up -d "${DOCKER_ARGS[@]}"
+elif [[ ${#COMPONENTS[@]} -gt 0 ]]; then
   echo "  Components: ${COMPONENTS[*]}"
   docker compose build "${COMPONENTS[@]}"
   docker compose up -d "${COMPONENTS[@]}"
-else
-  docker compose build
-  docker compose up -d "${DOCKER_ARGS[@]}"
 fi
 
 # ---- plugin registration (one-time, persists on named volume) ----
