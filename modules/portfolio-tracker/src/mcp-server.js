@@ -156,13 +156,24 @@ export async function createMcpServer(registry, app) {
     );
 
     // POST /mcp — handles all MCP protocol messages (stateless)
-    // express.json() already parses the body; pass it as 3rd arg
     app.post("/mcp", async (req, res) => {
         try {
+            console.log(
+                JSON.stringify({
+                    event: "mcp_post",
+                    body_type: typeof req.body,
+                    body_keys: req.body && Object.keys(req.body),
+                }),
+            );
             await transport.handleRequest(req, res, req.body);
+            console.log(JSON.stringify({ event: "mcp_post_done" }));
         } catch (e) {
             console.error(
-                JSON.stringify({ event: "mcp_error", error: e.message }),
+                JSON.stringify({
+                    event: "mcp_error",
+                    error: e.message,
+                    stack: e.stack,
+                }),
             );
             if (!res.headersSent) {
                 res.status(500).json({
