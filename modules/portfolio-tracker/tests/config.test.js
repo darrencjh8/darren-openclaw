@@ -9,7 +9,7 @@ const REQUIRED_ENV = {
     DEEPSEEK_API_KEY: "sk-test",
     ACTUAL_BUDGET_URL: "https://ab.example.com",
     ACTUAL_BUDGET_PASSWORD: "pw",
-    ACTUAL_BUDGET_FILE: "Test-SGD-Budget",
+    ACTUAL_PRIMARY_BUDGET_FILE: "Test-SGD-Budget",
     PP_XML_PATH: "/data/portfolio.xml",
     PP_JAR_PATH: "/app/pp-cli.jar",
     ONEDRIVE_CLIENT_ID: "test-client-id",
@@ -21,7 +21,7 @@ describe("Config — required fields", () => {
         expect(cfg.deepseekApiKey).toBe("sk-test");
         expect(cfg.actualBudgetUrl).toBe("https://ab.example.com");
         expect(cfg.actualBudgetPassword).toBe("pw");
-        expect(cfg.actualBudgetFile).toBe("Test-SGD-Budget");
+        expect(cfg.primaryBudgetFile).toBe("Test-SGD-Budget");
     });
 
     it("throws when required env vars are missing", () => {
@@ -63,9 +63,9 @@ describe("Config — defaults", () => {
         expect(cfg.imapFolder).toBe("Trades");
     });
 
-    it("uses default ppSyncAllCron", () => {
+    it("has balanceSyncModel default", () => {
         const cfg = new Config(REQUIRED_ENV);
-        expect(cfg.ppSyncAllCron).toBe("0 3 * * *");
+        expect(cfg.balanceSyncModel).toBe("");
     });
 
     it("parses taxonomy names from env", () => {
@@ -136,17 +136,17 @@ describe("Config — custom values", () => {
         expect(cfg.imapFolder).toBe("CustomInbox");
     });
 
-    it("loads myrBudgetFile when provided", () => {
+    it("loads secondaryBudgetFile when provided", () => {
         const cfg = new Config({
             ...REQUIRED_ENV,
-            MYR_BUDGET_FILE: "Test-MYR",
+            ACTUAL_SECONDARY_BUDGET_FILE: "Test-MYR",
         });
-        expect(cfg.myrBudgetFile).toBe("Test-MYR");
+        expect(cfg.secondaryBudgetFile).toBe("Test-MYR");
     });
 
-    it("defaults myrBudgetFile to empty string", () => {
+    it("defaults secondaryBudgetFile to empty string", () => {
         const cfg = new Config(REQUIRED_ENV);
-        expect(cfg.myrBudgetFile).toBe("");
+        expect(cfg.secondaryBudgetFile).toBe("");
     });
 });
 
@@ -179,28 +179,28 @@ describe("Config — taxonomy and mappings", () => {
 describe("Config — AB and PP fields", () => {
     it("loads emergency fund categories with defaults", () => {
         const cfg = new Config(REQUIRED_ENV);
-        expect(cfg.abEmergencySgdCategory).toBe("Emergency Fund SGD");
-        expect(cfg.abEmergencyMyrCategory).toBe("Emergency Fund MYR");
+        expect(cfg.abEmergencyPrimaryCategory).toBe("Emergency Fund SGD");
+        expect(cfg.abEmergencySecondaryCategory).toBe("Emergency Fund MYR");
         expect(cfg.abWarchestCategory).toBe("General Investment Fund");
     });
 
     it("loads PP account UUIDs", () => {
         const cfg = new Config({
             ...REQUIRED_ENV,
-            PP_EMERGENCY_SGD_ACCOUNT: "uuid-sgd",
-            PP_EMERGENCY_MYR_ACCOUNT: "uuid-myr",
-            PP_WARCHEST_SGD_ACCOUNT: "uuid-warchest",
+            PP_EMERGENCY_PRIMARY_ACCOUNT: "uuid-sgd",
+            PP_EMERGENCY_SECONDARY_ACCOUNT: "uuid-myr",
+            PP_WARCHEST_PRIMARY_ACCOUNT: "uuid-warchest",
         });
-        expect(cfg.ppEmergencySgdAccount).toBe("uuid-sgd");
-        expect(cfg.ppEmergencyMyrAccount).toBe("uuid-myr");
-        expect(cfg.ppWarchestSgdAccount).toBe("uuid-warchest");
+        expect(cfg.ppEmergencyPrimaryAccount).toBe("uuid-sgd");
+        expect(cfg.ppEmergencySecondaryAccount).toBe("uuid-myr");
+        expect(cfg.ppWarchestPrimaryAccount).toBe("uuid-warchest");
     });
 
     it("defaults PP account UUIDs to empty string", () => {
         const cfg = new Config(REQUIRED_ENV);
-        expect(cfg.ppEmergencySgdAccount).toBe("");
-        expect(cfg.ppEmergencyMyrAccount).toBe("");
-        expect(cfg.ppWarchestSgdAccount).toBe("");
+        expect(cfg.ppEmergencyPrimaryAccount).toBe("");
+        expect(cfg.ppEmergencySecondaryAccount).toBe("");
+        expect(cfg.ppWarchestPrimaryAccount).toBe("");
     });
 });
 
@@ -271,5 +271,23 @@ describe("Config — balance sync", () => {
     it("defaults balance sync model to empty string", () => {
         const cfg = new Config(REQUIRED_ENV);
         expect(cfg.balanceSyncModel).toBe("");
+    });
+});
+
+describe("Config — IBKR Flex Web Service", () => {
+    it("loads flex token and query ID from env", () => {
+        const cfg = new Config({
+            ...REQUIRED_ENV,
+            IBKR_FLEX_TOKEN: "test-token-12345",
+            IBKR_FLEX_QUERY_ID: "1319918",
+        });
+        expect(cfg.ibkrFlexToken).toBe("test-token-12345");
+        expect(cfg.ibkrFlexQueryId).toBe("1319918");
+    });
+
+    it("defaults flex token and query ID to empty string", () => {
+        const cfg = new Config(REQUIRED_ENV);
+        expect(cfg.ibkrFlexToken).toBe("");
+        expect(cfg.ibkrFlexQueryId).toBe("");
     });
 });

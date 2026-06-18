@@ -88,6 +88,7 @@ The PP model JAR is not available on Maven Central.</description>
                                  org.junit.runner.JUnitCore PpClientUpdateBalanceTest,PpClientUpdateBalanceEdgeTest -->
                         <exclude>**/PpClientUpdateBalanceTest.java</exclude>
                         <exclude>**/PpClientUpdateBalanceEdgeTest.java</exclude>
+                        <exclude>**/PpClientImportIbkrTest.java</exclude>
                     </excludes>
                 </configuration>
             </plugin>

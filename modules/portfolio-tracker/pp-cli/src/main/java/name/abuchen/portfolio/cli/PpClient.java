@@ -36,6 +36,12 @@ import name.abuchen.portfolio.money.ExchangeRate;
 import name.abuchen.portfolio.money.Money;
 import name.abuchen.portfolio.money.Values;
 import name.abuchen.portfolio.snapshot.AssetPosition;
+import name.abuchen.portfolio.datatransfer.Extractor;
+import name.abuchen.portfolio.datatransfer.Extractor.BuySellEntryItem;
+import name.abuchen.portfolio.datatransfer.Extractor.SecurityItem;
+import name.abuchen.portfolio.datatransfer.Extractor.TransactionItem;
+import name.abuchen.portfolio.datatransfer.SecurityCache;
+import name.abuchen.portfolio.datatransfer.ibflex.IBFlexStatementExtractor;
 import name.abuchen.portfolio.snapshot.ClientSnapshot;
 import name.abuchen.portfolio.snapshot.filter.ClientClassificationFilter;
 import org.eclipse.core.runtime.NullProgressMonitor;
@@ -737,10 +743,162 @@ public class PpClient {
         throw new IOException("Account not found: " + accountId);
     }
 
+    private Portfolio findPortfolio(Client client, String portfolioId) throws IOException {
+        for (Portfolio p : client.getPortfolios()) {
+            if (p.getUUID().equals(portfolioId)) return p;
+        }
+        throw new IOException("Portfolio not found: " + portfolioId);
+    }
+
     private Security findSecurity(Client client, String securityId) throws IOException {
         for (Security s : client.getSecurities()) {
             if (s.getUUID().equals(securityId)) return s;
         }
         throw new IOException("Security not found: " + securityId);
+    }
+
+    private boolean isDuplicate(BuySellEntry entry, Account account) {
+        AccountTransaction at = entry.getAccountTransaction();
+        PortfolioTransaction pt = entry.getPortfolioTransaction();
+
+        for (AccountTransaction t : account.getTransactions()) {
+            if (isPotentialDuplicate(at, t)) return true;
+        }
+        if (entry.getPortfolio() != null) {
+            for (PortfolioTransaction t : entry.getPortfolio().getTransactions()) {
+                if (isPotentialDuplicate(pt, t)) return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Same logic as PP DetectDuplicatesAction.isPotentialDuplicate.
+     */
+    private boolean isPotentialDuplicate(Transaction subject, Transaction other) {
+        if (!other.getDateTime().toLocalDate().equals(subject.getDateTime().toLocalDate()))
+            return false;
+        if (!other.getCurrencyCode().equals(subject.getCurrencyCode()))
+            return false;
+        if (other.getAmount() != subject.getAmount())
+            return false;
+        if (other.getShares() != subject.getShares())
+            return false;
+        if (!java.util.Objects.equals(other.getSecurity(), subject.getSecurity()))
+            return false;
+        return true;
+    }
+
+    /**
+     * Import IBKR Flex Query XML using the same IBFlexStatementExtractor
+     * as the Portfolio Performance desktop UI.
+     * Handles: trades, dividends, deposits, fees, interest, taxes,
+     * corporate actions, sales tax, FX conversions.
+     * Matches securities by CONID → ISIN → ticker + exchange suffix.
+     * Auto-creates missing securities.
+     *
+     * @param sgdAccountId optional UUID of SGD deposit account for trade routing
+     * @param usdAccountId optional UUID of USD deposit account for trade routing
+     */
+    public Map<String, Object> importIbkr(File xmlFile, String sgdAccountId, String usdAccountId, String portfolioId) throws IOException {
+        Client client = load();
+
+        if (!xmlFile.exists()) {
+            throw new IOException("IBKR XML file not found: " + xmlFile.getAbsolutePath());
+        }
+
+        // Pre-resolve the configured accounts
+        Account sgdAccount = (sgdAccountId != null && !sgdAccountId.isEmpty())
+                ? findAccount(client, sgdAccountId) : null;
+        Account usdAccount = (usdAccountId != null && !usdAccountId.isEmpty())
+                ? findAccount(client, usdAccountId) : null;
+        Portfolio portfolio = (portfolioId != null && !portfolioId.isEmpty())
+                ? findPortfolio(client, portfolioId) : null;
+
+        IBFlexStatementExtractor extractor = new IBFlexStatementExtractor(client);
+        Extractor.InputFile inputFile = new Extractor.InputFile(xmlFile);
+
+        List<Exception> errors = new ArrayList<>();
+        List<Extractor.Item> items = extractor.extract(
+                new SecurityCache(client), inputFile, errors);
+
+        // Post-process: pair dividend taxes with dividend transactions
+        extractor.postProcessing(items);
+
+        int tradesImported = 0;
+        int dividendsImported = 0;
+        int otherImported = 0;
+        int securitiesCreated = 0;
+        int itemsSkipped = 0;
+
+        for (Extractor.Item item : items) {
+            try {
+                if (item instanceof SecurityItem si) {
+                    client.addSecurity(si.getSecurity());
+                    securitiesCreated++;
+
+                } else if (item instanceof BuySellEntryItem bei) {
+                    BuySellEntry entry = (BuySellEntry) bei.getSubject();
+                    Account account = bei.getAccountPrimary();
+                    // Override with configured account if extractor couldn't match
+                    if (account == null) {
+                        String currency = entry.getAccountTransaction().getCurrencyCode();
+                        if ("SGD".equals(currency)) account = sgdAccount;
+                        else if ("USD".equals(currency)) account = usdAccount;
+                    }
+                    if (account == null) {
+                        itemsSkipped++;
+                    } else {
+                        entry.setAccount(account);
+                        // Use first portfolio as default (same pattern as insertTransaction)
+                        entry.setPortfolio(portfolio != null ? portfolio :
+                            (client.getPortfolios().isEmpty() ? null : client.getPortfolios().get(0)));
+                        if (entry.getPortfolio() == null) {
+                            itemsSkipped++;
+                        } else if (isDuplicate(entry, account)) {
+                            itemsSkipped++;
+                        } else {
+                            entry.insert();
+                            tradesImported++;
+                        }
+                    }
+
+                } else if (item instanceof TransactionItem ti) {
+                    Transaction txn = (Transaction) ti.getSubject();
+                    if (ti.getAccountPrimary() != null) {
+                        if (txn instanceof AccountTransaction at) {
+                            ti.getAccountPrimary().addTransaction(at);
+                            if (at.getType() == AccountTransaction.Type.DIVIDENDS)
+                                dividendsImported++;
+                            else
+                                otherImported++;
+                        } else if (txn instanceof PortfolioTransaction pt) {
+                            // Corporate actions (deliveries, splits)
+                            if (ti.getPortfolioPrimary() != null)
+                                ti.getPortfolioPrimary().addTransaction(pt);
+                            otherImported++;
+                        }
+                    } else {
+                        itemsSkipped++;
+                    }
+                } else {
+                    itemsSkipped++;
+                }
+            } catch (Exception e) {
+                errors.add(new IOException("Failed to insert item: " + e.getMessage(), e));
+            }
+        }
+
+        save(client);
+
+        Map<String, Object> result = new HashMap<>();
+        result.put("status", "ok");
+        result.put("trades_imported", tradesImported);
+        result.put("dividends_imported", dividendsImported);
+        result.put("other_imported", otherImported);
+        result.put("securities_created", securitiesCreated);
+        result.put("items_skipped", itemsSkipped);
+        result.put("errors", errors.stream().map(e -> e.getMessage()).toList());
+        return result;
     }
 }

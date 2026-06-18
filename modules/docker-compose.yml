@@ -89,7 +89,7 @@ services:
         volumes:
             - ../modules/portfolio-tracker/data:/app/data
             - onedrive_data:/data/onedrive:rw
-            - ../modules/onedrive-sync/config/onedrive/refresh_token:/app/config/onedrive_refresh_token:ro
+            - ../modules/onedrive-sync/config/onedrive/refresh_token:/app/config/onedrive_refresh_token:rw
             - ../modules/portfolio-tracker/config/google-service-account.json:/app/config/google-service-account.json:ro
         environment:
             - PP_XML_PATH=/data/onedrive/Portfolio/Portfolio.portfolio

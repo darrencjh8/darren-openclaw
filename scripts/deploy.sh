@@ -63,7 +63,10 @@ echo "--- Portfolio Tracker (.env) ---"
 PT_ENV="$PT_DIR/.env"
 if check_file "$PT_ENV"; then
   for v in DEEPSEEK_API_KEY ACTUAL_BUDGET_URL ACTUAL_BUDGET_PASSWORD \
-           ACTUAL_BUDGET_FILE MYR_BUDGET_FILE \
+           ACTUAL_PRIMARY_BUDGET_FILE ACTUAL_SECONDARY_BUDGET_FILE \
+           ONEDRIVE_CLIENT_ID \
+           IBKR_FLEX_TOKEN IBKR_FLEX_QUERY_ID \
+           IBKR_PP_SGD_ACCOUNT IBKR_PP_USD_ACCOUNT \
            GOOGLE_SERVICE_ACCOUNT_JSON GOOGLE_SHEET_ID; do
     check_var "$v" "$PT_ENV"
   done
@@ -114,7 +117,7 @@ fi
 echo ""
 echo "--- actual-api (.env) ---"
 if check_file "$PT_ENV"; then
-  for v in ACTUAL_BUDGET_PASSWORD ACTUAL_BUDGET_FILE ACTUAL_BUDGET_SERVER_URL; do
+  for v in ACTUAL_BUDGET_PASSWORD ACTUAL_PRIMARY_BUDGET_FILE ACTUAL_BUDGET_URL; do
     check_var "$v" "$PT_ENV"
   done
 else

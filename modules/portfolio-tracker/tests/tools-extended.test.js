@@ -14,21 +14,28 @@ import { join } from "path";
 import { writeFileSync, unlinkSync } from "fs";
 import crypto from "crypto";
 
-// Mock OneDrive module — pp-pull / pp-push call these directly (no bridge needed)
+// Mock OneDrive module
 vi.mock("../src/onedrive.js", () => ({
     pullFromOneDrive: vi.fn(),
     pushToOneDrive: vi.fn(),
 }));
 
+// Mock IBKR Flex module
+vi.mock("../src/ibkr_flex.js", () => ({
+    pullFlexXml: vi.fn(),
+}));
+
 import { pullFromOneDrive, pushToOneDrive } from "../src/onedrive.js";
+import { pullFlexXml } from "../src/ibkr_flex.js";
 
 const REQUIRED_ENV = {
     DEEPSEEK_API_KEY: "sk-test",
     ACTUAL_BUDGET_URL: "http://test:5006",
     ACTUAL_BUDGET_PASSWORD: "pw",
-    ACTUAL_BUDGET_FILE: "test-budget",
+    ACTUAL_PRIMARY_BUDGET_FILE: "test-budget",
     PP_XML_PATH: "/data/portfolio.xml",
     PP_JAR_PATH: "/app/pp-cli.jar",
+    ONEDRIVE_CLIENT_ID: "test-client-id",
 };
 
 /**
@@ -75,6 +82,17 @@ function createMockBridge(responses = {}) {
                 ticker: "AAPL",
                 shares: 100,
                 price: 185.3,
+            },
+        ),
+        importIbkr: vi.fn().mockResolvedValue(
+            responses.import || {
+                status: "ok",
+                trades_imported: 1,
+                dividends_imported: 0,
+                other_imported: 0,
+                securities_created: 0,
+                items_skipped: 0,
+                errors: [],
             },
         ),
     };
@@ -498,5 +516,88 @@ describe("ToolRegistry — lazy bridge initialization", () => {
         expect(bridge._xmlPath).toBe(xmlPath);
 
         unlinkSync(xmlPath);
+    });
+});
+
+describe("ToolRegistry — _computeSyncAll with flex pull", () => {
+    let registry;
+    let bridge;
+
+    beforeEach(() => {
+        vi.clearAllMocks();
+
+        pullFromOneDrive.mockResolvedValue({ success: true });
+        pushToOneDrive.mockResolvedValue({ success: true });
+
+        bridge = createMockBridge();
+
+        const cfg = new Config(REQUIRED_ENV);
+        const dbPath = join(
+            tmpdir(),
+            `dedup-${crypto.randomBytes(4).toString("hex")}.db`,
+        );
+        const dedup = new DedupJournal(dbPath);
+        const memory = new MemoryStore(
+            join(
+                tmpdir(),
+                `mappings-${crypto.randomBytes(4).toString("hex")}.json`,
+            ),
+        );
+        registry = new ToolRegistry(cfg, dedup, memory, bridge);
+
+        // Stub AB budget fetch
+        global.fetch = vi.fn().mockResolvedValue({
+            ok: true,
+            json: () =>
+                Promise.resolve({
+                    emergency_total: 100000,
+                    investment_total: 500000,
+                }),
+            text: () => Promise.resolve(""),
+        });
+
+        // Stub Google Sheets update
+        vi.spyOn(registry, "_updateSheet").mockResolvedValue({
+            cells_written: 10,
+            errors: [],
+        });
+    });
+
+    it("calls pullFlexXml and importIbkr during sync", async () => {
+        pullFlexXml.mockResolvedValue({
+            success: true,
+            xml: "<FlexQueryResponse>...</FlexQueryResponse>",
+        });
+
+        const result = await registry._computeSyncAll();
+
+        expect(pullFlexXml).toHaveBeenCalled();
+        expect(bridge.importIbkr).toHaveBeenCalled();
+        expect(result.flex_pull).toEqual({ success: true });
+        expect(result.flex_import.trades_imported).toBe(1);
+    });
+
+    it("skips flex import when pullFlexXml fails", async () => {
+        pullFlexXml.mockResolvedValue({
+            success: false,
+            error: "Network error",
+        });
+
+        const result = await registry._computeSyncAll();
+
+        expect(pullFlexXml).toHaveBeenCalled();
+        expect(bridge.importIbkr).not.toHaveBeenCalled();
+        expect(result.flex_pull.success).toBe(false);
+    });
+
+    it("skips flex import when not configured", async () => {
+        pullFlexXml.mockResolvedValue({
+            success: false,
+            error: "Not configured",
+        });
+
+        const result = await registry._computeSyncAll();
+
+        expect(bridge.importIbkr).not.toHaveBeenCalled();
     });
 });

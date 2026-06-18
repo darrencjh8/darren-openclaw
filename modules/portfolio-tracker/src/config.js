@@ -9,9 +9,7 @@ const REQUIRED_ENV_VARS = [
     "DEEPSEEK_API_KEY",
     "ACTUAL_BUDGET_URL",
     "ACTUAL_BUDGET_PASSWORD",
-    "ACTUAL_BUDGET_FILE",
-    "PP_XML_PATH",
-    "PP_JAR_PATH",
+    "ACTUAL_PRIMARY_BUDGET_FILE",
 ];
 
 export class Config {
@@ -28,8 +26,8 @@ export class Config {
         this.deepseekApiKey = env.DEEPSEEK_API_KEY || "";
         this.actualBudgetUrl = env.ACTUAL_BUDGET_URL || "";
         this.actualBudgetPassword = env.ACTUAL_BUDGET_PASSWORD || "";
-        this.actualBudgetFile = env.ACTUAL_BUDGET_FILE || "";
-        this.myrBudgetFile = env.MYR_BUDGET_FILE || "";
+        this.primaryBudgetFile = env.ACTUAL_PRIMARY_BUDGET_FILE || "";
+        this.secondaryBudgetFile = env.ACTUAL_SECONDARY_BUDGET_FILE || "";
 
         // Google Sheets — supports both file path and inline JSON
         const raw = env.GOOGLE_SERVICE_ACCOUNT_JSON || "";
@@ -71,17 +69,18 @@ export class Config {
         this.ppPassword = env.PP_PASSWORD || "";
 
         // Actual Budget categories
-        this.abEmergencySgdCategory =
-            env.AB_EMERGENCY_SGD_CATEGORY || "Emergency Fund SGD";
-        this.abEmergencyMyrCategory =
-            env.AB_EMERGENCY_MYR_CATEGORY || "Emergency Fund MYR";
+        this.abEmergencyPrimaryCategory =
+            env.AB_EMERGENCY_PRIMARY_CATEGORY || "Emergency Fund SGD";
+        this.abEmergencySecondaryCategory =
+            env.AB_EMERGENCY_SECONDARY_CATEGORY || "Emergency Fund MYR";
         this.abWarchestCategory =
             env.AB_WARCHEST_CATEGORY || "General Investment Fund";
 
         // PP account UUIDs for balance sync
-        this.ppEmergencySgdAccount = env.PP_EMERGENCY_SGD_ACCOUNT || "";
-        this.ppEmergencyMyrAccount = env.PP_EMERGENCY_MYR_ACCOUNT || "";
-        this.ppWarchestSgdAccount = env.PP_WARCHEST_SGD_ACCOUNT || "";
+        this.ppEmergencyPrimaryAccount = env.PP_EMERGENCY_PRIMARY_ACCOUNT || "";
+        this.ppEmergencySecondaryAccount =
+            env.PP_EMERGENCY_SECONDARY_ACCOUNT || "";
+        this.ppWarchestPrimaryAccount = env.PP_WARCHEST_PRIMARY_ACCOUNT || "";
 
         // Data paths
         this.dedupDbPath = env.DEDUP_DB_PATH || "data/dedup.db";
@@ -91,7 +90,6 @@ export class Config {
         this.logLevel = env.LOG_LEVEL || "INFO";
 
         // Scheduling
-        this.ppSyncAllCron = env.PP_SYNC_ALL_CRON || "0 3 * * *";
         this.balanceSyncModel = env.BALANCE_SYNC_MODEL || "";
 
         // User
@@ -127,6 +125,10 @@ export class Config {
             );
         }
         this.onedriveClientId = env.ONEDRIVE_CLIENT_ID;
+
+        // IBKR Flex Web Service
+        this.ibkrFlexToken = env.IBKR_FLEX_TOKEN || "";
+        this.ibkrFlexQueryId = env.IBKR_FLEX_QUERY_ID || "";
     }
 
     static fromEnv() {
