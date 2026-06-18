@@ -1183,8 +1183,8 @@ export class ToolRegistry {
     }
 
     async _handle_resolve_merchant({ merchant, budget_id }) {
-        if (!this._memory) return { payee: "Misc", source: "fallback" };
         if (!budget_id) return { error: "budget_id is required" };
+        if (!this._memory) return { payee: "Misc", source: "fallback" };
         const budgetId = budget_id;
         try {
             const memResults = await this._memory.search(merchant);
