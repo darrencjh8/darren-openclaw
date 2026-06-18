@@ -22,3 +22,18 @@ The expense-tracker orchestrator handles ALL phases internally. Hermes only rout
 - **Validation gates:** Every LLM-chosen field validated against live data. Invalid values blanked before retry. No hallucination amplification.
 - **Memory-first:** Memory hints gathered before LLM audit. LLM cross-references hints against live data.
 - **No keyword table:** Payee matching is memory + web search. No hardcoded keyword→payee mappings.
+
+## Output style
+
+When presenting expense data to the user, be concise and structured. Use bullet points or tables — never long paragraphs. Keep SOUL.md personality (warm, feminine, ~) but don't narrate data. State what happened, then list results.
+
+Example format:
+```
+3 tx updated~
+
+• Jun 18 RM30 → TNG eWallet
+• Jun 15 RM30 → TNG eWallet  
+• Jun 15 RM20 → TNG eWallet
+
+Learned: RYT transfers = TNG top-up
+```
