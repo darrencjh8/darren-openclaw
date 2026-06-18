@@ -14,9 +14,30 @@ import { getAuthUrl, exchangeCodeForToken } from "./onedrive_oauth.js";
 function createTools(server, registry) {
     server.tool(
         "portfolio_sync",
-        "Full portfolio sync — OneDrive pull → IBKR flex → import → AB sync → push → taxonomy.",
+        "Full portfolio sync — OneDrive pull → IBKR flex → import → AB sync → push → taxonomy. Checks OneDrive status first and returns a clear action if not authorized.",
         {},
-        async () => tx(await registry._computeSyncAll()),
+        async () => {
+            // Pre-check: is OneDrive set up and portfolio file available?
+            if (!registry._ppBridge) {
+                const tokenPath =
+                    process.env.ONEDRIVE_REFRESH_TOKEN_PATH ||
+                    "/app/config/onedrive_refresh_token";
+                const hasToken = existsSync(tokenPath);
+                if (!hasToken) {
+                    return tx({
+                        status: "error",
+                        error: "OneDrive not authorized. Portfolio file cannot be synced.",
+                        action: "Run /onedrive setup to authorize OneDrive, then /onedrive pull to download the portfolio file.",
+                    });
+                }
+                return tx({
+                    status: "error",
+                    error: "Portfolio file not found on disk. OneDrive pull may not have run yet.",
+                    action: "Run /onedrive pull to download the portfolio file from OneDrive.",
+                });
+            }
+            return tx(await registry._computeSyncAll());
+        },
     );
     server.tool(
         "portfolio_onedrive_auth_url",

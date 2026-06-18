@@ -779,7 +779,8 @@ export class ToolRegistry {
                 try {
                     if (!this._ppBridge) {
                         t.status = "skipped";
-                        t.error = "PP bridge not available";
+                        t.error =
+                            "OneDrive not synced — portfolio file not downloaded. Run /onedrive setup in Telegram.";
                         continue;
                     }
                     const updateResult = await this._ppBridge.updateBalance({
