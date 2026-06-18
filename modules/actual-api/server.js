@@ -6,8 +6,12 @@ const PORT = process.env.PORT || 3000;
 const SERVER_URL =
     process.env.ACTUAL_BUDGET_SERVER_URL || process.env.ACTUAL_BUDGET_URL;
 const PASSWORD = process.env.ACTUAL_BUDGET_PASSWORD;
-const BUDGET_FILE = process.env.ACTUAL_BUDGET_FILE;
-const MYR_BUDGET_FILE = process.env.MYR_BUDGET_FILE || "";
+const PRIMARY_BUDGET_FILE =
+    process.env.ACTUAL_PRIMARY_BUDGET_FILE || process.env.ACTUAL_BUDGET_FILE;
+const SECONDARY_BUDGET_FILE =
+    process.env.ACTUAL_SECONDARY_BUDGET_FILE ||
+    process.env.MYR_BUDGET_FILE ||
+    "";
 const DATA_DIR = process.env.DATA_DIR || "/tmp/actual-data";
 const BUDGET_SWITCH_DELAY_MS = parseInt(
     process.env.BUDGET_SWITCH_DELAY_MS || "2000",
@@ -81,8 +85,9 @@ async function init() {
         );
         const budgets = await retryWithBackoff(() => actual.getBudgets());
         const budget =
-            budgets.find((b) => b.name === BUDGET_FILE) || budgets[0];
-        if (!budget) throw new Error(`Budget "${BUDGET_FILE}" not found`);
+            budgets.find((b) => b.name === PRIMARY_BUDGET_FILE) || budgets[0];
+        if (!budget)
+            throw new Error(`Budget "${PRIMARY_BUDGET_FILE}" not found`);
         activeSyncId = budget.groupId || budget.cloudFileId;
         await retryWithBackoff(() =>
             actual.downloadBudget(activeSyncId, { password: PASSWORD }),
@@ -110,12 +115,8 @@ async function ensureBudget(budgetIdOrName) {
             b.name === budgetIdOrName,
     );
     if (!target) {
-        if (
-            MYR_BUDGET_FILE &&
-            (budgetIdOrName.includes("MYR") ||
-                budgetIdOrName === MYR_BUDGET_FILE)
-        ) {
-            target = budgets.find((b) => b.name === MYR_BUDGET_FILE);
+        if (SECONDARY_BUDGET_FILE && budgetIdOrName === SECONDARY_BUDGET_FILE) {
+            target = budgets.find((b) => b.name === SECONDARY_BUDGET_FILE);
         }
     }
     if (!target) return;

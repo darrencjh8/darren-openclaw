@@ -3,8 +3,16 @@
  * Ported 1:1 from src/statement/prompts.py
  */
 
-const BUDGET_FILE = process.env.ACTUAL_BUDGET_FILE || "My Budget";
-const MYR_BUDGET_FILE = process.env.MYR_BUDGET_FILE || "My MYR Budget";
+const PRIMARY_CURRENCY = process.env.ACTUAL_PRIMARY_CURRENCY || "SGD";
+const SECONDARY_CURRENCY = process.env.ACTUAL_SECONDARY_CURRENCY || "MYR";
+const PRIMARY_BUDGET_FILE =
+    process.env.ACTUAL_PRIMARY_BUDGET_FILE ||
+    process.env.ACTUAL_BUDGET_FILE ||
+    "My Budget";
+const SECONDARY_BUDGET_FILE =
+    process.env.ACTUAL_SECONDARY_BUDGET_FILE ||
+    process.env.MYR_BUDGET_FILE ||
+    "My MYR Budget";
 
 export const CLASSIFICATION_PROMPT = `\
 Classify this email as "statement", "transaction", or "skip". Respond with ONLY one word.
@@ -85,7 +93,7 @@ NOTIFICATION FORMAT:
      - [date]: [amount] at [description]"
 
 CURRENCY ROUTING:
-  SGD → budget "${BUDGET_FILE}". MYR/RM → budget "${MYR_BUDGET_FILE}".
+  ${PRIMARY_CURRENCY} → budget "${PRIMARY_BUDGET_FILE}". ${SECONDARY_CURRENCY}/RM → budget "${SECONDARY_BUDGET_FILE}".
 
 PASSWORD-PROTECTED PDFs:
   If extract_email_content returns text containing [PDF_ENCRYPTED]:

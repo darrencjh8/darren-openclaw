@@ -8,8 +8,8 @@
  * Required env vars (set these or create gateway/.env):
  *   ACTUAL_BUDGET_SERVER_URL / ACTUAL_BUDGET_URL — Actual server URL
  *   ACTUAL_BUDGET_PASSWORD    — Server password
- *   ACTUAL_BUDGET_FILE        — SGD budget name
- *   MYR_BUDGET_FILE           — MYR budget name (optional; MYR tests skipped)
+ *   ACTUAL_PRIMARY_BUDGET_FILE — SGD budget name
+ *   ACTUAL_SECONDARY_BUDGET_FILE — MYR budget name (optional; MYR tests skipped)
  */
 
 const path = require("path");
@@ -76,8 +76,11 @@ describe("Budget switch integration", () => {
     const SERVER_URL =
         process.env.ACTUAL_BUDGET_SERVER_URL || process.env.ACTUAL_BUDGET_URL;
     const PASSWORD = process.env.ACTUAL_BUDGET_PASSWORD;
-    const SGD_BUDGET = process.env.ACTUAL_BUDGET_FILE;
-    const MYR_BUDGET = process.env.MYR_BUDGET_FILE;
+    const SGD_BUDGET =
+        process.env.ACTUAL_PRIMARY_BUDGET_FILE ||
+        process.env.ACTUAL_BUDGET_FILE;
+    const MYR_BUDGET =
+        process.env.ACTUAL_SECONDARY_BUDGET_FILE || process.env.MYR_BUDGET_FILE;
     const hasMyr = !!(MYR_BUDGET && MYR_BUDGET.trim());
     const DATA_DIR = path.join(os.tmpdir(), `actual-integration-${Date.now()}`);
 
@@ -87,7 +90,10 @@ describe("Budget switch integration", () => {
             if (!SERVER_URL)
                 missing.push("ACTUAL_BUDGET_SERVER_URL or ACTUAL_BUDGET_URL");
             if (!PASSWORD) missing.push("ACTUAL_BUDGET_PASSWORD");
-            if (!SGD_BUDGET) missing.push("ACTUAL_BUDGET_FILE");
+            if (!SGD_BUDGET)
+                missing.push(
+                    "ACTUAL_PRIMARY_BUDGET_FILE or ACTUAL_BUDGET_FILE",
+                );
             throw new Error(
                 `Missing required env vars: ${missing.join(", ")}. ` +
                     "Create gateway/.env or export them before running this test.",
@@ -107,8 +113,8 @@ describe("Budget switch integration", () => {
         // Set env vars for the server module (loaded inside isolateModules)
         process.env.ACTUAL_BUDGET_SERVER_URL = SERVER_URL;
         process.env.ACTUAL_BUDGET_PASSWORD = PASSWORD;
-        process.env.ACTUAL_BUDGET_FILE = SGD_BUDGET;
-        if (hasMyr) process.env.MYR_BUDGET_FILE = MYR_BUDGET;
+        process.env.ACTUAL_PRIMARY_BUDGET_FILE = SGD_BUDGET;
+        if (hasMyr) process.env.ACTUAL_SECONDARY_BUDGET_FILE = MYR_BUDGET;
         process.env.PORT = "0";
         process.env.BUDGET_SWITCH_DELAY_MS = "0";
         process.env.DATA_DIR = DATA_DIR;
