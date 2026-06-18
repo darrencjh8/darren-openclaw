@@ -72,7 +72,6 @@ mcp_servers:
         supports_parallel_tool_calls: false
     portfolio-tracker:
         url: http://portfolio-tracker:8081/messages
-        transport: streamable-http
         tools:
             exclude: []
         supports_parallel_tool_calls: false
