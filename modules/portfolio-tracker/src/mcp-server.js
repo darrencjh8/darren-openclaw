@@ -1,11 +1,12 @@
 /**
- * MCP Server — SSE transport for portfolio-tracker.
- * Exposes 6 tools: sync, OneDrive auth + IO.
- * Follows expense-tracker MCP pattern (spec 021).
+ * MCP Server — Streamable HTTP transport (stateful, per-session).
+ * Pattern: https://github.com/ferrants/mcp-streamable-http-typescript-server
+ * Chosen over SSE because SSE breaks on container restart (session mismatch).
  */
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
+import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
+import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { existsSync } from "fs";
 import { pullFromOneDrive, pushToOneDrive } from "./onedrive.js";
@@ -17,19 +18,17 @@ function createTools(server, registry) {
         "Full portfolio sync — OneDrive pull → IBKR flex → import → AB sync → push → taxonomy. Checks OneDrive status first and returns a clear action if not authorized.",
         {},
         async () => {
-            // Pre-check: is OneDrive set up and portfolio file available?
             if (!registry._ppBridge) {
                 const tokenPath =
                     process.env.ONEDRIVE_REFRESH_TOKEN_PATH ||
                     "/app/config/onedrive_refresh_token";
                 const hasToken = existsSync(tokenPath);
-                if (!hasToken) {
+                if (!hasToken)
                     return tx({
                         status: "error",
                         error: "OneDrive not authorized. Portfolio file cannot be synced.",
                         action: "Run /onedrive setup to authorize OneDrive, then /onedrive pull to download the portfolio file.",
                     });
-                }
                 return tx({
                     status: "error",
                     error: "Portfolio file not found on disk. OneDrive pull may not have run yet.",
@@ -139,29 +138,89 @@ function createTools(server, registry) {
 }
 
 export function createMcpServer(registry, app) {
-    let transport = null;
+    const transports = {};
 
-    app.get("/sse", async (_req, res) => {
-        const server = new McpServer({
-            name: "portfolio-tracker",
-            version: "1.0.0",
-        });
-        createTools(server, registry);
-        transport = new SSEServerTransport("/messages", res);
-        await server.connect(transport);
-        console.log(JSON.stringify({ event: "mcp_sse_connected" }));
+    app.post("/mcp", async (req, res) => {
+        try {
+            const sessionId = req.headers["mcp-session-id"];
+            let transport;
+
+            if (sessionId && transports[sessionId]) {
+                transport = transports[sessionId];
+            } else if (!sessionId) {
+                const server = new McpServer({
+                    name: "portfolio-tracker",
+                    version: "1.0.0",
+                });
+                createTools(server, registry);
+                transport = new StreamableHTTPServerTransport({
+                    sessionIdGenerator: () => randomUUID(),
+                    enableJsonResponse: true,
+                    onsessioninitialized: (sid) => {
+                        transports[sid] = transport;
+                    },
+                });
+                transport.onclose = () => {
+                    const sid = transport.sessionId;
+                    if (sid) delete transports[sid];
+                };
+                await server.connect(transport);
+            } else {
+                res.status(400).json({
+                    jsonrpc: "2.0",
+                    error: {
+                        code: -32000,
+                        message: "Bad Request: invalid session",
+                    },
+                    id: null,
+                });
+                return;
+            }
+            await transport.handleRequest(req, res, req.body);
+        } catch (e) {
+            console.error(
+                JSON.stringify({ event: "mcp_error", error: e.message }),
+            );
+            if (!res.headersSent)
+                res.status(500).json({
+                    jsonrpc: "2.0",
+                    error: { code: -32603, message: "Internal server error" },
+                    id: null,
+                });
+        }
     });
 
-    app.post("/messages", async (req, res) => {
-        if (transport) {
-            await transport.handlePostMessage(req, res, req.body);
-        } else {
-            res.status(503).json({ error: "No active SSE connection" });
+    app.get("/mcp", async (req, res) => {
+        const sessionId = req.headers["mcp-session-id"];
+        if (!sessionId || !transports[sessionId]) {
+            res.status(400).end("Invalid session");
+            return;
+        }
+        try {
+            await transports[sessionId].handleRequest(req, res);
+        } catch (e) {
+            if (!res.headersSent) res.status(500).end();
+        }
+    });
+
+    app.delete("/mcp", async (req, res) => {
+        const sessionId = req.headers["mcp-session-id"];
+        if (!sessionId || !transports[sessionId]) {
+            res.status(400).end("Invalid session");
+            return;
+        }
+        try {
+            await transports[sessionId].handleRequest(req, res);
+        } catch (e) {
+            if (!res.headersSent) res.status(500).end();
         }
     });
 
     console.log(
-        JSON.stringify({ event: "mcp_server_ready", transport: "sse" }),
+        JSON.stringify({
+            event: "mcp_server_ready",
+            transport: "streamable-http",
+        }),
     );
 }
 
