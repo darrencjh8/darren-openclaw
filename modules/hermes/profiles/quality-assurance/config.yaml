@@ -13,28 +13,14 @@ agent:
 display:
     show_reasoning: false
 
-fallback_providers:
-    - provider: gemini
-      model: gemini-3.1-flash-lite
-      api_key: ${GEMINI_API_KEY}
-
-delegation:
-    max_spawn_depth: 1
-    max_iterations: 100
-    model: deepseek-v4-flash
-
 approvals:
     mode: smart
     timeout: 60
-    cron_mode: allow
 
 memory:
     memory_enabled: true
     user_profile_enabled: false
     write_approval: true
-
-skills:
-    guard_agent_created: true
 
 terminal:
     backend: local
@@ -44,44 +30,6 @@ terminal:
 web:
     search_backend: brave-free
     extract_backend: firecrawl
-
-auxiliary:
-    vision:
-        provider: gemini
-        model: gemini-3.1-flash-lite
-    web_extract:
-        provider: deepseek
-        model: deepseek-v4-flash
-        extra_body:
-            thinking:
-                type: disabled
-    compression:
-        provider: deepseek
-        model: deepseek-v4-flash
-        extra_body:
-            thinking:
-                type: disabled
-    approval:
-        provider: deepseek
-        model: deepseek-v4-flash
-        extra_body:
-            thinking:
-                type: disabled
-    kanban_decomposer:
-        provider: deepseek
-        model: deepseek-v4-pro
-    triage_specifier:
-        provider: deepseek
-        model: deepseek-v4-flash
-        extra_body:
-            thinking:
-                type: disabled
-    profile_describer:
-        provider: deepseek
-        model: deepseek-v4-flash
-        extra_body:
-            thinking:
-                type: disabled
 
 timezone: Asia/Kuala_Lumpur
 
@@ -101,19 +49,3 @@ mcp_servers:
         tools:
             exclude: []
         supports_parallel_tool_calls: false
-
-platforms:
-    webhook:
-        enabled: true
-        extra:
-            port: 8644
-            secret: ${HERMES_WEBHOOK_SECRET}
-            routes:
-                notify:
-                    secret: ${HERMES_WEBHOOK_SECRET}
-                    prompt: |
-                        SYSTEM: A notification arrived. Relay it.
-                        NOTIFICATION: {message}
-                    deliver: telegram
-                    deliver_extra:
-                        chat_id: "${TELEGRAM_HOME_CHANNEL}"

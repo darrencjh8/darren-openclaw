@@ -13,28 +13,14 @@ agent:
 display:
     show_reasoning: false
 
-fallback_providers:
-    - provider: gemini
-      model: gemini-3.1-flash-lite
-      api_key: ${GEMINI_API_KEY}
-
-delegation:
-    max_spawn_depth: 1
-    max_iterations: 100
-    model: deepseek-v4-flash
-
 approvals:
     mode: smart
     timeout: 60
-    cron_mode: allow
 
 memory:
     memory_enabled: true
     user_profile_enabled: false
     write_approval: true
-
-skills:
-    guard_agent_created: true
 
 terminal:
     backend: local

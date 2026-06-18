@@ -47,11 +47,8 @@ web:
 
 auxiliary:
     vision:
-        provider: deepseek
-        model: deepseek-v4-flash
-        extra_body:
-            thinking:
-                type: disabled
+        provider: gemini
+        model: gemini-3.1-flash-lite
     web_extract:
         provider: deepseek
         model: deepseek-v4-flash
@@ -72,10 +69,7 @@ auxiliary:
                 type: disabled
     kanban_decomposer:
         provider: deepseek
-        model: deepseek-v4-flash
-        extra_body:
-            thinking:
-                type: disabled
+        model: deepseek-v4-pro
     triage_specifier:
         provider: deepseek
         model: deepseek-v4-flash
