@@ -87,7 +87,10 @@ echo "--- Expense Tracker (.env) ---"
 ET_ENV="$ET_DIR/.env"
 if check_file "$ET_ENV"; then
   for v in DEEPSEEK_API_KEY ACTUAL_BUDGET_URL ACTUAL_BUDGET_PASSWORD \
-           ACTUAL_BUDGET_FILE IMAP_HOST IMAP_USERNAME IMAP_PASSWORD; do
+           ACTUAL_PRIMARY_BUDGET_FILE ACTUAL_SECONDARY_BUDGET_FILE \
+           ACTUAL_PRIMARY_CURRENCY ACTUAL_SECONDARY_CURRENCY \
+           NOTIFY_URL HERMES_WEBHOOK_SECRET \
+           IMAP_HOST IMAP_USERNAME IMAP_PASSWORD; do
     check_var "$v" "$ET_ENV"
   done
 fi
@@ -241,7 +244,7 @@ echo ""
 echo "--- Git Pull ---"
 cd "$ROOT"
 git stash push -m "auto-deploy-stash-$(date +%s)" 2>/dev/null || true
-git pull origin main
+git pull
 git stash drop 2>/dev/null || true
 echo "  ✓ code updated"
 
