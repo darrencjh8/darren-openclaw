@@ -1,11 +1,11 @@
 /**
- * MCP Server — SSE transport for portfolio-tracker.
- * Exposes 7 tools: sync, IBKR flex import, OneDrive auth + IO.
- * Follows expense-tracker MCP pattern (spec 021).
+ * MCP Server — Streamable HTTP transport for portfolio-tracker.
+ * Exposes 6 tools: sync, OneDrive auth + IO.
+ * Follows MCP Streamable HTTP spec (more stable than SSE).
  */
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
+import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { z } from "zod";
 import { existsSync } from "fs";
 import { pullFromOneDrive, pushToOneDrive } from "./onedrive.js";
@@ -15,7 +15,7 @@ function createTools(server, registry) {
     // ── Sync ──────────────────────────────────────────────────────
     server.tool(
         "portfolio_sync",
-        "Trigger full portfolio sync — OneDrive pull → AB balance sync (3 accounts) → OneDrive push → taxonomy export to Google Sheets. No LLM involvement.",
+        "Trigger full portfolio sync — OneDrive pull → IBKR flex pull → Java CLI import → AB balance sync (3 accounts) → OneDrive push → taxonomy export to Google Sheets. No LLM involvement.",
         {},
         async () => tx(await registry._computeSyncAll()),
     );
@@ -75,7 +75,6 @@ function createTools(server, registry) {
                 });
             }
 
-            // Actually validate the token by attempting to fetch an access token
             try {
                 const { readFileSync } = await import("fs");
                 const refreshToken = readFileSync(tokenPath, "utf8").trim();
@@ -140,36 +139,62 @@ function createTools(server, registry) {
 }
 
 /**
- * Register MCP SSE transport on the Express app.
+ * Register MCP Streamable HTTP transport on the Express app.
  * Must be called before app.listen().
  *
  * @param {import("./tools.js").ToolRegistry} registry
  * @param {import("express").Express} app
  */
 export function createMcpServer(registry, app) {
-    let transport = null;
+    const server = new McpServer({
+        name: "portfolio-tracker",
+        version: "1.0.0",
+    });
+    createTools(server, registry);
 
-    app.get("/sse", async (_req, res) => {
-        const server = new McpServer({
-            name: "portfolio-tracker",
-            version: "1.0.0",
-        });
-        createTools(server, registry);
-        transport = new SSEServerTransport("/messages", res);
-        await server.connect(transport);
-        console.log(JSON.stringify({ event: "mcp_sse_connected" }));
+    const transport = new StreamableHTTPServerTransport({
+        sessionIdGenerator: undefined, // stateless mode
     });
 
+    // POST /messages — handles all MCP protocol messages
     app.post("/messages", async (req, res) => {
-        if (transport) {
-            await transport.handlePostMessage(req, res, req.body);
-        } else {
-            res.status(503).json({ error: "No active SSE connection" });
+        try {
+            await transport.handleRequest(req, res, req.body);
+        } catch (e) {
+            console.error(
+                JSON.stringify({ event: "mcp_error", error: e.message }),
+            );
+            if (!res.headersSent) {
+                res.status(500).json({ error: e.message });
+            }
         }
     });
 
+    // Connect the transport (starts listening)
+    server
+        .connect(transport)
+        .then(() => {
+            console.log(
+                JSON.stringify({
+                    event: "mcp_server_connected",
+                    transport: "streamable-http",
+                }),
+            );
+        })
+        .catch((e) => {
+            console.error(
+                JSON.stringify({
+                    event: "mcp_connect_error",
+                    error: e.message,
+                }),
+            );
+        });
+
     console.log(
-        JSON.stringify({ event: "mcp_server_ready", transport: "sse" }),
+        JSON.stringify({
+            event: "mcp_server_ready",
+            transport: "streamable-http",
+        }),
     );
 }
 
