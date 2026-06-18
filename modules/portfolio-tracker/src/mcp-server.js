@@ -1,11 +1,11 @@
 /**
- * MCP Server — SSE transport for portfolio-tracker.
- * Exposes 6 tools: sync, OneDrive auth + IO.
- * Follows expense-tracker MCP pattern (spec 021).
+ * MCP Server — Streamable HTTP transport (stateful, per-session).
+ * Pattern: https://github.com/ferrants/mcp-streamable-http-typescript-server
  */
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
+import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
+import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { existsSync } from "fs";
 import { pullFromOneDrive, pushToOneDrive } from "./onedrive.js";
@@ -14,14 +14,13 @@ import { getAuthUrl, exchangeCodeForToken } from "./onedrive_oauth.js";
 function createTools(server, registry) {
     server.tool(
         "portfolio_sync",
-        "Trigger full portfolio sync — OneDrive pull → IBKR flex pull → Java CLI import → AB balance sync (3 accounts) → OneDrive push → taxonomy export to Google Sheets. No LLM involvement.",
+        "Full portfolio sync — OneDrive pull → IBKR flex → import → AB sync → push → taxonomy.",
         {},
         async () => tx(await registry._computeSyncAll()),
     );
-
     server.tool(
         "portfolio_onedrive_auth_url",
-        "Get the Microsoft OAuth URL for one-time OneDrive authorization.",
+        "Get Microsoft OAuth URL for OneDrive authorization.",
         {},
         async () => {
             try {
@@ -31,18 +30,10 @@ function createTools(server, registry) {
             }
         },
     );
-
     server.tool(
         "portfolio_onedrive_auth_complete",
-        "Complete OneDrive OAuth by exchanging the authorization code from the redirect URL for a refresh token.",
-        {
-            redirect_uri: z
-                .string()
-                .min(1)
-                .describe(
-                    "The full redirect URL from the browser address bar after authorizing (contains ?code=...)",
-                ),
-        },
+        "Complete OneDrive OAuth by exchanging auth code for refresh token.",
+        { redirect_uri: z.string().min(1) },
         async (args) => {
             try {
                 return tx(await exchangeCodeForToken(args.redirect_uri));
@@ -51,27 +42,24 @@ function createTools(server, registry) {
             }
         },
     );
-
     server.tool(
         "portfolio_onedrive_status",
-        "Check if OneDrive is authorized by validating the refresh token against Microsoft.",
+        "Check OneDrive authorization by validating refresh token.",
         {},
         async () => {
             const tokenPath =
                 process.env.ONEDRIVE_REFRESH_TOKEN_PATH ||
                 "/app/config/onedrive_refresh_token";
             const clientId = process.env.ONEDRIVE_CLIENT_ID || "";
-            if (!existsSync(tokenPath)) {
+            if (!existsSync(tokenPath))
                 return tx({
                     authorized: false,
-                    reason: "Refresh token file not found",
-                    action: "Run /onedrive setup to authorize OneDrive",
+                    reason: "No token file",
+                    action: "Run /onedrive setup",
                 });
-            }
             try {
                 const { readFileSync } = await import("fs");
-                const refreshToken = readFileSync(tokenPath, "utf8").trim();
-                const resp = await fetch(
+                const r = await fetch(
                     "https://login.microsoftonline.com/common/oauth2/v2.0/token",
                     {
                         method: "POST",
@@ -80,7 +68,10 @@ function createTools(server, registry) {
                         },
                         body: new URLSearchParams({
                             client_id: clientId,
-                            refresh_token: refreshToken,
+                            refresh_token: readFileSync(
+                                tokenPath,
+                                "utf8",
+                            ).trim(),
                             grant_type: "refresh_token",
                             redirect_uri:
                                 "https://login.microsoftonline.com/common/oauth2/nativeclient",
@@ -88,70 +79,128 @@ function createTools(server, registry) {
                         signal: AbortSignal.timeout(10000),
                     },
                 );
-                if (!resp.ok) {
-                    const err = await resp.text();
+                if (!r.ok) {
+                    const t = await r.text();
                     return tx({
                         authorized: false,
-                        reason: `Token refresh failed: HTTP ${resp.status}`,
-                        detail: err.slice(0, 200),
-                        action: "Run /onedrive setup to re-authorize OneDrive",
+                        reason: `HTTP ${r.status}`,
+                        detail: t.slice(0, 200),
+                        action: "Run /onedrive setup",
                     });
                 }
                 return tx({
                     authorized: true,
-                    token_path: tokenPath,
                     client_id: clientId
-                        ? `${clientId.slice(0, 8)}...`
+                        ? clientId.slice(0, 8) + "..."
                         : "not set",
                 });
             } catch (e) {
                 return tx({
                     authorized: false,
                     reason: e.message,
-                    action: "Run /onedrive setup to re-authorize OneDrive",
+                    action: "Run /onedrive setup",
                 });
             }
         },
     );
-
     server.tool(
         "portfolio_onedrive_pull",
-        "Download latest Portfolio.portfolio from OneDrive.",
+        "Download Portfolio.portfolio from OneDrive.",
         {},
         async () => tx(await pullFromOneDrive()),
     );
     server.tool(
         "portfolio_onedrive_push",
-        "Upload current Portfolio.portfolio to OneDrive.",
+        "Upload Portfolio.portfolio to OneDrive.",
         {},
         async () => tx(await pushToOneDrive()),
     );
 }
 
 export function createMcpServer(registry, app) {
-    let transport = null;
+    const transports = {};
 
-    app.get("/sse", async (_req, res) => {
-        const server = new McpServer({
-            name: "portfolio-tracker",
-            version: "1.0.0",
-        });
-        createTools(server, registry);
-        transport = new SSEServerTransport("/messages", res);
-        await server.connect(transport);
-        console.log(JSON.stringify({ event: "mcp_sse_connected" }));
+    app.post("/mcp", async (req, res) => {
+        try {
+            const sessionId = req.headers["mcp-session-id"];
+            let transport;
+
+            if (sessionId && transports[sessionId]) {
+                transport = transports[sessionId];
+            } else if (!sessionId) {
+                const server = new McpServer({
+                    name: "portfolio-tracker",
+                    version: "1.0.0",
+                });
+                createTools(server, registry);
+                transport = new StreamableHTTPServerTransport({
+                    sessionIdGenerator: () => randomUUID(),
+                    enableJsonResponse: true,
+                    onsessioninitialized: (sid) => {
+                        transports[sid] = transport;
+                    },
+                });
+                transport.onclose = () => {
+                    const sid = transport.sessionId;
+                    if (sid) delete transports[sid];
+                };
+                await server.connect(transport);
+            } else {
+                res.status(400).json({
+                    jsonrpc: "2.0",
+                    error: {
+                        code: -32000,
+                        message: "Bad Request: invalid session",
+                    },
+                    id: null,
+                });
+                return;
+            }
+            await transport.handleRequest(req, res, req.body);
+        } catch (e) {
+            console.error(
+                JSON.stringify({ event: "mcp_error", error: e.message }),
+            );
+            if (!res.headersSent)
+                res.status(500).json({
+                    jsonrpc: "2.0",
+                    error: { code: -32603, message: "Internal server error" },
+                    id: null,
+                });
+        }
     });
 
-    app.post("/messages", async (req, res) => {
-        if (transport) {
-            await transport.handlePostMessage(req, res, req.body);
-        } else {
-            res.status(503).json({ error: "No active SSE connection" });
+    app.get("/mcp", async (req, res) => {
+        const sessionId = req.headers["mcp-session-id"];
+        if (!sessionId || !transports[sessionId]) {
+            res.status(400).end("Invalid session");
+            return;
+        }
+        try {
+            await transports[sessionId].handleRequest(req, res);
+        } catch (e) {
+            if (!res.headersSent) res.status(500).end();
+        }
+    });
+
+    app.delete("/mcp", async (req, res) => {
+        const sessionId = req.headers["mcp-session-id"];
+        if (!sessionId || !transports[sessionId]) {
+            res.status(400).end("Invalid session");
+            return;
+        }
+        try {
+            await transports[sessionId].handleRequest(req, res);
+        } catch (e) {
+            if (!res.headersSent) res.status(500).end();
         }
     });
 
     console.log(
-        JSON.stringify({ event: "mcp_server_ready", transport: "sse" }),
+        JSON.stringify({
+            event: "mcp_server_ready",
+            transport: "streamable-http",
+        }),
     );
 }
 
