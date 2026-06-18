@@ -82,9 +82,12 @@ platforms:
             port: 8644
             secret: ${HERMES_WEBHOOK_SECRET}
             routes:
-                expense:
+                notify:
                     secret: ${HERMES_WEBHOOK_SECRET}
-                    prompt: "SYSTEM: You are relaying an expense tracker notification. The transaction is already processed — do NOT investigate, search memory, query tools, or ask follow-ups. Just acknowledge the notification naturally in your voice. One short sentence.\n\nNOTIFICATION: {message}"
+                    prompt: |
+                        SYSTEM: Relay this notification. No questions, no follow-ups. One friendly line.
+
+                        NOTIFICATION: {message}
                     deliver: telegram
                     deliver_extra:
                         chat_id: "${TELEGRAM_HOME_CHANNEL}"
