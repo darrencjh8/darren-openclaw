@@ -29,9 +29,10 @@ else
 fi
 
 cp "$SRC_DIR/MEMORY.md" "$SRC_DIR/USER.md" "$CLONE_DIR/" 2>/dev/null || true
-if [ -n "$EXPENSE_DIR" ] && [ -f "$EXPENSE_DIR/MEMORY.md" ]; then
+if [ -n "$EXPENSE_DIR" ]; then
     mkdir -p "$CLONE_DIR/expense-tracker"
-    cp "$EXPENSE_DIR/MEMORY.md" "$CLONE_DIR/expense-tracker/"
+    cp "$EXPENSE_DIR/MEMORY.md" "$CLONE_DIR/expense-tracker/" 2>/dev/null || true
+    cp "$EXPENSE_DIR/mappings.json" "$CLONE_DIR/expense-tracker/" 2>/dev/null || true
 fi
 
 cd "$CLONE_DIR"
