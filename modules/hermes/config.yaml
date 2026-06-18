@@ -74,6 +74,11 @@ mcp_servers:
         tools:
             exclude: []
         supports_parallel_tool_calls: false
+    ktmb-booking:
+        url: http://ktmb-booking:8082/mcp
+        tools:
+            exclude: []
+        supports_parallel_tool_calls: false
 
 platforms:
     webhook:
@@ -85,8 +90,7 @@ platforms:
                 notify:
                     secret: ${HERMES_WEBHOOK_SECRET}
                     prompt: |
-                        SYSTEM: Relay this notification. No questions, no follow-ups. One friendly line.
-
+                        SYSTEM: A notification arrived. Relay it.
                         NOTIFICATION: {message}
                     deliver: telegram
                     deliver_extra:

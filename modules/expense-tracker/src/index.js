@@ -15,7 +15,7 @@ import { logger } from "./logging.js";
 import { DedupJournal } from "./dedup.js";
 
 const HERMES_WEBHOOK_URL =
-    process.env.HERMES_WEBHOOK_URL || "http://hermes:8644/webhooks/expense";
+    process.env.HERMES_WEBHOOK_URL || "http://hermes:8644/webhooks/notify";
 const HERMES_WEBHOOK_SECRET = process.env.HERMES_WEBHOOK_SECRET;
 import { StatementProcessor } from "./statement/orchestrator.js";
 import { existsSync } from "fs";
