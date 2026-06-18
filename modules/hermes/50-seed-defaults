@@ -9,13 +9,26 @@ mkdir -p /opt/data/scripts
 cp -r /opt/hermes-defaults/scripts/* /opt/data/scripts/
 chmod +x /opt/data/scripts/*.sh
 
+# Seed profile configs and SOUL files (idempotent — won't overwrite existing)
+for profile_dir in /opt/hermes-defaults/profiles/*/; do
+    [ -d "$profile_dir" ] || continue
+    name=$(basename "$profile_dir")
+    mkdir -p "/opt/data/profiles/$name"
+    # Only seed if file doesn't already exist (preserves user edits)
+    [ ! -f "/opt/data/profiles/$name/config.yaml" ] && cp "$profile_dir/config.yaml" "/opt/data/profiles/$name/config.yaml" 2>/dev/null || true
+    [ ! -f "/opt/data/profiles/$name/SOUL.md" ] && cp "$profile_dir/SOUL.md" "/opt/data/profiles/$name/SOUL.md" 2>/dev/null || true
+done
+
 # Ensure cron-run directories are owned by hermes (gateway runs as hermes)
 mkdir -p /opt/data/memories-backup
 chown -R hermes:hermes /opt/data/memories-backup 2>/dev/null || true
 
 python3 -c '
-import os, re
-for path in ["/opt/data/config.yaml", "/opt/data/SOUL.md"]:
+import os, re, glob
+paths = ["/opt/data/config.yaml", "/opt/data/SOUL.md"]
+# Also resolve env vars in profile configs
+paths.extend(glob.glob("/opt/data/profiles/*/config.yaml"))
+for path in paths:
     with open(path) as f:
         content = f.read()
     content = re.sub(r"\$\{(\w+)\}", lambda m: os.environ.get(m.group(1), m.group(0)), content)
