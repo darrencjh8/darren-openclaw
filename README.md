@@ -137,7 +137,7 @@ Edit each `.env` with your credentials. See `.env.example` files for all require
 ### Step 3: Deploy
 
 ```bash
-./scripts/deploy.sh
+./modules/deploy.sh
 ```
 
 The script validates all required environment variables across all modules, then starts the containers. Verify:

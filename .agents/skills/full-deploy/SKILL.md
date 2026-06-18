@@ -111,7 +111,7 @@ Report the new HEAD commit to the user.
 The deploy script does `docker compose build` + `docker compose up -d`. This takes several minutes and will time out if run directly. **Use `spawn_agent` to run it in the background:**
 
 ```
-spawn_agent label="Redeploy" message="SSH to <user>@<server> and run: cd ~/darren-openclaw && bash ./scripts/deploy.sh --non-interactive. Report the full output including the health check results at the end."
+spawn_agent label="Redeploy" message="SSH to <user>@<server> and run: cd ~/darren-openclaw && bash ./modules/deploy.sh --component all --non-interactive. Report the full output including the health check results at the end."
 ```
 
 Wait for the agent to complete.

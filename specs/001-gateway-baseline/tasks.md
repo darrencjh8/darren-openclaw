@@ -99,7 +99,7 @@ environment:
 ```bash
 # Set bot token (even a dummy for health check)
 export TELEGRAM_BOT_TOKEN=123:abc
-./scripts/deploy.sh
+./modules/deploy.sh
 sleep 5
 curl http://localhost:18789/health
 docker compose logs openclaw | grep -i "skill\|expense-tracker"
@@ -159,7 +159,7 @@ Update `README.md` with Telegram bot setup instructions:
 2. Get user ID via @userinfobot
 3. Set env vars (TELEGRAM_BOT_TOKEN, plus expense-tracker .env)
 4. Update `openclaw.json` `allowFrom`
-5. `./scripts/deploy.sh`
+5. `./modules/deploy.sh --component all`
 6. Send first message to bot
 
 ---

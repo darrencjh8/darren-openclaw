@@ -410,7 +410,7 @@ Phase 3: Integration & Deploy
      1. Clone repo
      2. Copy `.env.example` to `.env`, fill in all values
      3. Generate a app-specific password (IMAP → Settings → Mail Accounts → IMAP Access)
-      4. `./scripts/deploy.sh` (from repo root)
+      4. `./modules/deploy.sh` (from repo root)
      5. Or: `pip install -r requirements.txt && python -m src.main` (local dev)
    - How to set up the burner inbox (step-by-step)
    - How to configure email forwarding from bank/payment apps → burner email
