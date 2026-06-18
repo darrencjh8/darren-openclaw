@@ -177,6 +177,7 @@ async function main() {
         "list_facts",
         "update_fact",
         "delete_fact",
+        "cleanup_facts",
         "fetch_budgets",
         "fetch_accounts",
         "fetch_categories",

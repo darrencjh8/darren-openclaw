@@ -131,6 +131,12 @@ function createTools(server, registry) {
         {},
         async () => tx(await registry.executeTool("compact_facts", {})),
     );
+    server.tool(
+        "cleanup_facts",
+        "Clean expense-tracker memory: resolve contradictory facts (newest wins) and deduplicate free-form facts using semantic similarity. Returns {before, after, removed, contradictions} for review.",
+        {},
+        async () => tx(await registry.executeTool("cleanup_facts", {})),
+    );
     // ── Telegram transaction entry ──────────────────────────────
     server.tool(
         "process_transaction",
