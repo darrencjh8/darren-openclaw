@@ -42,7 +42,8 @@ terminal:
     cwd: /workspace
 
 web:
-    backend: firecrawl
+    search_backend: brave-free
+    extract_backend: firecrawl
 
 auxiliary:
     vision:
