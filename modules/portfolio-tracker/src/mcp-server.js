@@ -12,10 +12,72 @@ import { existsSync } from "fs";
 import { pullFromOneDrive, pushToOneDrive } from "./onedrive.js";
 import { getAuthUrl, exchangeCodeForToken } from "./onedrive_oauth.js";
 
+function formatSyncResult(raw) {
+    const lines = [];
+
+    // Sync status
+    if (raw.summary) lines.push(raw.summary);
+
+    // New IBKR activity
+    const fi = raw.flex_import;
+    if (fi && (fi.trades_imported > 0 || fi.dividends_imported > 0)) {
+        lines.push(
+            `IBKR: ${fi.trades_imported || 0} trades, ${fi.dividends_imported || 0} dividends`,
+        );
+    }
+
+    // Portfolio totals
+    const s = raw.portfolio_status?.summary;
+    if (s) {
+        const total = Number(s.total_value_sgd || 0);
+        const equity = Number(s.equity_value_sgd || 0);
+        const cash = total - equity;
+        lines.push("");
+        lines.push(
+            `Total  SGD ${total.toLocaleString("en-SG", { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`,
+        );
+        lines.push(
+            `Equity SGD ${equity.toLocaleString("en-SG", { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`,
+        );
+        lines.push(
+            `Cash   SGD ${cash.toLocaleString("en-SG", { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`,
+        );
+
+        // Top holdings
+        const top = s.top_holdings || raw.portfolio_status?.holdings;
+        if (top && top.length) {
+            const sorted = [...top]
+                .filter((h) => (h.market_value || 0) > 0)
+                .sort((a, b) => (b.market_value || 0) - (a.market_value || 0))
+                .slice(0, 5);
+            lines.push("");
+            const header = "Instrument           Value";
+            lines.push(header);
+            lines.push("─".repeat(header.length));
+            for (const h of sorted) {
+                const name = (h.name || h.ticker || "?")
+                    .padEnd(20)
+                    .slice(0, 20);
+                const val =
+                    h.market_value != null
+                        ? Number(h.market_value).toLocaleString("en-SG", {
+                              minimumFractionDigits: 0,
+                              maximumFractionDigits: 0,
+                          })
+                        : "?";
+                const currency = h.currency || "";
+                lines.push(`${name} ${val} ${currency}`);
+            }
+        }
+    }
+
+    return lines.join("\n");
+}
+
 function createTools(server, registry) {
     server.tool(
         "portfolio_sync",
-        "Full portfolio sync — OneDrive pull → IBKR flex → import → AB sync → push → taxonomy. Checks OneDrive status first and returns a clear action if not authorized.",
+        "Full portfolio sync — OneDrive pull → IBKR flex → import → AB sync → push → taxonomy. Returns a concise structured summary. Relay this output directly without re-narrating or adding commentary.",
         {},
         async () => {
             if (!registry._ppBridge) {
@@ -35,7 +97,8 @@ function createTools(server, registry) {
                     action: "Run /onedrive pull to download the portfolio file from OneDrive.",
                 });
             }
-            return tx(await registry._computeSyncAll());
+            const raw = await registry._computeSyncAll();
+            return tx({ text: formatSyncResult(raw), _raw: raw });
         },
     );
     server.tool(
