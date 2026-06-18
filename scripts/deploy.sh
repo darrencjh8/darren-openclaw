@@ -18,6 +18,7 @@ for arg in "$@"; do
 done
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+MODULES_DIR="$ROOT/modules"
 GATEWAY_DIR="$ROOT/gateway"
 PT_DIR="$ROOT/modules/portfolio-tracker"
 ET_DIR="$ROOT/modules/expense-tracker"
@@ -253,7 +254,7 @@ echo "  ✓ code updated"
 
 # ---- deploy ----
 
-cd "$GATEWAY_DIR"
+cd "$MODULES_DIR"
 echo "Starting Cloudflare Warp (VPN for faster Docker pulls)..."
 warp-cli --accept-tos connect 2>/dev/null || true
 sleep 2
