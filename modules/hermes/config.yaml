@@ -71,7 +71,7 @@ mcp_servers:
             exclude: []
         supports_parallel_tool_calls: false
     portfolio-tracker:
-        url: http://portfolio-tracker:8081/messages
+        url: http://portfolio-tracker:8081/mcp
         tools:
             exclude: []
         supports_parallel_tool_calls: false
