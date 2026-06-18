@@ -103,3 +103,11 @@ except (FileNotFoundError, json.JSONDecodeError):
             json.dump({"jobs": jobs, "updated_at": datetime.datetime.now(datetime.timezone.utc).isoformat()}, f, indent=2)
             print("cron: portfolio-daily-sync seeded")
 ' || true
+
+# Disable profile gateways (workers don't need their own gateways — they compete for Telegram token)
+for gw_dir in /run/service/gateway-*; do
+    [ -d "$gw_dir" ] || continue
+    name=$(basename "$gw_dir")
+    [ "$name" = "gateway-default" ] && continue
+    /package/admin/s6-2.15.0.0/command/s6-svc -D "$gw_dir" 2>/dev/null || true
+done
