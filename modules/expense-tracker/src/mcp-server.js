@@ -129,6 +129,13 @@ function createTools(server, registry) {
         {},
         async () => tx(await registry.executeTool("compact_facts", {})),
     );
+    // ── Telegram transaction entry ──────────────────────────────
+    server.tool(
+        "process_transaction",
+        "Process a raw bank transaction alert (forwarded from phone/Telegram) through the full pipeline: extract fields, classify, insert into Actual Budget. Returns {action, details}. No notification sent — result returned inline.",
+        { raw_text: z.string().min(1) },
+        async (a) => tx(await registry.executeTool("process_transaction", a)),
+    );
 }
 
 export function createMcpServer(registry, app) {

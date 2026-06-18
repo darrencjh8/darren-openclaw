@@ -666,6 +666,22 @@ const TOOLS = [
             required: ["id", "budget_id"],
         },
     },
+    {
+        name: "process_transaction",
+        description:
+            "Process a raw bank transaction alert (text forwarded from phone/Telegram) through the full 4-phase pipeline: extract merchant/amount/date, classify, and insert into Actual Budget. Returns {action, details}.",
+        schema: {
+            type: "object",
+            properties: {
+                raw_text: {
+                    type: "string",
+                    description:
+                        "Raw text of the transaction alert (e.g., 'S$12.80 Toast Box on DBS Yuu').",
+                },
+            },
+            required: ["raw_text"],
+        },
+    },
 ];
 
 const TOOL_MAP = Object.fromEntries(TOOLS.map((t) => [t.name, t]));
@@ -682,10 +698,15 @@ export class ToolRegistry {
         this._emailRaw = null;
         this._imapHandler = null;
         this._statementJournal = null;
+        this._orchestrator = null;
     }
 
     setStatementJournal(journal) {
         this._statementJournal = journal;
+    }
+
+    setOrchestrator(orchestrator) {
+        this._orchestrator = orchestrator;
     }
 
     setEmailContext(msgId, rawEmail, imapHandler) {
@@ -1412,5 +1433,23 @@ export class ToolRegistry {
         });
         if (!r.ok) throw new Error(`actual-api ${r.status}`);
         return r.json();
+    }
+
+    // ── Telegram transaction entry ─────────────────────────────────
+
+    async _handle_process_transaction({ raw_text }) {
+        if (!this._orchestrator) {
+            return {
+                action: "error",
+                details: "Orchestrator not available",
+            };
+        }
+        if (!raw_text || !String(raw_text).trim()) {
+            return {
+                action: "error",
+                details: "No transaction text provided",
+            };
+        }
+        return this._orchestrator.processText(String(raw_text).trim());
     }
 }
