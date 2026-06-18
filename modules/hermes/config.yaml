@@ -23,7 +23,7 @@ delegation:
 approvals:
     mode: smart
     timeout: 60
-    cron_mode: deny
+    cron_mode: allow
 
 memory:
     memory_enabled: true
