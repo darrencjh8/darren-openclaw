@@ -99,6 +99,84 @@ export class AgentOrchestrator {
     }
 
     /**
+     * Process raw alert text from Telegram — same 4-phase pipeline, no IMAP/notify.
+     */
+    async processText(rawText) {
+        try {
+            return await this._processTextInternal(rawText);
+        } catch (e) {
+            logger.error({ event: "process_text_error", error: e.message });
+            return {
+                action: "error",
+                details: `Processing failed: ${e.message}`,
+            };
+        }
+    }
+
+    async _processTextInternal(rawText) {
+        const emailText = String(rawText || "");
+
+        // Phase 1a: LLM Extract (reasoning=disabled, no tools)
+        const phase1aOutput = await this._runPhase1a(emailText);
+        if (!phase1aOutput) {
+            return {
+                action: "notified",
+                details: "Couldn't understand this transaction alert.",
+            };
+        }
+
+        // Phase 1b: Deterministic Mapping
+        const phase1bOutput = this._runPhase1b(phase1aOutput);
+
+        // Skip early if Phase 1a detected non-transaction
+        if (phase1bOutput.action === "skip") {
+            return this._executePhase4Silent(phase1bOutput);
+        }
+
+        // Phase 2: LLM Audit + V2 Gate (with retries)
+        let phase2Output = await this._runPhase2(phase1bOutput, emailText);
+
+        if (phase2Output.action === "skip") {
+            return this._executePhase4Silent(phase2Output);
+        }
+
+        if (
+            phase2Output.account_id &&
+            phase2Output.payee_name &&
+            phase2Output.category_id
+        ) {
+            return this._executePhase4Silent(phase2Output);
+        }
+
+        if (!phase2Output.account_id) {
+            logger.warn({
+                event: "phase2_no_account",
+                merchant: phase2Output.merchant,
+            });
+            return {
+                action: "notified",
+                details: `Couldn't match an account for "${phase2Output.merchant}". Please review.`,
+            };
+        }
+
+        // Phase 3: Web Search + V3 Gate (only for payee/category)
+        let phase3Output = await this._runPhase3(phase2Output);
+
+        if (phase3Output.payee_name && phase3Output.category_id) {
+            return this._executePhase4Silent(phase3Output);
+        }
+
+        logger.warn({
+            event: "phase3_exhausted",
+            merchant: phase3Output.merchant,
+        });
+        return {
+            action: "notified",
+            details: `Couldn't classify "${phase3Output.merchant}". Please categorize manually.`,
+        };
+    }
+
+    /**
      * Process a transaction email through the 4-phase memory-first pipeline.
      */
     async processEmail(msgId, rawEmail, imapHandler) {
@@ -745,6 +823,133 @@ export class AgentOrchestrator {
             });
 
             // Learn facts (fire-and-forget, don't block)
+            const learnPromises = [];
+            if (llmOutput.account_name) {
+                learnPromises.push(
+                    this._tools
+                        .executeTool("learn_fact", {
+                            fact: `${llmOutput.account_name} is a payment account`,
+                        })
+                        .catch((e) =>
+                            logger.warn({
+                                event: "learn_failed",
+                                error: e.message,
+                            }),
+                        ),
+                );
+            }
+            if (llmOutput.merchant && payeeName) {
+                learnPromises.push(
+                    this._tools
+                        .executeTool("learn_fact", {
+                            fact: `${llmOutput.merchant} maps to ${payeeName} payee`,
+                        })
+                        .catch((e) =>
+                            logger.warn({
+                                event: "learn_failed",
+                                error: e.message,
+                            }),
+                        ),
+                );
+            }
+            if (payeeName && llmOutput.category_id) {
+                learnPromises.push(
+                    this._tools
+                        .executeTool("learn_fact", {
+                            fact: `${payeeName} maps to ${llmOutput.category_name || llmOutput.category_id} category`,
+                        })
+                        .catch((e) =>
+                            logger.warn({
+                                event: "learn_failed",
+                                error: e.message,
+                            }),
+                        ),
+                );
+            }
+            Promise.allSettled(learnPromises).catch(() => {});
+
+            // Log decision
+            await this._tools.executeTool("log_decision", {
+                action: "inserted",
+                reasoning: llmOutput.reasoning || "",
+                timestamp: new Date().toISOString(),
+            });
+
+            const summary = `${llmOutput.currency || "SGD"} ${Math.abs(llmOutput.amount_cents || 0) / 100} at ${llmOutput.merchant || payeeName} -> ${payeeName}`;
+            return { action: "inserted", details: summary };
+        }
+
+        return { action: "error", details: `Unknown action: ${action}` };
+    }
+
+    /**
+     * Silent Phase 4 — no notify_user, no mark_email_read.
+     * Used by processText for Telegram-initiated transactions.
+     */
+    async _executePhase4Silent(llmOutput) {
+        const { action } = llmOutput;
+
+        if (action === "skip") {
+            await this._tools.executeTool("log_decision", {
+                action: "skipped",
+                reasoning: llmOutput.reasoning || "",
+                timestamp: new Date().toISOString(),
+            });
+            return {
+                action: "skipped",
+                details: `Skipped "${llmOutput.merchant || "unknown"}" — ${llmOutput.reasoning?.slice(0, 100) || "not an expense"}`,
+            };
+        }
+
+        if (action === "insert") {
+            const payeeName = llmOutput.payee_name || "Misc";
+            const accountId = llmOutput.account_id || "";
+
+            // Check duplicate
+            const isDuplicate = await this._tools.executeTool(
+                "check_duplicate",
+                {
+                    date: llmOutput.date || "",
+                    amount_cents: llmOutput.amount_cents || 0,
+                    account_id: accountId,
+                    payee_name: payeeName,
+                    budget_id: llmOutput.budget_id || "",
+                },
+            );
+
+            if (isDuplicate) {
+                await this._tools.executeTool("log_decision", {
+                    action: "duplicate",
+                    reasoning: llmOutput.reasoning || "",
+                    timestamp: new Date().toISOString(),
+                });
+                return {
+                    action: "duplicate",
+                    details: `${llmOutput.currency || "SGD"} ${Math.abs(llmOutput.amount_cents || 0) / 100} at ${llmOutput.merchant || payeeName} (already exists)`,
+                };
+            }
+
+            // Insert transaction
+            try {
+                await this._tools.executeTool("insert_transaction", {
+                    account_id: accountId,
+                    date:
+                        llmOutput.date || new Date().toISOString().slice(0, 10),
+                    amount_cents: llmOutput.amount_cents || 0,
+                    imported_description: payeeName,
+                    category_id: llmOutput.category_id || undefined,
+                    notes: llmOutput.notes || "",
+                    budget_id: llmOutput.budget_id || "",
+                });
+            } catch (e) {
+                logger.error({ event: "insert_failed", error: e.message });
+                return {
+                    action: "error",
+                    details: `Insert failed: ${e.message}`,
+                };
+            }
+
+            // Learn facts (fire-and-forget)
             const learnPromises = [];
             if (llmOutput.account_name) {
                 learnPromises.push(
