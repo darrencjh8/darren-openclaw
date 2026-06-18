@@ -157,29 +157,34 @@ export function createMcpServer(registry, app) {
     });
 
     // POST /messages — handles all MCP protocol messages
-    app.post("/messages", async (req, res) => {
-        console.log(
-            JSON.stringify({
-                event: "mcp_request",
-                method: req.body?.method,
-                id: req.body?.id,
-            }),
-        );
-        try {
-            await transport.handleRequest(req, res, req.body);
-        } catch (e) {
-            console.error(
+    // Skip body parsing — the Streamable HTTP transport reads the raw body
+    app.post(
+        "/messages",
+        express.raw({ type: "*/*", limit: "10mb" }),
+        async (req, res) => {
+            console.log(
                 JSON.stringify({
-                    event: "mcp_error",
-                    error: e.message,
-                    stack: e.stack?.slice(0, 500),
+                    event: "mcp_request",
+                    method: req.body?.method,
+                    id: req.body?.id,
                 }),
             );
-            if (!res.headersSent) {
-                res.status(500).json({ error: e.message });
+            try {
+                await transport.handleRequest(req, res);
+            } catch (e) {
+                console.error(
+                    JSON.stringify({
+                        event: "mcp_error",
+                        error: e.message,
+                        stack: e.stack?.slice(0, 500),
+                    }),
+                );
+                if (!res.headersSent) {
+                    res.status(500).json({ error: e.message });
+                }
             }
-        }
-    });
+        },
+    );
 
     // Connect the transport (starts listening)
     server
