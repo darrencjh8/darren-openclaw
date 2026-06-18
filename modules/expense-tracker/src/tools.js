@@ -1015,7 +1015,7 @@ export class ToolRegistry {
         if (!this._statementJournal) {
             throw new Error("Statement journal not configured");
         }
-        const bid = budget_id || this._config.actualBudgetFile;
+        const bid = budget_id || this._config.primaryBudgetFile;
         const sid = this._statementJournal.recordStatement(
             account_id,
             bid,

@@ -6,12 +6,8 @@ const PORT = process.env.PORT || 3000;
 const SERVER_URL =
     process.env.ACTUAL_BUDGET_SERVER_URL || process.env.ACTUAL_BUDGET_URL;
 const PASSWORD = process.env.ACTUAL_BUDGET_PASSWORD;
-const PRIMARY_BUDGET_FILE =
-    process.env.ACTUAL_PRIMARY_BUDGET_FILE || process.env.ACTUAL_BUDGET_FILE;
-const SECONDARY_BUDGET_FILE =
-    process.env.ACTUAL_SECONDARY_BUDGET_FILE ||
-    process.env.MYR_BUDGET_FILE ||
-    "";
+const PRIMARY_BUDGET_FILE = process.env.ACTUAL_PRIMARY_BUDGET_FILE;
+const SECONDARY_BUDGET_FILE = process.env.ACTUAL_SECONDARY_BUDGET_FILE || "";
 const DATA_DIR = process.env.DATA_DIR || "/tmp/actual-data";
 const BUDGET_SWITCH_DELAY_MS = parseInt(
     process.env.BUDGET_SWITCH_DELAY_MS || "2000",
@@ -19,6 +15,11 @@ const BUDGET_SWITCH_DELAY_MS = parseInt(
 );
 
 mkdirSync(DATA_DIR, { recursive: true });
+
+if (!PRIMARY_BUDGET_FILE) {
+    console.error("ERROR: ACTUAL_PRIMARY_BUDGET_FILE is required but not set");
+    process.exit(1);
+}
 
 // Catch unhandled rejections from @actual-app/api internal sync
 // The library sometimes throws unhandled rejections during background sync

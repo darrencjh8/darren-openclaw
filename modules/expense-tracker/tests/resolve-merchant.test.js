@@ -252,6 +252,7 @@ describe("resolve_merchant pipeline", () => {
 
         const result = await registry._handle_resolve_merchant({
             merchant: "Starbucks",
+            budget_id: "test-budget",
         });
 
         expect(result).toEqual({ payee: "Coffee", source: "memory" });
@@ -273,6 +274,7 @@ describe("resolve_merchant pipeline", () => {
 
         const result = await registry._handle_resolve_merchant({
             merchant: "NTUC FairPrice",
+            budget_id: "test-budget",
         });
 
         expect(result).toEqual({ payee: "Groceries", source: "keyword" });
@@ -294,6 +296,7 @@ describe("resolve_merchant pipeline", () => {
 
         const result = await registry._handle_resolve_merchant({
             merchant: "Shell Station",
+            budget_id: "test-budget",
         });
 
         expect(result).toEqual({ payee: "Transport", source: "keyword" });
@@ -315,6 +318,7 @@ describe("resolve_merchant pipeline", () => {
 
         const result = await registry._handle_resolve_merchant({
             merchant: "fairprice finest",
+            budget_id: "test-budget",
         });
 
         expect(result).toEqual({ payee: "Groceries", source: "keyword" });
@@ -351,6 +355,7 @@ describe("resolve_merchant pipeline", () => {
 
         const result = await registry._handle_resolve_merchant({
             merchant: "XyzzyWidgetCorp",
+            budget_id: "test-budget",
         });
 
         expect(result).toEqual({ payee: "Misc", source: "fallback" });
@@ -397,6 +402,7 @@ describe("resolve_merchant pipeline", () => {
 
         const result = await registry._handle_resolve_merchant({
             merchant: "Acme Roasters",
+            budget_id: "test-budget",
         });
 
         expect(result).toEqual({ payee: "Coffee", source: "web" });
@@ -437,6 +443,7 @@ describe("resolve_merchant pipeline", () => {
 
         const result = await registry._handle_resolve_merchant({
             merchant: "UnknownBiz",
+            budget_id: "test-budget",
         });
 
         expect(result).toEqual({ payee: "Misc", source: "fallback" });
@@ -475,6 +482,7 @@ describe("resolve_merchant pipeline", () => {
 
         const result = await registry._handle_resolve_merchant({
             merchant: "TimeoutBiz",
+            budget_id: "test-budget",
         });
 
         expect(result).toEqual({ payee: "Misc", source: "fallback" });
@@ -492,6 +500,7 @@ describe("resolve_merchant pipeline", () => {
 
         const result = await registry._handle_resolve_merchant({
             merchant: "NTUC FairPrice",
+            budget_id: "test-budget",
         });
 
         expect(result).toEqual({ payee: "Groceries", source: "memory" });
@@ -508,6 +517,7 @@ describe("resolve_merchant pipeline", () => {
 
         const result = await registry._handle_resolve_merchant({
             merchant: "UnknownBiz",
+            budget_id: "test-budget",
         });
 
         expect(result).toEqual({ payee: "Coffee", source: "memory" });
@@ -527,6 +537,7 @@ describe("resolve_merchant pipeline", () => {
 
         const result = await registry._handle_resolve_merchant({
             merchant: "Shell",
+            budget_id: "test-budget",
         });
 
         expect(result).toEqual({ payee: "Transport", source: "memory" });
@@ -541,6 +552,7 @@ describe("resolve_merchant pipeline", () => {
         // "Shell" would match keyword "Transport", but not the memory regex
         const result = await registry._handle_resolve_merchant({
             merchant: "Shell",
+            budget_id: "test-budget",
         });
 
         // Should NOT return memory (regex won't match), but keyword WILL match
@@ -552,6 +564,7 @@ describe("resolve_merchant pipeline", () => {
         const registryNoMem = new ToolRegistry(mockConfig(), null);
         const result = await registryNoMem.executeTool("resolve_merchant", {
             merchant: "Anything",
+            budget_id: "test-budget",
         });
         expect(result).toEqual({ payee: "Misc", source: "fallback" });
     });
@@ -567,6 +580,7 @@ describe("resolve_merchant pipeline", () => {
 
         const promise = registry._handle_resolve_merchant({
             merchant: "NTUC FairPrice",
+            budget_id: "test-budget",
         });
 
         // Advance past 5s keyword validation timeout
@@ -629,6 +643,7 @@ describe("Classification prompt structure", () => {
 
         await registry._handle_resolve_merchant({
             merchant: "Joe's Diner",
+            budget_id: "test-budget",
         });
 
         // Verify chat received a single call
@@ -702,7 +717,7 @@ describe("Classification prompt structure", () => {
 
         const result = await registry.executeTool("resolve_merchant", {
             merchant: "Test",
-            budget_id: "",
+            budget_id: "test-budget",
         });
         // Verify it successfully extracted Coffee from the mixed text
         expect(result.payee).toBe("Coffee");
@@ -731,7 +746,10 @@ describe("Auto-learning", () => {
             }),
         );
 
-        await registry._handle_resolve_merchant({ merchant: "NTUC FairPrice" });
+        await registry._handle_resolve_merchant({
+            merchant: "NTUC FairPrice",
+            budget_id: "test-budget",
+        });
 
         expect(memory.add).toHaveBeenCalledWith(
             "NTUC FairPrice maps to Groceries payee",
@@ -770,7 +788,10 @@ describe("Auto-learning", () => {
             choices: [{ message: { content: '{"payee":"Coffee"}' } }],
         });
 
-        await registry._handle_resolve_merchant({ merchant: "UnchartedBiz" });
+        await registry._handle_resolve_merchant({
+            merchant: "UnchartedBiz",
+            budget_id: "test-budget",
+        });
 
         expect(memory.add).toHaveBeenCalledWith(
             "UnchartedBiz maps to Coffee payee",
@@ -784,7 +805,10 @@ describe("Auto-learning", () => {
         const config = mockConfig();
         const registry = new ToolRegistry(config, memory);
 
-        await registry._handle_resolve_merchant({ merchant: "Starbucks" });
+        await registry._handle_resolve_merchant({
+            merchant: "Starbucks",
+            budget_id: "test-budget",
+        });
 
         expect(memory.add).not.toHaveBeenCalled();
     });
@@ -796,6 +820,7 @@ describe("Auto-learning", () => {
 
         await registry._handle_resolve_merchant({
             merchant: "UnknownMerchantXYZ",
+            budget_id: "test-budget",
         });
 
         expect(memory.add).not.toHaveBeenCalled();
@@ -1031,10 +1056,12 @@ describe("Category validation in insert_transaction", () => {
 
         await registry.executeTool("insert_transaction", {
             account_id: "acct-1",
+            budget_id: "test-budget",
             date: "2026-06-15",
             amount_cents: -500,
             imported_description: "Test Merchant",
             category_id: "cat-unknown",
+            budget_id: "test-budget",
         });
 
         // Verify the original category_id was kept (not replaced)
@@ -1070,6 +1097,7 @@ describe("update_transaction", () => {
 
         const result = await registry._handle_update_transaction({
             id: "txn-1",
+            budget_id: "test-budget",
             payee_name: "NonExistentPayee",
         });
 
@@ -1104,6 +1132,7 @@ describe("update_transaction", () => {
 
         const result = await registry._handle_update_transaction({
             id: "txn-1",
+            budget_id: "test-budget",
             payee_name: "Food",
         });
 
@@ -1133,7 +1162,9 @@ describe("update_transaction", () => {
 
         const result = await registry._handle_update_transaction({
             id: "txn-1",
+            budget_id: "test-budget",
             category_id: "fake-cat-id",
+            budget_id: "test-budget",
         });
 
         expect(result.error).toContain("Category ID");
@@ -1167,7 +1198,9 @@ describe("update_transaction", () => {
 
         const result = await registry._handle_update_transaction({
             id: "txn-1",
+            budget_id: "test-budget",
             category_id: "cat-food",
+            budget_id: "test-budget",
         });
 
         expect(fetchMock).toHaveBeenCalledTimes(2);
@@ -1204,12 +1237,13 @@ describe("update_transaction", () => {
 
         await registry._handle_update_transaction({
             id: "txn-1",
+            budget_id: "test-budget",
             payee_name: "Food",
         });
 
         const patchCall = fetchMock.mock.calls[1];
         const patchBody = JSON.parse(patchCall[1].body);
-        expect(patchBody).toEqual({ payee: "Food" });
+        expect(patchBody).toEqual({ payee: "Food", budget_id: "test-budget" });
         expect(patchBody.notes).toBeUndefined();
         expect(patchBody.amount).toBeUndefined();
         expect(patchBody.date).toBeUndefined();
@@ -1229,6 +1263,7 @@ describe("update_transaction", () => {
 
         const result = await registry._handle_update_transaction({
             id: "txn-1",
+            budget_id: "test-budget",
         });
 
         expect(result.error).toContain("At least one field");
@@ -1261,6 +1296,7 @@ describe("update_transaction", () => {
 
         await registry._handle_update_transaction({
             id: "txn-1",
+            budget_id: "test-budget",
             payee_name: "Food",
             notes: "test",
             amount: -500,
@@ -1297,6 +1333,7 @@ describe("update_transaction", () => {
 
         await registry._handle_update_transaction({
             id: "txn-1",
+            budget_id: "test-budget",
             payee_name: "Food",
         });
 
@@ -1343,6 +1380,7 @@ describe("Multi-word payee regex", () => {
 
         const result = await registry._handle_resolve_merchant({
             merchant: "SGSUPERGREEN-B",
+            budget_id: "test-budget",
         });
 
         expect(result).toEqual({ payee: "Fun Money", source: "memory" });
@@ -1395,6 +1433,7 @@ describe("Timeout enforcement", () => {
 
         const promise = registry._handle_resolve_merchant({
             merchant: "UnknownBiz",
+            budget_id: "test-budget",
         });
 
         // Advance past 20s timeout (async to flush microtasks)

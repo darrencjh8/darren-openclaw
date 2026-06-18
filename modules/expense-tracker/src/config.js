@@ -6,7 +6,10 @@ import { getSystemPrompt } from "./prompts.js";
 const REQUIRED_ENV_VARS = [
     "ACTUAL_BUDGET_URL",
     "ACTUAL_BUDGET_PASSWORD",
+    "ACTUAL_PRIMARY_CURRENCY",
+    "ACTUAL_SECONDARY_CURRENCY",
     "ACTUAL_PRIMARY_BUDGET_FILE",
+    "ACTUAL_SECONDARY_BUDGET_FILE",
     "IMAP_HOST",
     "IMAP_USERNAME",
     "IMAP_PASSWORD",
@@ -22,13 +25,10 @@ export class Config {
         this.deepseekApiKey = env.DEEPSEEK_API_KEY || "";
         this.actualBudgetUrl = env.ACTUAL_BUDGET_URL || "";
         this.actualBudgetPassword = env.ACTUAL_BUDGET_PASSWORD || "";
-        this.primaryBudgetFile =
-            env.ACTUAL_PRIMARY_BUDGET_FILE || env.ACTUAL_BUDGET_FILE || "";
-        this.secondaryBudgetFile =
-            env.ACTUAL_SECONDARY_BUDGET_FILE || env.MYR_BUDGET_FILE || "";
+        this.primaryBudgetFile = env.ACTUAL_PRIMARY_BUDGET_FILE || "";
+        this.secondaryBudgetFile = env.ACTUAL_SECONDARY_BUDGET_FILE || "";
         this.primaryCurrency = env.ACTUAL_PRIMARY_CURRENCY || "SGD";
         this.secondaryCurrency = env.ACTUAL_SECONDARY_CURRENCY || "MYR";
-        this.actualBudgetFile = this.primaryBudgetFile;
         this.actualBudgetEncryptionPassword =
             env.ACTUAL_BUDGET_ENCRYPTION_PASSWORD || null;
         this.imapHost = env.IMAP_HOST || "";

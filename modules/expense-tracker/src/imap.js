@@ -151,8 +151,6 @@ export class ImapIdleHandler {
                             event: "imap_callback_error",
                             error: e.message,
                         });
-                        if (this._dedup)
-                            this._dedup.recordProcessed(msg.msg_id);
                     }
                 }
                 // Wait for new mail. Per imapflow's official API docs

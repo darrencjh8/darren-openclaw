@@ -6,13 +6,9 @@
 const PRIMARY_CURRENCY = process.env.ACTUAL_PRIMARY_CURRENCY || "SGD";
 const SECONDARY_CURRENCY = process.env.ACTUAL_SECONDARY_CURRENCY || "MYR";
 const PRIMARY_BUDGET_FILE =
-    process.env.ACTUAL_PRIMARY_BUDGET_FILE ||
-    process.env.ACTUAL_BUDGET_FILE ||
-    "My Budget";
+    process.env.ACTUAL_PRIMARY_BUDGET_FILE || "My Budget";
 const SECONDARY_BUDGET_FILE =
-    process.env.ACTUAL_SECONDARY_BUDGET_FILE ||
-    process.env.MYR_BUDGET_FILE ||
-    "My MYR Budget";
+    process.env.ACTUAL_SECONDARY_BUDGET_FILE || "My MYR Budget";
 
 export const CLASSIFICATION_PROMPT = `\
 Classify this email as "statement", "transaction", or "skip". Respond with ONLY one word.

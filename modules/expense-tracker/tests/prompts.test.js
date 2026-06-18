@@ -144,22 +144,24 @@ describe("prompt budget name resolution", () => {
         expect(fetchAcctsArgs).toContain('"Primary Budget"');
     });
 
-    it("picks up legacy ACTUAL_BUDGET_FILE / MYR_BUDGET_FILE as fallback", () => {
-        // Backward compat: old env var names still work
-        process.env.ACTUAL_BUDGET_FILE = "Darren SGD";
-        process.env.MYR_BUDGET_FILE = "Darren MYR";
+    it("ignores legacy ACTUAL_BUDGET_FILE / MYR_BUDGET_FILE (no fallback)", () => {
+        // Old env vars should be ignored — only new names are read
+        delete process.env.ACTUAL_PRIMARY_BUDGET_FILE;
+        delete process.env.ACTUAL_SECONDARY_BUDGET_FILE;
+        delete process.env.ACTUAL_PRIMARY_CURRENCY;
+        delete process.env.ACTUAL_SECONDARY_CURRENCY;
+        process.env.ACTUAL_BUDGET_FILE = "Legacy SGD";
+        process.env.MYR_BUDGET_FILE = "Legacy MYR";
 
         const prompt = getSystemPrompt();
-        expect(prompt).toContain('budget "Darren SGD"');
-        expect(prompt).toContain('"Darren MYR"');
+        // Falls back to hardcoded defaults since new vars are unset
+        expect(prompt).toContain('budget "My Budget"');
+        expect(prompt).toContain('"My MYR Budget"');
+        expect(prompt).toContain("Currency not SGD or MYR");
 
-        const examples = getFewShotExamples();
-        const ex1 = examples[0];
-        const fetchAcctsArgs = ex1
-            .find((m) => m.role === "assistant" && m.tool_calls)
-            ?.tool_calls?.find((tc) => tc.function?.name === "fetch_accounts")
-            ?.function?.arguments;
-        expect(fetchAcctsArgs).toContain('"Darren SGD"');
+        // No legacy names should leak into output
+        expect(prompt).not.toContain("Legacy SGD");
+        expect(prompt).not.toContain("Legacy MYR");
     });
 
     it("falls back to defaults when all env vars are not set", () => {
