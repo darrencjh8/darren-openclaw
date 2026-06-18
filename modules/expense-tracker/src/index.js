@@ -70,6 +70,7 @@ async function main() {
 
     const registry = new ToolRegistry(cfg, memory);
     const orchestrator = new AgentOrchestrator(cfg, registry);
+    registry.setOrchestrator(orchestrator);
     const dedupJournal = new DedupJournal(cfg.dedupDbPath);
 
     // Statement reconciliation pipeline (spec/004)
