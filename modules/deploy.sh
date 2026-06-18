@@ -416,4 +416,21 @@ if [ "$failed" -gt 0 ]; then
 fi
 
 echo -e "  ${GREEN}All services healthy.${NC}"
+
+# ---- MCP reconnect ----
+echo ""
+echo "--- MCP Reconnect ---"
+sleep 5
+
+for mcp_name in expense-tracker portfolio-tracker; do
+  if should_deploy "$mcp_name" || should_deploy "all"; then
+    echo -n "  $mcp_name ... "
+    if docker exec hermes hermes mcp test "$mcp_name" > /dev/null 2>&1; then
+      echo -e "${GREEN}connected${NC}"
+    else
+      echo -e "${YELLOW}failed (retry later)${NC}"
+    fi
+  fi
+done
+
 echo "========================================"
