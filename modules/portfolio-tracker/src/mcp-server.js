@@ -134,39 +134,21 @@ function createTools(server, registry) {
  * Register MCP Streamable HTTP transport on the Express app.
  * Must be called before app.listen().
  */
-export async function createMcpServer(registry, app) {
-    const server = new McpServer({
-        name: "portfolio-tracker",
-        version: "1.0.0",
-    });
-    createTools(server, registry);
-
-    const transport = new StreamableHTTPServerTransport({
-        sessionIdGenerator: undefined, // stateless mode
-        enableJsonResponse: true,
-    });
-
-    // Connect transport BEFORE registering routes
-    await server.connect(transport);
-    console.log(
-        JSON.stringify({
-            event: "mcp_server_connected",
-            transport: "streamable-http",
-        }),
-    );
-
-    // POST /mcp — handles all MCP protocol messages (stateless)
+export function createMcpServer(registry, app) {
+    // POST /mcp — per the reference: create transport + connect per initialization
     app.post("/mcp", async (req, res) => {
         try {
-            console.log(
-                JSON.stringify({
-                    event: "mcp_post",
-                    body_type: typeof req.body,
-                    body_keys: req.body && Object.keys(req.body),
-                }),
-            );
+            const server = new McpServer({
+                name: "portfolio-tracker",
+                version: "1.0.0",
+            });
+            createTools(server, registry);
+            const transport = new StreamableHTTPServerTransport({
+                sessionIdGenerator: undefined,
+                enableJsonResponse: true,
+            });
+            await server.connect(transport);
             await transport.handleRequest(req, res, req.body);
-            console.log(JSON.stringify({ event: "mcp_post_done" }));
         } catch (e) {
             console.error(
                 JSON.stringify({
@@ -182,30 +164,6 @@ export async function createMcpServer(registry, app) {
                     id: null,
                 });
             }
-        }
-    });
-
-    // GET /mcp — SSE stream for server-to-client notifications (required by spec)
-    app.get("/mcp", async (req, res) => {
-        try {
-            await transport.handleRequest(req, res);
-        } catch (e) {
-            console.error(
-                JSON.stringify({ event: "mcp_sse_error", error: e.message }),
-            );
-            if (!res.headersSent) res.status(500).end();
-        }
-    });
-
-    // DELETE /mcp — session termination
-    app.delete("/mcp", async (req, res) => {
-        try {
-            await transport.handleRequest(req, res);
-        } catch (e) {
-            console.error(
-                JSON.stringify({ event: "mcp_delete_error", error: e.message }),
-            );
-            if (!res.headersSent) res.status(500).end();
         }
     });
 
