@@ -52,6 +52,34 @@ if command -v sqlite3 >/dev/null 2>&1; then
     done
 fi
 
+# ---- Profile backup (identity metadata + per-profile memories) ----
+mkdir -p "$CLONE_DIR/profiles"
+
+# Sticky active profile
+if [ -f /opt/data/active_profile ]; then
+    cp /opt/data/active_profile "$CLONE_DIR/profiles/_active" 2>/dev/null || true
+fi
+
+# Named profiles
+for profile_dir in /opt/data/profiles/*/; do
+    [ -d "$profile_dir" ] || continue
+    name=$(basename "$profile_dir")
+    mkdir -p "$CLONE_DIR/profiles/$name"
+
+    # Description metadata
+    if [ -f "$profile_dir/profile.yaml" ]; then
+        cp "$profile_dir/profile.yaml" "$CLONE_DIR/profiles/$name/" 2>/dev/null || true
+    fi
+
+    # Per-profile memories
+    if [ -f "$profile_dir/memories/MEMORY.md" ]; then
+        cp "$profile_dir/memories/MEMORY.md" "$CLONE_DIR/profiles/$name/" 2>/dev/null || true
+    fi
+    if [ -f "$profile_dir/memories/USER.md" ]; then
+        cp "$profile_dir/memories/USER.md" "$CLONE_DIR/profiles/$name/" 2>/dev/null || true
+    fi
+done
+
 cd "$CLONE_DIR"
 # Check if there are changes (handles empty repo with no HEAD)
 if ! git rev-parse HEAD >/dev/null 2>&1; then
