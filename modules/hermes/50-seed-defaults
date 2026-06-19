@@ -5,6 +5,19 @@ cp /opt/hermes-defaults/config.yaml /opt/data/config.yaml
 cp /opt/hermes-defaults/SOUL.md.template /opt/data/SOUL.md
 mkdir -p /opt/data/skills
 cp -r /opt/hermes-defaults/skills/* /opt/data/skills/
+
+# Reset ownership of /opt/data/skills on every boot.
+# Skills directories can land owned by root when:
+#  - cp above runs as root (cont-init.d scripts are root)
+#  - skills are installed by MCP servers or docker exec (defaults to root)
+# After first boot the upstream stage2-hook.sh targeted chown (gated behind
+# needs_chown) never fires again, so later root-written skill dirs stay
+# root-owned forever and the hermes runtime cannot write to them
+# (PermissionDenied on skill_manage, etc.).
+# This unconditional chown mirrors the profiles chown pattern in
+# stage2-hook.sh (lines 261-263) and the memories-backup pattern below.
+chown -R hermes:hermes /opt/data/skills 2>/dev/null || true
+
 mkdir -p /opt/data/scripts
 cp -r /opt/hermes-defaults/scripts/* /opt/data/scripts/
 chmod +x /opt/data/scripts/*.sh
