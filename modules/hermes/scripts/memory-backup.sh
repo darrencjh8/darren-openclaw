@@ -14,7 +14,7 @@ else
     exit 0
 fi
 
-REPO_URL=$(echo "${GITHUB_URL}" | sed "s|https://|https://${AUTH_TOKEN}@|")
+REPO_URL="https://${AUTH_TOKEN}@${GITHUB_URL#https://}"
 CLONE_DIR="/opt/data/memories-backup"
 SRC_DIR="/opt/data/memories"
 EXPENSE_DIR="${EXPENSE_TRACKER_DATA:-}"

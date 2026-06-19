@@ -1,4 +1,6 @@
 #!/command/with-contenv sh
+# shellcheck shell=sh
+# shellcheck disable=SC2015,SC2235
 # Seed baked-in config, SOUL, skills, and scripts on every boot.
 # Then resolve any remaining ${VAR} placeholders that Hermes doesn't auto-substitute.
 cp /opt/hermes-defaults/config.yaml /opt/data/config.yaml
