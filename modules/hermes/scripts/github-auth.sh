@@ -58,7 +58,8 @@ export GITHUB_TOKEN="$TOKEN"
 log "token stored (expires $(echo "$BODY" | python3 -c "import sys,json; print(json.load(sys.stdin).get('expires_at','unknown'))"))"
 
 # ---- auth gh CLI as hermes user (workers) ----
-su -s /bin/sh hermes -c "gh auth logout 2>/dev/null" || true
+# gh auth login --with-token overwrites the existing entry for the same user.
+# No logout needed — avoids multi-user ambiguity errors.
 if ! echo "$TOKEN" | su -s /bin/sh hermes -c "gh auth login --with-token"; then
     die "gh auth login failed for hermes user"
 fi
@@ -70,7 +71,6 @@ fi
 log "hermes user authenticated as $(su -s /bin/sh hermes -c 'gh auth status 2>&1' | grep -oP 'account \K[^ ]+')"
 
 # ---- auth gh CLI as root (cron / memory-backup) ----
-gh auth logout 2>/dev/null || true
 echo "$TOKEN" | gh auth login --with-token 2>/dev/null || log "warning: gh auth login failed for root (non-fatal)"
 
 log "done"

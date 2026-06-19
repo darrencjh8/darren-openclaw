@@ -33,6 +33,37 @@ chown -R hermes:hermes /opt/data/memories-backup 2>/dev/null || true
 # (errors logged to stderr → docker logs; never blocks boot)
 /opt/data/scripts/github-auth.sh || true
 
+# Seed github-auth-refresh cron job (idempotent — refreshes installation token every 50 min)
+# GitHub App installation tokens expire after 1 hour; this keeps gh CLI auth alive.
+if [ -n "${GITHUB_APP_ID}" ] && [ -n "${GITHUB_APP_INSTALLATION_ID}" ] && [ -n "${GITHUB_APP_PRIVATE_KEY}" ]; then
+    python3 -c '
+import os, json, uuid, datetime
+jobs_path = "/opt/data/cron/jobs.json"
+os.makedirs(os.path.dirname(jobs_path), exist_ok=True)
+try:
+    with open(jobs_path) as f:
+        data = json.load(f)
+    jobs = data.get("jobs", []) if isinstance(data, dict) else data
+except (FileNotFoundError, json.JSONDecodeError):
+    jobs = []
+if not any(j.get("name") == "github-auth-refresh" for j in jobs if isinstance(j, dict)):
+    jobs.append({
+        "id": uuid.uuid4().hex[:12],
+        "name": "github-auth-refresh",
+        "schedule": "every 50min",
+        "script": "github-auth.sh",
+        "no_agent": True,
+        "enabled": True,
+        "deliver": "local",
+        "next_run_at": None,
+        "created_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+    })
+    with open(jobs_path, "w") as f:
+        json.dump({"jobs": jobs, "updated_at": datetime.datetime.now(datetime.timezone.utc).isoformat()}, f, indent=2)
+    print("cron: github-auth-refresh seeded")
+' || true
+fi
+
 python3 -c '
 import os, re, glob
 paths = ["/opt/data/config.yaml", "/opt/data/SOUL.md"]
