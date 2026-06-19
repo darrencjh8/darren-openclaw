@@ -8,7 +8,7 @@ import { join, dirname } from "path";
 import Database from "better-sqlite3";
 import { simpleParser } from "mailparser";
 import { DedupJournal } from "./dedup.js";
-import { extractPdfFromBuffer } from "./extractors.js";
+import { extractPdfFromBuffer, extractEmailContent } from "./extractors.js";
 import { DeepSeekClient } from "./orchestrator.js";
 import { logger, getLogger } from "./logging.js";
 
@@ -612,11 +612,15 @@ const TOOLS = [
     },
     {
         name: "extract_email_content",
-        description: "Extract and clean the text content of the current email.",
+        description: "Extract and clean the text content of the current email, including PDF attachment decryption when password is provided.",
         schema: {
             type: "object",
             properties: {
                 include_headers: { type: "boolean", default: false },
+                password: {
+                    type: "string",
+                    description: "Password for encrypted PDF attachments. Omit for unencrypted emails.",
+                },
             },
         },
     },
@@ -1202,8 +1206,16 @@ export class ToolRegistry {
         return { accepted: true };
     }
 
-    async _handle_extract_email_content({ include_headers = false } = {}) {
+    async _handle_extract_email_content({ include_headers = false, password = "" } = {}) {
         if (!this._emailRaw) return "";
+        // When password is provided, delegate to full extractEmailContent
+        // which handles PDF attachments and decryption via qpdf
+        if (password) {
+            const raw = Buffer.isBuffer(this._emailRaw)
+                ? this._emailRaw
+                : Buffer.from(String(this._emailRaw), "utf8");
+            return extractEmailContent(raw, password);
+        }
         const raw = Buffer.isBuffer(this._emailRaw)
             ? this._emailRaw
             : Buffer.from(String(this._emailRaw), "utf8");

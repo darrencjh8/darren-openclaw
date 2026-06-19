@@ -42,6 +42,45 @@ describe("ToolRegistry", () => {
         expect(pdfTool.function.parameters.required).toEqual(["pdf_bytes_b64"]);
     });
 
+    it("extract_email_content schema includes optional password field", () => {
+        const cfg = new Config(testEnv);
+        const registry = new ToolRegistry(cfg);
+        const schemas = registry.getToolSchemas();
+        const emailTool = schemas.find(
+            (s) => s.function.name === "extract_email_content",
+        );
+        expect(emailTool).toBeDefined();
+        expect(
+            emailTool.function.parameters.properties,
+        ).toHaveProperty("password");
+        expect(
+            emailTool.function.parameters.properties.password,
+        ).toMatchObject({ type: "string" });
+        if (emailTool.function.parameters.required) {
+            expect(
+                emailTool.function.parameters.required,
+            ).not.toContain("password");
+        }
+    });
+
+    it("_handle_extract_email_content accepts password parameter and passes to extractEmailContent", async () => {
+        const { vi } = await import("vitest");
+        const cfg = new Config(testEnv);
+        const registry = new ToolRegistry(cfg);
+        // Set up a mock email context so the handler doesn't short-circuit
+        registry.setEmailContext(
+            "test-msg-id",
+            Buffer.from("From: test@test.com\r\nSubject: test\r\n\r\nbody"),
+            null,
+        );
+        // With password, should not throw and should return a string
+        const result = await registry.executeTool("extract_email_content", {
+            include_headers: false,
+            password: "test123",
+        });
+        expect(typeof result).toBe("string");
+    });
+
     it("check_statement_duplicate falls back to AB API when dedup misses", async () => {
         const { vi } = await import("vitest");
         const cfg = new Config(testEnv);

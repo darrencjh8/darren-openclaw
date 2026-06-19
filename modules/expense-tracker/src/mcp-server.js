@@ -73,7 +73,10 @@ function createTools(server, registry) {
     server.tool(
         "extract_email_content",
         "Extract text from email",
-        { include_headers: z.boolean().optional().default(false) },
+        {
+            include_headers: z.boolean().optional().default(false),
+            password: z.string().optional().default(""),
+        },
         async (a) => tx(await registry.executeTool("extract_email_content", a)),
     );
     server.tool(
