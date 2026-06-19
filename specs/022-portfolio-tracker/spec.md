@@ -1,6 +1,6 @@
-# Feature Specification: Portfolio Tracker MCP (Phase 1)
+# Feature Specification: Portfolio Tracker
 
-**Feature:** portfolio-tracker-mcp
+**Feature:** portfolio-tracker
 **Spec Version:** 1.1.0
 **Status:** Specified
 **Created:** 2026-06-18
@@ -34,7 +34,7 @@ flowchart TB
     end
 
     subgraph PT["Portfolio Tracker (Node.js)"]
-        MCP_S["MCP Server<br/>GET /sse + POST /messages<span style='color:green'> (NEW)</span>"]
+        MCP_S["MCP Server<br/>POST/GET/DELETE /mcp<span style='color:green'> (NEW)</span>"]
         REST["REST API<br/>19 /tools/*<br/>(unchanged)"]
         ORCH["LLM Orchestrator<br/>DeepSeek tool-call loop<br/>(unchanged — PDF only)"]
         TOOLS["Tool Registry<br/>(unchanged)"]
@@ -56,7 +56,7 @@ flowchart TB
     CRON -->|"MCP: portfolio_sync()"| MCP_C
     TG_SYNC -->|"MCP: portfolio_sync()"| MCP_C
     TG_ONEDRIVE -->|"MCP: portfolio_onedrive_*"| MCP_C
-    MCP_C <-->|"SSE transport"| MCP_S
+    MCP_C <-->|"Streamable HTTP"| MCP_S
     MCP_S -->|"portfolio_sync"| SYNC
     MCP_S -->|"portfolio_onedrive_*"| OD
     IMAP --> IMAP_H -->|"dispatchEmail()<br/>PDF only"| ORCH
@@ -204,7 +204,7 @@ Useful for debugging or when the user only wants to sync the file without runnin
 **So that** Hermes discovers and can invoke the portfolio tools.
 
 **Acceptance Criteria:**
-- `modules/hermes/config.yaml` lists `portfolio-tracker` under `mcp_servers:` with SSE transport
+`modules/hermes/config.yaml` lists `portfolio-tracker` under `mcp_servers:` with Streamable HTTP transport
 - Hermes auto-discovers all portfolio MCP tools
 - MCP connection survives portfolio-tracker restarts (Hermes auto-reconnects)
 
@@ -290,6 +290,14 @@ no LLM involvement. The orchestrator is preserved for:
 Fetches the latest IBKR flex query XML from the IBKR Flex Web Service REST endpoint.
 This is a deterministic HTTP call — no LLM, no parsing, just fetch-and-return.
 
+**Endpoint:** `https://ndcdyn.interactivebrokers.com/AccountManagement/FlexWebService/SendRequest`
+
+**Two-step protocol:**
+1. `POST SendRequest?t=<token>&q=<query_id>&v=3` → returns `<FlexStatementResponse>` with `<ReferenceCode>` and `<Url>`
+2. `GET <Url>?t=<token>&q=<ReferenceCode>&v=3` → returns the actual flex query XML
+
+**Standalone:** Can be run directly: `node src/ibkr_flex.js [output-path]`
+
 ```
 Environment variables:
   IBKR_FLEX_TOKEN      — IBKR Flex Web Service token (from Account Management)
@@ -297,10 +305,9 @@ Environment variables:
 
 Function:
   pullFlexXml() → returns { success: boolean, xml?: string, error?: string }
-    → POST to https://gdcdyn.interactivebrokers.com/Universal/servlet/FlexStatementService
-       with parameters: t=<token>, q=<query_id>, v=3
-    → IBKR responds with base64-encoded XML or a reference code requiring a second request
-    → Returns the decoded XML string
+    → Step 1: POST to IBKR SendRequest endpoint with token + query ID
+    → Step 2: If response contains `<ReferenceCode>`, GET from the returned URL
+    → Returns the flex query XML string
 ```
 
 ---
@@ -312,7 +319,7 @@ Function:
 | OneDrive auth called when already authorized | `auth_url` still returns URL (can re-authorize); `auth_complete` overwrites existing token |
 | `auth_complete` called with invalid/bad redirect URI | Returns `{success: false, error: "..."}` |
 | `onedrive_pull` called before OAuth setup | Returns `{success: false, error: "refresh token not found"}` |
-| MCP SSE connection drops mid-call | Hermes retries; portfolio-tracker handles same as REST timeout |
+| MCP connection drops mid-call | Hermes retries; portfolio-tracker handles same as REST timeout |
 | IBKR Flex Web Service unreachable during sync | Logs warning, skips flex import, continues with balance sync + taxonomy |
 | IBKR Flex Web Service returns no new trades | Import step returns `trades_imported: 0` — sync continues |
 | Java CLI `import` with duplicate trades | PP native extractor handles dedup; returns `items_skipped > 0` |
@@ -330,6 +337,64 @@ Function:
 - ❌ Migrating memory to Hermes
 - ❌ Adding CPF/POEMS tools via MCP
 - ❌ `portfolio_ibkr_flex` as a standalone MCP tool (folded into `portfolio_sync`)
+
+---
+
+## Implementation Details
+
+### MCP Server Architecture (Streamable HTTP)
+
+The MCP server uses Streamable HTTP transport (NOT SSE). Why: SSE breaks on container restart causing session mismatch. Streamable HTTP creates fresh transport per session, transparent to Hermes auto-reconnect.
+
+- Express app mounts `POST /mcp`, `GET /mcp`, `DELETE /mcp` routes
+- Session management: per-session StreamableHTTPServerTransport instances keyed by `Mcp-Session-Id` header
+- On container restart, stale sessions discarded; Hermes creates new session transparently
+- `sessionIdGenerator` uses `randomUUID()`
+- Tools registered via `server.tool(name, description, zodSchema, handler)`
+- Results returned as `{ content: [{ type: "text", text: JSON.stringify(result) }] }`
+
+### REST Tools (19 — preserved for backward compatibility)
+
+| # | Tool | Type | Description |
+|---|---|---|---|
+| 1 | `parse_ibkr_flex_query` | Parse | Parse IBKR flex query XML (⚠ deprecated — IBKR flex now pulled via web service; retained for LLM orchestrator backward compat) |
+| 2 | `extract_email_content` | Parse | Extract text from email (PDF attachment support) |
+| 3 | `fetch_pp_accounts` | Read | List PP accounts via Java CLI |
+| 4 | `fetch_pp_securities` | Read | List PP securities with ISIN/ticker/currency |
+| 5 | `fetch_pp_portfolio` | Read | Full portfolio structure |
+| 6 | `insert_pp_transaction` | Write | Insert trade/dividend/deposit into PP |
+| 7 | `update_pp_balance` | Write | Update account balance |
+| 8 | `pp-pull` | Write | Download latest PP file from OneDrive |
+| 9 | `pp-push` | Write | Upload PP file to OneDrive |
+| 10 | `pp-sync-all` | Sync | Full balance sync: pull → AB budgets → update → push → taxonomy → Sheets |
+| 11 | `query_pp_taxonomies` | Read | Holdings aggregated by taxonomy |
+| 12 | `update_google_sheet` | Write | Write taxonomy data to Google Sheets |
+| 13 | `notify_user` | Write | Legacy gateway webhook notification (MCP path now preferred) |
+| 14 | `check_duplicate` | Read | SHA-256 lookup in SQLite dedup journal |
+| 15 | `learn_mapping` | Write | Persist security/account associations |
+| 16 | `log_decision` | Write | Audit trail entry |
+| 17 | `ask_user_confirmation` | Interactive | Pause for user approval before inserting |
+| 18 | `get_pp_status` | Read | Portfolio performance summary |
+| 19 | `query_pp_security` | Read | Query security by ticker/ISIN/name |
+
+REST endpoints served at `POST /tools/<slug>`. MCP server exposes equivalent functionality via structured JSON.
+
+### Key Design Decisions
+
+| Decision | Rationale |
+|---|---|
+| MCP Streamable HTTP over SSE | SSE breaks on container restart (session mismatch). Streamable HTTP creates fresh transport per session — transparent to Hermes auto-reconnect. |
+| Hermes MCP for notifications, not gateway webhook | Hermes migration transfers channel ownership from OpenClaw gateway to Hermes. MCP response is the single notification path. |
+| IMAP for PDF trade confirmations only | IBKR flex is pulled via REST web service, not email. IMAP handles PDF confirmations exclusively. |
+| Java CLI subprocess | Uses PP's own XML parser; serialized via mutex lock to prevent file corruption |
+| Dedup journal (SQLite) | Prevents duplicate trade inserts on re-processing |
+| PP native IBFlexStatementExtractor for flex import | Uses PP's own parser (same logic as PP desktop UI); handles CONID→ISIN matching, dividend tax pairing, auto-create securities |
+| Node.js runtime (not Python) | Migrated from Python to Node.js for unified module stack |
+
+### Startup & Config
+
+Critical env vars enforced at startup (fail fast if missing):
+`DEEPSEEK_API_KEY`, `ACTUAL_BUDGET_URL`, `ACTUAL_BUDGET_PASSWORD`, `ACTUAL_PRIMARY_BUDGET_FILE`, `ACTUAL_SECONDARY_BUDGET_FILE`, `ONEDRIVE_CLIENT_ID`, `IBKR_FLEX_TOKEN`, `IBKR_FLEX_QUERY_ID`, `IBKR_PP_SGD_ACCOUNT`, `IBKR_PP_USD_ACCOUNT`, `GOOGLE_SERVICE_ACCOUNT_JSON`, `GOOGLE_SHEET_ID`
 
 ---
 

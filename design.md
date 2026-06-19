@@ -14,6 +14,16 @@
 3. [System Architecture](#3-system-architecture)
 4. [Hosting Topology](#4-hosting-topology)
 5. [Module: expense-tracker](#5-module-expense-tracker)
+5.B [Module: portfolio-tracker](#5b-module-portfolio-tracker)
+   - [5B.1 Purpose](#5b1-purpose)
+   - [5B.2 Technology Stack](#5b2-technology-stack)
+   - [5B.3 Notification Architecture](#5b3-notification-architecture)
+   - [5B.4 IMAP Folder](#5b4-imap-folder)
+   - [5B.5 OneDrive Pull/Push Pipeline](#5b5-onedrive-pullpush-pipeline)
+   - [5B.6 Tools](#5b6-tools)
+   - [5B.7 Key Design Decisions](#5b7-key-design-decisions)
+   - [5B.8 MCP Server Architecture](#5b8-mcp-server-architecture)
+   - [5B.9 IBKR Flex Web Service](#5b9-ibkr-flex-web-service)
 6. [Module: gateway](#6-module-gateway)
    - [6.8 Workspace File Templates](#68-workspace-file-templates)
 7. [Data Flow](#7-data-flow)
@@ -823,100 +833,48 @@ Long-winded files give the LLM more surface to confabulate. Every line must earn
 
 ### 5B.1 Purpose
 
-An LLM-powered agent that manages investment portfolio data in Portfolio Performance. It ingests IBKR flex query XML files (via Telegram or IMAP email), parses trade/transaction data, matches securities by ISIN/ticker, inserts transactions into PP via Java CLI, and syncs account balances from Actual Budget. It also exports taxonomy data to Google Sheets.
+A Node.js agent that manages investment portfolio data. It syncs IBKR trades via the Flex Web Service, handles PDF trade confirmations via IMAP, updates Portfolio Performance via Java CLI, syncs Actual Budget balances, and exports taxonomy to Google Sheets. Hermes Agent controls it via MCP (`portfolio_sync`, OneDrive IO).
 
 ### 5B.2 Technology Stack
 
-| Layer | Choice | Rationale |
-|---|---|---|
-| Runtime | Node.js 22 + Java 17 | Node.js for async I/O and LLM orchestration; Java for PP CLI (XML read/write) |
-| LLM | DeepSeek v4-flash / v4-pro | Flash for fast processing; Pro for complex balance sync |
-| LLM Client | openai SDK | DeepSeek is OpenAI-API-compatible |
-| IMAP | node-imap | IMAP IDLE for email ingestion |
-| Telegram | OpenClaw Gateway | Gateway handles Telegram channel; portfolio-tracker sends notifications via gateway webhook |
-| OneDrive | Microsoft Graph API | Source of truth for PP file |
-| PP CLI | Java JAR (pp-cli.jar) | Deterministic XML read/write for Portfolio Performance |
-| Google Sheets | googleapis (Node.js) | Service account auth for taxonomy export |
-| Scheduler | node-cron | Daily pp-sync-all cron at 3 AM SGT |
+| Layer | Choice |
+|---|---|
+| Runtime | Node.js 22 + Java 17 |
+| LLM | DeepSeek v4 (PDF trade confirmation matching) |
+| MCP | @modelcontextprotocol/sdk (Streamable HTTP) |
+| IMAP | node-imap (PDF trade confirmations only) |
+| OneDrive | Microsoft Graph API |
+| PP CLI | Java JAR (pp-cli.jar) — native IBFlexStatementExtractor |
+| Google Sheets | googleapis (service account) |
+| Scheduling | Hermes cron (daily 3 AM SGT) |
 
-### 5B.3 Notification Architecture
+### 5B.3 Architecture
 
-The portfolio-tracker does **not** implement its own Telegram sender. All user notifications flow through the **OpenClaw Gateway webhook**:
+Portfolio-tracker exposes 6 MCP tools to Hermes: `portfolio_sync` (full pipeline), three OneDrive auth tools (`auth_url`, `auth_complete`, `status`), and two OneDrive IO tools (`pull`, `push`). The sync pipeline is deterministic — no LLM:
 
-    notify_user(message)
-      -> POST http://openclaw:18789/api/notify
-      -> OpenClaw HTTP API (port 18789)
-      -> Telegram Bot API
-      -> User
+1. OneDrive pull → 2. IBKR flex fetch → 3. Java CLI import → 4. AB balance sync → 5. OneDrive push → 6. Taxonomy export
 
-The gateway exposes `/api/notify` on port 18789 (the main OpenClaw HTTP API). Modules set `OPENCLAW_GATEWAY_URL=http://openclaw:18789` (or `KTMB_NOTIFY_URL` for ktmb). This avoids duplicating Telegram credentials across modules and ensures all notifications go through a single, consistent channel.
+IMAP IDLE monitors the "Trades" folder for PDF confirmations only. The LLM orchestrator matches securities and inserts trades. REST endpoints are preserved for backward compatibility. Full architecture details are in [spec 022](./specs/022-portfolio-tracker/spec.md).
 
-**Note:** Port 18800 was originally planned for a separate `notify-webhook.py` sidecar, but this was never built. All notifications now go through port 18789, which requires authentication via the OpenClaw API key.
-
-**Design rationale:** Per the constitution, the gateway owns all channel communication. Modules call back to the gateway for notifications rather than reaching around it to call Telegram directly.
-
-### 5B.4 IMAP Folder Configuration
-
-The IMAP handler monitors a **configurable folder** (default: Trades) via the IMAP_FOLDER env var. IBKR auto-forwards flex query emails to this folder via email rules. If the configured folder does not exist, the handler falls back to INBOX.
-
-### 5B.5 OneDrive Pull/Push Workflow
-
-The IBKR import workflow respects OneDrive as the source of truth. The correct sequence is:
-
-1. pp-pull — Download latest from OneDrive
-2. Parse IBKR XML
-3. Match securities (ISIN -> ticker -> name)
-4. User confirmation
-5. Insert trades (insert_pp_transaction x N)
-6. pp-push — Upload modified file to OneDrive
-7. pp-sync-all — Pull -> sync AB balances -> push -> taxonomy -> Sheets
-8. notify_user — Gateway webhook notification
-
-pp-sync-all internally does its own pp-pull -> update -> pp-push -> taxonomy export cycle. Pushing before calling pp-sync-all is critical — otherwise pp-sync-all initial pull would overwrite the newly inserted trades.
-
-### 5B.6 Tools
-
-| # | Tool | Type | Description |
-|---|---|---|---|
-| 1 | parse_ibkr_flex_query | Parse | Parse IBKR flex query XML into structured transactions |
-| 2 | extract_email_content | Parse | Extract text from email (PDF attachment support) |
-| 3 | fetch_pp_accounts | Read | List PP accounts via Java CLI |
-| 4 | fetch_pp_securities | Read | List PP securities with ISIN/ticker/currency |
-| 5 | fetch_pp_portfolio | Read | Full portfolio structure |
-| 6 | insert_pp_transaction | Write | Insert trade/dividend/deposit into PP |
-| 7 | update_pp_balance | Write | Update account balance |
-| 8 | pp-pull | Write | Download latest PP file from OneDrive |
-| 9 | pp-push | Write | Upload PP file to OneDrive |
-| 10 | pp-sync-all | Sync | Full balance sync: pull -> AB budgets -> update -> push -> taxonomy -> Sheets |
-| 11 | query_pp_taxonomies | Read | Holdings aggregated by taxonomy |
-| 12 | update_google_sheet | Write | Write taxonomy data to Google Sheets |
-| 13 | notify_user | Write | Send notification via gateway webhook (not direct Telegram) |
-| 14 | check_duplicate | Read | SHA-256 lookup in SQLite dedup journal |
-| 15 | learn_mapping | Write | Persist security/account associations |
-| 16 | log_decision | Write | Audit trail entry |
-| 17 | ask_user_confirmation | Interactive | Pause for user approval before inserting |
-| 18 | get_pp_status | Read | Portfolio performance summary |
-| 19 | query_pp_security | Read | Query security by ticker/ISIN/name |
-
-### 5B.7 Key Design Decisions
+### 5B.4 Key Design Decisions
 
 | Decision | Rationale |
 |---|---|
-| Webhook for notifications, not direct Telegram | Gateway owns channel layer; avoids duplicating credentials |
-| TCPConnector(force_close=True) for webhook calls | Bypasses system Privoxy proxy which cannot resolve Docker hostnames |
-| IMAP folder configurable, not hardcoded | IBKR emails routed to Trades folder via email rules |
-| pp-push before pp-sync-all | Prevents pp-sync-all initial pull from overwriting un-pushed inserts |
-| Java CLI subprocess (not JNI/PyJNIus) | Simpler deployment; serialized via asyncio lock to prevent file corruption |
-| Dedup journal (SQLite) | Prevents duplicate IBKR trade inserts on re-processing |
-|---|---|
-| `.speckit/` scaffold | ✅ Created |
-| Constitution (v3.0.0, OpenClaw-native) | ✅ Complete |
-| Spec (4 user stories) | ✅ Complete |
-| Plan (Mermaid + Docker Compose + SKILL.js) | ✅ Complete |
-| Tasks (8 tasks, ~3.5h) | ✅ Complete |
-| SKILL.md + SKILL.js + openclaw.json | ✅ Written |
-| docker-compose.yml | ✅ Written |
-| Implementation (tools_api.py) | ⬜ Pending |
+| MCP Streamable HTTP over SSE | Survives container restarts — Hermes auto-reconnects transparently |
+| IBKR flex via REST, not IMAP | Deterministic; no email parsing needed. PP native IBFlexStatementExtractor handles import |
+| Java CLI subprocess | Uses PP's own XML parser; mutex-locked to prevent file corruption |
+| Hermes MCP for notifications | Hermes migration transfers channel ownership from gateway to Hermes |
+
+### 5B.5 Implementation Status
+
+- ✅ MCP server (`src/mcp-server.js`) — 6 tools registered
+- ✅ IBKR Flex Web Service (`src/ibkr_flex.js`) — two-step protocol
+- ✅ `_computeSyncAll()` pipeline — deterministic, non-fatal on flex failure
+- ✅ Hermes config — `mcp_servers` lists portfolio-tracker
+- ✅ Telegram commands — `/sync`, `/onedrive` routed through Hermes
+- ✅ 19 REST `/tools/*` endpoints preserved for backward compatibility
+
+---
 
 ### 6.8 WARP for Docker Builds
 
