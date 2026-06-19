@@ -1,0 +1,47 @@
+name: Unit Tests
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  expense-tracker:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: modules/expense-tracker
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci
+      - run: npm test
+
+  portfolio-tracker:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: modules/portfolio-tracker
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci
+      - run: npm test
+
+  ktmb:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: modules/ktmb
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - run: pytest tests/ -v --no-header
