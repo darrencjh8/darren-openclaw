@@ -24,6 +24,9 @@ done
 mkdir -p /opt/data/memories-backup
 chown -R hermes:hermes /opt/data/memories-backup 2>/dev/null || true
 
+# Generate GitHub App token for workers
+/opt/data/scripts/github-auth.sh 2>/dev/null || true
+
 python3 -c '
 import os, re, glob
 paths = ["/opt/data/config.yaml", "/opt/data/SOUL.md"]
