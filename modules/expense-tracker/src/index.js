@@ -139,6 +139,8 @@ async function main() {
                 return `Could not process "${subject}": ${details}. User should review inbox and categorize manually.`;
             case "skipped":
                 return null;
+            case "completed":
+                return `Statement processed: ${details}`;
             default:
                 return `Error processing "${subject}": ${details}`;
         }
