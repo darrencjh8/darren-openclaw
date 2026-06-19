@@ -1,0 +1,71 @@
+name: Unit Tests
+
+on:
+    pull_request:
+        branches: [main]
+
+jobs:
+    expense-tracker:
+        runs-on: ubuntu-latest
+        defaults:
+            run:
+                working-directory: modules/expense-tracker
+        steps:
+            - uses: actions/checkout@v4
+            - uses: actions/setup-node@v4
+              with:
+                  node-version: 22
+            - run: sudo apt-get update -qq && sudo apt-get install -y -qq poppler-utils qpdf
+            - run: npm ci
+            - run: npm test
+
+    portfolio-tracker:
+        runs-on: ubuntu-latest
+        continue-on-error: true # needs IBKR keys + running services, fixing separately
+        defaults:
+            run:
+                working-directory: modules/portfolio-tracker
+        env:
+            ONEDRIVE_CLIENT_ID: ${{ secrets.ONEDRIVE_CLIENT_ID }}
+        steps:
+            - uses: actions/checkout@v4
+            - uses: actions/setup-node@v4
+              with:
+                  node-version: 22
+            - run: npm ci
+            - run: npm test
+
+    ktmb:
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v4
+            - name: Clone ktmb submodule
+              id: submodule
+              run: |
+                  if git submodule update --init modules/ktmb 2>/dev/null; then
+                    echo "available=true" >> "$GITHUB_OUTPUT"
+                  else
+                    echo "SKIP: submodule not accessible (private repo — set SUBMODULE_PAT secret)"
+                    echo "available=false" >> "$GITHUB_OUTPUT"
+                  fi
+            - uses: actions/setup-python@v5
+              if: steps.submodule.outputs.available == 'true'
+              with:
+                  python-version: "3.12"
+            - name: Run ktmb tests
+              if: steps.submodule.outputs.available == 'true'
+              working-directory: modules/ktmb
+              run: |
+                  pip install -r requirements.txt
+                  pytest tests/ -v --no-header
+
+    hermes-scripts:
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v4
+            - name: Lint bash scripts
+              run: |
+                  sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck
+                  shellcheck modules/hermes/scripts/*.sh modules/hermes/50-seed-defaults
+            - name: Test github-auth.sh
+              run: bash modules/hermes/tests/test-github-auth.sh

@@ -1,0 +1,131 @@
+model:
+    provider: deepseek
+    default: deepseek-v4-pro
+    api_key: ${DEEPSEEK_API_KEY}
+
+agent:
+    reasoning_effort: medium
+    disabled_toolsets:
+        - image_gen
+        - tts
+        - moa
+
+display:
+    show_reasoning: false
+
+fallback_providers:
+    - provider: gemini
+      model: gemini-3.1-flash-lite
+      api_key: ${GEMINI_API_KEY}
+
+delegation:
+    max_spawn_depth: 1
+    max_iterations: 100
+    model: deepseek-v4-flash
+
+approvals:
+    mode: smart
+    timeout: 60
+    cron_mode: allow
+
+memory:
+    memory_enabled: true
+    user_profile_enabled: true
+    write_approval: true
+
+skills:
+    guard_agent_created: true
+
+terminal:
+    backend: local
+    persistent_shell: true
+    cwd: /workspace
+
+web:
+    search_backend: brave-free
+    extract_backend: firecrawl
+
+auxiliary:
+    vision:
+        provider: gemini
+        model: gemini-3.1-flash-lite
+    web_extract:
+        provider: deepseek
+        model: deepseek-v4-flash
+        extra_body:
+            thinking:
+                type: disabled
+    compression:
+        provider: deepseek
+        model: deepseek-v4-flash
+        extra_body:
+            thinking:
+                type: disabled
+    approval:
+        provider: deepseek
+        model: deepseek-v4-flash
+        extra_body:
+            thinking:
+                type: disabled
+    kanban_decomposer:
+        provider: deepseek
+        model: deepseek-v4-pro
+    triage_specifier:
+        provider: deepseek
+        model: deepseek-v4-flash
+        extra_body:
+            thinking:
+                type: disabled
+    profile_describer:
+        provider: deepseek
+        model: deepseek-v4-flash
+        extra_body:
+            thinking:
+                type: disabled
+
+kanban:
+    dispatch_in_gateway: true
+    dispatch_interval_seconds: 60
+    auto_decompose: true
+    auto_decompose_per_tick: 3
+    auto_promote_children: true
+    failure_limit: 2
+    max_in_progress: 4
+    max_in_progress_per_profile: 2
+    orchestrator_profile: project-manager
+    default_assignee: quality-assurance
+
+timezone: Asia/Kuala_Lumpur
+
+mcp_servers:
+    expense-tracker:
+        url: http://expense-tracker:8080/mcp
+        tools:
+            exclude: []
+        supports_parallel_tool_calls: false
+    portfolio-tracker:
+        url: http://portfolio-tracker:8081/mcp
+        tools:
+            exclude: []
+        supports_parallel_tool_calls: false
+    ktmb-booking:
+        url: http://ktmb-booking:8082/mcp
+        tools:
+            exclude: []
+        supports_parallel_tool_calls: false
+
+platforms:
+    webhook:
+        enabled: true
+        extra:
+            port: 8644
+            secret: ${HERMES_WEBHOOK_SECRET}
+            routes:
+                notify:
+                    secret: ${HERMES_WEBHOOK_SECRET}
+                    prompt: |
+                        SYSTEM: A notification arrived. Relay it.
+                        NOTIFICATION: {message}
+                    deliver: telegram
+                    deliver_extra:
+                        chat_id: "${TELEGRAM_HOME_CHANNEL}"
