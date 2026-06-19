@@ -50,7 +50,8 @@ with open("/opt/data/config.yaml", "w") as f:
 '
 
 # Seed memory-backup cron job (idempotent — skips if already present)
-if [ -n "${GITHUB_PAT}" ] && [ -n "${GITHUB_URL}" ]; then
+# Uses GitHub App token primarily, PAT as fallback
+if [ -n "${GITHUB_URL}" ] && ( [ -n "${GITHUB_APP_ID}" ] || [ -n "${GITHUB_PAT}" ] ); then
     python3 -c '
 import os, json, uuid, datetime
 jobs_path = "/opt/data/cron/jobs.json"
