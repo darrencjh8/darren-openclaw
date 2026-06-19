@@ -4,7 +4,7 @@ model:
     api_key: ${DEEPSEEK_API_KEY}
 
 agent:
-    reasoning_effort: low
+    reasoning_effort: medium
     disabled_toolsets:
         - image_gen
         - tts
