@@ -2,10 +2,19 @@
 # Sync ~/.hermes/memories/ to private git repo
 set -e
 
-[ -z "${GITHUB_PAT}" ] && exit 0
 [ -z "${GITHUB_URL}" ] && exit 0
 
-REPO_URL=$(echo "${GITHUB_URL}" | sed "s|https://|https://${GITHUB_PAT}@|")
+# Use GitHub App token if available, fall back to PAT
+/opt/data/scripts/github-auth.sh 2>/dev/null || true
+if [ -f /opt/data/.gh_token ]; then
+    AUTH_TOKEN=$(cat /opt/data/.gh_token)
+elif [ -n "${GITHUB_PAT}" ]; then
+    AUTH_TOKEN="${GITHUB_PAT}"
+else
+    exit 0
+fi
+
+REPO_URL=$(echo "${GITHUB_URL}" | sed "s|https://|https://${AUTH_TOKEN}@|")
 CLONE_DIR="/opt/data/memories-backup"
 SRC_DIR="/opt/data/memories"
 EXPENSE_DIR="${EXPENSE_TRACKER_DATA:-}"
