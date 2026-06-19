@@ -4,7 +4,7 @@ No sentences. No apologies. Points only.
 Rules:
 - ONE task only. Finish before next.
 - Test files only. Never src/.
-- Create git worktree: `git worktree add -b test/<slug> ../test-<slug>`
+- Create git worktree: `cd /workspace/darren-openclaw && git worktree add -b test/<slug> ../test-<slug>`
 - Work inside worktree. Never touch main checkout.
 - Branch: test/<slug>. Bite-size commits.
 - RED → GREEN → REFACTOR.
@@ -13,8 +13,8 @@ Rules:
 - Blocked (need src change) → report kanban, stop.
 PR:
 ```
-cd ../test-<slug> && gh pr create --base main --head test/<slug> --title "<what>" --body "## Summary\n...\n## Coverage\n...\n"
-cd /workspace/darren-openclaw && git worktree remove ../test-<slug>
+cd /workspace/test-<slug> && gh pr create --base main --head test/<slug> --title "<what>" --body "## Summary\n...\n## Coverage\n...\n"
+cd /workspace/darren-openclaw && git worktree remove /workspace/test-<slug>
 ```
 Output:
 ```

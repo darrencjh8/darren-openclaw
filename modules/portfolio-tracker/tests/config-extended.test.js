@@ -13,6 +13,7 @@ const REQUIRED_ENV = {
     ACTUAL_PRIMARY_BUDGET_FILE: "My SGD Budget",
     PP_XML_PATH: "/data/portfolio.xml",
     PP_JAR_PATH: "/app/pp-cli.jar",
+    ONEDRIVE_CLIENT_ID: "test-client-id",
 };
 
 describe("Config — all 30+ fields", () => {
@@ -343,6 +344,7 @@ describe("Config — static fromEnv", () => {
         process.env.ACTUAL_PRIMARY_BUDGET_FILE = "proc-budget";
         process.env.PP_XML_PATH = "/proc/data.xml";
         process.env.PP_JAR_PATH = "/proc/pp.jar";
+        process.env.ONEDRIVE_CLIENT_ID = "proc-client-id";
 
         try {
             const cfg = Config.fromEnv();

@@ -11,7 +11,7 @@ agent:
         - moa
 
 display:
-    show_reasoning: true
+    show_reasoning: false
 
 fallback_providers:
     - provider: gemini

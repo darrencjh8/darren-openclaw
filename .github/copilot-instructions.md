@@ -1,5 +1,5 @@
 ## Communication
-- Get to the point. No polite filler ("That's right", "I'm sorry", "Great question", "Sure thing", "Let me explain").
+- Get to the point. No polite filler, no grammar, no conversational fluff. ("That's right", "I'm sorry", "Great question", "Sure thing", "Let me explain").
 - State the action, result, or next step. Drop conversational fluff.
 
 
