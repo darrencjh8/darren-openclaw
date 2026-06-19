@@ -384,29 +384,30 @@ The MCP server uses Streamable HTTP transport (NOT SSE). Why: SSE breaks on cont
 - Tools registered via `server.tool(name, description, zodSchema, handler)`
 - Results returned as `{ content: [{ type: "text", text: JSON.stringify(result) }] }`
 
-### REST Tools (19 — preserved for backward compatibility)
+### REST Tools (20 — preserved for backward compatibility)
 
 | # | Tool | Type | Description |
 |---|---|---|---|
 | 1 | `parse_ibkr_flex_query` | Parse | Parse IBKR flex query XML (⚠ deprecated — IBKR flex now pulled via web service; retained for LLM orchestrator backward compat) |
 | 2 | `extract_email_content` | Parse | Extract text from email (PDF attachment support) |
-| 3 | `fetch_pp_accounts` | Read | List PP accounts via Java CLI |
-| 4 | `fetch_pp_securities` | Read | List PP securities with ISIN/ticker/currency |
-| 5 | `fetch_pp_portfolio` | Read | Full portfolio structure |
-| 6 | `insert_pp_transaction` | Write | Insert trade/dividend/deposit into PP |
-| 7 | `update_pp_balance` | Write | Update account balance |
-| 8 | `pp-pull` | Write | Download latest PP file from OneDrive |
-| 9 | `pp-push` | Write | Upload PP file to OneDrive |
-| 10 | `pp-sync-all` | Sync | Full balance sync: pull → AB budgets → update → push → taxonomy → Sheets |
-| 11 | `query_pp_taxonomies` | Read | Holdings aggregated by taxonomy |
-| 12 | `update_google_sheet` | Write | Write taxonomy data to Google Sheets |
-| 13 | `notify_user` | Write | Legacy gateway webhook notification (MCP path now preferred) |
-| 14 | `check_duplicate` | Read | SHA-256 lookup in SQLite dedup journal |
-| 15 | `learn_mapping` | Write | Persist security/account associations |
-| 16 | `log_decision` | Write | Audit trail entry |
-| 17 | `ask_user_confirmation` | Interactive | Pause for user approval before inserting |
-| 18 | `get_pp_status` | Read | Portfolio performance summary |
-| 19 | `query_pp_security` | Read | Query security by ticker/ISIN/name |
+| 3 | `extract_pdf_text` | Parse | Extract text from PDF attachments with password support |
+| 4 | `fetch_pp_accounts` | Read | List PP accounts via Java CLI |
+| 5 | `fetch_pp_securities` | Read | List PP securities with ISIN/ticker/currency |
+| 6 | `fetch_pp_portfolio` | Read | Full portfolio structure |
+| 7 | `insert_pp_transaction` | Write | Insert trade/dividend/deposit into PP |
+| 8 | `update_pp_balance` | Write | Update account balance |
+| 9 | `pp-pull` | Write | Download latest PP file from OneDrive |
+| 10 | `pp-push` | Write | Upload PP file to OneDrive |
+| 11 | `pp-sync-all` | Sync | Full balance sync: pull → AB budgets → update → push → taxonomy → Sheets |
+| 12 | `query_pp_taxonomies` | Read | Holdings aggregated by taxonomy |
+| 13 | `update_google_sheet` | Write | Write taxonomy data to Google Sheets |
+| 14 | `notify_user` | Write | Legacy gateway webhook notification (MCP path now preferred) |
+| 15 | `check_duplicate` | Read | SHA-256 lookup in SQLite dedup journal |
+| 16 | `learn_mapping` | Write | Persist security/account associations |
+| 17 | `log_decision` | Write | Audit trail entry |
+| 18 | `ask_user_confirmation` | Interactive | Pause for user approval before inserting |
+| 19 | `get_pp_status` | Read | Portfolio performance summary |
+| 20 | `query_pp_security` | Read | Query security by ticker/ISIN/name |
 
 REST endpoints served at `POST /tools/<slug>`. MCP server exposes equivalent functionality via structured JSON.
 
