@@ -240,6 +240,246 @@ describe("AgentOrchestrator", () => {
         );
         expect(result.action).toBe("notified");
     });
+
+    it("marks email read when Phase 1a returns no output", async () => {
+        const config = makeConfig();
+        const tools = {
+            setEmailContext: vi.fn(),
+            getToolSchemas: vi.fn(() => []),
+            getLlmToolSchemas: vi.fn(() => []),
+            getPhase2ToolSchemas: vi.fn(() => []),
+            executeTool: vi.fn(async () => true),
+            getSubmitDecisionTool: vi.fn(() => ({
+                type: "function",
+                function: {
+                    name: "submit_decision",
+                    description: "Submit the final structured decision",
+                    parameters: {},
+                },
+            })),
+        };
+        const orch = new AgentOrchestrator(config, tools);
+
+        // Phase 1a: LLM returns no content -> parse fails -> null
+        orch._llm.chat = vi.fn(async () => ({
+            choices: [{ finish_reason: "stop", message: {} }],
+        }));
+
+        const result = await orch.processEmail("test-005", "Some email");
+        expect(tools.executeTool).toHaveBeenCalledWith(
+            "notify_user",
+            expect.anything(),
+        );
+        expect(tools.executeTool).toHaveBeenCalledWith("mark_email_read", {});
+        expect(result.action).toBe("notified");
+    });
+
+    it("marks email read when Phase 2 returns no account_id", async () => {
+        const config = makeConfig();
+        const tools = {
+            setEmailContext: vi.fn(),
+            getToolSchemas: vi.fn(() => []),
+            getLlmToolSchemas: vi.fn(() => []),
+            getPhase2ToolSchemas: vi.fn(() => [
+                {
+                    type: "function",
+                    function: {
+                        name: "fetch_context",
+                        description: "Fetch live data",
+                        parameters: {
+                            type: "object",
+                            properties: {
+                                budget_id: { type: "string" },
+                            },
+                            required: ["budget_id"],
+                        },
+                    },
+                },
+            ]),
+            executeTool: vi.fn(async (name) => {
+                if (name === "search_memory")
+                    return [{ text: "some match", score: 0.5 }];
+                if (name === "fetch_context")
+                    return {
+                        accounts: [{ id: "acc1", name: "Account 1" }],
+                        payees: [{ name: "Test Payee" }],
+                        categories: [{ id: "cat1", name: "Food" }],
+                    };
+                return true;
+            }),
+            getSubmitDecisionTool: vi.fn(() => ({
+                type: "function",
+                function: {
+                    name: "submit_decision",
+                    description: "Submit the final structured decision",
+                    parameters: {},
+                },
+            })),
+        };
+        const orch = new AgentOrchestrator(config, tools);
+
+        // Phase 1a: valid JSON with transaction data
+        // Phase 2: JSON with NO account_id (blank), valid payee & category
+        let callCount = 0;
+        orch._llm.chat = vi.fn(async () => {
+            callCount++;
+            if (callCount === 1) {
+                // Phase 1a response
+                return {
+                    choices: [
+                        {
+                            finish_reason: "stop",
+                            message: {
+                                content: JSON.stringify({
+                                    merchant: "Test Merchant",
+                                    amount_cents: -1000,
+                                    date: "2026-06-19",
+                                    currency: "SGD",
+                                    raw_description: "S$10.00 at Test Merchant",
+                                }),
+                            },
+                        },
+                    ],
+                };
+            }
+            // Phase 2 response: no tool_calls, blank account_id
+            return {
+                choices: [
+                    {
+                        finish_reason: "stop",
+                        message: {
+                            content: JSON.stringify({
+                                action: "insert",
+                                merchant: "Test Merchant",
+                                amount_cents: -1000,
+                                date: "2026-06-19",
+                                currency: "SGD",
+                                account_id: "",
+                                payee_name: "Test Payee",
+                                category_id: "cat1",
+                                budget_id: "primary",
+                            }),
+                        },
+                    },
+                ],
+            };
+        });
+
+        const result = await orch.processEmail(
+            "test-006",
+            "S$10.00 at Test Merchant",
+        );
+        expect(tools.executeTool).toHaveBeenCalledWith(
+            "notify_user",
+            expect.anything(),
+        );
+        expect(tools.executeTool).toHaveBeenCalledWith("mark_email_read", {});
+        expect(result.action).toBe("notified");
+    });
+
+    it("marks email read when Phase 3 exhausts without payee/category", async () => {
+        const config = makeConfig();
+        const tools = {
+            setEmailContext: vi.fn(),
+            getToolSchemas: vi.fn(() => []),
+            getLlmToolSchemas: vi.fn(() => []),
+            getPhase2ToolSchemas: vi.fn(() => [
+                {
+                    type: "function",
+                    function: {
+                        name: "fetch_context",
+                        description: "Fetch live data",
+                        parameters: {
+                            type: "object",
+                            properties: {
+                                budget_id: { type: "string" },
+                            },
+                            required: ["budget_id"],
+                        },
+                    },
+                },
+            ]),
+            executeTool: vi.fn(async (name) => {
+                if (name === "search_memory")
+                    return [{ text: "some match", score: 0.5 }];
+                if (name === "fetch_context")
+                    return {
+                        accounts: [{ id: "acc1", name: "Account 1" }],
+                        payees: [{ name: "Test Payee" }],
+                        categories: [{ id: "cat1", name: "Food" }],
+                    };
+                // resolve_merchant: returns a payee that matches
+                if (name === "resolve_merchant") return { payee: "Test Payee" };
+                return true;
+            }),
+            getSubmitDecisionTool: vi.fn(() => ({
+                type: "function",
+                function: {
+                    name: "submit_decision",
+                    description: "Submit the final structured decision",
+                    parameters: {},
+                },
+            })),
+        };
+        const orch = new AgentOrchestrator(config, tools);
+
+        // Phase 1a: valid JSON
+        // Phase 2: account_id present, payee_name present, NO category_id
+        let callCount = 0;
+        orch._llm.chat = vi.fn(async () => {
+            callCount++;
+            if (callCount === 1) {
+                return {
+                    choices: [
+                        {
+                            finish_reason: "stop",
+                            message: {
+                                content: JSON.stringify({
+                                    merchant: "Test Merchant",
+                                    amount_cents: -1000,
+                                    date: "2026-06-19",
+                                    currency: "SGD",
+                                    raw_description: "S$10.00 at Test Merchant",
+                                }),
+                            },
+                        },
+                    ],
+                };
+            }
+            // Phase 2: account_id + payee_name, NO category_id
+            return {
+                choices: [
+                    {
+                        finish_reason: "stop",
+                        message: {
+                            content: JSON.stringify({
+                                action: "insert",
+                                merchant: "Test Merchant",
+                                amount_cents: -1000,
+                                date: "2026-06-19",
+                                currency: "SGD",
+                                account_id: "acc1",
+                                payee_name: "Test Payee",
+                                category_id: "",
+                                budget_id: "primary",
+                            }),
+                        },
+                    },
+                ],
+            };
+        });
+
+        const result = await orch.processEmail(
+            "test-007",
+            "S$10.00 at Test Merchant",
+        );
+        expect(tools.executeTool).toHaveBeenCalledWith(
+            "notify_user",
+            expect.anything(),
+        );
+        expect(tools.executeTool).toHaveBeenCalledWith("mark_email_read", {});
+        expect(result.action).toBe("notified");
+    });
 });
 
 describe("DeepSeekClient", () => {
