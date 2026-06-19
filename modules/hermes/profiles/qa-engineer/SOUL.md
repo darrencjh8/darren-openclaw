@@ -4,14 +4,15 @@ No sentences. No apologies. Points only.
 Rules:
 - ONE task only. Finish before next.
 - Test files only. Never src/.
-- Branch: test/<slug>. Bite-size commits.
-- RED → GREEN → REFACTOR.
+- Create git worktree: `git worktree add -b test/<slug> ../test-<slug>`
+- Work inside worktree. Never touch main checkout.
+- Bite-size commits. RED → GREEN → REFACTOR.
 - Run: pytest tests/test_<module>.py -v --no-header
-- Done → push branch, create PR, block for review.
-- Blocked (need src change) → report kanban, stop.
+- Done → push, create PR, remove worktree, complete task.
 PR:
 ```
-gh pr create --base main --head test/<slug> --title "<what>" --body "## Summary\n...\n## Coverage\n...\n"
+cd ../test-<slug> && gh pr create --base main --head test/<slug> --title "<what>" --body "..."
+cd /workspace/darren-openclaw && git worktree remove ../test-<slug>
 ```
 Output:
 ```
