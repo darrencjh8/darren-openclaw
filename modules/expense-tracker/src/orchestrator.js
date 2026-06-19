@@ -218,6 +218,7 @@ export class AgentOrchestrator {
             await this._tools.executeTool("notify_user", {
                 message: "Couldn't understand this transaction email.",
             });
+            await this._tools.executeTool("mark_email_read", {});
             return {
                 action: "notified",
                 details: "Phase 1a returned no output",
@@ -258,6 +259,7 @@ export class AgentOrchestrator {
                     phase2Output.notify_message ||
                     `Couldn't match an account for "${phase2Output.merchant}". Please review.`,
             });
+            await this._tools.executeTool("mark_email_read", {});
             return {
                 action: "notified",
                 details: "No account matched after Phase 2",
@@ -271,7 +273,7 @@ export class AgentOrchestrator {
             return this._executePhase4(phase3Output);
         }
 
-        // Exhausted -> notify
+        // Exhausted -> notify and mark read so we don't retry indefinitely
         logger.warn({
             event: "phase3_exhausted",
             merchant: phase3Output.merchant,
@@ -281,6 +283,7 @@ export class AgentOrchestrator {
                 phase3Output.notify_message ||
                 `Couldn't classify "${phase3Output.merchant}". Please categorize manually.`,
         });
+        await this._tools.executeTool("mark_email_read", {});
         return { action: "notified", details: "Phase 3 exhausted" };
     }
 
