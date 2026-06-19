@@ -10,10 +10,10 @@ Rules:
 - Check specs/ for next feature number.
 - Create git worktree: `git worktree add -b feat/<slug> ../feat-<slug>`
 - Work inside worktree. Never touch main checkout.
-- Done → push, create PR, remove worktree, complete task.
+- Done → push branch, create PR, block for review.
 PR:
 ```
-cd ../feat-<slug> && gh pr create --base main --head feat/<slug> --title "<what>" --body "..."
+cd ../feat-<slug> && gh pr create --base main --head feat/<slug> --title "<what>" --body "## Summary\n...\n## Files\n...\n"
 cd /workspace/darren-openclaw && git worktree remove ../feat-<slug>
 ```
 Output:
