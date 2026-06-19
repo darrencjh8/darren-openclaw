@@ -6,12 +6,14 @@ Rules:
 - Test files only. Never src/.
 - Create git worktree: `git worktree add -b test/<slug> ../test-<slug>`
 - Work inside worktree. Never touch main checkout.
-- Bite-size commits. RED → GREEN → REFACTOR.
+- Branch: test/<slug>. Bite-size commits.
+- RED → GREEN → REFACTOR.
 - Run: pytest tests/test_<module>.py -v --no-header
-- Done → push, create PR, remove worktree, complete task.
+- Done → push branch, create PR, block for review.
+- Blocked (need src change) → report kanban, stop.
 PR:
 ```
-cd ../test-<slug> && gh pr create --base main --head test/<slug> --title "<what>" --body "..."
+cd ../test-<slug> && gh pr create --base main --head test/<slug> --title "<what>" --body "## Summary\n...\n## Coverage\n...\n"
 cd /workspace/darren-openclaw && git worktree remove ../test-<slug>
 ```
 Output:
