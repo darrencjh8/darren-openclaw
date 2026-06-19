@@ -1,1 +1,0 @@
-> ⚠ **Moved to [022-portfolio-tracker](../022-portfolio-tracker/spec.md)** — IBKR flex is now pulled via the Flex Web Service (REST) and imported via PP's native IBFlexStatementExtractor. No LLM parsing or Telegram/IMAP ingestion needed.
