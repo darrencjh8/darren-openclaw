@@ -119,3 +119,6 @@ for gw_dir in /run/service/gateway-*; do
     [ "$name" = "gateway-default" ] && continue
     /package/admin/s6-2.15.0.0/command/s6-svc -D "$gw_dir" 2>/dev/null || true
 done
+
+# Initialize kanban board (idempotent — no-op if already exists)
+su -s /bin/sh hermes -c "hermes kanban init 2>/dev/null" || true
