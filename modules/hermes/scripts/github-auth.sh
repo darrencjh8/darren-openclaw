@@ -27,9 +27,11 @@ TOKEN=$(curl -s -X POST \
 
 if [ -n "$TOKEN" ]; then
     echo "$TOKEN" > /opt/data/.gh_token
-    chmod 600 /opt/data/.gh_token
+    chmod 644 /opt/data/.gh_token
     # Set for current shell and future processes
     export GITHUB_TOKEN="$TOKEN"
-    # Also configure gh CLI
+    # Auth gh as hermes user (workers run as hermes)
+    echo "$TOKEN" | su -s /bin/sh hermes -c "gh auth login --with-token 2>/dev/null" || true
+    # Also auth as root for cron/memory-backup
     echo "$TOKEN" | gh auth login --with-token 2>/dev/null || true
 fi
