@@ -18,6 +18,9 @@ for profile_dir in /opt/hermes-defaults/profiles/*/; do
     [ ! -f "/opt/data/profiles/$name/config.yaml" ] && cp "$profile_dir/config.yaml" "/opt/data/profiles/$name/config.yaml" 2>/dev/null || true
     [ ! -f "/opt/data/profiles/$name/SOUL.md" ] && cp "$profile_dir/SOUL.md" "/opt/data/profiles/$name/SOUL.md" 2>/dev/null || true
     [ ! -f "/opt/data/profiles/$name/profile.yaml" ] && cp "$profile_dir/profile.yaml" "/opt/data/profiles/$name/profile.yaml" 2>/dev/null || true
+
+    # Register profile in Hermes (idempotent — fails silently if already exists)
+    su -s /bin/sh hermes -c "hermes profile create $name --no-alias 2>/dev/null" || true
 done
 
 # Ensure cron-run directories are owned by hermes (gateway runs as hermes)
