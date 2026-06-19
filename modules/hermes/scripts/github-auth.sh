@@ -60,17 +60,34 @@ log "token stored (expires $(echo "$BODY" | python3 -c "import sys,json; print(j
 # ---- auth gh CLI as hermes user (workers) ----
 # gh auth login --with-token overwrites the existing entry for the same user.
 # No logout needed — avoids multi-user ambiguity errors.
-if ! echo "$TOKEN" | su -s /bin/sh hermes -c "gh auth login --with-token"; then
-    die "gh auth login failed for hermes user"
+if [ "$(id -u)" = "$(id -u hermes 2>/dev/null || echo 0)" ]; then
+    # Already running as hermes — auth directly
+    if ! (unset GITHUB_TOKEN; echo "$TOKEN" | gh auth login --with-token); then
+        die "gh auth login failed for hermes user"
+    fi
+else
+    if ! echo "$TOKEN" | su -s /bin/sh hermes -c "gh auth login --with-token"; then
+        die "gh auth login failed for hermes user"
+    fi
 fi
 
 # ---- verify hermes auth ----
-if ! su -s /bin/sh hermes -c "gh auth status" >/dev/null 2>&1; then
+_gh_auth_check() {
+    if [ "$(id -u)" = "$(id -u hermes 2>/dev/null || echo 0)" ]; then
+        gh auth status "$@"
+    else
+        su -s /bin/sh hermes -c "gh auth status $*"
+    fi
+}
+if ! _gh_auth_check >/dev/null 2>&1; then
     die "gh auth verification failed for hermes user"
 fi
-log "hermes user authenticated as $(su -s /bin/sh hermes -c 'gh auth status 2>&1' | grep -oP 'account \K[^ ]+')"
+log "hermes user authenticated as $(_gh_auth_check 2>&1 | grep -oP 'account \K[^ ]+')"
 
 # ---- auth gh CLI as root (cron / memory-backup) ----
-echo "$TOKEN" | gh auth login --with-token 2>/dev/null || log "warning: gh auth login failed for root (non-fatal)"
+# Only try root auth if we are actually root; skip when running as hermes via cron.
+if [ "$(id -u)" = "0" ]; then
+    echo "$TOKEN" | gh auth login --with-token 2>/dev/null || log "warning: gh auth login failed for root (non-fatal)"
+fi
 
 log "done"
