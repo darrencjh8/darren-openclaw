@@ -324,6 +324,37 @@ Function:
 | IBKR Flex Web Service returns no new trades | Import step returns `trades_imported: 0` — sync continues |
 | Java CLI `import` with duplicate trades | PP native extractor handles dedup; returns `items_skipped > 0` |
 | Hermes cron and apscheduler both trigger sync | Idempotent — delta = 0 if already synced |
+| AB budget API down | Log error, exit without modifying PP |
+| Zero budget data (all categories = 0) | Report "All balances are 0 — may need review", skip update |
+| PP file corrupted (unparseable XML) | Java CLI exits with error, no write attempted |
+| AB category not found for one account | Skip that account, update remaining 2, report partial success |
+| MYR/SGD currency mismatch | Reject update, log error, do not write incorrect currency |
+
+---
+
+## AB Balance Sync (deterministic)
+
+`_computeSyncAll()` syncs 3 PP accounts from Actual Budget targets:
+
+| Account | Source Budget | Currency |
+|---|---|---|
+| Emergency Funds - SGD | `ACTUAL_PRIMARY_BUDGET_FILE` | SGD |
+| Emergency Funds - MYR | `ACTUAL_SECONDARY_BUDGET_FILE` | MYR |
+| Warchest | `ACTUAL_PRIMARY_BUDGET_FILE` (investment_total) | SGD |
+
+Budget data is fetched from `http://actual-api:3000/budget-12m` with exponential backoff retry (max 3 attempts). Amounts are in cents from AB — divided by 100 before writing to PP. Account IDs are hardcoded UUIDs from PP's internal data model. Balance updates go through Java CLI via `PpJavaBridge.updateBalance()`. The Java CLI handles the `AccountSnapshot.create()` with `isDebit()`/`isCredit()` transaction type classification internally.
+
+## Taxonomy Export
+
+Taxonomy data is exported to Google Sheets with live FX conversion to SGD:
+
+- Java CLI queries taxonomy via `queryTaxonomies()` (configurable via `TAXONOMY_NAMES` env var, default: "Sector,Geography,Asset Class")
+- Each classification's native value is converted to SGD using per-currency breakdowns
+- Live exchange rates from `open.er-api.com/v6/latest/USD` (free, no API key)
+- Cell mappings configured via `TAXONOMY_SHEET_MAPPING` env var (format: `key1=cell1,key2=cell2`)
+- Valuation uses most-recent-price-≤-today from PP price history
+- Writes to `GOOGLE_SHEET_ID` using service account from `GOOGLE_SERVICE_ACCOUNT_JSON`
+- Handles weight-based proration via PP's `Assignment.getWeight()`
 
 ---
 
