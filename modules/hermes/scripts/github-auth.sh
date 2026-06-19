@@ -74,9 +74,9 @@ fi
 # ---- verify hermes auth ----
 _gh_auth_check() {
     if [ "$(id -u)" = "$(id -u hermes 2>/dev/null || echo 0)" ]; then
-        gh auth status "$@"
+        gh auth status
     else
-        su -s /bin/sh hermes -c "gh auth status $*"
+        su -s /bin/sh hermes -c 'gh auth status'
     fi
 }
 if ! _gh_auth_check >/dev/null 2>&1; then
