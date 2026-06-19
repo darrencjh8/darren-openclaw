@@ -272,16 +272,7 @@ describe("Route handlers", () => {
         ]);
     });
 
-    test("POST /transactions/:id/clear fetches txn, appends notes, sets cleared", async () => {
-        actual.getTransaction.mockResolvedValue({
-            id: "txn-2",
-            account: "acc-1",
-            date: "2025-06-01",
-            amount: -1280,
-            payee: "NTUC",
-            notes: "Imported from OCBC alert",
-            cleared: false,
-        });
+    test("POST /transactions/:id/clear sets cleared directly without getTransaction", async () => {
         const handler = findHandler("post", "/transactions/:id/clear");
         const req = mockReq({
             params: { id: "txn-2" },
@@ -291,10 +282,10 @@ describe("Route handlers", () => {
 
         await handler(req, res);
 
-        expect(actual.getTransaction).toHaveBeenCalledWith("txn-2");
+        expect(actual.getTransaction).not.toHaveBeenCalled();
         expect(actual.updateTransaction).toHaveBeenCalledWith("txn-2", {
             cleared: true,
-            notes: "Imported from OCBC alert | Statement May 2026",
+            notes: "Statement May 2026",
         });
         expect(res.json).toHaveBeenCalledWith({
             status: "cleared",
@@ -302,16 +293,11 @@ describe("Route handlers", () => {
         });
     });
 
-    test("POST /transactions/:id/clear appends to empty notes", async () => {
-        actual.getTransaction.mockResolvedValue({
-            id: "txn-3",
-            notes: "",
-            cleared: false,
-        });
+    test("POST /transactions/:id/clear clears without notes", async () => {
         const handler = findHandler("post", "/transactions/:id/clear");
         const req = mockReq({
             params: { id: "txn-3" },
-            body: { notes: "Statement Jun 2026" },
+            body: {},
         });
         const res = mockRes();
 
@@ -319,23 +305,7 @@ describe("Route handlers", () => {
 
         expect(actual.updateTransaction).toHaveBeenCalledWith("txn-3", {
             cleared: true,
-            notes: " | Statement Jun 2026",
         });
-    });
-
-    test("POST /transactions/:id/clear returns 404 when txn not found", async () => {
-        actual.getTransaction.mockResolvedValue(null);
-        const handler = findHandler("post", "/transactions/:id/clear");
-        const req = mockReq({ params: { id: "nonexistent" } });
-        const res = mockRes();
-
-        await handler(req, res);
-
-        expect(res.status).toHaveBeenCalledWith(404);
-        expect(res.json).toHaveBeenCalledWith({
-            error: "Transaction not found",
-        });
-        expect(actual.updateTransaction).not.toHaveBeenCalled();
     });
 
     test("route error returns 500 with error.message in JSON body", async () => {

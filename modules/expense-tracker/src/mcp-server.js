@@ -144,6 +144,35 @@ function createTools(server, registry) {
         { raw_text: z.string().min(1) },
         async (a) => tx(await registry.executeTool("process_transaction", a)),
     );
+    // ── Reconciliation ──────────────────────────────────────────
+    server.tool(
+        "reconcile_transaction",
+        "Clear one or more Actual Budget transactions (mark as reconciled). Pass ab_transaction_ids as an array. Each is set cleared=true with optional statement_ref appended to notes.",
+        {
+            ab_transaction_ids: z.array(z.string().min(1)).min(1),
+            statement_ref: z.string().optional().default(""),
+            budget_id: z.string().min(1),
+        },
+        async (a) =>
+            tx(await registry.executeTool("reconcile_transaction", a)),
+    );
+    server.tool(
+        "fetch_unreconciled_transactions",
+        "Fetch uncleared (not reconciled) transactions from Actual Budget for an account within a date range. Use this during statement reconciliation to find transactions that need clearing.",
+        {
+            account_id: z.string().min(1),
+            date_from: z.string().min(1),
+            date_to: z.string().min(1),
+            budget_id: z.string().min(1),
+        },
+        async (a) =>
+            tx(
+                await registry.executeTool(
+                    "fetch_unreconciled_transactions",
+                    a,
+                ),
+            ),
+    );
 }
 
 export function createMcpServer(registry, app) {

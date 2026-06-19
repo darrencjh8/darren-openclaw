@@ -24,6 +24,8 @@ describe("ToolRegistry", () => {
         expect(names).toContain("learn_fact");
         expect(names).toContain("fetch_accounts");
         expect(names).toContain("insert_transaction");
+        expect(names).toContain("reconcile_transaction");
+        expect(names).toContain("fetch_unreconciled_transactions");
     });
 
     it("extract_pdf_text schema includes optional password field", () => {
