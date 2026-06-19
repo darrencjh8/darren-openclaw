@@ -1,1 +1,0 @@
-> ⚠ **Moved to [022-portfolio-tracker](../022-portfolio-tracker/spec.md)** — the portfolio-tracker is now Node.js with Hermes MCP cron. This spec described the original Python apscheduler implementation.
