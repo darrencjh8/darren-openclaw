@@ -249,6 +249,12 @@ const TOOLS = [
         },
     },
     {
+        name: "cleanup_facts",
+        description:
+            "Clean MEMORY.md by removing duplicate and contradictory facts. Uses structured parsing to detect same-entity different-value conflicts (newest wins) and semantic similarity for free-form facts. Returns {before, after, removed, contradictions} for review.",
+        schema: { type: "object", properties: {} },
+    },
+    {
         name: "fetch_budgets",
         description:
             "List all available budgets from Actual Budget. Returns name, groupId, and cloudFileId for each. Use the name as budget_id in subsequent calls.",
@@ -808,6 +814,17 @@ export class ToolRegistry {
     async _handle_compact_facts() {
         if (!this._memory) return { before: 0, after: 0, removed: 0 };
         return this._memory.compact();
+    }
+
+    async _handle_cleanup_facts() {
+        if (!this._memory)
+            return {
+                before: 0,
+                after: 0,
+                removed: 0,
+                contradictions: [],
+            };
+        return this._memory.cleanup();
     }
 
     async _handle_update_fact({ old_text, new_text }) {

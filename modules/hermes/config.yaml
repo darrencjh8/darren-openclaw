@@ -10,6 +10,9 @@ agent:
         - tts
         - moa
 
+display:
+    show_reasoning: true
+
 fallback_providers:
     - provider: gemini
       model: gemini-3.1-flash-lite
@@ -23,7 +26,7 @@ delegation:
 approvals:
     mode: smart
     timeout: 60
-    cron_mode: deny
+    cron_mode: allow
 
 memory:
     memory_enabled: true
@@ -37,6 +40,10 @@ terminal:
     backend: local
     persistent_shell: true
     cwd: /workspace
+
+web:
+    search_backend: brave-free
+    extract_backend: firecrawl
 
 auxiliary:
     vision:
@@ -60,6 +67,33 @@ auxiliary:
         extra_body:
             thinking:
                 type: disabled
+    kanban_decomposer:
+        provider: deepseek
+        model: deepseek-v4-pro
+    triage_specifier:
+        provider: deepseek
+        model: deepseek-v4-flash
+        extra_body:
+            thinking:
+                type: disabled
+    profile_describer:
+        provider: deepseek
+        model: deepseek-v4-flash
+        extra_body:
+            thinking:
+                type: disabled
+
+kanban:
+    dispatch_in_gateway: true
+    dispatch_interval_seconds: 60
+    auto_decompose: true
+    auto_decompose_per_tick: 3
+    auto_promote_children: true
+    failure_limit: 2
+    max_in_progress: 4
+    max_in_progress_per_profile: 2
+    orchestrator_profile: project-manager
+    default_assignee: quality-assurance
 
 timezone: Asia/Kuala_Lumpur
 
@@ -74,6 +108,11 @@ mcp_servers:
         tools:
             exclude: []
         supports_parallel_tool_calls: false
+    ktmb-booking:
+        url: http://ktmb-booking:8082/mcp
+        tools:
+            exclude: []
+        supports_parallel_tool_calls: false
 
 platforms:
     webhook:
@@ -82,9 +121,11 @@ platforms:
             port: 8644
             secret: ${HERMES_WEBHOOK_SECRET}
             routes:
-                expense:
+                notify:
                     secret: ${HERMES_WEBHOOK_SECRET}
-                    prompt: "{SOUL_MD}\n\nSYSTEM: You are relaying an expense tracker notification. The transaction is already processed — do NOT investigate, search memory, query tools, or ask follow-ups. Just acknowledge the notification naturally in your voice. One short sentence.\n\nNOTIFICATION: {message}"
+                    prompt: |
+                        SYSTEM: A notification arrived. Relay it.
+                        NOTIFICATION: {message}
                     deliver: telegram
                     deliver_extra:
                         chat_id: "${TELEGRAM_HOME_CHANNEL}"

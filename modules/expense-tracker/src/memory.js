@@ -4,6 +4,10 @@
  * Ported 1:1 from src/agent/memory.py
  * Replaces the hardcoded data/mappings.json with a human-readable MEMORY.md
  * file backed by all-MiniLM-L6-v2 WASM embeddings for semantic search.
+ *
+ * Structured dedup (2026-06): facts matching known templates are indexed by
+ * (entity, relation) in a Map for O(1) contradiction detection. Free-form
+ * facts fall back to cosine-similarity-based semantic dedup.
  */
 
 import {
@@ -22,11 +26,25 @@ const MEMORY_TEMPLATE = `# Long-Term Memory
 
 `;
 
+/** @type {Array<{re: RegExp, rel: string}>} */
+const STRUCTURED_PATTERNS = [
+    {
+        re: /^(.+?)\s+merchant\s+maps\s+to\s+(.+?)\s+payee$/i,
+        rel: "merchant->payee",
+    },
+    { re: /^(.+?)\s+maps\s+to\s+(.+?)\s+payee$/i, rel: "->payee" },
+    { re: /^(.+?)\s+maps\s+to\s+(.+?)\s+category$/i, rel: "->category" },
+    { re: /^(.+?)\s+is\s+(?:a|an)\s+(.+?)\s+account$/i, rel: "is-account" },
+];
+
+/** Semantic-dedup cosine-similarity threshold for free-form facts. */
+const SEMANTIC_THRESHOLD = 0.88;
+
 export class MemoryStore {
     /**
      * @param {string} path - Path to MEMORY.md
-     * @param {number} [maxFacts=200] - Auto-compact when facts exceed this
-     * @param {number} [compactTo=150] - Keep this many facts after compaction
+     * @param {number} [maxFacts=300] - Auto-compact when facts exceed this
+     * @param {number} [compactTo=250] - Keep this many facts after compaction
      */
     constructor(path = "data/MEMORY.md", maxFacts = 300, compactTo = 250) {
         this.path = path;
@@ -36,6 +54,8 @@ export class MemoryStore {
         this._embeddingCache = new Map();
         this._initialized = false;
         this._dedupSet = new Set();
+        /** @type {Map<string, {fact: string, index: number, parsed: {entity: string, relation: string, value: string}}>} */
+        this._structuredIndex = new Map();
         this._maxFacts = maxFacts;
         this._compactTo = compactTo;
         this._init();
@@ -44,16 +64,13 @@ export class MemoryStore {
     // ── public interface ──────────────────────────────────────────
 
     /**
-     * Reload facts from disk and rebuild the dedup set.
+     * Reload facts from disk and rebuild the dedup set + structured index.
      * Used after migrateFromMappings() writes new facts to the file.
      */
     reload() {
         this._loadFacts();
         this._dedupExisting();
-        this._dedupSet.clear();
-        for (const f of this._facts) {
-            this._dedupSet.add(f.trim().toLowerCase());
-        }
+        this._rebuildIndices();
     }
 
     get initialized() {
@@ -84,34 +101,84 @@ export class MemoryStore {
         return !!this._model;
     }
 
+    /**
+     * Add a fact with three-tier dedup:
+     *  1. Exact string match (O(1))
+     *  2. Structured key match (O(1)) — contradiction → skip + warn
+     *  3. Semantic cosine similarity (O(N), free-form only)
+     */
     async add(fact) {
         fact = fact.trim();
         if (!fact)
             return { added: false, skipped: false, reason: "empty fact" };
 
+        // ── Level 1: exact string dedup ──
         const normalized = fact.toLowerCase();
         if (this._dedupSet.has(normalized)) {
             return { added: false, skipped: true, reason: "duplicate" };
         }
 
-        // Semantic dedup: check cosine similarity against existing facts
-        if (this._model) {
-            try {
-                const newEmb = await this._getOrComputeEmbedding(fact);
-                for (const existing of this._facts) {
-                    const existingEmb = await this._getOrComputeEmbedding(existing);
-                    const similarity = this._cosineSimilarity(newEmb, existingEmb);
-                    if (similarity > 0.95) {
-                        return { added: false, skipped: true, reason: "semantic duplicate" };
-                    }
+        // ── Level 2: structured dedup (O(1) Map lookup) ──
+        const parsed = this._parseStructured(fact);
+        if (parsed) {
+            const key = `${parsed.entity}|||${parsed.relation}`;
+            const existing = this._structuredIndex.get(key);
+            if (existing) {
+                if (existing.parsed.value === parsed.value) {
+                    return {
+                        added: false,
+                        skipped: true,
+                        reason: "structured duplicate",
+                    };
                 }
-            } catch {
-                // Semantic dedup failed — fall through to string dedup
+                // Contradiction: same (entity, relation) but different value.
+                // Safe mode: keep the existing fact, skip the new one.
+                return {
+                    added: false,
+                    skipped: true,
+                    reason: "contradiction",
+                    existing: existing.fact,
+                };
             }
         }
 
+        // ── Level 3: semantic dedup (free-form facts only) ──
+        if (!parsed) {
+            if (this._model) {
+                try {
+                    const newEmb = await this._getOrComputeEmbedding(fact);
+                    for (const existing of this._facts) {
+                        const existingEmb =
+                            await this._getOrComputeEmbedding(existing);
+                        const similarity = this._cosineSimilarity(
+                            newEmb,
+                            existingEmb,
+                        );
+                        if (similarity > SEMANTIC_THRESHOLD) {
+                            return {
+                                added: false,
+                                skipped: true,
+                                reason: "semantic duplicate",
+                            };
+                        }
+                    }
+                } catch {
+                    // Semantic dedup failed — fall through
+                }
+            }
+        }
+
+        // ── Add the fact ──
+        const index = this._facts.length;
         this._dedupSet.add(normalized);
         this._facts.push(fact);
+        if (parsed) {
+            this._structuredIndex.set(`${parsed.entity}|||${parsed.relation}`, {
+                fact,
+                index,
+                parsed,
+            });
+        }
         this._rewriteFile();
 
         // Auto-compact if over threshold
@@ -135,7 +202,7 @@ export class MemoryStore {
         });
         const removed = original - this._facts.length;
         if (removed > 0) {
-            this._rewriteFile();
+            this._rebuildIndices();
             // Invalidate cache for removed facts
             for (const key of this._embeddingCache.keys()) {
                 if (key.toLowerCase().includes(matchText.toLowerCase())) {
@@ -158,6 +225,7 @@ export class MemoryStore {
                 this._dedupSet.add(newText.trim().toLowerCase());
                 this._facts[i] = newText.trim();
                 this._embeddingCache.delete(oldFact);
+                this._rebuildIndices();
                 this._rewriteFile();
                 return { updated: true, found: true };
             }
@@ -168,13 +236,9 @@ export class MemoryStore {
     // ── compaction ───────────────────────────────────────────────
 
     /**
-     * Compact memory: deduplicate subsumed facts and trim to compactTo.
-     * Keeps the most specific (longest) facts and the newest ones.
-     *
-     * Strategy:
-     *  1. Remove facts that are substrings of other facts (keep longer)
-     *  2. If still over compactTo, trim oldest payee-mapping facts first
-     *  3. Then trim oldest general facts
+     * Compact memory: resolve contradictions, deduplicate subsumed facts,
+     * and trim to compactTo. Keeps the most specific (longest) facts and
+     * the newest ones. For contradictions, newest (last in file) wins.
      */
     compact() {
         const before = this._facts.length;
@@ -184,6 +248,9 @@ export class MemoryStore {
     }
 
     _compact() {
+        // Step 0: Resolve structured contradictions — newest wins
+        this._resolveContradictions();
+
         // Step 1: Remove subsumed facts (keep longer version)
         const remaining = [];
         const sorted = [...this._facts].sort((a, b) => b.length - a.length);
@@ -216,11 +283,115 @@ export class MemoryStore {
         }
 
         this._facts = remaining;
-        this._dedupSet.clear();
-        for (const f of this._facts) {
-            this._dedupSet.add(f.trim().toLowerCase());
-        }
+        this._rebuildIndices();
         this._rewriteFile();
+    }
+
+    /**
+     * Full manual cleanup: resolve structured contradictions and semantic
+     * near-duplicates in free-form facts. Returns the contradictions list
+     * for review.
+     * @returns {Promise<{before: number, after: number, removed: number, contradictions: Array<{old: string, new: string}>}>}
+     */
+    async cleanup() {
+        const before = this._facts.length;
+
+        // Step 1: Resolve structured contradictions — newest wins
+        const structuredContradictions = this._resolveContradictions();
+
+        // Step 2: Semantic dedup on free-form facts
+        let freeFormRemoved = 0;
+        if (this._model) {
+            const kept = [];
+            for (const fact of this._facts) {
+                // Skip already-structured facts (they were handled in step 1)
+                if (this._parseStructured(fact)) {
+                    kept.push(fact);
+                    continue;
+                }
+                let isDup = false;
+                try {
+                    const emb = await this._getOrComputeEmbedding(fact);
+                    for (let i = 0; i < kept.length; i++) {
+                        // Only compare free-form to free-form
+                        if (this._parseStructured(kept[i])) continue;
+                        const keptEmb = await this._getOrComputeEmbedding(
+                            kept[i],
+                        );
+                        if (
+                            this._cosineSimilarity(emb, keptEmb) >
+                            SEMANTIC_THRESHOLD
+                        ) {
+                            isDup = true;
+                            // Keep the longer fact (more specific)
+                            if (fact.length > kept[i].length) {
+                                kept[i] = fact;
+                            }
+                            break;
+                        }
+                    }
+                } catch {
+                    /* skip on embedding failure */
+                }
+                if (!isDup) kept.push(fact);
+                else freeFormRemoved++;
+            }
+            this._facts = kept;
+        }
+
+        this._rebuildIndices();
+        this._rewriteFile();
+
+        const after = this._facts.length;
+        return {
+            before,
+            after,
+            removed: before - after,
+            contradictions: structuredContradictions,
+        };
+    }
+
+    /**
+     * Resolve structured contradictions in-place.
+     * For each (entity, relation) with multiple values, keep the last one
+     * (newest, since facts are appended). Returns overwritten facts for logging.
+     * @returns {Array<{old: string, new: string}>}
+     */
+    _resolveContradictions() {
+        const contradictions = [];
+        const seen = new Map(); // key → { fact, index }
+
+        for (let i = 0; i < this._facts.length; i++) {
+            const fact = this._facts[i];
+            const parsed = this._parseStructured(fact);
+            if (!parsed) continue;
+
+            const key = `${parsed.entity}|||${parsed.relation}`;
+            const existing = seen.get(key);
+            if (existing && existing.parsed.value !== parsed.value) {
+                contradictions.push({ old: existing.fact, new: fact });
+            }
+            seen.set(key, { fact, index: i, parsed }); // last write wins
+        }
+
+        if (contradictions.length > 0) {
+            // Rebuild facts: keep all free-form + resolved structured
+            const resolved = new Set([...seen.values()].map((s) => s.fact));
+            const freeForm = this._facts.filter(
+                (f) => !this._parseStructured(f),
+            );
+            // Merge, preserving original order
+            const merged = [];
+            for (const f of this._facts) {
+                if (resolved.has(f) || freeForm.includes(f)) {
+                    merged.push(f);
+                    resolved.delete(f); // only keep first occurrence
+                }
+            }
+            this._facts = merged;
+        }
+
+        return contradictions;
     }
 
     get stats() {
@@ -231,16 +402,73 @@ export class MemoryStore {
         };
     }
 
+    // ── structured parsing ────────────────────────────────────────
+
+    /**
+     * Parse a fact into { entity, relation, value } if it matches a known
+     * structured template. Returns null for free-form facts.
+     * @param {string} fact
+     * @returns {{entity: string, relation: string, value: string} | null}
+     */
+    _parseStructured(fact) {
+        for (const { re, rel } of STRUCTURED_PATTERNS) {
+            const m = fact.match(re);
+            if (m) {
+                const entity = this._normalizeEntity(m[1]);
+                let value = m[2].trim().toLowerCase();
+                // Normalize: strip trailing " account" — the pattern already
+                // ends with "account", so "bank account account" → "bank"
+                value = value.replace(/\s+account$/, "");
+                value = value
+                    .replace(/[.,;:!?\s]+$/, "")
+                    .replace(/\s+/g, " ")
+                    .trim();
+                return { entity, relation: rel, value };
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Normalize an entity name for comparison: lowercase, strip trailing
+     * punctuation/whitespace, collapse multiple spaces.
+     * @param {string} name
+     * @returns {string}
+     */
+    _normalizeEntity(name) {
+        return name
+            .replace(/[.,;:!?\s]+$/, "")
+            .replace(/\s+/g, " ")
+            .trim()
+            .toLowerCase();
+    }
+
+    // ── index maintenance ─────────────────────────────────────────
+
+    /** Rebuild dedup set and structured index from current facts. */
+    _rebuildIndices() {
+        this._dedupSet.clear();
+        this._structuredIndex.clear();
+        for (let i = 0; i < this._facts.length; i++) {
+            const fact = this._facts[i];
+            this._dedupSet.add(fact.trim().toLowerCase());
+            const parsed = this._parseStructured(fact);
+            if (parsed) {
+                this._structuredIndex.set(
+                    `${parsed.entity}|||${parsed.relation}`,
+                    { fact, index: i, parsed },
+                );
+            }
+        }
+    }
+
     // ── file I/O ──────────────────────────────────────────────────
 
     _init() {
         this._ensureFile();
         this._loadFacts();
         this._dedupExisting();
-        this._dedupSet.clear();
-        for (const f of this._facts) {
-            this._dedupSet.add(f.trim().toLowerCase());
-        }
+        this._rebuildIndices();
         this._loadModel();
         this._initialized = true;
     }

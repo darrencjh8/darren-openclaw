@@ -131,6 +131,12 @@ function createTools(server, registry) {
         {},
         async () => tx(await registry.executeTool("compact_facts", {})),
     );
+    server.tool(
+        "cleanup_facts",
+        "Clean expense-tracker memory: resolve contradictory facts (newest wins) and deduplicate free-form facts using semantic similarity. Returns {before, after, removed, contradictions} for review.",
+        {},
+        async () => tx(await registry.executeTool("cleanup_facts", {})),
+    );
     // ── Telegram transaction entry ──────────────────────────────
     server.tool(
         "process_transaction",
@@ -150,7 +156,8 @@ export function createMcpServer(registry, app) {
 
             if (sessionId && transports[sessionId]) {
                 transport = transports[sessionId];
-            } else if (!sessionId) {
+            } else {
+                // No session or stale session (container restart): create new
                 const server = new McpServer({
                     name: "expense-tracker",
                     version: "1.0.0",
@@ -168,16 +175,6 @@ export function createMcpServer(registry, app) {
                     if (sid) delete transports[sid];
                 };
                 await server.connect(transport);
-            } else {
-                res.status(400).json({
-                    jsonrpc: "2.0",
-                    error: {
-                        code: -32000,
-                        message: "Bad Request: invalid session",
-                    },
-                    id: null,
-                });
-                return;
             }
             await transport.handleRequest(req, res, req.body);
         } catch (e) {

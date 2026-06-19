@@ -333,22 +333,25 @@ describe("MemoryStore", () => {
             });
         });
 
-        it("maintains dedup set when a fact is updated", async () => {
+        it("blocks re-adding old version after update (structured key occupied)", async () => {
             const store = new MemoryStore(tempMemoryPath);
             await store.add("Toast Box merchant maps to Food payee");
             store.update(
                 "Toast Box",
                 "Toast Box merchant maps to Coffee payee",
             );
-            // Old fact can be re-added (key was deleted from dedup set)
+            // Old fact blocked: (toast box, merchant->payee) slot now has "coffee payee"
             const r1 = await store.add("Toast Box merchant maps to Food payee");
             expect(r1).toEqual({
-                added: true,
-                skipped: false,
-                compacted: false,
+                added: false,
+                skipped: true,
+                reason: "contradiction",
+                existing: "Toast Box merchant maps to Coffee payee",
             });
-            // New fact is blocked (key was added to dedup set)
-            const r2 = await store.add("Toast Box merchant maps to Coffee payee");
+            // New fact blocked as exact duplicate (caught by string dedup before structured)
+            const r2 = await store.add(
+                "Toast Box merchant maps to Coffee payee",
+            );
             expect(r2).toEqual({
                 added: false,
                 skipped: true,
@@ -432,17 +435,25 @@ describe("MemoryStore", () => {
         });
     });
 
-
     describe("semantic dedup", () => {
-        it("rejects semantically similar facts (cosine > 0.95)", async () => {
+        it("rejects semantically similar free-form facts (cosine > 0.88)", async () => {
             const store = new MemoryStore(emptyMemoryPath);
             await store.ready();
 
-            const r1 = await store.add("NTUC FairPrice maps to Groceries payee");
-            expect(r1).toEqual({ added: true, skipped: false, compacted: false });
+            // Free-form facts (don't match any structured pattern)
+            const r1 = await store.add(
+                "The coffee shop near the MRT sells breakfast sets",
+            );
+            expect(r1).toEqual({
+                added: true,
+                skipped: false,
+                compacted: false,
+            });
 
-            // Same meaning, different wording — should be caught by semantic dedup
-            const r2 = await store.add("fairprice ntuc maps to groceries payee");
+            // Near-identical, one word changed — should be caught by semantic dedup
+            const r2 = await store.add(
+                "The coffee shop near the MRT sells breakfast platters",
+            );
             expect(r2).toEqual({
                 added: false,
                 skipped: true,
@@ -450,14 +461,16 @@ describe("MemoryStore", () => {
             });
         });
 
-        it("accepts semantically different facts", async () => {
+        it("accepts semantically different free-form facts", async () => {
             const store = new MemoryStore(emptyMemoryPath);
             await store.ready();
 
-            const r1 = await store.add("NTUC maps to Groceries payee");
+            const r1 = await store.add("The coffee shop sells breakfast sets");
             expect(r1.added).toBe(true);
 
-            const r2 = await store.add("Shell maps to Transport payee");
+            const r2 = await store.add(
+                "Shell petrol station is on the highway",
+            );
             expect(r2.added).toBe(true);
         });
 
@@ -520,6 +533,260 @@ describe("MemoryStore", () => {
             // 4th exceeds maxFacts → compaction triggers
             const r4 = await store.add("fact 4");
             expect(r4.compacted).toBe(true);
+        });
+
+        it("resolves structured contradictions during compaction (newest wins)", async () => {
+            const store = new MemoryStore(emptyMemoryPath, 10, 5);
+            // add() blocks contradictions in safe mode; write to file then reload
+            writeFileSync(
+                emptyMemoryPath,
+                [
+                    "# Long-Term Memory",
+                    "",
+                    "## Facts",
+                    "",
+                    "- Kopitiam merchant maps to Food payee",
+                    "- Kopitiam merchant maps to Coffee payee",
+                    "- Bus merchant maps to Transport payee",
+                ].join("\n") + "\n",
+            );
+            store.reload();
+            for (let i = 1; i <= 8; i++) {
+                await store.add(`padding fact ${i}`);
+            }
+            const facts = store.listFacts();
+            expect(facts).toContain("Kopitiam merchant maps to Coffee payee");
+            expect(facts).not.toContain("Kopitiam merchant maps to Food payee");
+            expect(facts).toContain("Bus merchant maps to Transport payee");
+        });
+    });
+
+    describe("structured dedup", () => {
+        it("parses merchant->payee pattern", () => {
+            const store = new MemoryStore(emptyMemoryPath);
+            const parsed = store._parseStructured(
+                "Toast Box merchant maps to Food payee",
+            );
+            expect(parsed).toEqual({
+                entity: "toast box",
+                relation: "merchant->payee",
+                value: "food",
+            });
+        });
+
+        it("parses ->payee pattern", () => {
+            const store = new MemoryStore(emptyMemoryPath);
+            const parsed = store._parseStructured(
+                "CHONG JIN HENG maps to Transfer payee",
+            );
+            expect(parsed).toEqual({
+                entity: "chong jin heng",
+                relation: "->payee",
+                value: "transfer",
+            });
+        });
+
+        it("parses ->category pattern", () => {
+            const store = new MemoryStore(emptyMemoryPath);
+            const parsed = store._parseStructured("Food maps to Food category");
+            expect(parsed).toEqual({
+                entity: "food",
+                relation: "->category",
+                value: "food",
+            });
+        });
+
+        it("parses is-account pattern", () => {
+            const store = new MemoryStore(emptyMemoryPath);
+            const parsed = store._parseStructured(
+                "DBS Yuu is a debit card account",
+            );
+            expect(parsed).toEqual({
+                entity: "dbs yuu",
+                relation: "is-account",
+                value: "debit card",
+            });
+        });
+
+        it("returns null for free-form facts", () => {
+            const store = new MemoryStore(emptyMemoryPath);
+            expect(
+                store._parseStructured(
+                    "KOUFU is a food court chain in Singapore",
+                ),
+            ).toBeNull();
+            expect(
+                store._parseStructured("CHONG JIN HENG is Darren himself"),
+            ).toBeNull();
+            expect(store._parseStructured("The sky is blue")).toBeNull();
+        });
+
+        it("normalizes entity names (trailing punctuation, case)", () => {
+            const store = new MemoryStore(emptyMemoryPath);
+            const p1 = store._parseStructured(
+                "SGSUPERGREEN-B PTE. LT. maps to Food payee",
+            );
+            const p2 = store._parseStructured(
+                "SGSUPERGREEN-B PTE LTD maps to Food payee",
+            );
+            const p3 = store._parseStructured(
+                "sgsupergreen-b pte. lt maps to Food payee",
+            );
+            expect(p1.entity).toBe("sgsupergreen-b pte. lt");
+            expect(p2.entity).toBe("sgsupergreen-b pte ltd");
+            expect(p1.entity).toBe(p3.entity);
+        });
+
+        it("normalizes account account typo in is-account pattern", () => {
+            const store = new MemoryStore(emptyMemoryPath);
+            const clean = store._parseStructured("OCBC 360 is a bank account");
+            const typo = store._parseStructured(
+                "OCBC 360 is a bank account account",
+            );
+            expect(clean.value).toBe("bank");
+            expect(typo.value).toBe("bank");
+            expect(clean.entity).toBe(typo.entity);
+        });
+
+        it("blocks contradiction (same entity, relation, different value)", async () => {
+            const store = new MemoryStore(emptyMemoryPath);
+            await store.add("Grab merchant maps to Transport payee");
+            const r = await store.add("Grab merchant maps to Food payee");
+            expect(r).toEqual({
+                added: false,
+                skipped: true,
+                reason: "contradiction",
+                existing: "Grab merchant maps to Transport payee",
+            });
+            expect(store.listFacts()).toContain(
+                "Grab merchant maps to Transport payee",
+            );
+            expect(store.listFacts()).not.toContain(
+                "Grab merchant maps to Food payee",
+            );
+        });
+
+        it("allows different relations for same entity", async () => {
+            const store = new MemoryStore(emptyMemoryPath);
+            const r1 = await store.add("Food maps to Food payee");
+            expect(r1.added).toBe(true);
+            const r2 = await store.add("Food maps to Food category");
+            expect(r2.added).toBe(true);
+            expect(store.listFacts().length).toBe(2);
+        });
+
+        it("structured facts skip semantic dedup O1 path", async () => {
+            const store = new MemoryStore(emptyMemoryPath);
+            await store.add("KFC merchant maps to Fast Food payee");
+            const r = await store.add("K F C merchant maps to Fast Food payee");
+            expect(r.added).toBe(true);
+        });
+    });
+
+    describe("cleanup", () => {
+        it("resolves contradictions newest wins", async () => {
+            const store = new MemoryStore(emptyMemoryPath);
+            writeFileSync(
+                emptyMemoryPath,
+                [
+                    "# Long-Term Memory",
+                    "",
+                    "## Facts",
+                    "",
+                    "- Grab merchant maps to Transport payee",
+                    "- Grab merchant maps to Food payee",
+                    "- OCBC 360 is a bank account",
+                    "- OCBC 360 is a savings account",
+                ].join("\n") + "\n",
+            );
+            store.reload();
+
+            const result = await store.cleanup();
+            expect(result.before).toBe(4);
+            expect(result.after).toBe(2);
+            expect(result.removed).toBe(2);
+            expect(result.contradictions).toEqual([
+                {
+                    old: "Grab merchant maps to Transport payee",
+                    new: "Grab merchant maps to Food payee",
+                },
+                {
+                    old: "OCBC 360 is a bank account",
+                    new: "OCBC 360 is a savings account",
+                },
+            ]);
+            const facts = store.listFacts();
+            expect(facts).toContain("Grab merchant maps to Food payee");
+            expect(facts).toContain("OCBC 360 is a savings account");
+            expect(facts).not.toContain(
+                "Grab merchant maps to Transport payee",
+            );
+            expect(facts).not.toContain("OCBC 360 is a bank account");
+        });
+
+        it("preserves non-contradictory facts", async () => {
+            const store = new MemoryStore(emptyMemoryPath);
+            await store.add("Toast Box merchant maps to Food payee");
+            await store.add("Shell merchant maps to Transport payee");
+            await store.add("Food maps to Food category");
+
+            const result = await store.cleanup();
+            expect(result.removed).toBe(0);
+            expect(result.contradictions).toEqual([]);
+            expect(store.listFacts().length).toBe(3);
+        });
+
+        it("preserves free-form facts during cleanup", async () => {
+            const store = new MemoryStore(emptyMemoryPath);
+            await store.add("Kopitiam merchant maps to Food payee");
+            await store.add("KOUFU PTE LTD is a food court chain in Singapore");
+            await store.add("CHONG JIN HENG is Darren himself");
+
+            const result = await store.cleanup();
+            const facts = store.listFacts();
+            expect(facts).toContain(
+                "KOUFU PTE LTD is a food court chain in Singapore",
+            );
+            expect(facts).toContain("CHONG JIN HENG is Darren himself");
+            expect(facts).toContain("Kopitiam merchant maps to Food payee");
+        });
+
+        it("handles empty facts gracefully", async () => {
+            const store = new MemoryStore(emptyMemoryPath);
+            const result = await store.cleanup();
+            expect(result.before).toBe(0);
+            expect(result.after).toBe(0);
+            expect(result.removed).toBe(0);
+            expect(result.contradictions).toEqual([]);
+        });
+
+        it("index is consistent after cleanup", async () => {
+            const store = new MemoryStore(emptyMemoryPath);
+            await store.add("Grab merchant maps to Transport payee");
+            await store.add("Grab merchant maps to Food payee");
+            await store.cleanup();
+
+            const r = await store.add("Grab merchant maps to Food payee");
+            expect(r.added).toBe(false);
+            expect(r.skipped).toBe(true);
+        });
+
+        it("deduplicates semantically similar free-form facts", async () => {
+            const store = new MemoryStore(emptyMemoryPath);
+            await store.ready();
+            await store.add(
+                "The coffee shop near the MRT sells breakfast sets",
+            );
+            await store.add(
+                "The coffee shop near the MRT sells breakfast platters",
+            );
+            await store.add("Unrelated free-form fact about weather");
+
+            const result = await store.cleanup();
+            expect(store.listFacts().length).toBe(2);
+            const facts = store.listFacts();
+            expect(facts.some((f) => f.includes("breakfast"))).toBe(true);
+            expect(facts.some((f) => f.includes("weather"))).toBe(true);
         });
     });
 });
