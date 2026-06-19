@@ -67,3 +67,6 @@ modules/onedrive-sync/config/onedrive-state/
 
 # Secret scanning
 .trufflehog.yaml
+.venv/
+__pycache__/
+.pytest_cache/
