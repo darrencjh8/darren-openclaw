@@ -83,3 +83,186 @@ describe("MCP server tool registration", () => {
         expect(tool.function.parameters.required).toContain("budget_id");
     });
 });
+
+describe("reconcile_transaction handler — negative cases", () => {
+    it("rejects empty ab_transaction_ids array", async () => {
+        const cfg = new Config(testEnv);
+        const registry = new ToolRegistry(cfg);
+        const result = await registry.executeTool("reconcile_transaction", {
+            ab_transaction_ids: [],
+            budget_id: "test-budget",
+        });
+        expect(result.error).toBe(
+            "ab_transaction_ids must be a non-empty array",
+        );
+    });
+
+    it("rejects missing budget_id", async () => {
+        const cfg = new Config(testEnv);
+        const registry = new ToolRegistry(cfg);
+        const result = await registry.executeTool("reconcile_transaction", {
+            ab_transaction_ids: ["txn-1"],
+        });
+        expect(result.error).toBe("budget_id is required");
+    });
+
+    it("rejects non-array ab_transaction_ids", async () => {
+        const cfg = new Config(testEnv);
+        const registry = new ToolRegistry(cfg);
+        const result = await registry.executeTool("reconcile_transaction", {
+            ab_transaction_ids: "txn-1",
+            budget_id: "test-budget",
+        });
+        expect(result.error).toBe(
+            "ab_transaction_ids must be a non-empty array",
+        );
+    });
+
+    it("clears multiple transactions successfully", async () => {
+        const { vi } = await import("vitest");
+        const cfg = new Config(testEnv);
+        const registry = new ToolRegistry(cfg);
+
+        const origFetch = global.fetch;
+        global.fetch = vi.fn().mockResolvedValue({
+            ok: true,
+            json: async () => ({ status: "cleared", id: "any" }),
+        });
+
+        try {
+            const result = await registry.executeTool(
+                "reconcile_transaction",
+                {
+                    ab_transaction_ids: ["txn-a", "txn-b", "txn-c"],
+                    statement_ref: "Jun 2026",
+                    budget_id: "test-budget",
+                },
+            );
+            expect(result.cleared).toBe(3);
+            expect(result.failed).toBe(0);
+            expect(result.results.length).toBe(3);
+            expect(result.results[0].status).toBe("cleared");
+            expect(global.fetch).toHaveBeenCalledTimes(3);
+        } finally {
+            global.fetch = origFetch;
+        }
+    });
+
+    it("handles partial failure in batch", async () => {
+        const { vi } = await import("vitest");
+        const cfg = new Config(testEnv);
+        const registry = new ToolRegistry(cfg);
+
+        const origFetch = global.fetch;
+        let callCount = 0;
+        global.fetch = vi.fn().mockImplementation(() => {
+            callCount++;
+            if (callCount === 2) {
+                return Promise.resolve({
+                    ok: false,
+                    status: 500,
+                    json: async () => ({
+                        error: "Internal server error",
+                    }),
+                });
+            }
+            return Promise.resolve({
+                ok: true,
+                json: async () => ({ status: "cleared", id: "any" }),
+            });
+        });
+
+        try {
+            const result = await registry.executeTool(
+                "reconcile_transaction",
+                {
+                    ab_transaction_ids: ["txn-ok", "txn-fail", "txn-ok2"],
+                    budget_id: "test-budget",
+                },
+            );
+            expect(result.cleared).toBe(2);
+            expect(result.failed).toBe(1);
+            expect(result.results.length).toBe(3);
+            expect(result.results[1].status).toBe("error");
+        } finally {
+            global.fetch = origFetch;
+        }
+    });
+
+    it("handles all failures in batch", async () => {
+        const { vi } = await import("vitest");
+        const cfg = new Config(testEnv);
+        const registry = new ToolRegistry(cfg);
+
+        const origFetch = global.fetch;
+        global.fetch = vi.fn().mockResolvedValue({
+            ok: false,
+            status: 500,
+            json: async () => ({ error: "Internal server error" }),
+        });
+
+        try {
+            const result = await registry.executeTool(
+                "reconcile_transaction",
+                {
+                    ab_transaction_ids: ["txn-x", "txn-y"],
+                    budget_id: "test-budget",
+                },
+            );
+            expect(result.cleared).toBe(0);
+            expect(result.failed).toBe(2);
+            expect(result.results.every((r) => r.status === "error")).toBe(
+                true,
+            );
+        } finally {
+            global.fetch = origFetch;
+        }
+    });
+
+    it("includes statement_ref in API call body", async () => {
+        const { vi } = await import("vitest");
+        const cfg = new Config(testEnv);
+        const registry = new ToolRegistry(cfg);
+
+        const origFetch = global.fetch;
+        global.fetch = vi.fn().mockResolvedValue({
+            ok: true,
+            json: async () => ({ status: "cleared", id: "any" }),
+        });
+
+        try {
+            await registry.executeTool("reconcile_transaction", {
+                ab_transaction_ids: ["txn-1"],
+                statement_ref: "Affin statement Jun 2026",
+                budget_id: "test-budget",
+            });
+            const body = JSON.parse(global.fetch.mock.calls[0][1].body);
+            expect(body.notes).toBe("Affin statement Jun 2026");
+        } finally {
+            global.fetch = origFetch;
+        }
+    });
+
+    it("omits notes when statement_ref is empty", async () => {
+        const { vi } = await import("vitest");
+        const cfg = new Config(testEnv);
+        const registry = new ToolRegistry(cfg);
+
+        const origFetch = global.fetch;
+        global.fetch = vi.fn().mockResolvedValue({
+            ok: true,
+            json: async () => ({ status: "cleared", id: "any" }),
+        });
+
+        try {
+            await registry.executeTool("reconcile_transaction", {
+                ab_transaction_ids: ["txn-1"],
+                budget_id: "test-budget",
+            });
+            const body = JSON.parse(global.fetch.mock.calls[0][1].body);
+            expect(body.notes).toBeUndefined();
+        } finally {
+            global.fetch = origFetch;
+        }
+    });
+});
