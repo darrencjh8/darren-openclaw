@@ -147,9 +147,9 @@ function createTools(server, registry) {
     // ── Reconciliation ──────────────────────────────────────────
     server.tool(
         "reconcile_transaction",
-        "Clear an Actual Budget transaction (mark as reconciled against a bank statement). Sets cleared=true and optionally appends a statement reference note.",
+        "Clear one or more Actual Budget transactions (mark as reconciled). Pass ab_transaction_ids as an array. Each is set cleared=true with optional statement_ref appended to notes.",
         {
-            ab_transaction_id: z.string().min(1),
+            ab_transaction_ids: z.array(z.string().min(1)).min(1),
             statement_ref: z.string().optional().default(""),
             budget_id: z.string().min(1),
         },

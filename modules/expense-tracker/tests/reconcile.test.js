@@ -49,7 +49,7 @@ describe("MCP server tool registration", () => {
         expect(typeof handler).toBe("function");
     });
 
-    it("reconcile_transaction schema has ab_transaction_id and budget_id required", () => {
+    it("reconcile_transaction schema has ab_transaction_ids array and budget_id required", () => {
         const cfg = new Config(testEnv);
         const registry = new ToolRegistry(cfg);
         const schemas = registry.getToolSchemas();
@@ -58,9 +58,12 @@ describe("MCP server tool registration", () => {
         );
         expect(tool).toBeDefined();
         expect(tool.function.parameters.required).toContain(
-            "ab_transaction_id",
+            "ab_transaction_ids",
         );
         expect(tool.function.parameters.required).toContain("budget_id");
+        expect(
+            tool.function.parameters.properties.ab_transaction_ids.type,
+        ).toBe("array");
         expect(
             tool.function.parameters.properties.statement_ref,
         ).toBeDefined();

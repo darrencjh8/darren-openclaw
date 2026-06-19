@@ -37,7 +37,7 @@ const schemas = {
         budget_id: z.string().min(1),
     }),
     reconcile_transaction: z.object({
-        ab_transaction_id: z.string().min(1),
+        ab_transaction_ids: z.array(z.string().min(1)).min(1),
         statement_ref: z.string().optional().default(""),
         budget_id: z.string().min(1),
     }),
@@ -202,9 +202,9 @@ describe("MCP Zod schemas — budget_id rejects empty string", () => {
     });
 
     describe("reconcile_transaction", () => {
-        test("rejects empty ab_transaction_id", () => {
+        test("rejects empty ab_transaction_ids array", () => {
             const r = schemas.reconcile_transaction.safeParse({
-                ab_transaction_id: "",
+                ab_transaction_ids: [],
                 budget_id: "My Budget",
             });
             expect(r.success).toBe(false);
@@ -212,28 +212,30 @@ describe("MCP Zod schemas — budget_id rejects empty string", () => {
 
         test("rejects empty budget_id", () => {
             const r = schemas.reconcile_transaction.safeParse({
-                ab_transaction_id: "txn-1",
+                ab_transaction_ids: ["txn-1"],
                 budget_id: "",
             });
             expect(r.success).toBe(false);
         });
 
-        test("accepts valid payload without statement_ref", () => {
+        test("accepts single ID in array", () => {
             const r = schemas.reconcile_transaction.safeParse({
-                ab_transaction_id: "txn-1",
+                ab_transaction_ids: ["txn-1"],
                 budget_id: "My Budget",
             });
             expect(r.success).toBe(true);
+            expect(r.data.ab_transaction_ids).toEqual(["txn-1"]);
             expect(r.data.statement_ref).toBe("");
         });
 
-        test("accepts valid payload with statement_ref", () => {
+        test("accepts multiple IDs with statement_ref", () => {
             const r = schemas.reconcile_transaction.safeParse({
-                ab_transaction_id: "txn-1",
+                ab_transaction_ids: ["txn-1", "txn-2", "txn-3"],
                 budget_id: "My Budget",
                 statement_ref: "Affin Jun 2026",
             });
             expect(r.success).toBe(true);
+            expect(r.data.ab_transaction_ids.length).toBe(3);
             expect(r.data.statement_ref).toBe("Affin Jun 2026");
         });
     });
