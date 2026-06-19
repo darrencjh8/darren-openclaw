@@ -25,6 +25,8 @@ jobs:
         defaults:
             run:
                 working-directory: modules/portfolio-tracker
+        env:
+            ONEDRIVE_CLIENT_ID: ${{ secrets.ONEDRIVE_CLIENT_ID }}
         steps:
             - uses: actions/checkout@v4
             - uses: actions/setup-node@v4
