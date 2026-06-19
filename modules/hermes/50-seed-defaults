@@ -28,7 +28,8 @@ mkdir -p /opt/data/memories-backup
 chown -R hermes:hermes /opt/data/memories-backup 2>/dev/null || true
 
 # Generate GitHub App token for workers
-/opt/data/scripts/github-auth.sh 2>/dev/null || true
+# (errors logged to stderr → docker logs; never blocks boot)
+/opt/data/scripts/github-auth.sh || true
 
 python3 -c '
 import os, re, glob
