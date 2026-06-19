@@ -124,6 +124,18 @@ if check_file "$HERMES_ENV"; then
   echo "  [Webhook]"
   check_var "HERMES_WEBHOOK_SECRET" "$HERMES_ENV"
 
+  # GitHub App
+  echo "  [GitHub App]"
+  check_var "GITHUB_URL" "$HERMES_ENV"
+  check_var "GITHUB_APP_ID" "$HERMES_ENV"
+  check_var "GITHUB_APP_INSTALLATION_ID" "$HERMES_ENV"
+  check_var "GITHUB_APP_PRIVATE_KEY" "$HERMES_ENV"
+
+  # Dashboard Auth
+  echo "  [Dashboard Auth]"
+  check_var "HERMES_DASHBOARD_BASIC_AUTH_USERNAME" "$HERMES_ENV"
+  check_var "HERMES_DASHBOARD_BASIC_AUTH_PASSWORD" "$HERMES_ENV"
+
   # Persona
   echo "  [Persona]"
   check_var "IDENTITY_NAME" "$HERMES_ENV"
@@ -137,14 +149,8 @@ if check_file "$HERMES_ENV"; then
   # Optional
   echo "  [Optional]"
   check_var_optional "GITHUB_PAT" "$HERMES_ENV"
-  check_var_optional "GITHUB_URL" "$HERMES_ENV"
-  check_var_optional "GITHUB_APP_ID" "$HERMES_ENV"
-  check_var_optional "GITHUB_APP_INSTALLATION_ID" "$HERMES_ENV"
-  check_var_optional "GITHUB_APP_PRIVATE_KEY" "$HERMES_ENV"
   check_var_optional "BRAVE_SEARCH_API_KEY" "$HERMES_ENV"
   check_var_optional "FIRECRAWL_API_KEY" "$HERMES_ENV"
-  check_var_optional "HERMES_DASHBOARD_BASIC_AUTH_USERNAME" "$HERMES_ENV"
-  check_var_optional "HERMES_DASHBOARD_BASIC_AUTH_PASSWORD" "$HERMES_ENV"
 fi
 fi
 
