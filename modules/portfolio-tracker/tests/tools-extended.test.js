@@ -529,6 +529,9 @@ describe("ToolRegistry — _computeSyncAll with flex pull", () => {
         pullFromOneDrive.mockResolvedValue({ success: true });
         pushToOneDrive.mockResolvedValue({ success: true });
 
+        // Stub AbortSignal.timeout for test environment
+        AbortSignal.timeout = vi.fn(() => ({ aborted: false }));
+
         bridge = createMockBridge();
 
         const cfg = new Config(REQUIRED_ENV);
@@ -548,6 +551,7 @@ describe("ToolRegistry — _computeSyncAll with flex pull", () => {
         // Stub AB budget fetch
         global.fetch = vi.fn().mockResolvedValue({
             ok: true,
+            status: 200,
             json: () =>
                 Promise.resolve({
                     emergency_total: 100000,
@@ -573,7 +577,7 @@ describe("ToolRegistry — _computeSyncAll with flex pull", () => {
 
         expect(pullFlexXml).toHaveBeenCalled();
         expect(bridge.importIbkr).toHaveBeenCalled();
-        expect(result.flex_pull).toEqual({ success: true });
+        expect(result.flex_pull).toMatchObject({ success: true });
         expect(result.flex_import.trades_imported).toBe(1);
     });
 

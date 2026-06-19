@@ -781,18 +781,20 @@ export class ToolRegistry {
                         t.status = "skipped";
                         t.error =
                             "OneDrive not synced — portfolio file not downloaded. Run /onedrive setup in Telegram.";
-                        continue;
+                    } else {
+                        const updateResult = await this._ppBridge.updateBalance(
+                            {
+                                accountId: t.account_id,
+                                amount: t.amount,
+                                currencyCode: t.currency,
+                                date: today,
+                                notes: `Synced from AB ${t.name}`,
+                            },
+                        );
+                        t.result = updateResult;
+                        t.delta = updateResult.delta ?? 0;
+                        t.status = updateResult.status || "updated";
                     }
-                    const updateResult = await this._ppBridge.updateBalance({
-                        accountId: t.account_id,
-                        amount: t.amount,
-                        currencyCode: t.currency,
-                        date: today,
-                        notes: `Synced from AB ${t.name}`,
-                    });
-                    t.result = updateResult;
-                    t.delta = updateResult.delta ?? 0;
-                    t.status = updateResult.status || "updated";
                 } catch (e) {
                     t.result = { error: e.message };
                     t.delta = 0;
