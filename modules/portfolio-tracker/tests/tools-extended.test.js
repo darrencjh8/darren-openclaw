@@ -548,6 +548,7 @@ describe("ToolRegistry — _computeSyncAll with flex pull", () => {
         // Stub AB budget fetch
         global.fetch = vi.fn().mockResolvedValue({
             ok: true,
+            status: 200,
             json: () =>
                 Promise.resolve({
                     emergency_total: 100000,

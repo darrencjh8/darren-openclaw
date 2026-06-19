@@ -344,6 +344,7 @@ describe("Config — static fromEnv", () => {
         process.env.ACTUAL_PRIMARY_BUDGET_FILE = "proc-budget";
         process.env.PP_XML_PATH = "/proc/data.xml";
         process.env.PP_JAR_PATH = "/proc/pp.jar";
+        process.env.ONEDRIVE_CLIENT_ID = "proc-client-id";
 
         try {
             const cfg = Config.fromEnv();
