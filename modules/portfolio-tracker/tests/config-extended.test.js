@@ -13,6 +13,7 @@ const REQUIRED_ENV = {
     ACTUAL_PRIMARY_BUDGET_FILE: "My SGD Budget",
     PP_XML_PATH: "/data/portfolio.xml",
     PP_JAR_PATH: "/app/pp-cli.jar",
+    ONEDRIVE_CLIENT_ID: "test-client-id",
 };
 
 describe("Config — all 30+ fields", () => {
