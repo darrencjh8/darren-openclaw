@@ -7,3 +7,6 @@ COPY profiles/ /opt/hermes-defaults/profiles/
 RUN chmod +x /opt/hermes-defaults/scripts/*.sh
 COPY 50-seed-defaults /etc/cont-init.d/50-seed-defaults
 RUN chmod +x /etc/cont-init.d/50-seed-defaults
+
+# Overlay SessionDB locking fix (retry-with-jitter) on top of the base image
+COPY hermes_state.py /opt/hermes/hermes_state.py
