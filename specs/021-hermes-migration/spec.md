@@ -1,8 +1,8 @@
-# Feature Specification: Migrate expense-tracker from OpenClaw to Hermes Agent
+# Feature Specification: Migrate from OpenClaw to Hermes Agent
 
 **Feature:** hermes-migration
-**Spec Version:** 1.0.0
-**Status:** Draft
+**Spec Version:** 2.0.0
+**Status:** Done
 **Created:** 2026-06-17
 **Constitution Hash:** v4.0.0
 
@@ -10,11 +10,9 @@
 
 ## Overview
 
-Migrate the expense-tracker module from OpenClaw Gateway to [Nous Research's Hermes Agent](https://github.com/NousResearch/hermes-agent) — a production-grade, open-source autonomous agent framework. Hermes provides native Email (IMAP), Telegram, Memory, Cron, Sub-Agent Delegation, MCP integration, and Docker hosting — all features that replace the custom-built OpenClaw + expense-tracker stack with a single, maintained framework.
+All modules migrated from OpenClaw Gateway to Hermes Agent. Hermes provides Telegram, Email (IMAP), Memory, Cron, MCP — replacing the entire custom OpenClaw stack. The OpenClaw gateway container, `gateway/` directory, and all `openclaw.json` config have been removed.
 
-**Scope**: expense-tracker only. ktmb, portfolio-tracker, image-gen remain on OpenClaw for now.
-
-**Key insight**: Hermes already has every feature we need built-in. This is overwhelmingly a **configuration and thin-adapter** exercise, not a build project. The only net-new code is a ~100-line MCP adapter in expense-tracker.
+**Completed**: expense-tracker, portfolio-tracker, ktmb-booking, image-gen.
 
 ## Architecture Change
 
@@ -26,56 +24,21 @@ BEFORE (OpenClaw)                    AFTER (Hermes)
 │  • orchestrator      │      │  • email ✓ native     │
 │  • thinker           │      │  • memory ✓ native    │
 │  • plugin bridge     │      │  • cron ✓ native      │
-│  • SKILL.md files    │      │  • delegate_task ✓    │
-└──────┬───────────────┘      │  • MCP client ✓       │
-       │ curl                   └──────┬───────────────┘
-       ▼                               │ MCP (HTTP SSE)
-┌──────────────────────┐      ┌───────┴───────────────┐
-│  expense-tracker     │      │  expense-tracker      │
-│  • IMAP IDLE ❌ rem  │      │  • MCP server ✓ new   │
-│  • LLM loop  ❌ rem  │      │  • AB REST API ✓ keep │
-│  • MEMORY.md ❌ rem  │      │  • dedup journal ✓    │
-│  • embeddings ❌ rem │      │  • PDF extraction ✓   │
-│  • AB tools   ✓ keep │      └──────────────────────┘
-│  • dedup      ✓ keep │
-└──────────────────────┘
+│  • SKILL.md files    │      │  • MCP client ✓       │
+└──────┬───────────────┘      └──────┬───────────────┘
+       │ curl (all tools)             │ MCP (all modules)
+       ▼                               ▼
+┌──────────────────────┐      ┌──────────────────────┐
+│  All modules         │      │  All modules         │
+│  • expense-tracker   │      │  • expense-tracker   │
+│  • portfolio-tracker │      │  • portfolio-tracker │
+│  • ktmb-booking      │      │  • ktmb-booking      │
+│  • image-gen         │      │  • image-gen         │
+│  HTTP REST + curl    │      │  MCP (Streamable HTTP)│
+└──────────────────────┘      └──────────────────────┘
 ```
 
-## Code Removed from expense-tracker
-
-| Removed | Why |
-|---------|-----|
-| `src/imap.js` (~200 LOC) | Hermes Email channel handles IMAP |
-| `src/orchestrator.js` (~300 LOC) | Hermes handles tool-calling loop |
-| `src/prompts.js` (~150 LOC) | Hermes manages system prompts |
-| `src/memory.js` (~350 LOC) | Hermes has native memory system |
-| `src/decision-executor.js` (~200 LOC) | Hermes handles execution flow |
-| `src/payee-resolver.js` (~150 LOC) | Replaced by Hermes semantic memory |
-| `src/keywords.js` (~80 LOC) | Replaced by Hermes memory search |
-| `src/classify.js` (~50 LOC) | Replaced by Hermes NLU + pipelines |
-| `openai` npm dependency | LLM calls move to Hermes |
-| `@xenova/transformers` npm   | Embeddings replaced by Hermes memory |
-| `imapflow` npm              | IMAP handled by Hermes |
-| `mailparser` npm            | Email parsing in Hermes |
-| `cheerio` npm               | HTML parsing kept for PDF extraction |
-
-## Code Added to expense-tracker
-
-| Added | Why |
-|-------|-----|
-| `src/mcp-server.ts` (~100 LOC) | Thin MCP wrapper over existing REST endpoints |
-| `@modelcontextprotocol/sdk` npm | MCP server implementation |
-
-## Code Kept in expense-tracker
-
-| Kept | Why |
-|------|-----|
-| `src/tools.js` | Actual Budget HTTP client (all 13 AB tools) |
-| `src/dedup.js` | SHA-256 dedup journal |
-| `src/extractors.js` | PDF → text, HTML → text |
-| `src/config.js` | Environment variable loading |
-| `src/logging.js` | Pino structured logging |
-| `src/index.js` | Entry point → now starts MCP server, not IMAP loop |
+All modules expose an MCP server. Hermes connects to each via `mcp_servers` config. No module has its own IMAP, LLM loop, or memory — Hermes owns those concerns.
 
 ---
 
@@ -226,13 +189,10 @@ BEFORE (OpenClaw)                    AFTER (Hermes)
 
 ## Out of Scope
 
-- ktmb module migration (stays on OpenClaw/Hermes for now)
-- portfolio-tracker migration
-- image-gen migration
-- Browser CDP/web browsing (not needed for expense-tracker)
+- Browser CDP/web browsing (removed with OpenClaw)
 - Voice mode
 - Multi-profile setup
-- Dashboard (optional, can add later)
+- Dashboard
 
 ---
 

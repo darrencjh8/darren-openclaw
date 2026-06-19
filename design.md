@@ -1,9 +1,8 @@
-# OpenClaw — Architecture Design Document
+# darren-openclaw — Architecture Design Document
 
-**Project:** darren-openclaw
-**Version:** 2.1.0
-**Last Updated:** 2026-06-12
-**Status:** Gateway implemented & deployed. Workspace memory files specified. Statement Reconciliation specified.
+**Version:** 3.0.0
+**Last Updated:** 2026-06-20
+**Status:** Hermes migration complete. All modules MCP-enabled.
 
 ---
 
@@ -14,18 +13,18 @@
 3. [System Architecture](#3-system-architecture)
 4. [Hosting Topology](#4-hosting-topology)
 5. [Module: expense-tracker](#5-module-expense-tracker)
+5.A [Module: statement-reconciliation](#5a-module-statement-reconciliation-new)
 5.B [Module: portfolio-tracker](#5b-module-portfolio-tracker)
-   - [5B.1 Purpose](#5b1-purpose)
-   - [5B.2 Technology Stack](#5b2-technology-stack)
-   - [5B.3 Notification Architecture](#5b3-notification-architecture)
-   - [5B.4 IMAP Folder](#5b4-imap-folder)
-   - [5B.5 OneDrive Pull/Push Pipeline](#5b5-onedrive-pullpush-pipeline)
-   - [5B.6 Tools](#5b6-tools)
-   - [5B.7 Key Design Decisions](#5b7-key-design-decisions)
-   - [5B.8 MCP Server Architecture](#5b8-mcp-server-architecture)
-   - [5B.9 IBKR Flex Web Service](#5b9-ibkr-flex-web-service)
-6. [Module: gateway](#6-module-gateway)
-   - [6.8 Workspace File Templates](#68-workspace-file-templates)
+6. [Module: Hermes Agent](#6-module-hermes-agent)
+7. [Data Flow](#7-data-flow)
+8. [Security Design](#8-security-design)
+9. [Observability](#9-observability)
+10. [Cost Model](#10-cost-model)
+11. [Development Workflow](#11-development-workflow-spec-kit)
+12. [Risk Register](#12-risk-register)
+13. [Roadmap](#13-roadmap)
+
+---
 7. [Data Flow](#7-data-flow)
 8. [Security Design](#8-security-design)
 9. [Observability](#9-observability)
@@ -639,195 +638,70 @@ Threshold: 50. Returns top 3 candidates sorted by score.
 
 ---
 
-## 6. Module: gateway
+## 6. Module: Hermes Agent
 
 ### 6.1 Purpose
 
-An **OpenClaw Gateway deployment** running the official `openclaw` Node.js gateway on Ubuntu/Docker, loaded with a custom **expense-tracker skill**. The gateway provides channels (WhatsApp/Telegram/WebChat), agent orchestration, session management, and tool calling. WE provide the skills and deterministic tools.
-
-The gateway can be joined by **OpenClaw nodes** — separate machines (Windows/macOS/iOS/Android) that connect via WebSocket and expose device capabilities (camera, screen capture, canvas, voice).
+The central agent runtime replacing the former OpenClaw gateway. Hermes provides Telegram, email, memory, cron, and MCP client support. All modules connect via MCP — Hermes calls their tools, receives results, and relays to users.
 
 ### 6.2 Architecture
 
 ```mermaid
 graph TB
-    subgraph Local["Ubuntu Laptop — Docker Compose"]
-        subgraph Startup["Container Startup"]
-            TPL["*.md.template files"]
-            ENT["docker-entrypoint.sh"]
-            WS["Orchestrator Workspace<br/>AGENTS, SOUL, USER, IDENTITY, MEMORY"]
-            TWS["Thinker Workspace<br/>AGENTS only"]
-            TPL --> ENT --> WS
-            TPL --> ENT --> TWS
-        end
-
-        subgraph Agents["Multi-Agent Tiering"]
-            ORCH["orchestrator agent<br/>deepseek-v4-flash · thinking:off<br/>classifies + handles simple tasks"]
-            THINK["thinker agent<br/>deepseek-v4-pro · thinking:max<br/>spawned for complex reasoning"]
-            ORCH -->|"sessions_spawn"| THINK
-        end
-
-        GW["OpenClaw Gateway<br/>Custom Dockerfile<br/>Port 18789"]
-        WS -->|"system prompt"| ORCH
-        TWS -->|"system prompt"| THINK
-        ORCH --> GW
-        THINK --> GW
-
-        subgraph Memory["Memory System"]
-            MC["memory-core plugin<br/>Gemini embeddings"]
-            MEM["MEMORY.md<br/>plugin-managed"]
-            MC -->|"memoryFlush"| MEM
-            MEM -->|"memory_search"| GW
-        end
-
-        subgraph Skills["Skills"]
-            EXP["expense-tracker"]
-            POR["portfolio-tracker"]
-            IMG["image-generation"]
-            PDF["pdf"]
-        end
-
-        GW -->|"tool calls"| Skills
-        EXP -->|"HTTP :8080"| ET["expense-tracker<br/>Node.js"]
-        POR -->|"HTTP :8081"| PT["portfolio-tracker<br/>Node.js + Java"]
+    subgraph Hermes["Hermes Agent"]
+        TG["Telegram"]
+        Email["IMAP Email"]
+        MEM["Memory"]
+        CRON["Cron"]
+        MCP["MCP Client"]
     end
 
-    DS["DeepSeek API"] -->|"LLM"| GW
-    GM["Gemini API"] -->|"embeddings"| MC
-    TG["Telegram API"] <-->|"Bot API"| GW
-    CH["Chrome CDP<br/>:9223"] <-->|"browser plugin"| GW
+    subgraph Modules["MCP Servers"]
+        ET["expense-tracker\n:8080/mcp"]
+        PT["portfolio-tracker\n:8081/mcp"]
+        KTMB["ktmb-booking\n:8082/mcp"]
+        IG["image-gen\n:8083/mcp"]
+    end
+
+    TG --> Hermes
+    Email --> Hermes
+    CRON --> Hermes
+    MCP <--> ET
+    MCP <--> PT
+    MCP <--> KTMB
+    MCP <--> IG
+
     ET --> AB["Actual Budget"]
-    ET --> Email["IMAP Email"]
-    PT --> PP["PP XML"]
+    PT --> PP["Portfolio Performance"]
     PT --> GS["Google Sheets"]
+    PT --> IBKR["IBKR Flex WS"]
+    KTMB --> KTMBAPI["KTMB API"]
 ```
 
-**Model Tiering Flow:**
+### 6.3 MCP Servers
 
-```
-Telegram → bindings → orchestrator (v4-flash, thinking:off)
-                          │
-                  ┌───────┼────────┐
-                  │       │        │
-             Simple    Medium    Complex
-             (direct)  (direct)  (sessions_spawn → thinker)
-                                       │
-                                  thinker (v4-pro, thinking:max)
-                                  loads minimal AGENTS.md
-                                  calls tools, composes result
-                                  announces back to orchestrator
-```
-
-| Agent | Model | thinkingDefault | Fallbacks | Purpose |
-|---|---|---|---|---|
-| orchestrator | `deepseek-v4-flash` | `off` | gemini-3.5-flash → gemini-3.1-flash-lite | Classification, simple queries, delegation |
-| thinker | `deepseek-v4-pro` | `max` | deepseek-v4-flash | Complex reasoning, multi-step analysis, reconciliation |
-
-The orchestrator runs `delegationMode: "prefer"` with `allowAgents: ["thinker"]`. Per the [Thinking Levels doc](https://docs.openclaw.ai/tools/thinking), `off` disables reasoning entirely and `max` maps to `reasoning_effort: "max"` on DeepSeek V4. Sub-agents only receive `AGENTS.md` (no SOUL/IDENTITY/USER/MEMORY per the [Sub-agents doc](https://docs.openclaw.ai/tools/subagents)), so the thinker workspace is lean.
-
-### 6.3 We Do NOT Build HTTP Endpoints
-
-The OpenClaw Gateway provides all infrastructure:
-- Channel handlers (WhatsApp, Telegram, WebChat, 26+ others)
-- Agent orchestration (LLM loop, tool calling, session management)
-- DM pairing and security
-- Webhook verification
-- Graceful shutdown and health checks
-
-We configure `openclaw.json` — we do not build a custom server.
-
-### 6.4 We Build Skills + Tools
-
-| File | Language | Purpose |
+| Module | MCP URL | Tools |
 |---|---|---|
-| `SKILL.md` (per skill) | Markdown | LLM instructions: expense-tracking, portfolio-sync, image-generation, PDF extraction, KTMB booking |
-| `tools_api.py` (ktmb-booking only) | Python | HTTP endpoints for deterministic tools |
-| `openclaw.json` | JSON5 | Gateway config (models, providers, channels, agents, memory, compaction, browser, tools) |
-| `docker-compose.yml` | YAML | Five containers: gateway + expense-tracker + portfolio-tracker + actual-api + ktmb-booking |
-| `*.md.template` | Markdown | Workspace file templates (AGENTS, SOUL, USER, IDENTITY, MEMORY) |
+| expense-tracker | `http://expense-tracker:8080/mcp` | 13 Actual Budget tools + dedup + extractors |
+| portfolio-tracker | `http://portfolio-tracker:8081/mcp` | `portfolio_sync`, OneDrive IO, OneDrive auth |
+| ktmb-booking | `http://ktmb-booking:8082/mcp` | Train booking, schedule lookup |
+| image-gen | `http://image-gen:8083/mcp` | Image generation |
 
-### 6.5 WhatsApp/Telegram — Zero Code Required
+### 6.4 Cron Jobs (Hermes-managed)
 
-OpenClaw natively supports 26+ channels. To enable WhatsApp:
-```json
-// openclaw.json
-{
-  "channels": {
-    "whatsapp": { "enabled": true }
-  }
-}
-```
-
-The gateway handles Meta webhook verification, message parsing, and DM pairing. No custom code needed.
-
-### 6.6 Windows Companion
-
-The [Windows Hub](https://docs.openclaw.ai/platforms/windows) companion app (signed x64/arm64 installer from OpenClaw releases) connects via LAN WebSocket using the gateway auth token. After installing, choose **Advanced setup** → **Remote Gateway by URL and token**, using `ws://192.168.68.51:18789` plus the token from `gateway.auth.token`.
-
-The companion can run in **node mode** to expose device capabilities (canvas, screen, camera, TTS, STT, `system.run`) to the gateway agent. Pairing is required — approve via `openclaw devices approve <requestId>` on the gateway host.
-
-**Connection requires**: Docker port `0.0.0.0:18789` (not loopback-only) and `gateway.auth.token` configured in `openclaw.json`.
-
-### 6.7 Status
-
-| Artifact | Status |
-|---|---|
-| Gateway container + Dockerfile | Implemented |
-| openclaw.json (models, providers, channels, agents, memory, compaction) | Deployed |
-| Multi-agent model tiering (orchestrator + thinker) | Deployed |
-| Workspace template files (AGENTS.md, SOUL.md, USER.md, IDENTITY.md) | Deployed |
-| Thinker workspace template (AGENTS.thinker.md.template) | Deployed |
-| MEMORY.md template (plugin-managed seed) | Deployed |
-| USER.md template rewrite (compact user profile) | Deployed |
-| docker-entrypoint.sh (template generation + Xvfb + thinker ws) | Deployed |
-| Skills (expense-tracker, portfolio-tracker, image-gen, pdf) | Deployed |
-| Telegram channel + DM allowlist | Deployed |
-| Browser CDP relay (chrome-daemon.service) | Deployed |
-| Memory search (Gemini embeddings) | Deployed |
-| Session compaction + memoryFlush | Deployed |
-
-### 6.8 Workspace File Templates
-
-Files live on the `openclaw_home` named Docker volume (`/app/.openclaw`), persisting across container restarts and image rebuilds.
-
-#### Template Pipeline
-
-At startup, `docker-entrypoint.sh` reads each `*.md.template`, substitutes `$ENV_VAR` placeholders (longest keys first), and writes to the appropriate workspace:
-
-```
-AGENTS.md.template         →  /app/.openclaw/workspace/AGENTS.md            (orchestrator: tool routing, rules, model tiering, memory policy)
-AGENTS.thinker.md.template →  /app/.openclaw/workspace-thinker/AGENTS.md    (thinker: tool routing, rules — no tiering/persona)
-SOUL.md.template           →  /app/.openclaw/workspace/SOUL.md              (voice, tone, visual appearance)
-USER.md.template           →  /app/.openclaw/workspace/USER.md              (currency, budgets, payees, accounts)
-IDENTITY.md.template       →  /app/.openclaw/workspace/IDENTITY.md          (name, vibe, emoji)
-MEMORY.md.template         →  /app/.openclaw/workspace/MEMORY.md            (section headers only — plugin-managed)
-```
-
-#### File Roles
-
-| File | Manager | Read/Write |
+| Job | Schedule | Action |
 |---|---|---|
-| `MEMORY.md` | memory-core plugin | Plugin writes (memoryFlush), agent reads (memory_search) |
-| `USER.md` | Human (template) | Agent reads at session start — never re-asks currency/budget/rules |
-| `SOUL.md` | Human (template) | Agent reads for persona, image-gen reads for appearance/outfit |
-| `AGENTS.md` | Human (template) | Agent reads for routing, rules, deployment, memory policy |
-| `IDENTITY.md` | Human (template) | Agent reads for name/vibe |
+| portfolio-daily-sync | Daily 10 AM KL | `portfolio_sync` via MCP |
+| github-auth-refresh | Every 50 min | Refresh GitHub App token |
+| memory-backup | Every 360 min | Backup Hermes memories to private repo |
 
-#### Design: Compact Files
+### 6.5 Implementation Status
 
-Long-winded files give the LLM more surface to confabulate. Every line must earn its place:
-- **MEMORY.md**: Section headers only (`## Facts`, `## Preferences`, `## Decisions`). No example content that could be mistaken for real memories.
-- **USER.md**: Terse key-value. No narrative prose. Only facts the agent would otherwise re-ask.
-
-#### Memory Flow
-
-1. Agent learns a durable fact during conversation (e.g., "UOB 4605 = Ladies card")
-2. Session approaches `reserveTokens: 40000` → compaction triggered
-3. `memoryFlush` runs silent model turn → extracts key facts → appends to MEMORY.md
-4. Compaction summarizes old context; facts now safe in MEMORY.md
-5. Next session: `memory_search` retrieves facts from MEMORY.md via Gemini embeddings
-
----
+- ✅ Hermes container running (`modules/hermes/Dockerfile`)
+- ✅ All 4 modules registered as MCP servers in `config.yaml`
+- ✅ Telegram + email channels configured
+- ✅ Cron jobs seeded via `50-seed-defaults`
+- ✅ OpenClaw gateway fully removed
 
 ## 5.B Module: portfolio-tracker
 
