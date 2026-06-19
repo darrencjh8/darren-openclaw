@@ -8,10 +8,13 @@ Rules:
 - Constitution at .specify/memory/constitution.md
 - TDD mandatory. Docker-first. No overengineering.
 - Check specs/ for next feature number.
-- Done → push branch, create PR, block for review.
+- Create git worktree: `git worktree add -b feat/<slug> ../feat-<slug>`
+- Work inside worktree. Never touch main checkout.
+- Done → push, create PR, remove worktree, complete task.
 PR:
 ```
-gh pr create --base main --head <branch> --title "<what>" --body "## Summary\n...\n## Files\n...\n"
+cd ../feat-<slug> && gh pr create --base main --head feat/<slug> --title "<what>" --body "..."
+cd /workspace/darren-openclaw && git worktree remove ../feat-<slug>
 ```
 Output:
 ```
