@@ -1,6 +1,6 @@
-# Feature Specification: Migrate from OpenClaw to Hermes Agent
+# Feature Specification: Gateway (Hermes Agent)
 
-**Feature:** hermes-migration
+**Feature:** gateway
 **Spec Version:** 2.0.0
 **Status:** Done
 **Created:** 2026-06-17

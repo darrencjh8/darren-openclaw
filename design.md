@@ -4,6 +4,8 @@
 **Last Updated:** 2026-06-20
 **Status:** Hermes migration complete. All modules MCP-enabled.
 
+> ⚠ **This is a high-level overview.** Implementation details, tool tables, env vars, and algorithms belong in `specs/`. Link to specs for full detail. Do not bloat this file.
+
 ---
 
 ## Table of Contents
@@ -308,333 +310,70 @@ graph TB
 
 ### 5.1 Purpose
 
-An LLM-powered agent that monitors a dedicated Email burner inbox via IMAP IDLE. When a receipt or transaction alert email arrives, the agent extracts structured transaction data and inserts it into the user's Actual Budget instance.
+An LLM-powered agent that handles receipt emails, extracts structured transactions, and inserts them into Actual Budget. Exposes 16 tools via MCP to Hermes. The LLM orchestrator, IMAP handling, and memory are now owned by Hermes — expense-tracker is a tool server.
 
 ### 5.2 Technology Stack
 
-| Layer | Choice | Rationale |
-|---|---|---|
-| Runtime | Node.js 22-slim | Fast builds (no PyTorch), unified JS stack with gateway |
-| LLM | DeepSeek `deepseek-chat` | $0.14/1M input, $0.28/1M output; strong at structured extraction |
-| LLM Client | `openai` npm | DeepSeek is OpenAI-API-compatible |
-| IMAP | `imapflow` + `mailparser` | Async IMAP IDLE support, modern API |
-| HTTP | `express` | Lightweight HTTP server for tool endpoints |
-| HTML Parsing | `cheerio` | jQuery-like API, fast |
-| PDF OCR | child_process `pdftotext` | Tesseract binary in Docker image |
-| Dedup | `better-sqlite3` | Native SQLite, reads same dedup.db |
-| Embeddings | `@xenova/transformers` (WASM) | all-MiniLM-L6-v2, ~50MB, no native deps |
-| Memory | `MEMORY.md` (Markdown) | Human-readable learned facts file, volume-mounted — unchanged |
-| Logging | `pino` | Fast JSON-line structured logs |
-| Container | Docker Compose | `Dockerfile` + `docker-compose.yml` — unchanged |
-
-### 5.3 User Stories (from spec.md)
-
-| ID | Story | Core Behavior |
-|---|---|---|
-| US-1 | Real-Time Email Monitoring | IMAP IDLE connection detects new emails within 5 seconds; auto-reconnect with catch-up |
-| US-2 | Intelligent Email Parsing via LLM | DeepSeek extracts amount, currency, merchant, date from any format; no per-bank parser code |
-| US-3 | Dual-Currency Budget Routing | SGD → `Test-SGD-Budget`; MYR → MYR budget; unknown currencies trigger notification |
-| US-4 | Live Account Matching | LLM calls `fetch_accounts` before matching; no hardcoded account UUIDs |
-| US-5 | Live Category Assignment | LLM calls `fetch_categories`; category based on merchant context; `null` if uncertain |
-| US-6 | Duplicate Prevention | SHA-256 hash check against SQLite journal before each insert |
-| US-7 | Notification for Ambiguous Emails | Unknown currency, missing amount, unmatched account → SMTP notification, email left unread |
-| US-8 | Idempotent Processing | Emails marked `\Seen` only after successful insert; safe to restart at any time |
-
-### 5.4 The 21 LLM Tools
-
-The LLM is given 21 function definitions (OpenAI-compatible JSON schema). It chooses which tools to call and in what order:
-
-| # | Tool | Type | Description |
-|---|---|---|---|
-| 1 | `extract_email_content` | Pre-processing | Extract & clean text from email (HTML → text, PDF → OCR) |
-| 2 | `fetch_accounts` | Read | GET accounts from Actual Budget API |
-| 3 | `fetch_categories` | Read | GET categories from Actual Budget API |
-| 4 | `fetch_payees` | Read | GET payees from Actual Budget API |
-| 5 | `fetch_recent_transactions` | Read | GET recent transactions for dedup context |
-| 6 | `insert_transaction` | Write | POST transaction to Actual Budget |
-| 7 | `check_duplicate` | Read | SHA-256 lookup in SQLite dedup journal |
-| 8 | `mark_email_read` | Write | Set IMAP `\Seen` flag |
-| 9 | `notify_user` | Write | Send notification via gateway webhook (cooldown: 1h) |
-| 10 | `log_decision` | Write | Structured JSON log entry |
-| 11 | `search_memory` | Read | Semantic search over learned facts in MEMORY.md |
-| 12 | `learn_fact` | Write | Append fact to MEMORY.md with cosine-similarity dedup (≥0.95) |
-| 13 | `list_facts` | Read | Return all learned facts |
-| 14 | `update_fact` | Write | Replace a fact by substring match; clears notification cooldown |
-| 15 | `delete_fact` | Write | Remove facts by substring match; clears notification cooldown |
-| 16 | `reconcile_transaction` | Write | Mark AB transaction as cleared against statement |
-| 17 | `budget_extract_email_content` | Pre-processing | Extract & clean text from email via plugin typed tool |
-| 18 | `budget_mark_email_read` | Write | Set IMAP `\Seen` flag via plugin typed tool |
-| 19 | `budget_notify_user` | Write | Send notification via plugin typed tool (cooldown: 1h) |
-| 20 | `budget_log_decision` | Write | Structured JSON log entry via plugin typed tool |
-| 21 | `budget_check_statement_duplicate` | Read | Check statement journal for duplicate (account, period) |
-
-### 5.5 Agent Orchestration (Mermaid Sequence)
-
-```mermaid
-sequenceDiagram
-    participant IMAP as IMAP IDLE Handler
-    participant DB as Dedup Journal (processed_uids)
-    participant Orch as Agent Orchestrator
-    participant LLM as DeepSeek LLM
-    participant Tools as Tool Executor
-    participant AB as Actual Budget API
-    participant GW as Gateway Webhook
-
-    IMAP->>DB: isRecentlyProcessed(uid)?
-    alt Recently processed (within 60 min)
-        DB-->>IMAP: yes
-        Note over IMAP: skip — no LLM calls
-    else New or expired cooldown
-        DB-->>IMAP: no
-        IMAP->>Orch: new email detected (uid, raw MIME)
-        Orch->>Tools: extract_email_content()
-        Tools-->>Orch: cleaned text content
-        Orch->>LLM: system prompt + tools + email content
-        
-        loop Tool Call Loop (max 5 iterations)
-            LLM-->>Orch: tool_calls: [fetch_accounts, fetch_categories, ...]
-            Orch->>Tools: execute requested tools
-            Tools->>AB: GET /budgets/{id}/accounts
-            AB-->>Tools: account list
-            Tools->>AB: GET /budgets/{id}/categories
-            AB-->>Tools: category list
-            Tools-->>Orch: tool results
-            Orch->>LLM: tool results
-        end
-
-        LLM-->>Orch: final decision
-        
-        alt Confident (Happy Path)
-            Orch->>Tools: check_duplicate()
-            Tools->>AB: check existing transactions
-            AB-->>Tools: not duplicate
-            Orch->>Tools: insert_transaction()
-            Tools->>AB: POST /transactions
-            AB-->>Tools: transaction created
-            Orch->>Tools: mark_email_read()
-            Orch->>Tools: log_decision("inserted")
-            IMAP->>DB: recordProcessed(uid)
-        else Promotional / Skip
-            Orch->>Tools: log_decision("skipped")
-            Orch->>Tools: mark_email_read()
-            IMAP->>DB: recordProcessed(uid)
-        else Uncertain / Error
-            Orch->>Tools: notify_user(message)
-            Tools->>GW: POST /api/notify
-            GW-->>Tools: 200 OK
-            Orch->>Tools: log_decision("notified")
-            Note over IMAP: UID NOT recorded — retry next cycle
-        end
-    end
-```
-
-### 5.6 Dedup Journal
-
-Two SQLite tables provide dedup at different pipeline layers:
-
-**Transaction dedup (`dedup`)**: SHA-256 hash over `(date, amount_cents, account_id, payee_name)`. Recorded **after** successful insertion, not before. Prevents false positives if LLM calls `check_duplicate` twice in one session.
-
-**UID pre-check (`processed_uids`)**: Message UID with timestamp. Checked at IMAP layer **before** any LLM call. If UID recorded within 60 min, email is skipped entirely. UID recorded only after successful callback.
-
-### 5.7 Environment Variables
-
-| Variable | Required | Description |
-|---|---|---|
-| `DEEPSEEK_API_KEY` | Yes | DeepSeek API key |
-| `ACTUAL_BUDGET_URL` | Yes | Actual Budget server URL |
-| `ACTUAL_BUDGET_PASSWORD` | Yes | Actual Budget server password |
-| `ACTUAL_BUDGET_FILE` | Yes | Budget file ID or name |
-| `ACTUAL_BUDGET_ENCRYPTION_PASSWORD` | No | Optional encryption password |
-| `ACTUAL_BUDGET_SYNC_TOKEN` | No | Sync token for budget switching |
-| `IMAP_HOST` | Yes | IMAP server hostname |
-| `IMAP_PORT` | No | Default: `993` |
-| `IMAP_USERNAME` | Yes | Burner email address |
-| `IMAP_PASSWORD` | Yes | IMAP app-specific password |
-| `OPENCLAW_GATEWAY_URL` | Yes | Gateway webhook URL for notifications (e.g., `http://openclaw:18789`) |
-| `OPENCLAW_GATEWAY_TOKEN` | Yes | Gateway API token for auth |
-| `USER_NAME` | No | User name for personalization |
-| `DEDUP_DB_PATH` | No | Default: `data/dedup.db` |
-| `MEMORY_PATH` | No | Default: `data/MEMORY.md`; path to learned facts file |
-| `LOG_LEVEL` | No | Default: `INFO` |
-
-### 5.8 Email Configuration
-
-| Aspect | Setting |
+| Layer | Choice |
 |---|---|
-| IMAP Host | `imap.zoho.com` (configurable via `IMAP_HOST`) |
-| IMAP Port | 993 (SSL) |
-| IDLE Support | Yes (5-min timeout with auto-reconnect) |
-| Auth Method | App-specific password |
-| IMAP Library | `imapflow` (Node.js, async IDLE) |
-| Message IDs | UIDs (persistent across sessions, not sequence numbers) |
-| Pre-check | `processed_uids` table with 60-min cooldown before LLM dispatch |
-| Notifications | Gateway webhook via `OPENCLAW_GATEWAY_URL` (replaces SMTP) |
-| Architectural Impact | Hostname-only configuration change from any other IMAP provider |
+| Runtime | Node.js 22 |
+| LLM Client | openai SDK (DeepSeek) |
+| HTTP | Express |
+| MCP | @modelcontextprotocol/sdk (Streamable HTTP) |
+| Embeddings | @xenova/transformers (WASM, all-MiniLM-L6-v2) |
+| Dedup | better-sqlite3 (dedup.db + statement.db) |
+| PDF | child_process pdftotext |
+| Logging | pino |
 
-### 5.10 Memory System (Embeddings + MEMORY.md)
+### 5.3 Architecture
 
-The expense tracker learns from every processed email using a local semantic memory system:
+Expense-tracker exposes an MCP server at `:8080/mcp`. Hermes handles email ingestion, LLM orchestration, and memory. The module provides deterministic tools: Actual Budget CRUD, dedup checks, PDF extraction, and HTML parsing. Alert emails (receipts) and statement emails (monthly PDFs) are dispatched by Hermes to the appropriate pipeline. Full details in [spec 002](./specs/002-expense-tracking/spec.md).
 
-**Storage**: `MEMORY.md` — human-readable Markdown file with `## Facts` section. Each fact is a natural-language sentence (e.g., "Card ending 4605 belongs to UOB Ladies credit card"). Volume-mounted at `data/MEMORY.md`.
+### 5.4 Key Design Decisions
 
-**Embeddings**: `all-MiniLM-L6-v2` via ONNX runtime (~55 MB RAM, quantized int8). Loaded at startup, baked into Docker image at build time (no runtime download).
+| Decision | Rationale |
+|---|---|
+| Node.js over Python | Fast Docker builds (no PyTorch), unified stack |
+| WASM embeddings over ONNX | ~50MB model, no native deps, baked into image |
+| SQLite dedup journal | Prevents duplicate inserts; shared schema with Python era |
+| MCP over REST-only | Hermes integration; typed tool schemas |
 
-**Semantic Search**: `search_memory(query)` — cosine similarity over 384-dim embeddings. Handles spelling variations ("TOASTBOX" matches "Toast Box") and partial matches ("card 4605" matches "Card ending 4605").
+### 5.5 Implementation Status
 
-**Self-Learning**: After each successful insert, `learn_fact()` appends 3 facts (account, payee, category). Dedup: exact-match via normalized `Set` — repeated facts return `{ skipped: true, reason: "duplicate" }` without touching disk. File rewrites on every unique add (no batching).
-
-**Startup Dedup**: `_dedupExisting()` runs on init, removing duplicate facts from MEMORY.md accumulated before the dedup gate was added. One-time cleanup, idempotent.
-
-**File Safety**: `_rewriteFile()` writes to `.tmp` then `renameSync()` (atomic on Linux). If rename fails, temp file is cleaned up and error re-thrown.
-
-**User Feedback**: Gateway routes Telegram corrections ("X should be Y") to `update-fact`/`delete-fact`. Corrections clear the notification cooldown so pending emails re-process immediately.
-
-**Notification Cooldown**: Ambiguous emails trigger `notify_user()` once per hour per msg_id. Set cleared on any fact correction — unread emails re-process on next IDLE cycle.
-
-### 5.11 Implementation Status
-
-| Phase | Artifacts | Status |
-|---|---|---|
-| 0: Constitution | `constitution.md` | Complete |
-| 1: Specify | `spec.md` (9 user stories, 10 edge cases) | Complete |
-| 2: Plan | `plan.md` | Complete |
-| 3: Tasks | `tasks.md` | Complete |
-| 4: Implement | Source code (Node.js, 16 tools, IMAP IDLE, embeddings) | Complete |
-| 5: Validate | Test suite (269 tests), Docker build | Complete |
+- ✅ 16 tools registered as MCP server
+- ✅ Dedup journal (dedup.db + statement.db)
+- ✅ PDF extraction (pdftotext)
+- ✅ WASM embeddings baked into Docker image
+- ✅ Pre-classification: statement vs transaction routing
 
 ---
 
-## 5.A Module: statement-reconciliation (NEW)
+## 5.A Module: statement-reconciliation
 
 ### 5A.1 Purpose
 
-A **parallel pipeline** that processes monthly credit card and bank **statements** (PDF or HTML tabular emails). Unlike the alert pipeline, which treats each email as a potential new transaction, the statement pipeline treats the statement as the **bank's authoritative final record** for a billing cycle:
+A parallel pipeline for processing monthly bank/credit card statements (PDF/HTML). Unlike receipt emails which insert new transactions, statements reconcile against existing entries: matching line items are marked cleared, unmatched are inserted as outliers. Uses DeepSeek v4-pro for higher accuracy on multi-line extraction.
 
-| | Alert Pipeline | Statement Pipeline |
-|---|---|---|
-| **Authority** | Hint (may miss txns) | Bank's official record |
-| **"Match found"** | Duplicate → skip silently | **Reconciliation** → mark cleared |
-| **"No match"** | Insert new txn (cleared=false) | **Insert as outlier** (cleared=false, noted) |
-| **Result** | 1 txn inserted or skipped | X cleared + Y outliers inserted |
-| **Email disposition** | Read on insert; unread on skip/fail | **Always marked read** |
-| **LLM Model** | deepseek-v4-flash | deepseek-v4-pro |
-| **Database** | dedup.db (dedup journal) | statement.db (statement journal) |
+### 5A.2 Architecture
 
-### 5A.2 Architecture: Pre-Classification + Dispatch
+An email is pre-classified by Hermes as "statement" vs "transaction" before dispatch. Statements go to the StatementProcessor (separate orchestrator, v4-pro, max 20 iterations). The pipeline: extract content → LLM extracts line items → fuzzy match against unreconciled transactions → mark matched as cleared, insert outliers → notify user with summary. Full details in [spec 004](./specs/004-statement-reconciliation/spec.md).
 
-Every email goes through a **lightweight pre-classification LLM call** before dispatch to determine which pipeline to use:
+### 5A.3 Key Design Decisions
 
-```
-Email arrives → extract content (text/HTML/PDF OCR)
-    │
-    ▼
-Pre-classification LLM call (deepseek-v4-flash, no tools):
-  "Classify: 'statement' or 'transaction'"
-    │
-    ├── "transaction" → AgentOrchestrator.process_email()
-    │                    (EXISTING alert pipeline — UC-1/2/3, UNCHANGED)
-    │
-    └── "statement"  → StatementProcessor.process_statement()
-                         (NEW — deepseek-v4-pro, max 20 iterations)
-```
-
-This handles all formats: single-receipt PDFs route to the alert pipeline, tabular HTML statements route to the statement pipeline. Ambiguous input defaults to "transaction" (safe).
-
-### 5A.3 Statement Processing Flow
-
-```
-Statement email dispatched to StatementProcessor (v4-pro)
-    │
-    ▼
-1. Extract content (PDF OCR or HTML text via extractors/__init__.py — now wired)
-    │
-    ▼
-2. LLM Turn 1: extracts statement period, account, currency, ALL line items
-      tool_calls: [fetch_accounts, fetch_categories, fetch_statement_history]
-        → Check: has this (account, period) been processed?
-        → If YES → notify "Already processed" → mark_read → STOP
-    │
-    ▼
-3. LLM Turn 2: fetch_unreconciled_transactions(account_id, period_start, period_end)
-        → GET /transactions?account_id=X&cleared=false&since_date=Y&until_date=Z
-    │
-    ▼
-4. LLM Turns 3-N: For EACH statement line item:
-      fuzzy_match(stmt_date, stmt_amount, stmt_desc, uncleared_txns)
-        → Returns top 3 scored candidates (amount ±20c, date ±2d, merchant overlap)
-        → MATCH (score ≥ 50):
-            reconcile_transaction(ab_txn_id, "Statement [period]")
-              → POST /transactions/:id/clear → cleared: true
-              → Notes: "... | Statement [period]"
-        → NO MATCH:
-            insert_transaction(account_id, date, amount, payee,
-                               notes="OUTLIER | Statement [period]")
-              → POST /transactions → created with cleared: false (default)
-    │
-    ▼
-5. Final turn:
-      tool_calls: [record_statement(...), notify_user(...), mark_email_read()]
-        → Telegram: "✅ X reconciled and cleared ⚠️ Y outliers inserted but not cleared: [details]"
-        → IMAP \Seen flag
-
-On ANY failure:
-      → notify_user("Failed: [error]") → mark_email_read() → log error
-```
-
-### 5A.4 New Tools (5 new, 16 total with existing 11)
-
-| # | Tool | Pipeline | Purpose |
-|---|---|---|---|
-| 12 | `fetch_unreconciled_transactions` | Statement | GET uncleared AB txns for account in date range |
-| 13 | `reconcile_transaction` | Statement | PATCH AB transaction → `cleared: true` |
-| 14 | `record_statement` | Statement | Log statement processing in statement journal |
-| 15 | `fetch_statement_history` | Statement | Check if (account, period) was already processed |
-| 16 | `check_statement_duplicate` | Statement | Check statement journal for duplicate (account, period) before processing |
-
-Existing 11 alert tools are **shared** between both pipelines (unchanged).
-
-### 5A.5 Fuzzy Matching Algorithm
-
-| Signal | Weight | Condition |
-|---|---|---|
-| Amount exact | 80 | Same cents |
-| Amount within ±20c | 50 | Tolerance for rounding |
-| Date exact | 30 | Same calendar day |
-| Date within ±2d | 15 | Posting delay |
-| Merchant overlap > 0.5 | 20 | Jaccard token similarity |
-
-Threshold: 50. Returns top 3 candidates sorted by score.
-
-### 5A.6 actual-api Changes (gateway/actual-api/server.js)
-
-| Change | Endpoint | Purpose |
-|---|---|---|
-| NEW | `POST /transactions/:id/clear` | Mark transaction as cleared |
-| ENHANCED | `GET /transactions?cleared=false` | Filter uncleared transactions |
-| ENHANCED | `GET /transactions?since_date=X&until_date=Y` | Date range filtering |
-
-### 5A.7 User Stories (6 stories)
-
-| ID | Story |
+| Decision | Rationale |
 |---|---|
-| US-1 | LLM pre-classification ("statement" vs "transaction") |
-| US-2 | PDF ingestion via OCR (wire pdf_extractor.py) |
-| US-3 | Multi-transaction extraction from statement text |
-| US-4 | Reconciliation (match→clear) + outlier insertion (no-match→insert uncleared) |
-| US-5 | Statement period tracking (prevent double-processing) |
-| US-6 | Notification with reconciliation summary; always mark read |
+| Separate orchestrator from alert pipeline | Isolates regression risk; different LLM model + iteration count |
+| Statement journal (statement.db) | Prevents double-processing by account + period |
+| Fuzzy matching over exact matching | Handles posting delays (±2d) and amount rounding (±20c) |
 
-### 5A.8 Regression Isolation
+### 5A.4 Implementation Status
 
-| Component | Alert Pipeline | Statement Pipeline | Shared? |
-|---|---|---|---|
-| Orchestrator | `agent/orchestrator.py` (MAX=5) | `statement/orchestrator.py` (MAX=20) | No |
-| LLM Model | deepseek-v4-flash | deepseek-v4-pro | No |
-| System Prompt | `agent/prompts.py` | `statement/prompts.py` | No |
-| Tool Registry | `agent/tools.py` (15 tools) | Same instance | Yes |
-| Journal | `dedup.db` | `statement.db` | No |
-| actual-api | `server.js` (original + new) | Same server | Yes |
-| Pre-classification | N/A | Flash LLM call in main.py | Yes (main.py) |
+- ✅ Statement classification (pre-classify LLM call)
+- ✅ StatementProcessor with 5 tools (fetch_unreconciled, reconcile, record, fetch_history, check_duplicate)
+- ✅ Fuzzy matching algorithm (amount + date + merchant overlap)
+- ✅ actual-api endpoints (/transactions/:id/clear, date range filters)
+
+---
 
 ---
 
@@ -728,7 +467,7 @@ Portfolio-tracker exposes 6 MCP tools to Hermes: `portfolio_sync` (full pipeline
 
 1. OneDrive pull → 2. IBKR flex fetch → 3. Java CLI import → 4. AB balance sync → 5. OneDrive push → 6. Taxonomy export
 
-IMAP IDLE monitors the "Trades" folder for PDF confirmations only. The LLM orchestrator matches securities and inserts trades. REST endpoints are preserved for backward compatibility. Full architecture details are in [spec 022](./specs/022-portfolio-tracker/spec.md).
+IMAP IDLE monitors the "Trades" folder for PDF confirmations only. The LLM orchestrator matches securities and inserts trades. REST endpoints are preserved for backward compatibility. Full architecture details are in [spec 003](./specs/003-portfolio-tracker/spec.md).
 
 ### 5B.4 Key Design Decisions
 
