@@ -164,6 +164,90 @@ describe("AgentOrchestrator", () => {
       expect.anything(),
     );
   });
+
+  // ── notify_user failure handling ─────────────────────────────
+
+  it("skips mark_email_read when notify_user fails in Phase 1 null path", async () => {
+    const config = makeConfig();
+    const tools = makeTools({
+      executeTool: vi.fn(async (name) => {
+        if (name === "notify_user") return false;
+        return true;
+      }),
+    });
+    const orch = new AgentOrchestrator(config, tools);
+
+    orch._runPhase1 = vi.fn().mockResolvedValue(null);
+
+    const result = await orch.processEmail("test-nf1", "raw email");
+
+    expect(result.action).toBe("notify_failed");
+    expect(tools.executeTool).toHaveBeenCalledWith(
+      "notify_user",
+      expect.anything(),
+    );
+    // mark_email_read should NOT be called
+    const markCalls = tools.executeTool.mock.calls.filter(
+      (c) => c[0] === "mark_email_read",
+    );
+    expect(markCalls.length).toBe(0);
+  });
+
+  it("skips mark_email_read when notify_user fails in Phase 1 no-account path", async () => {
+    const config = makeConfig();
+    const tools = makeTools({
+      executeTool: vi.fn(async (name) => {
+        if (name === "notify_user") return false;
+        return true;
+      }),
+    });
+    const orch = new AgentOrchestrator(config, tools);
+
+    orch._runPhase1 = vi
+      .fn()
+      .mockResolvedValue(
+        fakePhase1Output({ account_id: "", action: "insert" }),
+      );
+
+    const result = await orch.processEmail("test-nf2", "raw email");
+
+    expect(result.action).toBe("notify_failed");
+    const markCalls = tools.executeTool.mock.calls.filter(
+      (c) => c[0] === "mark_email_read",
+    );
+    expect(markCalls.length).toBe(0);
+  });
+
+  it("skips mark_email_read when notify_user fails after successful insert", async () => {
+    const config = makeConfig();
+    const tools = makeTools({
+      executeTool: vi.fn(async (name) => {
+        if (name === "check_duplicate") return false;
+        if (name === "notify_user") return false;
+        return true;
+      }),
+    });
+    const orch = new AgentOrchestrator(config, tools);
+
+    const p1 = fakePhase1Output();
+    const p2 = fakePhase2Output(p1);
+    orch._runPhase1 = vi.fn().mockResolvedValue(p1);
+    orch._resolvePhase2 = vi.fn().mockResolvedValue(p2);
+
+    const result = await orch.processEmail("test-nf3", "raw email");
+
+    // Transaction was inserted successfully
+    expect(result.action).toBe("inserted");
+    expect(tools.executeTool).toHaveBeenCalledWith(
+      "insert_transaction",
+      expect.anything(),
+    );
+    // But mark_email_read should NOT be called because notification failed
+    const markCalls = tools.executeTool.mock.calls.filter(
+      (c) => c[0] === "mark_email_read",
+    );
+    expect(markCalls.length).toBe(0);
+  });
 });
 
 describe("DeepSeekClient", () => {
