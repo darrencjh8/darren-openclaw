@@ -390,6 +390,108 @@ describe("AgentOrchestrator", () => {
     expect(message).toContain("via Maybank");
   });
 
+  // ── category hint + insert failure notifications ────────────
+
+  it("notify_user fallback includes category hint when category_name is set", async () => {
+    const config = makeConfig();
+    const tools = makeTools({
+      executeTool: vi.fn(async (name) => {
+        if (name === "check_duplicate") return false;
+        return true;
+      }),
+    });
+    const orch = new AgentOrchestrator(config, tools);
+
+    const p1 = fakePhase1Output({ notify_message: "" });
+    const p2 = fakePhase2Output(p1, { category_name: "Food" });
+    orch._runPhase1 = vi.fn().mockResolvedValue(p1);
+    orch._resolvePhase2 = vi.fn().mockResolvedValue(p2);
+
+    await orch.processEmail("test-cat", "raw email");
+
+    const notifyCall = tools.executeTool.mock.calls.find(
+      (c) => c[0] === "notify_user",
+    );
+    const { message } = notifyCall[1] || {};
+    expect(message).toContain("→ Food");
+  });
+
+  it("notify_user fallback omits category hint when category_name is not set", async () => {
+    const config = makeConfig();
+    const tools = makeTools({
+      executeTool: vi.fn(async (name) => {
+        if (name === "check_duplicate") return false;
+        return true;
+      }),
+    });
+    const orch = new AgentOrchestrator(config, tools);
+
+    const p1 = fakePhase1Output({ notify_message: "" });
+    const p2 = fakePhase2Output(p1); // no category_name
+    orch._runPhase1 = vi.fn().mockResolvedValue(p1);
+    orch._resolvePhase2 = vi.fn().mockResolvedValue(p2);
+
+    await orch.processEmail("test-nocat", "raw email");
+
+    const notifyCall = tools.executeTool.mock.calls.find(
+      (c) => c[0] === "notify_user",
+    );
+    const { message } = notifyCall[1] || {};
+    expect(message).not.toContain("→");
+  });
+
+  it("notifies user when insert_transaction fails", async () => {
+    const config = makeConfig();
+    const tools = makeTools({
+      executeTool: vi.fn(async (name) => {
+        if (name === "check_duplicate") return false;
+        if (name === "insert_transaction") throw new Error("AB API down");
+        return true;
+      }),
+    });
+    const orch = new AgentOrchestrator(config, tools);
+
+    const p1 = fakePhase1Output();
+    const p2 = fakePhase2Output(p1);
+    orch._runPhase1 = vi.fn().mockResolvedValue(p1);
+    orch._resolvePhase2 = vi.fn().mockResolvedValue(p2);
+
+    const result = await orch.processEmail("test-insfail", "raw email");
+
+    expect(result.action).toBe("error");
+    expect(result.details).toContain("AB API down");
+    const notifyCall = tools.executeTool.mock.calls.find(
+      (c) => c[0] === "notify_user",
+    );
+    expect(notifyCall).toBeDefined();
+    expect(notifyCall[1].message).toContain("Failed to insert");
+    expect(notifyCall[1].message).toContain("Toast Box");
+  });
+
+  it("does not mark email read when insert_transaction fails", async () => {
+    const config = makeConfig();
+    const tools = makeTools({
+      executeTool: vi.fn(async (name) => {
+        if (name === "check_duplicate") return false;
+        if (name === "insert_transaction") throw new Error("AB API down");
+        return true;
+      }),
+    });
+    const orch = new AgentOrchestrator(config, tools);
+
+    const p1 = fakePhase1Output();
+    const p2 = fakePhase2Output(p1);
+    orch._runPhase1 = vi.fn().mockResolvedValue(p1);
+    orch._resolvePhase2 = vi.fn().mockResolvedValue(p2);
+
+    await orch.processEmail("test-insfail2", "raw email");
+
+    const markCalls = tools.executeTool.mock.calls.filter(
+      (c) => c[0] === "mark_email_read",
+    );
+    expect(markCalls.length).toBe(0);
+  });
+
   // ── Sender / Subject header prepending for Phase 1 account matching ──
 
   it("prepends From and Subject headers to emailText for Phase 1", async () => {
