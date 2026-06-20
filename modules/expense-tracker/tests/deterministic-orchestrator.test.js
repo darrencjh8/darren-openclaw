@@ -758,7 +758,7 @@ describe("3-phase entry points", () => {
       expect(executeCalls.some((c) => c.name === "mark_email_read")).toBe(true);
     });
 
-    it("Phase 1 returns null → notify + mark_read + stop", async () => {
+    it("Phase 1 returns null → notify + stop (no mark_read)", async () => {
       const { AgentOrchestrator } = await import("../src/orchestrator.js");
       const config = makeConfig();
       const executeCalls = [];
@@ -778,10 +778,10 @@ describe("3-phase entry points", () => {
       expect(orch._resolvePhase2).not.toHaveBeenCalled();
       expect(result.action).toBe("notified");
       expect(executeCalls.some((c) => c.name === "notify_user")).toBe(true);
-      expect(executeCalls.some((c) => c.name === "mark_email_read")).toBe(true);
+      expect(executeCalls.some((c) => c.name === "mark_email_read")).toBe(false); // Design §7.1: leave unread for retry;
     });
 
-    it("Phase 1 no account_id → notify + mark_read + stop", async () => {
+    it("Phase 1 no account_id → notify + stop (no mark_read)", async () => {
       const { AgentOrchestrator } = await import("../src/orchestrator.js");
       const config = makeConfig();
       const executeCalls = [];
@@ -805,7 +805,7 @@ describe("3-phase entry points", () => {
       expect(orch._resolvePhase2).not.toHaveBeenCalled();
       expect(result.action).toBe("notified");
       expect(executeCalls.some((c) => c.name === "notify_user")).toBe(true);
-      expect(executeCalls.some((c) => c.name === "mark_email_read")).toBe(true);
+      expect(executeCalls.some((c) => c.name === "mark_email_read")).toBe(false); // Design §7.1: leave unread for retry;
     });
 
     it("inserts transaction with Misc payee", async () => {

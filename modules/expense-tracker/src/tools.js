@@ -576,7 +576,8 @@ const TOOLS = [
         },
         notify_message: {
           type: "string",
-          description: "Friendly one-sentence notification message",
+          description:
+            "Concise notification with merchant, amount, currency, account name, date, and result. Used for insert and no-account cases.",
         },
       },
       required: [

@@ -43,6 +43,8 @@ RULES:
 6. IMPORTANT: Leave payee_name and category_id BLANK (empty string).
    Phase 2 resolves these deterministically.
 7. Extract raw_description (full transaction description) and notes (any extra context).
+7b. Write notify_message as a concise one-liner containing:
+    merchant, amount with currency symbol, account_name, and date.
 8. Amount: S\$12.80 = -1280, RM 45.50 = -4550. INTEGER cents.
 9. Date: extract from email timestamp or transaction mention.
 
@@ -58,7 +60,7 @@ Respond ONLY with valid JSON (no markdown, no code fences):
   "notes": "",
   "skip": false,
   "reasoning": "Matched DBS Yuu account ending 1234",
-  "notify_message": "S\$12.80 at Toast Box, logged!"
+  "notify_message": "S\$12.80 at Toast Box via DBS Yuu on 2026-06-18, logged!"
 }`;
 }
 
