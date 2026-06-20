@@ -359,6 +359,8 @@ describe("dispatchEmail", () => {
       "msg-001",
       "raw email content",
       mockImapHandler,
+      "test@example.com",
+      "Test Subject",
     );
     expect(mockImapHandler.markRead).not.toHaveBeenCalled();
   });
@@ -398,6 +400,8 @@ describe("dispatchEmail", () => {
       "msg-001",
       "raw email content",
       mockImapHandler,
+      "test@example.com",
+      "Test Subject",
     );
     expect(mockImapHandler.markRead).not.toHaveBeenCalled();
   });
@@ -417,6 +421,8 @@ describe("dispatchEmail", () => {
       "msg-001",
       "raw email content",
       mockImapHandler,
+      "test@example.com",
+      "Test Subject",
     );
     expect(mockStatementProcessor.processStatement).not.toHaveBeenCalled();
     expect(mockImapHandler.markRead).not.toHaveBeenCalled();
@@ -448,6 +454,8 @@ describe("dispatchEmail", () => {
       undefined,
       undefined,
       mockImapHandler,
+      undefined,
+      undefined,
     );
   });
 

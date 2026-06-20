@@ -91,7 +91,7 @@ export async function classifyEmail(rawEmail, subject, sender, apiKey) {
  * @param {string} msg.subject - email subject
  * @param {string} msg.from - email sender
  * @param {Function} classifyFn - async (rawEmail, subject, sender) => string
- * @param {object} orchestrator - has processEmail(msgId, rawEmail, imapHandler)
+ * @param {object} orchestrator - has processEmail(msgId, rawEmail, imapHandler, from, subject)
  * @param {object} imapHandler - has markRead(msgId)
  * @param {object} [statementProcessor] - optional, has processStatement(msgId, rawEmail, imapHandler)
  * @returns {Promise<void>}
@@ -139,5 +139,7 @@ export async function dispatchEmail(
         msg.msg_id,
         msg.raw_email,
         imapHandler,
+        msg.from,
+        msg.subject,
     );
 }

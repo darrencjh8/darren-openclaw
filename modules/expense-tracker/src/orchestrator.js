@@ -145,9 +145,15 @@ export class AgentOrchestrator {
   /**
    * Process a transaction email through the 3-phase pipeline.
    */
-  async processEmail(msgId, rawEmail, imapHandler) {
+  async processEmail(msgId, rawEmail, imapHandler, from, subject) {
     try {
-      return await this._processEmailInternal(msgId, rawEmail, imapHandler);
+      return await this._processEmailInternal(
+        msgId,
+        rawEmail,
+        imapHandler,
+        from,
+        subject,
+      );
     } catch (e) {
       logger.error({ event: "process_email_error", error: e.message });
       this._tools.setEmailContext(msgId, rawEmail, imapHandler);
@@ -165,11 +171,12 @@ export class AgentOrchestrator {
     }
   }
 
-  async _processEmailInternal(msgId, rawEmail, imapHandler) {
+  async _processEmailInternal(msgId, rawEmail, imapHandler, from, subject) {
     this._tools.setEmailContext(msgId, rawEmail, imapHandler);
 
     // Extract email content
     let emailText = "";
+    let usedFallback = false;
     try {
       const raw = Buffer.isBuffer(rawEmail)
         ? rawEmail
@@ -177,6 +184,17 @@ export class AgentOrchestrator {
       emailText = await extractEmailContent(raw);
     } catch {
       emailText = String(rawEmail || "");
+      usedFallback = true;
+    }
+
+    // Prepend sender + subject as account-matching signals for Phase 1.
+    // Skip when extractEmailContent failed — raw MIME already contains headers.
+    if (!usedFallback) {
+      const headerLines = [];
+      if (from) headerLines.push(`From: ${from}`);
+      if (subject) headerLines.push(`Subject: ${subject}`);
+      if (headerLines.length)
+        emailText = headerLines.join("\n") + "\n\n" + emailText;
     }
 
     // Phase 1: LLM Analysis
