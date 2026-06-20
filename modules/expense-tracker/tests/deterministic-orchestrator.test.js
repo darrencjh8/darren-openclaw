@@ -656,6 +656,286 @@ describe("Phase 2: Resolution (3-phase)", () => {
 });
 
 // ═══════════════════════════════════════════════════════════════════
+// 3b. Phase 2: Sign correction (credit card → negative, income support)
+// ═══════════════════════════════════════════════════════════════════
+
+describe("Phase 2: Sign correction", () => {
+  // ── _detectAccountType ────────────────────────────────────────
+
+  describe("_detectAccountType", () => {
+    it("returns 'credit card' from memory fact", async () => {
+      const { AgentOrchestrator } = await import("../src/orchestrator.js");
+      const config = makeConfig();
+      const tools = makeTools({
+        executeTool: vi.fn(async (name) => {
+          if (name === "search_memory")
+            return {
+              results: [
+                { text: "UOB One is a credit card account", score: 0.9 },
+              ],
+            };
+          return true;
+        }),
+      });
+      const orch = new AgentOrchestrator(config, tools);
+
+      const result = await orch._detectAccountType("UOB One");
+      expect(result).toBe("credit card");
+    });
+
+    it("returns 'bank' from memory fact", async () => {
+      const { AgentOrchestrator } = await import("../src/orchestrator.js");
+      const config = makeConfig();
+      const tools = makeTools({
+        executeTool: vi.fn(async (name) => {
+          if (name === "search_memory")
+            return {
+              results: [{ text: "OCBC 360 is a bank account", score: 0.9 }],
+            };
+          return true;
+        }),
+      });
+      const orch = new AgentOrchestrator(config, tools);
+
+      const result = await orch._detectAccountType("OCBC 360");
+      expect(result).toBe("bank");
+    });
+
+    it("returns 'debit card' from memory fact (treated as bank — no flip)", async () => {
+      const { AgentOrchestrator } = await import("../src/orchestrator.js");
+      const config = makeConfig();
+      const tools = makeTools({
+        executeTool: vi.fn(async (name) => {
+          if (name === "search_memory")
+            return {
+              results: [
+                { text: "DBS Yuu is a debit card account", score: 0.9 },
+              ],
+            };
+          return true;
+        }),
+      });
+      const orch = new AgentOrchestrator(config, tools);
+
+      const result = await orch._detectAccountType("DBS Yuu");
+      expect(result).toBe("debit card");
+    });
+
+    it("returns 'credit card' from keyword fallback when memory empty", async () => {
+      const { AgentOrchestrator } = await import("../src/orchestrator.js");
+      const config = makeConfig();
+      const tools = makeTools({
+        executeTool: vi.fn(async () => ({ results: [] })),
+      });
+      const orch = new AgentOrchestrator(config, tools);
+
+      const result = await orch._detectAccountType("DBS Altitude Visa");
+      expect(result).toBe("credit card");
+    });
+
+    it("returns 'bank' from keyword fallback when no credit card keywords", async () => {
+      const { AgentOrchestrator } = await import("../src/orchestrator.js");
+      const config = makeConfig();
+      const tools = makeTools({
+        executeTool: vi.fn(async () => ({ results: [] })),
+      });
+      const orch = new AgentOrchestrator(config, tools);
+
+      const result = await orch._detectAccountType("Ryt Bank");
+      expect(result).toBe("bank");
+    });
+
+    it("returns 'bank' when account name is null/undefined/empty", async () => {
+      const { AgentOrchestrator } = await import("../src/orchestrator.js");
+      const config = makeConfig();
+      const tools = makeTools();
+      const orch = new AgentOrchestrator(config, tools);
+
+      expect(await orch._detectAccountType(null)).toBe("bank");
+      expect(await orch._detectAccountType(undefined)).toBe("bank");
+      expect(await orch._detectAccountType("")).toBe("bank");
+    });
+  });
+
+  // ── Sign flip in _resolvePhase2 ─────────────────────────────
+
+  describe("sign flip in _resolvePhase2", () => {
+    it("flips positive to negative for credit card account", async () => {
+      const { AgentOrchestrator } = await import("../src/orchestrator.js");
+      const config = makeConfig();
+      const tools = makeTools({
+        executeTool: vi.fn(async (name) => {
+          if (name === "search_memory") {
+            return {
+              results: [
+                { text: "UOB One is a credit card account", score: 0.9 },
+              ],
+            };
+          }
+          return true;
+        }),
+      });
+      const orch = new AgentOrchestrator(config, tools);
+
+      const phase1Output = {
+        merchant: "AMAZE* GREATEASTERN",
+        amount_cents: 5000,
+        date: "2026-06-19",
+        currency: "SGD",
+        account_id: "acc-1",
+        account_name: "UOB One",
+        budget_id: "primary-budget-id",
+        action: "insert",
+      };
+
+      const result = await orch._resolvePhase2(phase1Output);
+      expect(result.amount_cents).toBe(-5000);
+      expect(result._sign_flipped).toBe(true);
+    });
+
+    it("keeps negative as negative for credit card (idempotent)", async () => {
+      const { AgentOrchestrator } = await import("../src/orchestrator.js");
+      const config = makeConfig();
+      const tools = makeTools({
+        executeTool: vi.fn(async (name) => {
+          if (name === "search_memory") {
+            return {
+              results: [
+                { text: "UOB One is a credit card account", score: 0.9 },
+              ],
+            };
+          }
+          return true;
+        }),
+      });
+      const orch = new AgentOrchestrator(config, tools);
+
+      const phase1Output = {
+        merchant: "AMAZE* GREATEASTERN",
+        amount_cents: -5000,
+        date: "2026-06-19",
+        currency: "SGD",
+        account_id: "acc-1",
+        account_name: "UOB One",
+        budget_id: "primary-budget-id",
+        action: "insert",
+      };
+
+      const result = await orch._resolvePhase2(phase1Output);
+      expect(result.amount_cents).toBe(-5000);
+      expect(result._sign_flipped).toBe(true);
+    });
+
+    it("keeps positive as positive for bank account (income)", async () => {
+      const { AgentOrchestrator } = await import("../src/orchestrator.js");
+      const config = makeConfig();
+      const tools = makeTools({
+        executeTool: vi.fn(async (name) => {
+          if (name === "search_memory") {
+            return {
+              results: [{ text: "Ryt Bank is a bank account", score: 0.9 }],
+            };
+          }
+          return true;
+        }),
+      });
+      const orch = new AgentOrchestrator(config, tools);
+
+      const phase1Output = {
+        merchant: "CHEN SIEW NGO",
+        amount_cents: 4600,
+        date: "2026-06-19",
+        currency: "MYR",
+        account_id: "acc-2",
+        account_name: "Ryt Bank",
+        budget_id: "secondary-budget-id",
+        action: "insert",
+      };
+
+      const result = await orch._resolvePhase2(phase1Output);
+      expect(result.amount_cents).toBe(4600);
+      expect(result._sign_flipped).toBeUndefined();
+    });
+
+    it("keeps negative as negative for debit card (bank account)", async () => {
+      const { AgentOrchestrator } = await import("../src/orchestrator.js");
+      const config = makeConfig();
+      const tools = makeTools({
+        executeTool: vi.fn(async (name) => {
+          if (name === "search_memory") {
+            return {
+              results: [
+                { text: "DBS Yuu is a debit card account", score: 0.9 },
+              ],
+            };
+          }
+          return true;
+        }),
+      });
+      const orch = new AgentOrchestrator(config, tools);
+
+      const phase1Output = {
+        merchant: "Toast Box",
+        amount_cents: -1280,
+        date: "2026-06-19",
+        currency: "SGD",
+        account_id: "acc-1",
+        account_name: "DBS Yuu",
+        budget_id: "primary-budget-id",
+        action: "insert",
+      };
+
+      const result = await orch._resolvePhase2(phase1Output);
+      expect(result.amount_cents).toBe(-1280);
+      expect(result._sign_flipped).toBeUndefined();
+    });
+
+    it("handles empty string amount_cents — skips sign flip", async () => {
+      const { AgentOrchestrator } = await import("../src/orchestrator.js");
+      const config = makeConfig();
+      const tools = makeTools();
+      const orch = new AgentOrchestrator(config, tools);
+
+      const phase1Output = {
+        merchant: "SomeMerchant",
+        amount_cents: "",
+        date: "2026-06-19",
+        currency: "SGD",
+        account_id: "acc-1",
+        account_name: "UOB One",
+        budget_id: "primary-budget-id",
+        action: "insert",
+      };
+
+      const result = await orch._resolvePhase2(phase1Output);
+      expect(result.amount_cents).toBe("");
+      expect(result._sign_flipped).toBeUndefined();
+    });
+
+    it("skips sign flip when account_name is missing", async () => {
+      const { AgentOrchestrator } = await import("../src/orchestrator.js");
+      const config = makeConfig();
+      const tools = makeTools();
+      const orch = new AgentOrchestrator(config, tools);
+
+      const phase1Output = {
+        merchant: "SomeMerchant",
+        amount_cents: 5000,
+        date: "2026-06-19",
+        currency: "SGD",
+        account_id: "acc-1",
+        budget_id: "primary-budget-id",
+        action: "insert",
+      };
+
+      const result = await orch._resolvePhase2(phase1Output);
+      expect(result.amount_cents).toBe(5000);
+      expect(result._sign_flipped).toBeUndefined();
+    });
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════
 // 4. Integration: 3-phase entry points (email + Telegram)
 // ═══════════════════════════════════════════════════════════════════
 
@@ -840,7 +1120,7 @@ describe("3-phase entry points", () => {
       expect(insertCall.args.category_id).toBeUndefined();
     });
 
-    it("learns only account_name fact (not payee or category)", async () => {
+    it("learns only account_name fact with inferred type (bank by default)", async () => {
       const { AgentOrchestrator } = await import("../src/orchestrator.js");
       const config = makeConfig();
       const executeCalls = [];
@@ -858,6 +1138,7 @@ describe("3-phase entry points", () => {
         payee_name: "Toast Box",
         category_id: "cat-food",
       });
+      // _sign_flipped is not set → defaults to "bank"
 
       orch._runPhase1 = vi.fn().mockResolvedValue(phase1Out);
       orch._resolvePhase2 = vi.fn().mockResolvedValue(phase2Out);
@@ -866,7 +1147,37 @@ describe("3-phase entry points", () => {
 
       const learnCalls = executeCalls.filter((c) => c.name === "learn_fact");
       expect(learnCalls).toHaveLength(1);
-      expect(learnCalls[0].args.fact).toBe("DBS Yuu is a payment account");
+      expect(learnCalls[0].args.fact).toBe("DBS Yuu is a bank account");
+    });
+
+    it("learns credit card account fact when sign was flipped", async () => {
+      const { AgentOrchestrator } = await import("../src/orchestrator.js");
+      const config = makeConfig();
+      const executeCalls = [];
+      const tools = makeTools({
+        executeTool: vi.fn(async (name, args) => {
+          executeCalls.push({ name, args });
+          if (name === "check_duplicate") return false;
+          return true;
+        }),
+      });
+      const orch = new AgentOrchestrator(config, tools);
+
+      const phase1Out = fakePhase1Output({ account_name: "UOB One" });
+      const phase2Out = fakePhase2Output(phase1Out, {
+        payee_name: "Insurance",
+        category_id: "cat-insurance",
+        _sign_flipped: true,
+      });
+
+      orch._runPhase1 = vi.fn().mockResolvedValue(phase1Out);
+      orch._resolvePhase2 = vi.fn().mockResolvedValue(phase2Out);
+
+      await orch.processEmail("msg-7", "raw email");
+
+      const learnCalls = executeCalls.filter((c) => c.name === "learn_fact");
+      expect(learnCalls).toHaveLength(1);
+      expect(learnCalls[0].args.fact).toBe("UOB One is a credit card account");
     });
 
     it("returns error on insert_transaction failure, does not mark read", async () => {

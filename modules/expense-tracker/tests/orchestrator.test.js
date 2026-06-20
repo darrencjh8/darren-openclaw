@@ -596,7 +596,7 @@ describe("auto-learn contradiction resolution", () => {
         if (name === "check_duplicate") return false;
         if (name === "fetch_context")
           return { categories: [{ id: "cat-misc", name: "Misc" }] };
-        if (name === "learn_fact" && args?.fact?.includes("payment account"))
+        if (name === "learn_fact" && args?.fact?.includes("is a bank account"))
           return {
             added: false,
             skipped: true,
@@ -624,7 +624,7 @@ describe("auto-learn contradiction resolution", () => {
       "update_fact",
       expect.objectContaining({
         old_text: "DBS Yuu is a debit card account",
-        new_text: "DBS Yuu is a payment account",
+        new_text: "DBS Yuu is a bank account",
       }),
     );
   });

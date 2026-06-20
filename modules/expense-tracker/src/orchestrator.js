@@ -460,11 +460,45 @@ export class AgentOrchestrator {
   // Phase 2: Resolution (code-driven, LLM-assisted)
   // ═══════════════════════════════════════════════════════════════
 
+  async _detectAccountType(accountName) {
+    if (!accountName) return "bank";
+    try {
+      const mem = await this._tools.executeTool("search_memory", {
+        query: accountName + " account",
+      });
+      for (const r of mem?.results || []) {
+        const m = (r.text || "").match(/is an?\s+(.+?)\s+account/i);
+        if (m) return m[1].toLowerCase(); // "credit card", "debit card", "bank"
+      }
+    } catch {}
+    // Fallback: keyword match on account name
+    // Exclude Visa Debit / Mastercard Debit — those are debit cards, not credit
+    if (
+      /visa|mastercard|credit\s*card|ecard/i.test(accountName) &&
+      !/\bdebit\b/i.test(accountName)
+    )
+      return "credit card";
+    return "bank";
+  }
+
   async _resolvePhase2(phase1Output) {
     const output = {
       ...phase1Output,
       category_id: phase1Output.category_id || null,
     };
+
+    // Sign correction: credit cards always flip to negative
+    if (
+      output.account_name &&
+      output.amount_cents != null &&
+      output.amount_cents !== ""
+    ) {
+      const acctType = await this._detectAccountType(output.account_name);
+      if (acctType === "credit card") {
+        output.amount_cents = -Math.abs(Number(output.amount_cents));
+        output._sign_flipped = true;
+      }
+    }
 
     // Step 1: Payee resolution
     if (!output.payee_name && output.merchant) {
@@ -702,7 +736,8 @@ export class AgentOrchestrator {
         learnPromises.push(
           (async () => {
             try {
-              const fact = `${llmOutput.account_name} is a payment account`;
+              const acctType = llmOutput._sign_flipped ? "credit card" : "bank";
+              const fact = `${llmOutput.account_name} is a ${acctType} account`;
               const learned = await this._tools.executeTool("learn_fact", {
                 fact,
               });
