@@ -456,10 +456,14 @@ export class AgentOrchestrator {
             output.payee_name = resolved.payee;
             output.payee_source = resolved.source || "fallback";
           }
-        } catch {
-          // resolve_merchant failed — leave payee blank
+        } catch (e) {
+          // resolve_merchant failed — leave payee blank, fall through to Misc
+          logger.warn({
+            event: "resolve_merchant_failed",
+            merchant: output.merchant,
+            error: e.message,
+          });
         }
-      }
     }
 
     // Fallback
