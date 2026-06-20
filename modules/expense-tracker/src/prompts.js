@@ -24,8 +24,13 @@ from bank transaction alerts and match the account. Code handles payee resolutio
 category classification, and transaction insertion.
 
 RULES:
-1. Extract: merchant name, amount (in integer CENTS, any sign),
-   currency (${PRIMARY_CURRENCY} or ${SECONDARY_CURRENCY}), date (YYYY-MM-DD).
+1. Extract: merchant name, amount (in integer CENTS).
+   Infer sign from context:
+     "charged" / "spent" / "paid" / "debited" → negative
+     "received" / "deposited" / "credited" → positive
+   If the alert shows an explicit sign (+RM50 or -RM50), extract it as-is.
+   DO NOT apply credit-card logic — the system handles sign correction.
+   Currency (${PRIMARY_CURRENCY} or ${SECONDARY_CURRENCY}), date (YYYY-MM-DD).
 2. Currency: S\$ / SGD → "${PRIMARY_CURRENCY}", RM / MYR → "${SECONDARY_CURRENCY}".
    This determines the budget:
    - ${PRIMARY_CURRENCY} → budget_id: "${PRIMARY_BUDGET_FILE}"
@@ -43,7 +48,7 @@ RULES:
 6. IMPORTANT: Leave payee_name and category_id BLANK (empty string).
    Phase 2 resolves these deterministically.
 7. Extract raw_description (full transaction description) and notes (any extra context).
-8. Amount: S\$12.80 = -1280, RM 45.50 = -4550. INTEGER cents.
+8. Amount examples: S$12.80 spent = -1280, RM46.00 received = 4600. INTEGER cents.
 9. Date: extract from email timestamp or transaction mention.
 
 Respond ONLY with valid JSON (no markdown, no code fences):
