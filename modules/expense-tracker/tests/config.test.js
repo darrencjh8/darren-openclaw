@@ -59,9 +59,9 @@ describe("Config", () => {
   it("uses default notify URL", () => {
     const config = new Config({
       ...requiredEnv,
-      NOTIFY_URL: "http://hermes:8644/webhooks/expense",
+      NOTIFY_URL: "http://hermes:8644/webhooks/notify",
     });
-    expect(config.notifyUrl).toBe("http://hermes:8644/webhooks/expense");
+    expect(config.notifyUrl).toBe("http://hermes:8644/webhooks/notify");
   });
 
   it("all fields populated with custom values", () => {
