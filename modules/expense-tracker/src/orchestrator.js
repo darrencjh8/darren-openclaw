@@ -574,6 +574,7 @@ export class AgentOrchestrator {
             );
             if (matched) {
               output.category_id = matched.id;
+              output.category_name = matched.name;
               break;
             }
           }
@@ -602,6 +603,7 @@ export class AgentOrchestrator {
             const valid = liveCategories.find((c) => c.id === categoryId);
             if (valid) {
               output.category_id = categoryId;
+              output.category_name = valid.name;
               // Auto-learn for next time (learn_fact → update_fact on contradiction)
               try {
                 const fact = `${output.payee_name} maps to ${valid.name} category`;
@@ -697,6 +699,13 @@ export class AgentOrchestrator {
         });
       } catch (e) {
         logger.error({ event: "insert_failed", error: e.message });
+        if (!silent) {
+          try {
+            await this._tools.executeTool("notify_user", {
+              message: `Failed to insert ${llmOutput.currency || "SGD"} ${Math.abs(llmOutput.amount_cents || 0) / 100} at ${llmOutput.merchant || payeeName}: ${String(e.message).slice(0, 200)}`,
+            });
+          } catch {} // prevent notify_user failure from triggering top-level catch
+        }
         return {
           action: "error",
           details: `Insert failed: ${e.message}`,
@@ -715,7 +724,10 @@ export class AgentOrchestrator {
               const acct = llmOutput.account_name || "unknown account";
               const dt = llmOutput.date || "today";
               const merchant = llmOutput.merchant || payeeName;
-              return `${sym}${amt} at ${merchant} via ${acct} on ${dt}, logged`;
+              const cat = llmOutput.category_name
+                ? ` → ${llmOutput.category_name}`
+                : "";
+              return `${sym}${amt} at ${merchant} via ${acct} on ${dt}${cat}, logged`;
             })(),
         });
         if (!notified) {
