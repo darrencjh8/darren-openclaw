@@ -20,6 +20,27 @@ vi.mock("better-sqlite3", () => {
 
 vi.mock("fs", () => ({ mkdirSync: vi.fn() }));
 
+const { loggerInfoMock, loggerWarnMock, loggerErrorMock } = vi.hoisted(() => ({
+  loggerInfoMock: vi.fn(),
+  loggerWarnMock: vi.fn(),
+  loggerErrorMock: vi.fn(),
+}));
+
+vi.mock("../src/logging.js", () => ({
+  logger: {
+    info: loggerInfoMock,
+    warn: loggerWarnMock,
+    error: loggerErrorMock,
+    child: vi.fn(() => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn() })),
+  },
+  getLogger: vi.fn(() => ({
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+  })),
+  setLogLevel: vi.fn(),
+}));
+
 const mockFetch = vi.fn();
 global.fetch = mockFetch;
 
@@ -54,6 +75,9 @@ describe("ToolRegistry — budget_id validation", () => {
 
   beforeEach(() => {
     mockFetch.mockReset();
+    loggerInfoMock.mockReset();
+    loggerWarnMock.mockReset();
+    loggerErrorMock.mockReset();
     registry = new ToolRegistry(mockConfig(), null);
   });
 
@@ -182,5 +206,162 @@ describe("ToolRegistry — budget_id validation", () => {
       });
       expect(result).toEqual({ error: "budget_id is required" });
     });
+  });
+});
+
+describe("executeTool logging", () => {
+  let registry;
+
+  beforeEach(() => {
+    mockFetch.mockReset();
+    loggerInfoMock.mockReset();
+    loggerWarnMock.mockReset();
+    loggerErrorMock.mockReset();
+    registry = new ToolRegistry(mockConfig(), null);
+  });
+
+  test("logs tool_exec event on successful execution", async () => {
+    await registry.executeTool("log_decision", {
+      action: "test",
+      reasoning: "unit test",
+    });
+    expect(loggerInfoMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: "tool_exec",
+        tool: "log_decision",
+      }),
+    );
+  });
+
+  test("includes result in tool_exec log", async () => {
+    await registry.executeTool("log_decision", {
+      action: "test",
+      reasoning: "verify result logged",
+    });
+    expect(loggerInfoMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: "tool_exec",
+        result: "true",
+      }),
+    );
+  });
+
+  test("truncates long args and result", async () => {
+    // log_decision returns true (short), but args can be long
+    const longReasoning = "x".repeat(500);
+    await registry.executeTool("log_decision", {
+      action: "test",
+      reasoning: longReasoning,
+    });
+    const call = loggerInfoMock.mock.calls.find(
+      (c) => c[0]?.event === "tool_exec",
+    );
+    expect(call).toBeDefined();
+    // args stringified + sliced to 200 chars
+    expect(call[0].args.length).toBeLessThanOrEqual(200);
+  });
+
+  test("still throws on unknown tool (no log emitted)", async () => {
+    await expect(registry.executeTool("nonexistent", {})).rejects.toThrow(
+      "Unknown tool",
+    );
+    // No tool_exec log because handler lookup threw before result
+    expect(loggerInfoMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("_handle_notify_user logging", () => {
+  let registry;
+
+  beforeEach(() => {
+    mockFetch.mockReset();
+    loggerInfoMock.mockReset();
+    loggerWarnMock.mockReset();
+    loggerErrorMock.mockReset();
+    registry = new ToolRegistry(mockConfig(), null);
+  });
+
+  test("logs notify_user_sent on webhook success", async () => {
+    mockFetch.mockResolvedValue({ ok: true });
+    await registry.executeTool("notify_user", {
+      message: "Test notification",
+    });
+    expect(loggerInfoMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: "notify_user_sent",
+        message: "Test notification",
+      }),
+    );
+  });
+
+  test("logs notify_user_failed on non-200 response", async () => {
+    mockFetch.mockResolvedValue({ ok: false, status: 500 });
+    const result = await registry.executeTool("notify_user", {
+      message: "Should fail",
+    });
+    expect(result).toBe(false);
+    expect(loggerErrorMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: "notify_user_failed",
+        status: 500,
+      }),
+    );
+  });
+
+  test("logs notify_user_failed on network error", async () => {
+    mockFetch.mockRejectedValue(new Error("ECONNREFUSED"));
+    const result = await registry.executeTool("notify_user", {
+      message: "Should error",
+    });
+    expect(result).toBe(false);
+    expect(loggerErrorMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: "notify_user_failed",
+        error: "ECONNREFUSED",
+      }),
+    );
+  });
+
+  test("logs notify_user_cooldown when suppressed", async () => {
+    // Record a send for msg-1, then try again — should suppress
+    const cfg = mockConfig();
+    registry = new ToolRegistry(cfg, null);
+    registry.setEmailContext("msg-1", "raw", null);
+
+    // First call: succeeds
+    mockFetch.mockResolvedValue({ ok: true });
+    await registry.executeTool("notify_user", {
+      message: "First notification",
+    });
+
+    // Second call: should be suppressed by cooldown (no fetch call)
+    mockFetch.mockReset();
+    loggerInfoMock.mockReset();
+    const result = await registry.executeTool("notify_user", {
+      message: "Second notification",
+    });
+    expect(result).toBe(true);
+    expect(loggerInfoMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: "notify_user_cooldown",
+      }),
+    );
+    // Fetch should NOT have been called
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  test("does not double-log tool_exec for notify_user (handler logs its own)", async () => {
+    // The handler logs notify_user_sent; executeTool also logs tool_exec.
+    // Both are intentional — tool_exec gives a unified timeline, notify_user_*
+    // gives domain-specific detail.
+    mockFetch.mockResolvedValue({ ok: true });
+    await registry.executeTool("notify_user", {
+      message: "Test",
+    });
+
+    // Should have both tool_exec and notify_user_sent
+    const events = loggerInfoMock.mock.calls.map((c) => c[0]?.event);
+    expect(events).toContain("tool_exec");
+    expect(events).toContain("notify_user_sent");
   });
 });

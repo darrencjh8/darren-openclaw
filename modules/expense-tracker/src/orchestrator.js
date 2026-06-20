@@ -150,12 +150,17 @@ export class AgentOrchestrator {
       return await this._processEmailInternal(msgId, rawEmail, imapHandler);
     } catch (e) {
       logger.error({ event: "process_email_error", error: e.message });
-      try {
-        this._tools.setEmailContext(msgId, rawEmail, imapHandler);
-        await this._tools.executeTool("notify_user", {
-          message: `Error processing email: ${e.message}`,
+      this._tools.setEmailContext(msgId, rawEmail, imapHandler);
+      const notified = await this._tools.executeTool("notify_user", {
+        message: `Error processing email: ${e.message}`,
+      });
+      if (!notified) {
+        logger.error({
+          event: "notify_user_failed",
+          context: "process_email_catch",
+          error: e.message,
         });
-      } catch {}
+      }
       throw e;
     }
   }
@@ -177,9 +182,19 @@ export class AgentOrchestrator {
     // Phase 1: LLM Analysis
     const phase1 = await this._runPhase1(emailText);
     if (!phase1) {
-      await this._tools.executeTool("notify_user", {
+      const notified = await this._tools.executeTool("notify_user", {
         message: "Couldn't understand this transaction email.",
       });
+      if (!notified) {
+        logger.error({
+          event: "notify_user_failed",
+          context: "phase1_null",
+        });
+        return {
+          action: "notify_failed",
+          details: "Phase 1 returned no output, notification failed",
+        };
+      }
       await this._tools.executeTool("mark_email_read", {});
       return {
         action: "notified",
@@ -196,11 +211,22 @@ export class AgentOrchestrator {
         event: "phase1_no_account",
         merchant: phase1.merchant,
       });
-      await this._tools.executeTool("notify_user", {
+      const notified = await this._tools.executeTool("notify_user", {
         message:
           phase1.notify_message ||
           `Couldn't match an account for "${phase1.merchant}". Please review.`,
       });
+      if (!notified) {
+        logger.error({
+          event: "notify_user_failed",
+          context: "phase1_no_account",
+          merchant: phase1.merchant,
+        });
+        return {
+          action: "notify_failed",
+          details: "No account matched, notification failed",
+        };
+      }
       await this._tools.executeTool("mark_email_read", {});
       return {
         action: "notified",
@@ -621,12 +647,20 @@ export class AgentOrchestrator {
       }
 
       if (!silent) {
-        await this._tools.executeTool("mark_email_read", {});
-        await this._tools.executeTool("notify_user", {
+        const notified = await this._tools.executeTool("notify_user", {
           message:
             llmOutput.notify_message ||
             `I found a ${llmOutput.currency || "SGD"} ${Math.abs(llmOutput.amount_cents || 0) / 100} transaction at ${llmOutput.merchant || payeeName}, logged it safely for you!`,
         });
+        if (!notified) {
+          logger.error({
+            event: "notify_user_failed",
+            context: "phase3_insert",
+            merchant: llmOutput.merchant || payeeName,
+          });
+        } else {
+          await this._tools.executeTool("mark_email_read", {});
+        }
       }
 
       // Learn facts (fire-and-forget, don't block)

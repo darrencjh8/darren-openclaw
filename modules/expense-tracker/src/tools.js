@@ -755,7 +755,17 @@ export class ToolRegistry {
   async executeTool(name, args) {
     const handler = this[`_handle_${name.replace(/-/g, "_")}`];
     if (!handler) throw new Error(`Unknown tool: ${name}`);
-    return handler.call(this, args);
+    const result = await handler.call(this, args);
+    logger.info({
+      event: "tool_exec",
+      tool: name,
+      args: JSON.stringify(args).slice(0, 200),
+      result:
+        typeof result === "string"
+          ? result.slice(0, 200)
+          : JSON.stringify(result).slice(0, 200),
+    });
+    return result;
   }
 
   // ── Memory tools ──────────────────────────────────────────────
@@ -1115,6 +1125,7 @@ export class ToolRegistry {
 
   async _handle_notify_user({ message }) {
     if (this._emailMsgId && this._cooldown.shouldSuppress(this._emailMsgId)) {
+      logger.info({ event: "notify_user_cooldown", message });
       return true;
     }
     const url = `${this._config.notifyUrl}`;
@@ -1134,10 +1145,23 @@ export class ToolRegistry {
         headers,
         body,
       });
-      if (!r.ok) return false;
+      if (!r.ok) {
+        logger.error({
+          event: "notify_user_failed",
+          status: r.status,
+          message,
+        });
+        return false;
+      }
       if (this._emailMsgId) this._cooldown.record(this._emailMsgId);
+      logger.info({ event: "notify_user_sent", message });
       return true;
-    } catch {
+    } catch (e) {
+      logger.error({
+        event: "notify_user_failed",
+        error: e.message,
+        message,
+      });
       return false;
     }
   }
