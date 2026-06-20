@@ -377,7 +377,7 @@ describe("AgentOrchestrator", () => {
     expect(result.action).toBe("notified");
   });
 
-  it("marks email read when Phase 3 exhausts without payee/category", async () => {
+  it("inserts transaction when Phase 3 has payee but no category", async () => {
     const config = makeConfig();
     const tools = {
       setEmailContext: vi.fn(),
@@ -408,8 +408,8 @@ describe("AgentOrchestrator", () => {
             payees: [{ name: "Test Payee" }],
             categories: [{ id: "cat1", name: "Food" }],
           };
-        // resolve_merchant: returns a payee that matches
         if (name === "resolve_merchant") return { payee: "Test Payee" };
+        if (name === "check_duplicate") return false;
         return true;
       }),
       getSubmitDecisionTool: vi.fn(() => ({
@@ -474,11 +474,123 @@ describe("AgentOrchestrator", () => {
       "S$10.00 at Test Merchant",
     );
     expect(tools.executeTool).toHaveBeenCalledWith(
-      "notify_user",
+      "insert_transaction",
       expect.anything(),
     );
     expect(tools.executeTool).toHaveBeenCalledWith("mark_email_read", {});
-    expect(result.action).toBe("notified");
+    expect(result.action).toBe("inserted");
+  });
+
+  it("accepts Misc payee from resolve_merchant fallback and inserts transaction", async () => {
+    const config = makeConfig();
+    const tools = {
+      setEmailContext: vi.fn(),
+      getToolSchemas: vi.fn(() => []),
+      getLlmToolSchemas: vi.fn(() => []),
+      getPhase2ToolSchemas: vi.fn(() => [
+        {
+          type: "function",
+          function: {
+            name: "fetch_context",
+            description: "Fetch live data",
+            parameters: {
+              type: "object",
+              properties: {
+                budget_id: { type: "string" },
+              },
+              required: ["budget_id"],
+            },
+          },
+        },
+      ]),
+      executeTool: vi.fn(async (name) => {
+        if (name === "search_memory")
+          return [{ text: "some match", score: 0.5 }];
+        if (name === "fetch_context")
+          return {
+            accounts: [{ id: "acc1", name: "Account 1" }],
+            payees: [{ name: "Existing Payee" }],
+            categories: [{ id: "cat1", name: "Food" }],
+          };
+        // resolve_merchant falls back to Misc — Misc NOT in live payees
+        if (name === "resolve_merchant")
+          return { payee: "Misc", source: "fallback" };
+        if (name === "check_duplicate") return false;
+        return true;
+      }),
+      getSubmitDecisionTool: vi.fn(() => ({
+        type: "function",
+        function: {
+          name: "submit_decision",
+          description: "Submit the final structured decision",
+          parameters: {},
+        },
+      })),
+    };
+    const orch = new AgentOrchestrator(config, tools);
+
+    // Phase 1a: valid JSON, payee + category blank
+    // Phase 2: account_id present, NO payee_name, NO category_id
+    let callCount = 0;
+    orch._llm.chat = vi.fn(async () => {
+      callCount++;
+      if (callCount === 1) {
+        return {
+          choices: [
+            {
+              finish_reason: "stop",
+              message: {
+                content: JSON.stringify({
+                  merchant: "AMAZE GREAT EASTERN",
+                  amount_cents: -5000,
+                  date: "2026-06-19",
+                  currency: "SGD",
+                  raw_description: "S$50.00 at AMAZE GREAT EASTERN",
+                }),
+              },
+            },
+          ],
+        };
+      }
+      // Phase 2: account_id present, payee blank, category blank
+      return {
+        choices: [
+          {
+            finish_reason: "stop",
+            message: {
+              content: JSON.stringify({
+                action: "insert",
+                merchant: "AMAZE GREAT EASTERN",
+                amount_cents: -5000,
+                date: "2026-06-19",
+                currency: "SGD",
+                account_id: "acc1",
+                payee_name: "",
+                category_id: "",
+                budget_id: "primary",
+              }),
+            },
+          },
+        ],
+      };
+    });
+
+    const result = await orch.processEmail(
+      "test-008",
+      "S$50.00 at AMAZE GREAT EASTERN",
+    );
+    // Should call resolve_merchant and accept the "Misc" fallback
+    expect(tools.executeTool).toHaveBeenCalledWith(
+      "resolve_merchant",
+      expect.objectContaining({ merchant: "AMAZE GREAT EASTERN" }),
+    );
+    // Should insert with Misc payee
+    expect(tools.executeTool).toHaveBeenCalledWith(
+      "insert_transaction",
+      expect.objectContaining({ imported_description: "Misc" }),
+    );
+    expect(tools.executeTool).toHaveBeenCalledWith("mark_email_read", {});
+    expect(result.action).toBe("inserted");
   });
 });
 
