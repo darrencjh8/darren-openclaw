@@ -464,6 +464,7 @@ export class AgentOrchestrator {
             error: e.message,
           });
         }
+      }
     }
 
     // Fallback
