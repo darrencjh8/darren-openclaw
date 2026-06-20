@@ -32,6 +32,11 @@ RULES:
    - ${SECONDARY_CURRENCY} → budget_id: "${SECONDARY_BUDGET_FILE}"
 3. Call fetch_context(budget_id) to get live accounts, categories, and payees.
 4. Match account_id and account_name from live accounts. Prefer open, non-closed.
+   Use ALL available signals:
+   - Email From domain (e.g., @dbs.com → DBS accounts)
+   - Subject line (e.g., "Card ending 3255" → match from memory)
+   - Card type in alert (credit/debit helps narrow to the right account)
+   - Merchant name in body as a contextual clue
    If no open account matches, leave account_id blank.
 5. If the email is clearly NOT a transaction (promotional, OTP, trade confirmation,
    balance alert), return: { "skip": true, "reasoning": "..." }

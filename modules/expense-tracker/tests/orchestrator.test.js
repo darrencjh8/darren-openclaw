@@ -248,6 +248,111 @@ describe("AgentOrchestrator", () => {
     );
     expect(markCalls.length).toBe(0);
   });
+
+  // ── Sender / Subject header prepending for Phase 1 account matching ──
+
+  it("prepends From and Subject headers to emailText for Phase 1", async () => {
+    const config = makeConfig();
+    const tools = makeTools();
+    const orch = new AgentOrchestrator(config, tools);
+
+    const p1 = fakePhase1Output();
+    const p2 = fakePhase2Output(p1);
+    orch._runPhase1 = vi.fn().mockResolvedValue(p1);
+    orch._resolvePhase2 = vi.fn().mockResolvedValue(p2);
+
+    await orch.processEmail(
+      "test-headers",
+      "raw email body",
+      null,
+      "alerts.dbs.com",
+      "Card Transaction Alert for 3255",
+    );
+
+    const phase1Arg = orch._runPhase1.mock.calls[0][0];
+    expect(phase1Arg).toContain("From: alerts.dbs.com");
+    expect(phase1Arg).toContain("Subject: Card Transaction Alert for 3255");
+    expect(phase1Arg).toContain("raw email body");
+    // Headers should appear before body
+    const fromIdx = phase1Arg.indexOf("From:");
+    const bodyIdx = phase1Arg.indexOf("raw email body");
+    expect(fromIdx).toBeLessThan(bodyIdx);
+  });
+
+  it("excludes From header when sender is empty", async () => {
+    const config = makeConfig();
+    const tools = makeTools();
+    const orch = new AgentOrchestrator(config, tools);
+
+    orch._runPhase1 = vi.fn().mockResolvedValue(fakePhase1Output());
+    orch._resolvePhase2 = vi.fn().mockResolvedValue(fakePhase2Output());
+
+    await orch.processEmail(
+      "test-no-from",
+      "raw email body",
+      null,
+      "",
+      "Card Alert",
+    );
+
+    const phase1Arg = orch._runPhase1.mock.calls[0][0];
+    expect(phase1Arg).not.toContain("From:");
+    expect(phase1Arg).toContain("Subject: Card Alert");
+  });
+
+  it("excludes Subject header when subject is empty", async () => {
+    const config = makeConfig();
+    const tools = makeTools();
+    const orch = new AgentOrchestrator(config, tools);
+
+    orch._runPhase1 = vi.fn().mockResolvedValue(fakePhase1Output());
+    orch._resolvePhase2 = vi.fn().mockResolvedValue(fakePhase2Output());
+
+    await orch.processEmail(
+      "test-no-subject",
+      "raw email body",
+      null,
+      "alerts.dbs.com",
+      "",
+    );
+
+    const phase1Arg = orch._runPhase1.mock.calls[0][0];
+    expect(phase1Arg).toContain("From: alerts.dbs.com");
+    expect(phase1Arg).not.toContain("Subject:");
+  });
+
+  it("handles undefined sender and subject gracefully", async () => {
+    const config = makeConfig();
+    const tools = makeTools();
+    const orch = new AgentOrchestrator(config, tools);
+
+    orch._runPhase1 = vi.fn().mockResolvedValue(fakePhase1Output());
+    orch._resolvePhase2 = vi.fn().mockResolvedValue(fakePhase2Output());
+
+    // Old signature — no from/subject (backward compat)
+    await orch.processEmail("test-backcompat", "raw email body", null);
+
+    const phase1Arg = orch._runPhase1.mock.calls[0][0];
+    expect(phase1Arg).not.toContain("From:");
+    expect(phase1Arg).not.toContain("Subject:");
+    expect(phase1Arg).toContain("raw email body");
+  });
+
+  it("processText does NOT include sender headers", async () => {
+    const config = makeConfig();
+    const tools = makeTools();
+    const orch = new AgentOrchestrator(config, tools);
+
+    orch._runPhase1 = vi.fn().mockResolvedValue(fakePhase1Output());
+    orch._resolvePhase2 = vi.fn().mockResolvedValue(fakePhase2Output());
+
+    await orch.processText("Telegram: S$12.80 at Toast Box");
+
+    const phase1Arg = orch._runPhase1.mock.calls[0][0];
+    expect(phase1Arg).not.toContain("From:");
+    expect(phase1Arg).not.toContain("Subject:");
+    expect(phase1Arg).toBe("Telegram: S$12.80 at Toast Box");
+  });
 });
 
 // ── Auto-learn: learn_fact → update_fact on contradiction ────
@@ -478,6 +583,8 @@ describe("dispatchEmail statement routing", () => {
       "txn-001",
       "SGD 12.80 at Toast Box",
       mockImapHandler,
+      "alerts@example.com",
+      "Transaction Alert",
     );
     expect(mockStatementProcessor.processStatement).not.toHaveBeenCalled();
   });

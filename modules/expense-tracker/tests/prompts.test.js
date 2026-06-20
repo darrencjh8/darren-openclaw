@@ -41,6 +41,21 @@ describe("getPhase1Prompt", () => {
     expect(prompt).toContain("account_name");
     expect(prompt).toContain("raw_description");
   });
+
+  it("instructs LLM to use email sender domain for account matching", () => {
+    expect(prompt).toContain("From domain");
+    expect(prompt).toMatch(/@dbs\.com/);
+  });
+
+  it("instructs LLM to use subject line for card number matching", () => {
+    expect(prompt).toContain("Subject line");
+    expect(prompt).toMatch(/Card ending/);
+  });
+
+  it("instructs LLM to use card type for account matching", () => {
+    expect(prompt).toContain("Card type");
+    expect(prompt).toMatch(/credit.debit/);
+  });
 });
 
 describe("getCategoryPickerPrompt", () => {
