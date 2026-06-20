@@ -158,7 +158,7 @@ export class AgentOrchestrator {
       logger.error({ event: "process_email_error", error: e.message });
       this._tools.setEmailContext(msgId, rawEmail, imapHandler);
       const notified = await this._tools.executeTool("notify_user", {
-        message: `Error processing email: ${e.message}`,
+        message: `Error processing email from "${from || "unknown"}" re: "${subject || "unknown"}": ${String(e.message).slice(0, 300)}`,
       });
       if (!notified) {
         logger.error({
@@ -201,7 +201,7 @@ export class AgentOrchestrator {
     const phase1 = await this._runPhase1(emailText);
     if (!phase1) {
       const notified = await this._tools.executeTool("notify_user", {
-        message: "Couldn't understand this transaction email.",
+        message: `Couldn't understand email from "${from || "unknown"}" re: "${subject || "unknown"}".`,
       });
       if (!notified) {
         logger.error({
@@ -213,7 +213,6 @@ export class AgentOrchestrator {
           details: "Phase 1 returned no output, notification failed",
         };
       }
-      await this._tools.executeTool("mark_email_read", {});
       return {
         action: "notified",
         details: "Phase 1 returned no output",
@@ -245,7 +244,6 @@ export class AgentOrchestrator {
           details: "No account matched, notification failed",
         };
       }
-      await this._tools.executeTool("mark_email_read", {});
       return {
         action: "notified",
         details: "No account matched after Phase 1",
@@ -709,7 +707,16 @@ export class AgentOrchestrator {
         const notified = await this._tools.executeTool("notify_user", {
           message:
             llmOutput.notify_message ||
-            `I found a ${llmOutput.currency || "SGD"} ${Math.abs(llmOutput.amount_cents || 0) / 100} transaction at ${llmOutput.merchant || payeeName}, logged it safely for you!`,
+            (() => {
+              const sym = llmOutput.currency === "MYR" ? "RM" : "S$";
+              const amt = (Math.abs(llmOutput.amount_cents || 0) / 100).toFixed(
+                2,
+              );
+              const acct = llmOutput.account_name || "unknown account";
+              const dt = llmOutput.date || "today";
+              const merchant = llmOutput.merchant || payeeName;
+              return `${sym}${amt} at ${merchant} via ${acct} on ${dt}, logged`;
+            })(),
         });
         if (!notified) {
           logger.error({

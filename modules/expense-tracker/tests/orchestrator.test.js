@@ -55,7 +55,7 @@ function fakePhase1Output(overrides = {}) {
     raw_description: "S$12.80 at Toast Box",
     notes: "",
     reasoning: "Matched DBS Yuu",
-    notify_message: "S$12.80 at Toast Box, logged!",
+    notify_message: "S$12.80 at Toast Box via DBS Yuu on 2026-06-19, logged!",
     ...overrides,
   };
 }
@@ -113,7 +113,11 @@ describe("AgentOrchestrator", () => {
       "notify_user",
       expect.anything(),
     );
-    expect(tools.executeTool).toHaveBeenCalledWith("mark_email_read", {});
+    // Design §7.1: leave unread for retry — do NOT mark email read on uncertainty
+    const markCalls = tools.executeTool.mock.calls.filter(
+      (c) => c[0] === "mark_email_read",
+    );
+    expect(markCalls.length).toBe(0);
   });
 
   it("notifies when Phase 1 has no account_id", async () => {
@@ -133,7 +137,11 @@ describe("AgentOrchestrator", () => {
       "notify_user",
       expect.anything(),
     );
-    expect(tools.executeTool).toHaveBeenCalledWith("mark_email_read", {});
+    // Design §7.1: leave unread for retry — do NOT mark email read on uncertainty
+    const markCalls = tools.executeTool.mock.calls.filter(
+      (c) => c[0] === "mark_email_read",
+    );
+    expect(markCalls.length).toBe(0);
   });
 
   it("inserts transaction via full 3-phase flow", async () => {
@@ -165,9 +173,55 @@ describe("AgentOrchestrator", () => {
     );
   });
 
-  // ── notify_user failure handling ─────────────────────────────
+  // ── uncertainty paths never mark email read (design §7.1) ────
 
-  it("skips mark_email_read when notify_user fails in Phase 1 null path", async () => {
+  it("does not mark email read when Phase 1 null + notify succeeds", async () => {
+    const config = makeConfig();
+    const tools = makeTools({
+      executeTool: vi.fn(async (name) => {
+        if (name === "notify_user") return true;
+        return true;
+      }),
+    });
+    const orch = new AgentOrchestrator(config, tools);
+
+    orch._runPhase1 = vi.fn().mockResolvedValue(null);
+
+    const result = await orch.processEmail("test-un1", "raw email");
+
+    expect(result.action).toBe("notified");
+    const markCalls = tools.executeTool.mock.calls.filter(
+      (c) => c[0] === "mark_email_read",
+    );
+    expect(markCalls.length).toBe(0);
+  });
+
+  it("does not mark email read when Phase 1 no-account + notify succeeds", async () => {
+    const config = makeConfig();
+    const tools = makeTools({
+      executeTool: vi.fn(async (name) => {
+        if (name === "notify_user") return true;
+        return true;
+      }),
+    });
+    const orch = new AgentOrchestrator(config, tools);
+
+    orch._runPhase1 = vi
+      .fn()
+      .mockResolvedValue(
+        fakePhase1Output({ account_id: "", action: "insert" }),
+      );
+
+    const result = await orch.processEmail("test-un2", "raw email");
+
+    expect(result.action).toBe("notified");
+    const markCalls = tools.executeTool.mock.calls.filter(
+      (c) => c[0] === "mark_email_read",
+    );
+    expect(markCalls.length).toBe(0);
+  });
+
+  it("returns notify_failed when Phase 1 null + notify_user fails", async () => {
     const config = makeConfig();
     const tools = makeTools({
       executeTool: vi.fn(async (name) => {
@@ -186,14 +240,13 @@ describe("AgentOrchestrator", () => {
       "notify_user",
       expect.anything(),
     );
-    // mark_email_read should NOT be called
     const markCalls = tools.executeTool.mock.calls.filter(
       (c) => c[0] === "mark_email_read",
     );
     expect(markCalls.length).toBe(0);
   });
 
-  it("skips mark_email_read when notify_user fails in Phase 1 no-account path", async () => {
+  it("returns notify_failed when Phase 1 no-account + notify_user fails", async () => {
     const config = makeConfig();
     const tools = makeTools({
       executeTool: vi.fn(async (name) => {
@@ -247,6 +300,94 @@ describe("AgentOrchestrator", () => {
       (c) => c[0] === "mark_email_read",
     );
     expect(markCalls.length).toBe(0);
+  });
+
+  // ── notify_message content assertions ────────────────────────
+
+  it("notify_message includes merchant, amount, account, and date", async () => {
+    const config = makeConfig();
+    const tools = makeTools({
+      executeTool: vi.fn(async (name) => {
+        if (name === "check_duplicate") return false;
+        return true;
+      }),
+    });
+    const orch = new AgentOrchestrator(config, tools);
+
+    const p1 = fakePhase1Output();
+    const p2 = fakePhase2Output(p1);
+    orch._runPhase1 = vi.fn().mockResolvedValue(p1);
+    orch._resolvePhase2 = vi.fn().mockResolvedValue(p2);
+
+    await orch.processEmail("test-msg", "raw email");
+
+    const notifyCall = tools.executeTool.mock.calls.find(
+      (c) => c[0] === "notify_user",
+    );
+    const { message } = notifyCall[1] || {};
+    expect(message).toContain("Toast Box");
+    expect(message).toContain("S$");
+    expect(message).toContain("DBS Yuu");
+    expect(message).toContain("2026-06-19");
+  });
+
+  it("notify_user fallback includes account and date when notify_message is empty", async () => {
+    const config = makeConfig();
+    const tools = makeTools({
+      executeTool: vi.fn(async (name) => {
+        if (name === "check_duplicate") return false;
+        return true;
+      }),
+    });
+    const orch = new AgentOrchestrator(config, tools);
+
+    const p1 = fakePhase1Output({ notify_message: "" });
+    const p2 = fakePhase2Output(p1);
+    orch._runPhase1 = vi.fn().mockResolvedValue(p1);
+    orch._resolvePhase2 = vi.fn().mockResolvedValue(p2);
+
+    await orch.processEmail("test-fallback", "raw email");
+
+    const notifyCall = tools.executeTool.mock.calls.find(
+      (c) => c[0] === "notify_user",
+    );
+    const { message } = notifyCall[1] || {};
+    // Fallback should match LLM format: via account on date
+    expect(message).toContain("Toast Box");
+    expect(message).toContain("S$");
+    expect(message).toContain("via DBS Yuu");
+    expect(message).toContain("2026-06-19");
+  });
+
+  it("notify_user fallback uses RM symbol for MYR currency", async () => {
+    const config = makeConfig();
+    const tools = makeTools({
+      executeTool: vi.fn(async (name) => {
+        if (name === "check_duplicate") return false;
+        return true;
+      }),
+    });
+    const orch = new AgentOrchestrator(config, tools);
+
+    const p1 = fakePhase1Output({
+      notify_message: "",
+      currency: "MYR",
+      amount_cents: -4600,
+      account_name: "Maybank",
+      date: "2026-06-20",
+    });
+    const p2 = fakePhase2Output(p1);
+    orch._runPhase1 = vi.fn().mockResolvedValue(p1);
+    orch._resolvePhase2 = vi.fn().mockResolvedValue(p2);
+
+    await orch.processEmail("test-myr", "raw email");
+
+    const notifyCall = tools.executeTool.mock.calls.find(
+      (c) => c[0] === "notify_user",
+    );
+    const { message } = notifyCall[1] || {};
+    expect(message).toContain("RM46.00");
+    expect(message).toContain("via Maybank");
   });
 
   // ── Sender / Subject header prepending for Phase 1 account matching ──
