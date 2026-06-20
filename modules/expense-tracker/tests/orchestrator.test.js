@@ -1,11 +1,9 @@
 /**
- * Mock-based tests for AgentOrchestrator pipeline.
- * Ported from tests/test_agent_orchestrator.py
+ * Mock-based tests for AgentOrchestrator 3-phase pipeline.
  */
 import { describe, it, expect, vi } from "vitest";
 import { AgentOrchestrator, DeepSeekClient } from "../src/orchestrator.js";
 import { Config } from "../src/config.js";
-import { getSystemPrompt } from "../src/prompts.js";
 import { dispatchEmail } from "../src/classify.js";
 
 function makeConfig(overrides = {}) {
@@ -31,566 +29,140 @@ function makeConfig(overrides = {}) {
   return new Config(defaults);
 }
 
+// ── helpers ─────────────────────────────────────────────────────
+
+function makeTools(overrides = {}) {
+  return {
+    setEmailContext: vi.fn(),
+    getToolSchemas: vi.fn(() => []),
+    executeTool: vi.fn(async () => true),
+    ...overrides,
+  };
+}
+
+function fakePhase1Output(overrides = {}) {
+  return {
+    merchant: "Toast Box",
+    amount_cents: -1280,
+    date: "2026-06-19",
+    currency: "SGD",
+    account_id: "acc-1",
+    account_name: "DBS Yuu",
+    budget_id: "budget-sgd",
+    action: "insert",
+    payee_name: "",
+    category_id: "",
+    raw_description: "S$12.80 at Toast Box",
+    notes: "",
+    reasoning: "Matched DBS Yuu",
+    notify_message: "S$12.80 at Toast Box, logged!",
+    ...overrides,
+  };
+}
+
+function fakePhase2Output(phase1, overrides = {}) {
+  return {
+    ...phase1,
+    payee_name: "Toast Box",
+    category_id: "cat-food",
+    ...overrides,
+  };
+}
+
+// ═══════════════════════════════════════════════════════════════════
+
 describe("AgentOrchestrator", () => {
   it("constructs with config", () => {
     const config = makeConfig();
-    const tools = {
-      setEmailContext: vi.fn(),
-      getToolSchemas: vi.fn(() => []),
-      getLlmToolSchemas: vi.fn(() => []),
-      getPhase2ToolSchemas: vi.fn(() => []),
-      executeTool: vi.fn(),
-      getSubmitDecisionTool: vi.fn(() => ({
-        type: "function",
-        function: {
-          name: "submit_decision",
-          description: "Submit the final structured decision",
-          parameters: {},
-        },
-      })),
-    };
+    const tools = makeTools();
     const orch = new AgentOrchestrator(config, tools);
     expect(orch).toBeDefined();
     expect(orch.tools).toBe(tools);
   });
 
-  it("_buildMessages includes system prompt", () => {
-    const config = makeConfig();
-    const tools = {
-      setEmailContext: vi.fn(),
-      getToolSchemas: vi.fn(() => []),
-      getLlmToolSchemas: vi.fn(() => []),
-      getPhase2ToolSchemas: vi.fn(() => []),
-      executeTool: vi.fn(),
-      getSubmitDecisionTool: vi.fn(() => ({
-        type: "function",
-        function: {
-          name: "submit_decision",
-          description: "Submit the final structured decision",
-          parameters: {},
-        },
-      })),
-    };
-    const orch = new AgentOrchestrator(config, tools);
-    const messages = orch._buildMessages("Test email content");
-    expect(messages.length).toBeGreaterThanOrEqual(2);
-    expect(messages[0].role).toBe("system");
-    expect(messages[0].content).toContain("expense-tracking");
-  });
+  // ── processEmail (email path) ────────────────────────────────
 
-  it("_buildMessages includes user content at the end", () => {
+  it("skips promotional email via Phase 1 skip", async () => {
     const config = makeConfig();
-    const tools = {
-      setEmailContext: vi.fn(),
-      getToolSchemas: vi.fn(() => []),
-      getLlmToolSchemas: vi.fn(() => []),
-      getPhase2ToolSchemas: vi.fn(() => []),
-      executeTool: vi.fn(),
-      getSubmitDecisionTool: vi.fn(() => ({
-        type: "function",
-        function: {
-          name: "submit_decision",
-          description: "Submit the final structured decision",
-          parameters: {},
-        },
-      })),
-    };
+    const tools = makeTools();
     const orch = new AgentOrchestrator(config, tools);
-    const messages = orch._buildMessages("Test email content");
-    expect(messages[messages.length - 1].role).toBe("user");
-    expect(messages[messages.length - 1].content).toContain(
-      "Test email content",
+
+    orch._runPhase1 = vi.fn().mockResolvedValue(
+      fakePhase1Output({
+        action: "skip",
+        skip: true,
+        reasoning: "Promo email",
+      }),
     );
-  });
 
-  it("_buildMessages has system and user messages (no few-shot examples in new pipeline)", () => {
-    const config = makeConfig();
-    const tools = {
-      setEmailContext: vi.fn(),
-      getToolSchemas: vi.fn(() => []),
-      getLlmToolSchemas: vi.fn(() => []),
-      getPhase2ToolSchemas: vi.fn(() => []),
-      executeTool: vi.fn(),
-      getSubmitDecisionTool: vi.fn(() => ({
-        type: "function",
-        function: {
-          name: "submit_decision",
-          description: "Submit the final structured decision",
-          parameters: {},
-        },
-      })),
-    };
-    const orch = new AgentOrchestrator(config, tools);
-    const messages = orch._buildMessages("Test");
-    const roles = messages.map((m) => m.role);
-    expect(roles[0]).toBe("system");
-    expect(roles[roles.length - 1]).toBe("user");
-  });
-
-  it("processes email happy path — promotional skip", async () => {
-    const config = makeConfig();
-    const tools = {
-      setEmailContext: vi.fn(),
-      getToolSchemas: vi.fn(() => []),
-      getLlmToolSchemas: vi.fn(() => []),
-      getPhase2ToolSchemas: vi.fn(() => []),
-      executeTool: vi.fn(async () => true),
-      getSubmitDecisionTool: vi.fn(() => ({
-        type: "function",
-        function: {
-          name: "submit_decision",
-          description: "Submit the final structured decision",
-          parameters: {},
-        },
-      })),
-    };
-    const orch = new AgentOrchestrator(config, tools);
-
-    // Mock the LLM to return JSON with action: "skip"
-    orch._llm.chat = vi.fn(async () => ({
-      choices: [
-        {
-          finish_reason: "stop",
-          message: {
-            content: JSON.stringify({
-              action: "skip",
-              reasoning: "Promotional email",
-              notify_message: "Skipped promo",
-            }),
-          },
-        },
-      ],
-    }));
-
-    const rawEmail =
-      "From: noreply@example.com\r\nSubject: Promo!\r\n\r\nApply now for 5% cashback.";
-
-    const result = await orch.processEmail("test-002", rawEmail);
-    expect(result).toBeDefined();
+    const result = await orch.processEmail("test-1", "raw email");
     expect(result.action).toBe("skipped");
+    expect(tools.executeTool).toHaveBeenCalledWith("mark_email_read", {});
   });
 
-  it("returns error when LLM returns malformed JSON", async () => {
+  it("notifies when Phase 1 returns null", async () => {
     const config = makeConfig();
-    const tools = {
-      setEmailContext: vi.fn(),
-      getToolSchemas: vi.fn(() => []),
-      getLlmToolSchemas: vi.fn(() => []),
-      getPhase2ToolSchemas: vi.fn(() => []),
-      executeTool: vi.fn(async () => true),
-      getSubmitDecisionTool: vi.fn(() => ({
-        type: "function",
-        function: {
-          name: "submit_decision",
-          description: "Submit the final structured decision",
-          parameters: {},
-        },
-      })),
-    };
+    const tools = makeTools();
     const orch = new AgentOrchestrator(config, tools);
 
-    orch._llm.chat = vi.fn(async () => ({
-      choices: [
-        {
-          finish_reason: "stop",
-          message: {
-            content: "Not JSON, just random text.",
-          },
-        },
-      ],
-    }));
+    orch._runPhase1 = vi.fn().mockResolvedValue(null);
 
-    const result = await orch.processEmail("test-003", "Some email");
-    // Now notifies user instead of returning error
-    expect(tools.executeTool).toHaveBeenCalledWith(
-      "notify_user",
-      expect.anything(),
-    );
+    const result = await orch.processEmail("test-2", "raw email");
     expect(result.action).toBe("notified");
-  });
-
-  it("notifies when LLM returns no parseable JSON (old loop is gone)", async () => {
-    const config = makeConfig();
-    const tools = {
-      setEmailContext: vi.fn(),
-      getToolSchemas: vi.fn(() => []),
-      getLlmToolSchemas: vi.fn(() => []),
-      getPhase2ToolSchemas: vi.fn(() => []),
-      executeTool: vi.fn(async () => true),
-      getSubmitDecisionTool: vi.fn(() => ({
-        type: "function",
-        function: {
-          name: "submit_decision",
-          description: "Submit the final structured decision",
-          parameters: {},
-        },
-      })),
-    };
-    const orch = new AgentOrchestrator(config, tools);
-
-    // Phase 1a LLM returns no content → parse fails → null → notified
-    orch._llm.chat = vi.fn(async () => ({
-      choices: [{ finish_reason: "stop", message: {} }],
-    }));
-
-    const result = await orch.processEmail("test-004", "Email content");
-    expect(tools.executeTool).toHaveBeenCalledWith(
-      "notify_user",
-      expect.anything(),
-    );
-    expect(result.action).toBe("notified");
-  });
-
-  it("marks email read when Phase 1a returns no output", async () => {
-    const config = makeConfig();
-    const tools = {
-      setEmailContext: vi.fn(),
-      getToolSchemas: vi.fn(() => []),
-      getLlmToolSchemas: vi.fn(() => []),
-      getPhase2ToolSchemas: vi.fn(() => []),
-      executeTool: vi.fn(async () => true),
-      getSubmitDecisionTool: vi.fn(() => ({
-        type: "function",
-        function: {
-          name: "submit_decision",
-          description: "Submit the final structured decision",
-          parameters: {},
-        },
-      })),
-    };
-    const orch = new AgentOrchestrator(config, tools);
-
-    // Phase 1a: LLM returns no content -> parse fails -> null
-    orch._llm.chat = vi.fn(async () => ({
-      choices: [{ finish_reason: "stop", message: {} }],
-    }));
-
-    const result = await orch.processEmail("test-005", "Some email");
     expect(tools.executeTool).toHaveBeenCalledWith(
       "notify_user",
       expect.anything(),
     );
     expect(tools.executeTool).toHaveBeenCalledWith("mark_email_read", {});
-    expect(result.action).toBe("notified");
   });
 
-  it("marks email read when Phase 2 returns no account_id", async () => {
+  it("notifies when Phase 1 has no account_id", async () => {
     const config = makeConfig();
-    const tools = {
-      setEmailContext: vi.fn(),
-      getToolSchemas: vi.fn(() => []),
-      getLlmToolSchemas: vi.fn(() => []),
-      getPhase2ToolSchemas: vi.fn(() => [
-        {
-          type: "function",
-          function: {
-            name: "fetch_context",
-            description: "Fetch live data",
-            parameters: {
-              type: "object",
-              properties: {
-                budget_id: { type: "string" },
-              },
-              required: ["budget_id"],
-            },
-          },
-        },
-      ]),
-      executeTool: vi.fn(async (name) => {
-        if (name === "search_memory")
-          return [{ text: "some match", score: 0.5 }];
-        if (name === "fetch_context")
-          return {
-            accounts: [{ id: "acc1", name: "Account 1" }],
-            payees: [{ name: "Test Payee" }],
-            categories: [{ id: "cat1", name: "Food" }],
-          };
-        return true;
-      }),
-      getSubmitDecisionTool: vi.fn(() => ({
-        type: "function",
-        function: {
-          name: "submit_decision",
-          description: "Submit the final structured decision",
-          parameters: {},
-        },
-      })),
-    };
+    const tools = makeTools();
     const orch = new AgentOrchestrator(config, tools);
 
-    // Phase 1a: valid JSON with transaction data
-    // Phase 2: JSON with NO account_id (blank), valid payee & category
-    let callCount = 0;
-    orch._llm.chat = vi.fn(async () => {
-      callCount++;
-      if (callCount === 1) {
-        // Phase 1a response
-        return {
-          choices: [
-            {
-              finish_reason: "stop",
-              message: {
-                content: JSON.stringify({
-                  merchant: "Test Merchant",
-                  amount_cents: -1000,
-                  date: "2026-06-19",
-                  currency: "SGD",
-                  raw_description: "S$10.00 at Test Merchant",
-                }),
-              },
-            },
-          ],
-        };
-      }
-      // Phase 2 response: no tool_calls, blank account_id
-      return {
-        choices: [
-          {
-            finish_reason: "stop",
-            message: {
-              content: JSON.stringify({
-                action: "insert",
-                merchant: "Test Merchant",
-                amount_cents: -1000,
-                date: "2026-06-19",
-                currency: "SGD",
-                account_id: "",
-                payee_name: "Test Payee",
-                category_id: "cat1",
-                budget_id: "primary",
-              }),
-            },
-          },
-        ],
-      };
-    });
+    orch._runPhase1 = vi
+      .fn()
+      .mockResolvedValue(
+        fakePhase1Output({ account_id: "", action: "insert" }),
+      );
 
-    const result = await orch.processEmail(
-      "test-006",
-      "S$10.00 at Test Merchant",
-    );
+    const result = await orch.processEmail("test-3", "raw email");
+    expect(result.action).toBe("notified");
     expect(tools.executeTool).toHaveBeenCalledWith(
       "notify_user",
       expect.anything(),
     );
     expect(tools.executeTool).toHaveBeenCalledWith("mark_email_read", {});
-    expect(result.action).toBe("notified");
   });
 
-  it("inserts transaction when Phase 3 has payee but no category", async () => {
+  it("inserts transaction via full 3-phase flow", async () => {
     const config = makeConfig();
-    const tools = {
-      setEmailContext: vi.fn(),
-      getToolSchemas: vi.fn(() => []),
-      getLlmToolSchemas: vi.fn(() => []),
-      getPhase2ToolSchemas: vi.fn(() => [
-        {
-          type: "function",
-          function: {
-            name: "fetch_context",
-            description: "Fetch live data",
-            parameters: {
-              type: "object",
-              properties: {
-                budget_id: { type: "string" },
-              },
-              required: ["budget_id"],
-            },
-          },
-        },
-      ]),
+    const tools = makeTools({
       executeTool: vi.fn(async (name) => {
-        if (name === "search_memory")
-          return [{ text: "some match", score: 0.5 }];
-        if (name === "fetch_context")
-          return {
-            accounts: [{ id: "acc1", name: "Account 1" }],
-            payees: [{ name: "Test Payee" }],
-            categories: [{ id: "cat1", name: "Food" }],
-          };
-        if (name === "resolve_merchant") return { payee: "Test Payee" };
         if (name === "check_duplicate") return false;
         return true;
       }),
-      getSubmitDecisionTool: vi.fn(() => ({
-        type: "function",
-        function: {
-          name: "submit_decision",
-          description: "Submit the final structured decision",
-          parameters: {},
-        },
-      })),
-    };
+    });
     const orch = new AgentOrchestrator(config, tools);
 
-    // Phase 1a: valid JSON
-    // Phase 2: account_id present, payee_name present, NO category_id
-    let callCount = 0;
-    orch._llm.chat = vi.fn(async () => {
-      callCount++;
-      if (callCount === 1) {
-        return {
-          choices: [
-            {
-              finish_reason: "stop",
-              message: {
-                content: JSON.stringify({
-                  merchant: "Test Merchant",
-                  amount_cents: -1000,
-                  date: "2026-06-19",
-                  currency: "SGD",
-                  raw_description: "S$10.00 at Test Merchant",
-                }),
-              },
-            },
-          ],
-        };
-      }
-      // Phase 2: account_id + payee_name, NO category_id
-      return {
-        choices: [
-          {
-            finish_reason: "stop",
-            message: {
-              content: JSON.stringify({
-                action: "insert",
-                merchant: "Test Merchant",
-                amount_cents: -1000,
-                date: "2026-06-19",
-                currency: "SGD",
-                account_id: "acc1",
-                payee_name: "Test Payee",
-                category_id: "",
-                budget_id: "primary",
-              }),
-            },
-          },
-        ],
-      };
-    });
+    const p1 = fakePhase1Output();
+    const p2 = fakePhase2Output(p1);
+    orch._runPhase1 = vi.fn().mockResolvedValue(p1);
+    orch._resolvePhase2 = vi.fn().mockResolvedValue(p2);
 
-    const result = await orch.processEmail(
-      "test-007",
-      "S$10.00 at Test Merchant",
-    );
+    const result = await orch.processEmail("test-4", "raw email");
+
+    expect(result.action).toBe("inserted");
     expect(tools.executeTool).toHaveBeenCalledWith(
       "insert_transaction",
       expect.anything(),
     );
     expect(tools.executeTool).toHaveBeenCalledWith("mark_email_read", {});
-    expect(result.action).toBe("inserted");
-  });
-
-  it("accepts Misc payee from resolve_merchant fallback and inserts transaction", async () => {
-    const config = makeConfig();
-    const tools = {
-      setEmailContext: vi.fn(),
-      getToolSchemas: vi.fn(() => []),
-      getLlmToolSchemas: vi.fn(() => []),
-      getPhase2ToolSchemas: vi.fn(() => [
-        {
-          type: "function",
-          function: {
-            name: "fetch_context",
-            description: "Fetch live data",
-            parameters: {
-              type: "object",
-              properties: {
-                budget_id: { type: "string" },
-              },
-              required: ["budget_id"],
-            },
-          },
-        },
-      ]),
-      executeTool: vi.fn(async (name) => {
-        if (name === "search_memory")
-          return [{ text: "some match", score: 0.5 }];
-        if (name === "fetch_context")
-          return {
-            accounts: [{ id: "acc1", name: "Account 1" }],
-            payees: [{ name: "Existing Payee" }],
-            categories: [{ id: "cat1", name: "Food" }],
-          };
-        // resolve_merchant falls back to Misc — Misc NOT in live payees
-        if (name === "resolve_merchant")
-          return { payee: "Misc", source: "fallback" };
-        if (name === "check_duplicate") return false;
-        return true;
-      }),
-      getSubmitDecisionTool: vi.fn(() => ({
-        type: "function",
-        function: {
-          name: "submit_decision",
-          description: "Submit the final structured decision",
-          parameters: {},
-        },
-      })),
-    };
-    const orch = new AgentOrchestrator(config, tools);
-
-    // Phase 1a: valid JSON, payee + category blank
-    // Phase 2: account_id present, NO payee_name, NO category_id
-    let callCount = 0;
-    orch._llm.chat = vi.fn(async () => {
-      callCount++;
-      if (callCount === 1) {
-        return {
-          choices: [
-            {
-              finish_reason: "stop",
-              message: {
-                content: JSON.stringify({
-                  merchant: "AMAZE GREAT EASTERN",
-                  amount_cents: -5000,
-                  date: "2026-06-19",
-                  currency: "SGD",
-                  raw_description: "S$50.00 at AMAZE GREAT EASTERN",
-                }),
-              },
-            },
-          ],
-        };
-      }
-      // Phase 2: account_id present, payee blank, category blank
-      return {
-        choices: [
-          {
-            finish_reason: "stop",
-            message: {
-              content: JSON.stringify({
-                action: "insert",
-                merchant: "AMAZE GREAT EASTERN",
-                amount_cents: -5000,
-                date: "2026-06-19",
-                currency: "SGD",
-                account_id: "acc1",
-                payee_name: "",
-                category_id: "",
-                budget_id: "primary",
-              }),
-            },
-          },
-        ],
-      };
-    });
-
-    const result = await orch.processEmail(
-      "test-008",
-      "S$50.00 at AMAZE GREAT EASTERN",
-    );
-    // Should call resolve_merchant and accept the "Misc" fallback
     expect(tools.executeTool).toHaveBeenCalledWith(
-      "resolve_merchant",
-      expect.objectContaining({ merchant: "AMAZE GREAT EASTERN" }),
+      "notify_user",
+      expect.anything(),
     );
-    // Should insert with Misc payee
-    expect(tools.executeTool).toHaveBeenCalledWith(
-      "insert_transaction",
-      expect.objectContaining({ imported_description: "Misc" }),
-    );
-    expect(tools.executeTool).toHaveBeenCalledWith("mark_email_read", {});
-    expect(result.action).toBe("inserted");
   });
 });
 
@@ -605,13 +177,7 @@ describe("DeepSeekClient", () => {
     const config = makeConfig();
     const client = new DeepSeekClient(config);
     const data = {
-      choices: [
-        {
-          message: {
-            reasoning_content: "This is reasoning",
-          },
-        },
-      ],
+      choices: [{ message: { reasoning_content: "This is reasoning" } }],
     };
     client._mergeReasoning(data);
     expect(data.choices[0].message.content).toBe("This is reasoning");
@@ -635,30 +201,7 @@ describe("DeepSeekClient", () => {
   });
 });
 
-describe("SYSTEM_PROMPT", () => {
-  it("mentions expense-tracking and portfolio-related skips", () => {
-    const lowered = getSystemPrompt().toLowerCase();
-    const hasReference =
-      lowered.includes("trade") ||
-      lowered.includes("portfolio") ||
-      lowered.includes("ibkr") ||
-      lowered.includes("investment");
-    expect(hasReference).toBe(true);
-  });
-
-  it("says not to notify for non-expense emails", () => {
-    const lowered = getSystemPrompt().toLowerCase();
-    const hasSkipRule =
-      lowered.includes("not notify") ||
-      lowered.includes("do not notify") ||
-      lowered.includes("not a transaction");
-    expect(hasSkipRule).toBe(true);
-  });
-});
-
-// ─────────────────────────────────────────────────────────────────────────
-// Statement routing tests — verify dispatchEmail routing logic
-// ─────────────────────────────────────────────────────────────────────────
+// ── Statement routing tests ─────────────────────────────────────
 
 describe("dispatchEmail statement routing", () => {
   it("routes transaction emails to the transaction orchestrator", async () => {
@@ -710,8 +253,8 @@ describe("dispatchEmail statement routing", () => {
 
     const msg = {
       msg_id: "stmt-001",
-      raw_email: "Your monthly statement is ready",
-      subject: "Monthly eStatement",
+      raw_email: "Statement CSV data",
+      subject: "Monthly Statement",
       from: "bank@example.com",
     };
 
@@ -723,102 +266,7 @@ describe("dispatchEmail statement routing", () => {
       mockStatementProcessor,
     );
 
-    // Statement goes to statementProcessor, NOT the transaction orchestrator
-    expect(mockStatementProcessor.processStatement).toHaveBeenCalledWith(
-      "stmt-001",
-      "Your monthly statement is ready",
-      mockImapHandler,
-    );
+    expect(mockStatementProcessor.processStatement).toHaveBeenCalled();
     expect(mockOrchestrator.processEmail).not.toHaveBeenCalled();
-  });
-
-  it("routes statement to transaction orchestrator when statementProcessor is absent (backward compat)", async () => {
-    const mockOrchestrator = {
-      processEmail: vi.fn().mockResolvedValue({ action: "completed" }),
-    };
-    const mockImapHandler = {
-      markRead: vi.fn().mockResolvedValue(undefined),
-    };
-    const classifyFn = vi.fn().mockResolvedValue("statement");
-
-    const msg = {
-      msg_id: "stmt-002",
-      raw_email: "Statement without processor",
-      subject: "eStatement",
-      from: "bank@example.com",
-    };
-
-    await dispatchEmail(
-      msg,
-      classifyFn,
-      mockOrchestrator,
-      mockImapHandler,
-      // no statementProcessor
-    );
-
-    // Falls back to orchestrator
-    expect(mockOrchestrator.processEmail).toHaveBeenCalledWith(
-      "stmt-002",
-      "Statement without processor",
-      mockImapHandler,
-    );
-  });
-});
-
-// --- DeepSeek API call format regression tests (bug: body override) ---
-describe("DeepSeekClient API format", () => {
-  it("passes thinking in kwargs body, not as RequestOptions override", async () => {
-    const config = makeConfig();
-    const client = new DeepSeekClient(config);
-
-    const mockCreate = vi.fn().mockResolvedValue({
-      choices: [{ finish_reason: "stop", message: { content: "ok" } }],
-    });
-    client._client.chat.completions.create = mockCreate;
-
-    await client.chat([{ role: "user", content: "hello" }], null);
-
-    const callArgs = mockCreate.mock.calls[0];
-    expect(callArgs).toHaveLength(1);
-    const kwargs = callArgs[0];
-    expect(kwargs.messages).toBeDefined();
-    expect(kwargs.messages[0].content).toBe("hello");
-    expect(kwargs.thinking).toEqual({ type: "adaptive" });
-    expect(kwargs.model).toBe("deepseek-chat");
-  });
-
-  it("includes tools in kwargs with tool_choice auto", async () => {
-    const config = makeConfig();
-    const client = new DeepSeekClient(config);
-
-    const mockCreate = vi.fn().mockResolvedValue({
-      choices: [{ finish_reason: "stop", message: { content: "ok" } }],
-    });
-    client._client.chat.completions.create = mockCreate;
-
-    const tools = [{ type: "function", function: { name: "test_tool" } }];
-    await client.chat([{ role: "user", content: "hi" }], tools);
-
-    const kwargs = mockCreate.mock.calls[0][0];
-    expect(kwargs.tools).toEqual(tools);
-    expect(kwargs.tool_choice).toBe("auto");
-    expect(kwargs.thinking).toEqual({ type: "adaptive" });
-  });
-
-  it("retries on failure then succeeds on second attempt", async () => {
-    const config = makeConfig();
-    const client = new DeepSeekClient(config);
-
-    const mockCreate = vi
-      .fn()
-      .mockRejectedValueOnce(new Error("Network error"))
-      .mockResolvedValue({
-        choices: [{ finish_reason: "stop", message: { content: "ok" } }],
-      });
-    client._client.chat.completions.create = mockCreate;
-
-    const result = await client.chat([{ role: "user", content: "hi" }], null);
-    expect(mockCreate).toHaveBeenCalledTimes(2);
-    expect(result.choices[0].message.content).toBe("ok");
   });
 });

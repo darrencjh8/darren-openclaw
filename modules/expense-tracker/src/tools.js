@@ -738,42 +738,6 @@ export class ToolRegistry {
   }
 
   /**
-   * Get only info-gathering tool schemas for Phase 1 LLM (spec 020).
-   */
-  getLlmToolSchemas() {
-    const LLM_TOOLS = new Set([
-      "search_memory",
-      "fetch_accounts",
-      "fetch_categories",
-    ]);
-    return TOOLS.filter((t) => LLM_TOOLS.has(t.name)).map((t) => ({
-      type: "function",
-      function: {
-        name: t.name,
-        description: t.description,
-        parameters: t.schema,
-      },
-    }));
-  }
-
-  /**
-   * Get only the fetch_context tool schema for Phase 2 LLM (audit phase).
-   */
-  getPhase2ToolSchemas() {
-    const t = TOOL_MAP["fetch_context"];
-    return [
-      {
-        type: "function",
-        function: {
-          name: t.name,
-          description: t.description,
-          parameters: t.schema,
-        },
-      },
-    ];
-  }
-
-  /**
    * Get only the fetch_context tool schema for Phase 1 LLM (3-phase design).
    */
   getPhase1ToolSchemas() {
@@ -788,21 +752,6 @@ export class ToolRegistry {
         },
       },
     ];
-  }
-
-  /**
-   * Get only the submit_decision tool schema (for Phase 1b forced call).
-   */
-  getSubmitDecisionTool() {
-    const t = TOOL_MAP["submit_decision"];
-    return {
-      type: "function",
-      function: {
-        name: t.name,
-        description: t.description,
-        parameters: t.schema,
-      },
-    };
   }
 
   async executeTool(name, args) {
