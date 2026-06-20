@@ -250,6 +250,165 @@ describe("AgentOrchestrator", () => {
   });
 });
 
+// ── Auto-learn: learn_fact → update_fact on contradiction ────
+
+describe("auto-learn contradiction resolution", () => {
+  it("falls back to update_fact when learn_fact returns contradiction (category)", async () => {
+    const config = makeConfig();
+    const tools = makeTools({
+      executeTool: vi.fn(async (name) => {
+        if (name === "check_duplicate") return false;
+        if (name === "fetch_context")
+          return { categories: [{ id: "cat-cafe", name: "Cafe" }] };
+        if (name === "search_memory") return { results: [] };
+        if (name === "learn_fact")
+          return {
+            added: false,
+            skipped: true,
+            reason: "contradiction",
+            existing: "Toast Box maps to Food category",
+          };
+        return true;
+      }),
+    });
+    const orch = new AgentOrchestrator(config, tools);
+    orch._runPhase1 = vi.fn().mockResolvedValue(
+      fakePhase1Output({
+        payee_name: "Toast Box",
+        category_id: "",
+      }),
+    );
+
+    // Don't mock _resolvePhase2 — let it run real code to test the auto-learn path.
+    // Mock the LLM call for the category picker.
+    orch._llm = {
+      chat: vi.fn().mockResolvedValue({
+        choices: [{ message: { content: '{"category_id": "cat-cafe"}' } }],
+      }),
+    };
+
+    await orch.processEmail("test-al1", "raw email");
+
+    // learn_fact was called for category
+    expect(tools.executeTool).toHaveBeenCalledWith(
+      "learn_fact",
+      expect.objectContaining({ fact: expect.stringContaining("category") }),
+    );
+    // update_fact was called because learn_fact returned contradiction
+    expect(tools.executeTool).toHaveBeenCalledWith(
+      "update_fact",
+      expect.objectContaining({
+        old_text: "Toast Box maps to Food category",
+        new_text: expect.stringContaining("category"),
+      }),
+    );
+  });
+
+  it("does NOT call update_fact when learn_fact succeeds with no contradiction", async () => {
+    const config = makeConfig();
+    const tools = makeTools({
+      executeTool: vi.fn(async (name) => {
+        if (name === "check_duplicate") return false;
+        if (name === "fetch_context")
+          return { categories: [{ id: "cat-food", name: "Food" }] };
+        if (name === "search_memory") return { results: [] };
+        if (name === "learn_fact") return { added: true, skipped: false };
+        return true;
+      }),
+    });
+    const orch = new AgentOrchestrator(config, tools);
+    orch._runPhase1 = vi.fn().mockResolvedValue(
+      fakePhase1Output({
+        payee_name: "New Merchant",
+        category_id: "",
+      }),
+    );
+    orch._llm = {
+      chat: vi.fn().mockResolvedValue({
+        choices: [{ message: { content: '{"category_id": "cat-food"}' } }],
+      }),
+    };
+
+    await orch.processEmail("test-al2", "raw email");
+
+    // learn_fact was called for category
+    expect(tools.executeTool).toHaveBeenCalledWith(
+      "learn_fact",
+      expect.objectContaining({ fact: expect.stringContaining("category") }),
+    );
+    // update_fact should NOT be called for category correction
+    const updateCalls = tools.executeTool.mock.calls.filter(
+      (c) => c[0] === "update_fact",
+    );
+    expect(updateCalls.length).toBe(0);
+  });
+
+  it("falls back to update_fact when learn_fact returns contradiction (account)", async () => {
+    const config = makeConfig();
+    const tools = makeTools({
+      executeTool: vi.fn(async (name, args) => {
+        if (name === "check_duplicate") return false;
+        if (name === "fetch_context")
+          return { categories: [{ id: "cat-misc", name: "Misc" }] };
+        if (name === "learn_fact" && args?.fact?.includes("payment account"))
+          return {
+            added: false,
+            skipped: true,
+            reason: "contradiction",
+            existing: "DBS Yuu is a debit card account",
+          };
+        return true;
+      }),
+    });
+    const orch = new AgentOrchestrator(config, tools);
+
+    const p1 = fakePhase1Output({
+      account_name: "DBS Yuu",
+      payee_name: "Toast Box",
+      category_id: "cat-misc",
+    });
+    const p2 = fakePhase2Output(p1);
+    orch._runPhase1 = vi.fn().mockResolvedValue(p1);
+    orch._resolvePhase2 = vi.fn().mockResolvedValue(p2);
+
+    await orch.processEmail("test-al3", "raw email");
+
+    // update_fact was called to correct the contradiction
+    expect(tools.executeTool).toHaveBeenCalledWith(
+      "update_fact",
+      expect.objectContaining({
+        old_text: "DBS Yuu is a debit card account",
+        new_text: "DBS Yuu is a payment account",
+      }),
+    );
+  });
+
+  it("silently swallows errors from learn_fact/update_fact without crashing", async () => {
+    const config = makeConfig();
+    const tools = makeTools({
+      executeTool: vi.fn(async (name) => {
+        if (name === "check_duplicate") return false;
+        if (name === "learn_fact") throw new Error("learn boom");
+        return true;
+      }),
+    });
+    const orch = new AgentOrchestrator(config, tools);
+
+    const p1 = fakePhase1Output({
+      account_name: "Test Account",
+      payee_name: "Toast Box",
+      category_id: "cat-food",
+    });
+    const p2 = fakePhase2Output(p1);
+    orch._runPhase1 = vi.fn().mockResolvedValue(p1);
+    orch._resolvePhase2 = vi.fn().mockResolvedValue(p2);
+
+    // Should not throw — learn_fact failure is caught
+    const result = await orch.processEmail("test-al4", "raw email");
+    expect(result.action).toBe("inserted");
+  });
+});
+
 describe("DeepSeekClient", () => {
   it("can be instantiated with config", () => {
     const config = makeConfig();

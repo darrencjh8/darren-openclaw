@@ -552,11 +552,18 @@ export class AgentOrchestrator {
             const valid = liveCategories.find((c) => c.id === categoryId);
             if (valid) {
               output.category_id = categoryId;
-              // Auto-learn for next time
+              // Auto-learn for next time (learn_fact → update_fact on contradiction)
               try {
-                await this._tools.executeTool("learn_fact", {
-                  fact: `${output.payee_name} maps to ${valid.name} category`,
+                const fact = `${output.payee_name} maps to ${valid.name} category`;
+                const learned = await this._tools.executeTool("learn_fact", {
+                  fact,
                 });
+                if (learned?.reason === "contradiction" && learned?.existing) {
+                  await this._tools.executeTool("update_fact", {
+                    old_text: learned.existing,
+                    new_text: fact,
+                  });
+                }
               } catch {}
             }
           }
@@ -664,19 +671,29 @@ export class AgentOrchestrator {
       }
 
       // Learn facts (fire-and-forget, don't block)
+      // Two-step: learn_fact → update_fact on contradiction
       const learnPromises = [];
       if (llmOutput.account_name) {
         learnPromises.push(
-          this._tools
-            .executeTool("learn_fact", {
-              fact: `${llmOutput.account_name} is a payment account`,
-            })
-            .catch((e) =>
+          (async () => {
+            try {
+              const fact = `${llmOutput.account_name} is a payment account`;
+              const learned = await this._tools.executeTool("learn_fact", {
+                fact,
+              });
+              if (learned?.reason === "contradiction" && learned?.existing) {
+                await this._tools.executeTool("update_fact", {
+                  old_text: learned.existing,
+                  new_text: fact,
+                });
+              }
+            } catch (e) {
               logger.warn({
                 event: "learn_failed",
                 error: e.message,
-              }),
-            ),
+              });
+            }
+          })(),
         );
       }
       Promise.allSettled(learnPromises).catch(() => {});

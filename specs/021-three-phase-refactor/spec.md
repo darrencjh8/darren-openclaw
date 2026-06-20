@@ -92,8 +92,10 @@ The spec 020 design (3 phases with deterministic Phase 1.5) was partially implem
 │                                                             │
 │  insert → check_duplicate → insert_transaction              │
 │         → mark_read → notify_user → learn_fact × 1          │
-│         (only account_name — payee learned by               │
-│          resolve_merchant, category by Phase 2 Step 2)      │
+│         (account_name; payee learned by resolve_merchant,    │
+│          category by Phase 2 Step 2)                         │
+│         → learn_fact returns contradiction ?                 │
+│           update_fact (self-correcting auto-learn)           │
 │                                                             │
 │  skip   → mark_read → log_decision                          │
 └─────────────────────────────────────────────────────────────┘
@@ -231,10 +233,14 @@ const { category_id } = parseJson(response);
 const validCategory = liveCategories.find(c => c.id === category_id);
 if (!validCategory) category_id = null;
 
-// Auto-learn for next time
+// Auto-learn for next time (self-corrects on contradiction)
 if (category_id) {
   const catName = liveCategories.find(c => c.id === category_id)?.name;
-  await learn_fact(`${payeeName} maps to ${catName} category`);
+  const fact = `${payeeName} maps to ${catName} category`;
+  const learned = await learn_fact(fact);
+  if (learned?.reason === "contradiction" && learned?.existing) {
+    await update_fact({ old_text: learned.existing, new_text: fact });
+  }
 }
 
 return category_id || null;
@@ -254,15 +260,19 @@ Phase 3 is a rename of current Phase 4 with one change: `learn_fact` reduced fro
 - `_executePhase4()` → `_executePhase3()` — used by email path
 - `_executePhase4Silent()` → `_executePhase3Silent()` — used by Telegram path
 
-**Learn change:** In the insert path, remove `learn_fact` calls for payee and category (now handled by `resolve_merchant` internally and Phase 2 Step 2). Keep only the account `learn_fact`:
+**Learn change:** In the insert path, remove `learn_fact` calls for payee and category (now handled by `resolve_merchant` internally and Phase 2 Step 2). Keep only the account `learn_fact`, with two-step self-correction:
 
 ```js
 // Remove these:
 learn_fact(`${merchant} maps to ${payeeName} payee`);    // resolve_merchant auto-learns
 learn_fact(`${payeeName} maps to ${category} category`);  // Phase 2 Step 2 auto-learns
 
-// Keep this:
-learn_fact(`${account_name} is a payment account`);
+// Keep this — with contradiction→update_fact fallback:
+const fact = `${account_name} is a payment account`;
+const learned = await learn_fact(fact);
+if (learned?.reason === "contradiction" && learned?.existing) {
+  await update_fact({ old_text: learned.existing, new_text: fact });
+}
 ```
 
 Everything else stays identical — `check_duplicate`, `insert_transaction`, `mark_email_read`, `notify_user`, `log_decision`.
@@ -385,7 +395,6 @@ As a system with existing tool endpoints, I want all REST API endpoints and tool
 
 - Changing the StatementProcessor (separate pipeline)
 - Changing the IMAP handler or dedup journal
-- Adding AB-to-memory correction feedback loop (tracked as issue #100)
 - Changing the `resolve_merchant` internal implementation
 - Changing Phase 3 execution (Phase 4 in current code)
 - Telegram entry point (`processText`) behavior preserved (inline return, no push notification)
@@ -400,7 +409,7 @@ As a system with existing tool endpoints, I want all REST API endpoints and tool
 | Category classifier produces wrong category | LLM picker constrained to live list; null on uncertainty; user can fix in AB |
 | Account hallucination with only 1 retry | 1 retry with explicit account list feedback covers most cases; stop is safer than inserting to wrong account |
 | Cold-start: new merchants always go to "Misc" | Same as current behavior — resolve_merchant fallback is unchanged |
-| Category auto-learn locks in wrong answer | Same risk as current Phase 4 auto-learn; tracked as issue #100 |
+| Category auto-learn locks in wrong answer | Two-step `learn_fact → update_fact` on contradiction; when user re-categorizes in AB, memory auto-corrects (fixes #100) |
 | Removing V2/V3 gates allows invalid data through | Payee resolved by code (validated by resolve_merchant), category classified against live list — no LLM guessing to validate |
 | Phase 1 LLM produces skip=false for promotional email | Current Phase 1a has same risk with no retry; acceptable tradeoff |
 
@@ -410,7 +419,7 @@ As a system with existing tool endpoints, I want all REST API endpoints and tool
 
 | File | Change |
 |------|--------|
-| `src/orchestrator.js` | Rewrite orchestrator: 3 phases, remove V2/V3 gates, add account validation, add category classifier. Preserve both `_executePhase3` (email: notify+mark_read) and `_executePhase3Silent` (Telegram: inline return, no notify/mark_read). |
+| `src/orchestrator.js` | Rewrite orchestrator: 3 phases, remove V2/V3 gates, add account validation, add category classifier. Add two-step `learn_fact → update_fact` on contradiction for auto-learn self-correction. Preserve both `_executePhase3` (email: notify+mark_read) and `_executePhase3Silent` (Telegram: inline return, no notify/mark_read). |
 | `src/prompts.js` | New Phase 1 prompt (replaces Phase 1a + Phase 2 prompts), new category picker prompt |
 | `tests/orchestrator.test.js` | Rewrite tests for 3-phase flow |
 | `tests/deterministic-orchestrator.test.js` | Rewrite tests for 3-phase flow |
