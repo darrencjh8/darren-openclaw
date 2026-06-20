@@ -12,8 +12,6 @@ import { extractPdfFromBuffer, extractEmailContent } from "./extractors.js";
 import { DeepSeekClient } from "./orchestrator.js";
 import { logger, getLogger } from "./logging.js";
 
-const ACTUAL_API_URL = process.env.ACTUAL_API_URL || "http://localhost:3000";
-
 export class NotificationCooldown {
   COOLDOWN_SECONDS = 3600;
 
@@ -1336,13 +1334,17 @@ export class ToolRegistry {
     }
   }
 
-  // ── HTTP helpers ──────────────────────────────────────────────
+  // ── HTTP helpers ────────────────────────────────────────────
+
+  get _apiUrl() {
+    return this._config.actualBudgetUrl || "http://localhost:3000";
+  }
 
   async _get(path, budgetId, extraParams = {}) {
     const params = new URLSearchParams(extraParams);
     if (budgetId) params.set("budget_id", budgetId);
     const qs = params.toString();
-    const url = `${ACTUAL_API_URL}${path}${qs ? "?" + qs : ""}`;
+    const url = `${this._apiUrl}${path}${qs ? "?" + qs : ""}`;
     const r = await fetch(url);
     if (!r.ok) throw new Error(`actual-api ${r.status}`);
     return r.json();
@@ -1351,7 +1353,7 @@ export class ToolRegistry {
   async _post(path, body, budgetId) {
     const payload = { ...body };
     if (budgetId) payload.budget_id = budgetId;
-    const r = await fetch(`${ACTUAL_API_URL}${path}`, {
+    const r = await fetch(`${this._apiUrl}${path}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
@@ -1417,7 +1419,7 @@ export class ToolRegistry {
   async _patch(path, body, budgetId) {
     const payload = { ...body };
     if (budgetId) payload.budget_id = budgetId;
-    const r = await fetch(`${ACTUAL_API_URL}${path}`, {
+    const r = await fetch(`${this._apiUrl}${path}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
