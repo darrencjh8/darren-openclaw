@@ -112,7 +112,7 @@ jobs:
               run: |
                   mkdir -p modules/hermes modules/portfolio-tracker modules/expense-tracker modules/image-gen
                   touch modules/hermes/.env modules/portfolio-tracker/.env modules/expense-tracker/.env modules/image-gen/.env
-                  mkdir -p /var/lib/darren-openclaw/portfolio-tracker/data /var/lib/darren-openclaw/onedrive-sync /var/lib/darren-openclaw/portfolio-tracker
+                  mkdir -p /var/lib/darren-openclaw/{expense-tracker/data,portfolio-tracker/data,onedrive-sync,hermes/{data,workspace}}
                   if [ "${DEPLOY_COMPONENTS}" = "all" ]; then
                       bash ./modules/deploy.sh --component all --non-interactive
                   else

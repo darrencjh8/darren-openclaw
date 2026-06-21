@@ -6,7 +6,7 @@ services:
         ports:
             - "127.0.0.1:8080:8080"
         volumes:
-            - ../modules/expense-tracker/data:/app/data
+            - /var/lib/darren-openclaw/expense-tracker/data:/app/data
             - ../modules/expense-tracker/.env:/app/.env:ro
         environment:
             - ACTUAL_API_URL=http://actual-api:3000
@@ -114,10 +114,10 @@ services:
             - "9119:9119"
             - "8644:8644"
         volumes:
-            - ~/.hermes:/opt/data
-            - ~/workspace/hermes:/workspace
+            - /var/lib/darren-openclaw/hermes/data:/opt/data
+            - /var/lib/darren-openclaw/hermes/workspace:/workspace
             - /var/run/docker.sock:/var/run/docker.sock
-            - ../modules/expense-tracker/data:/opt/data/expense-tracker-data:ro
+            - /var/lib/darren-openclaw/expense-tracker/data:/opt/data/expense-tracker-data:ro
         env_file:
             - ../modules/hermes/.env
         environment:
