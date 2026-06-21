@@ -119,11 +119,29 @@ jobs:
                       mkdir -p "/home/runner/data/$d"
                       touch "/home/runner/data/$d/.env"
                   done
-                  # Populate .env from shell (Docker Compose env_file loads these into containers)
-                  printenv > /home/runner/data/expense-tracker/.env
-                  printenv > /home/runner/data/portfolio-tracker/.env
-                  printenv > /home/runner/data/hermes/.env
-                  printenv > /home/runner/data/image-gen/.env
+                  # Populate per-service .env files (only vars each service needs)
+                  write_env() {
+                      local file="$1"; shift
+                      > "$file"
+                      for var in "$@"; do printf '%s=%s\n' "$var" "${!var:-}" >> "$file"; done
+                  }
+                  write_env /home/runner/data/expense-tracker/.env \
+                      DEEPSEEK_API_KEY ACTUAL_BUDGET_URL ACTUAL_BUDGET_PASSWORD \
+                      ACTUAL_PRIMARY_BUDGET_FILE ACTUAL_SECONDARY_BUDGET_FILE \
+                      ACTUAL_PRIMARY_CURRENCY ACTUAL_SECONDARY_CURRENCY \
+                      NOTIFY_URL HERMES_WEBHOOK_SECRET IMAP_HOST IMAP_USERNAME IMAP_PASSWORD
+                  write_env /home/runner/data/portfolio-tracker/.env \
+                      DEEPSEEK_API_KEY ACTUAL_BUDGET_URL ACTUAL_BUDGET_PASSWORD \
+                      ACTUAL_PRIMARY_BUDGET_FILE ACTUAL_SECONDARY_BUDGET_FILE \
+                      ONEDRIVE_CLIENT_ID IBKR_FLEX_TOKEN IBKR_FLEX_QUERY_ID \
+                      IBKR_PP_SGD_ACCOUNT IBKR_PP_USD_ACCOUNT GOOGLE_SHEET_ID
+                  write_env /home/runner/data/hermes/.env \
+                      DEEPSEEK_API_KEY GEMINI_API_KEY TELEGRAM_BOT_TOKEN \
+                      TELEGRAM_ALLOWED_USERS TELEGRAM_HOME_CHANNEL HERMES_WEBHOOK_SECRET \
+                      MEMORY_REPO_URL GH_APP_ID GH_APP_INSTALLATION_ID GH_APP_PRIVATE_KEY \
+                      HERMES_DASHBOARD_BASIC_AUTH_USERNAME HERMES_DASHBOARD_BASIC_AUTH_PASSWORD \
+                      IDENTITY_NAME IDENTITY_EMOJI IDENTITY_VIBE SOUL_VOICE_TONE SOUL_VOICE_STYLE \
+                      SOUL_VOICE_RULES SOUL_DELEGATION
                   if [ "${DEPLOY_COMPONENTS}" = "all" ]; then
                       bash ./modules/deploy.sh --component all --non-interactive
                   else
