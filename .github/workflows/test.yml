@@ -49,3 +49,30 @@ jobs:
                   shellcheck modules/hermes/scripts/*.sh modules/hermes/50-seed-defaults
             - name: Test github-auth.sh
               run: bash modules/hermes/tests/test-github-auth.sh
+
+    ktmb:
+        runs-on: ubuntu-latest
+        env:
+            SUBMODULE_PAT: ${{ secrets.SUBMODULE_PAT }}
+        steps:
+            - uses: actions/checkout@v4
+            - name: Clone ktmb submodule
+              id: submodule
+              run: |
+                  git config --global url."https://${SUBMODULE_PAT}@github.com/".insteadOf "https://github.com/"
+                  if git submodule update --init modules/ktmb 2>/dev/null; then
+                    echo "available=true" >> "$GITHUB_OUTPUT"
+                  else
+                    echo "SKIP: submodule not accessible"
+                    echo "available=false" >> "$GITHUB_OUTPUT"
+                  fi
+            - uses: actions/setup-python@v5
+              if: steps.submodule.outputs.available == 'true'
+              with:
+                  python-version: "3.12"
+            - name: Run ktmb tests
+              if: steps.submodule.outputs.available == 'true'
+              working-directory: modules/ktmb
+              run: |
+                  pip install -r requirements.txt
+                  pytest tests/ -v --no-header
