@@ -425,21 +425,22 @@ echo "--- Building & Deploying ---"
 docker network create hermes_shared --driver bridge 2>/dev/null || true
 
 export COMPOSE_DOCKER_CLI_BUILD=1 DOCKER_BUILDKIT=1
+COMPOSE="docker-compose --project-name modules"
 if [[ " ${COMPONENTS[*]} " =~ " all " ]] || [[ ${#COMPONENTS[@]} -eq 1 && "${COMPONENTS[0]}" == "all" ]]; then
   echo "  Building all services..."
   # ktmb is a private submodule — skip if not cloned
   if $GITHUB_MODE && [ ! -d "$ROOT/modules/ktmb/docker" ]; then
-    SERVICES=$(docker-compose config --services | grep -v ktmb-booking | tr '\n' ' ')
+    SERVICES=$($COMPOSE config --services | grep -v ktmb-booking | tr '\n' ' ')
     echo "  (excluding ktmb-booking — private submodule not cloned)"
   else
     SERVICES=""
   fi
-  docker-compose build $SERVICES
-  docker-compose up -d $SERVICES
+  $COMPOSE build $SERVICES
+  $COMPOSE up -d $SERVICES
 else
   echo "  Components: ${COMPONENTS[*]}"
-  docker-compose build "${COMPONENTS[@]}"
-  docker-compose up -d "${COMPONENTS[@]}"
+  $COMPOSE build "${COMPONENTS[@]}"
+  $COMPOSE up -d "${COMPONENTS[@]}"
 fi
 
 # ---- health checks ----
