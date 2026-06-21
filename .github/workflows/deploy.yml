@@ -20,11 +20,13 @@ concurrency:
 
 jobs:
     test:
+        if: github.event_name != 'push'
         uses: ./.github/workflows/test.yml
         secrets:
             ONEDRIVE_CLIENT_ID: ${{ secrets.ONEDRIVE_CLIENT_ID }}
 
     deploy:
+        if: always() && needs.test.result != 'failure'
         needs: test
         runs-on: self-hosted
         environment:
