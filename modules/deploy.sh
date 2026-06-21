@@ -436,6 +436,9 @@ if [[ " ${COMPONENTS[*]} " =~ " all " ]] || [[ ${#COMPONENTS[@]} -eq 1 && "${COM
     SERVICES=""
   fi
   $COMPOSE build $SERVICES
+  # Stop old containers before starting new ones (build first = minimal downtime)
+  docker ps -q --filter name=gateway | xargs -r docker stop 2>/dev/null; true
+  docker stop hermes modules-portfolio-tracker-1 modules-expense-tracker-1 modules-actual-api-1 2>/dev/null; true
   $COMPOSE up -d $SERVICES
 else
   echo "  Components: ${COMPONENTS[*]}"
