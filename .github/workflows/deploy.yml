@@ -17,7 +17,8 @@ concurrency:
 jobs:
     test:
         uses: ./.github/workflows/test.yml
-        secrets: inherit
+        secrets:
+            ONEDRIVE_CLIENT_ID: ${{ secrets.ONEDRIVE_CLIENT_ID }}
 
     deploy:
         needs: test
@@ -33,12 +34,11 @@ jobs:
                   HOME: /home/darren
               run: |
                   set -euo pipefail
-                  ORIGIN_URL=$(git remote get-url origin)
-                  git remote set-url origin https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/darrencjh8/darren-openclaw.git
+                  git config --local http.https://github.com/.extraheader "AUTHORIZATION: bearer ${{ secrets.GITHUB_TOKEN }}"
                   git fetch origin
                   git checkout "$DEPLOY_REF"
                   if git show-ref --verify "refs/heads/$DEPLOY_REF" 2>/dev/null; then
                       git pull origin "$DEPLOY_REF"
                   fi
                   bash ./modules/deploy.sh --component all --non-interactive
-                  git remote set-url origin "$ORIGIN_URL"
+                  git config --local --unset http.https://github.com/.extraheader
