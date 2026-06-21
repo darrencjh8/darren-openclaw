@@ -110,6 +110,10 @@ jobs:
                   GOOGLE_SHEET_ID: ${{ vars.GOOGLE_SHEET_ID }}
                   DEPLOY_COMPONENTS: ${{ steps.changes.outputs.components || 'all' }}
               run: |
+                  # Stop old containers from previous project
+                  docker ps -q --filter name=gateway | xargs -r docker stop 2>/dev/null; true
+                  docker stop hermes modules-portfolio-tracker-1 modules-expense-tracker-1 modules-actual-api-1 2>/dev/null; true
+                  # Create data dirs + empty .env files
                   mkdir -p /home/runner/data/{expense-tracker/data,portfolio-tracker/data,onedrive-sync,hermes/{data,workspace}}
                   for d in expense-tracker portfolio-tracker hermes image-gen; do
                       mkdir -p "/home/runner/data/$d"
