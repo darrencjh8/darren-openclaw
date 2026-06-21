@@ -9,13 +9,12 @@ services:
             - /home/runner/data/expense-tracker/data:/app/data
         environment:
             - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
-            - ACTUAL_BUDGET_URL=${ACTUAL_BUDGET_URL}
+            - ACTUAL_BUDGET_URL=http://actual-api:3000
             - ACTUAL_BUDGET_PASSWORD=${ACTUAL_BUDGET_PASSWORD}
             - ACTUAL_PRIMARY_BUDGET_FILE=${ACTUAL_PRIMARY_BUDGET_FILE}
             - ACTUAL_SECONDARY_BUDGET_FILE=${ACTUAL_SECONDARY_BUDGET_FILE}
             - ACTUAL_PRIMARY_CURRENCY=${ACTUAL_PRIMARY_CURRENCY}
             - ACTUAL_SECONDARY_CURRENCY=${ACTUAL_SECONDARY_CURRENCY}
-            - ACTUAL_API_URL=http://actual-api:3000
             - NOTIFY_URL=${NOTIFY_URL}
             - HERMES_WEBHOOK_SECRET=${HERMES_WEBHOOK_SECRET}
             - IMAP_HOST=${IMAP_HOST}
