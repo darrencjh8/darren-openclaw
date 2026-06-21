@@ -7,7 +7,6 @@ agent:
     reasoning_effort: medium
     disabled_toolsets:
         - image_gen
-        - tts
         - moa
 
 display:

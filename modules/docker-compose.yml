@@ -122,8 +122,16 @@ services:
             - ../modules/hermes/.env
         environment:
             - HERMES_DASHBOARD=1
+            - OPENAI_API_KEY=not-needed
+        networks:
+            - default
+            - hermes_shared
         shm_size: 1g
 
 volumes:
     onedrive_data:
     image_gen_media:
+
+networks:
+    hermes_shared:
+        external: true

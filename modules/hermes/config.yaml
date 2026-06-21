@@ -7,7 +7,6 @@ agent:
     reasoning_effort: medium
     disabled_toolsets:
         - image_gen
-        - tts
         - moa
 
 display:
@@ -96,6 +95,14 @@ kanban:
     default_assignee: quality-assurance
 
 timezone: Asia/Kuala_Lumpur
+
+tts:
+    provider: "openai"
+    openai:
+        model: "kokoro"
+        voice: "af_bella"
+        speed: 1.0
+        base_url: "http://kokoro-tts:8880/v1"
 
 mcp_servers:
     expense-tracker:

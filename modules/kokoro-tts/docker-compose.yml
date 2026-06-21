@@ -14,6 +14,7 @@ services:
                 limits:
                     memory: 1g
         restart: unless-stopped
+        shm_size: 256m
         networks:
             - hermes_shared
         healthcheck:
