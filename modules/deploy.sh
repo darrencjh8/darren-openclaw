@@ -361,7 +361,7 @@ echo ""
 echo "--- Git Pull ---"
 cd "$ROOT"
 git stash push -m "auto-deploy-stash-$(date +%s)" 2>/dev/null || true
-git pull
+git pull || true
 git stash drop 2>/dev/null || true
 echo -e "  ${GREEN}✓ code updated${NC}"
 
