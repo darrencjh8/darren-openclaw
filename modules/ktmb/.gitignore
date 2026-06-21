@@ -1,0 +1,40 @@
+# Credentials
+/tmp/ktmb_cookies.pkl
+/tmp/ktmb_password.txt
+/tmp/ktmb_reset_flag.txt
+/tmp/ktmb_watcher.pid
+/tmp/ktmb_watcher.stop
+/tmp/ktmb_pw_cookies.json
+/tmp/ktmb_live_session.pkl
+/tmp/ktmb_curl_cookies.txt
+/tmp/ktmb_curl.txt
+/tmp/ktmb_formdata.txt
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+
+# Playwright
+/tmp/ktmb_pw_up.js
+*.pw.js
+
+# IDE
+.vscode/
+.idea/
+
+# Code that lives in /tmp (runtime scripts)
+/tmp/ktmb_*.py
+
+# Node.js
+node_modules/
+
+# Environment secrets
+.env
+
+# Runtime data
+data/
+
+# Kilo worktrees
+.kilo/
