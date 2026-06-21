@@ -103,6 +103,7 @@ tts:
         voice: "af_bella"
         speed: 1.0
         base_url: "http://kokoro-tts:8880/v1"
+        response_format: "opus"
 
 mcp_servers:
     expense-tracker:
