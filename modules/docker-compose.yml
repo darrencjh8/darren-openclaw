@@ -7,7 +7,7 @@ services:
             - "127.0.0.1:8080:8080"
         volumes:
             - /var/lib/darren-openclaw/expense-tracker/data:/app/data
-            - ../modules/expense-tracker/.env:/app/.env:ro
+            - /var/lib/darren-openclaw/expense-tracker/.env:/app/.env:ro
         environment:
             - ACTUAL_API_URL=http://actual-api:3000
             - NOTIFY_URL=http://hermes:8644/webhooks/notify
@@ -31,7 +31,7 @@ services:
         ports:
             - "127.0.0.1:3000:3000"
         env_file:
-            - ../modules/portfolio-tracker/.env
+            - /var/lib/darren-openclaw/portfolio-tracker/.env
         environment:
             - BUDGET_SWITCH_DELAY_MS=5000
         restart: unless-stopped
@@ -50,7 +50,7 @@ services:
         environment:
             - PP_XML_PATH=/data/onedrive/Portfolio/Portfolio.portfolio
         env_file:
-            - ../modules/portfolio-tracker/.env
+            - /var/lib/darren-openclaw/portfolio-tracker/.env
         restart: unless-stopped
         healthcheck:
             test:
@@ -74,8 +74,8 @@ services:
             - ../modules/perchance-gen:/app/modules/perchance-gen:ro
             - image_gen_media:/app/.openclaw/workspace/media
         env_file:
-            - ../modules/portfolio-tracker/.env
-            - ../modules/image-gen/.env
+            - /var/lib/darren-openclaw/portfolio-tracker/.env
+            - /var/lib/darren-openclaw/image-gen/.env
         environment:
             - CDP_URL=http://172.17.0.1:9223
         extra_hosts:
@@ -119,7 +119,7 @@ services:
             - /var/run/docker.sock:/var/run/docker.sock
             - /var/lib/darren-openclaw/expense-tracker/data:/opt/data/expense-tracker-data:ro
         env_file:
-            - ../modules/hermes/.env
+            - /var/lib/darren-openclaw/hermes/.env
         environment:
             - HERMES_DASHBOARD=1
             - OPENAI_API_KEY=not-needed

@@ -110,9 +110,11 @@ jobs:
                   GOOGLE_SHEET_ID: ${{ vars.GOOGLE_SHEET_ID }}
                   DEPLOY_COMPONENTS: ${{ steps.changes.outputs.components || 'all' }}
               run: |
-                  mkdir -p modules/hermes modules/portfolio-tracker modules/expense-tracker modules/image-gen
-                  touch modules/hermes/.env modules/portfolio-tracker/.env modules/expense-tracker/.env modules/image-gen/.env
                   mkdir -p /var/lib/darren-openclaw/{expense-tracker/data,portfolio-tracker/data,onedrive-sync,hermes/{data,workspace}}
+                  for d in expense-tracker portfolio-tracker hermes image-gen; do
+                      mkdir -p "/var/lib/darren-openclaw/$d"
+                      touch "/var/lib/darren-openclaw/$d/.env"
+                  done
                   if [ "${DEPLOY_COMPONENTS}" = "all" ]; then
                       bash ./modules/deploy.sh --component all --non-interactive
                   else
