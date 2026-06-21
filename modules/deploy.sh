@@ -341,6 +341,20 @@ else
 fi
 fi  # should_deploy portfolio-tracker
 
+# ---- hermes workspace ----
+
+if should_deploy "hermes" || should_deploy "all"; then
+  HERMES_WS="$HOME/workspace/hermes"
+  mkdir -p "$HERMES_WS"
+  if [ "$(stat -c '%u' "$HERMES_WS" 2>/dev/null)" != "10000" ]; then
+    echo ""
+    echo "--- Hermes Workspace ---"
+    echo "  Setting ownership of $HERMES_WS to UID 10000 (hermes user)..."
+    sudo chown 10000:10000 "$HERMES_WS"
+    echo -e "  ${GREEN}✓ hermes workspace ready${NC}"
+  fi
+fi
+
 # ---- pull latest code ----
 
 echo ""
