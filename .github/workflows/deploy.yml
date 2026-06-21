@@ -40,6 +40,7 @@ jobs:
                   fetch-depth: 2
                   clean: false
                   submodules: recursive
+                  token: ${{ secrets.GITHUB_PAT }}
 
             - name: Detect changed modules
               id: changes
