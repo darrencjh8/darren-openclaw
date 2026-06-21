@@ -132,7 +132,7 @@ platforms:
             routes:
                 notify:
                     secret: ${HERMES_WEBHOOK_SECRET}
-                    prompt: "NOTIFICATION: {message}"
+                    prompt: "NOTIFICATION — do NOT call any tools or skills: {message}"
                     deliver: telegram
                     deliver_extra:
                         chat_id: "${TELEGRAM_HOME_CHANNEL}"
