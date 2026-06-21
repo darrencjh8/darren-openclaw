@@ -118,7 +118,7 @@ services:
             - KTMB_CAPTCHA_KEY=${KTMB_CAPTCHA_KEY}
             - KTMB_ACCOUNT_NAME=${KTMB_ACCOUNT_NAME:-KTMB}
             - KTMB_MAX_RETRIES=${KTMB_MAX_RETRIES:-5}
-            - KTMB_POLL_INTERVAL=${KTMB_POLL_INTERVAL:-60}
+            - KTMB_POLL_INTERVAL=${KTMB_POLL_INTERVAL:-2}
             - IMAP_USERNAME=${IMAP_USERNAME}
             - IMAP_PASSWORD=${IMAP_PASSWORD}
         restart: unless-stopped
