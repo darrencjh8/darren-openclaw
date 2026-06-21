@@ -227,6 +227,8 @@ if $GITHUB_MODE || check_file "$ET_ENV"; then
            IMAP_HOST IMAP_USERNAME IMAP_PASSWORD; do
     check_var "$v" "$ET_ENV"
   done
+  echo "  [Optional]"
+  check_var_optional "BRAVE_SEARCH_API_KEY" "$ET_ENV"
 fi
 fi
 
