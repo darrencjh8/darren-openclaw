@@ -453,15 +453,17 @@ echo "--- Health Checks ---"
 
 health_ok() {
   local name="$1" url="$2"
-  local code attempt=0 max_attempts=5
+  local code attempt=0 max_attempts=10
+  # Give the container a moment to bind the port
+  sleep 2
   while [ "$attempt" -lt "$max_attempts" ]; do
-    code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 "$url" 2>/dev/null || echo "000")
+    code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 "$url" 2>/dev/null || echo "000")
     if [[ "$code" =~ ^[23][0-9][0-9]$ ]]; then
       echo -e "  ${GREEN}✓ $name${NC}"
       return 0
     fi
     attempt=$((attempt + 1))
-    [ "$attempt" -lt "$max_attempts" ] && sleep 3
+    [ "$attempt" -lt "$max_attempts" ] && sleep 6
   done
   echo -e "  ${RED}✗ $name (HTTP $code)${NC}"
   return 1
