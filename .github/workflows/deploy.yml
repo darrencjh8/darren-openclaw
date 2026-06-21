@@ -32,6 +32,7 @@ jobs:
             - name: Deploy all services
               env:
                   HOME: /home/darren
+                  HERMES_WEBHOOK_SECRET: ${{ secrets.HERMES_WEBHOOK_SECRET }}
               run: |
                   set -euo pipefail
                   git config --local http.https://github.com/.extraheader "AUTHORIZATION: bearer ${{ secrets.GITHUB_TOKEN }}"
