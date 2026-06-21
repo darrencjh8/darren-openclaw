@@ -12,7 +12,7 @@ services:
         deploy:
             resources:
                 limits:
-                    memory: 1g
+                    memory: 1536m
         restart: unless-stopped
         shm_size: 256m
         networks:

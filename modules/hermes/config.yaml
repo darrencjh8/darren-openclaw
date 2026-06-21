@@ -130,11 +130,7 @@ platforms:
             routes:
                 notify:
                     secret: ${HERMES_WEBHOOK_SECRET}
-                    prompt: |
-                        SYSTEM: {SOUL_MD}
-
-                        A notification arrived. Relay it in your natural voice.
-                        NOTIFICATION: {message}
+                    prompt: "NOTIFICATION: {message}"
                     deliver: telegram
                     deliver_extra:
                         chat_id: "${TELEGRAM_HOME_CHANNEL}"

@@ -17,6 +17,7 @@ services:
             - ACTUAL_SECONDARY_CURRENCY=${ACTUAL_SECONDARY_CURRENCY}
             - NOTIFY_URL=${NOTIFY_URL}
             - HERMES_WEBHOOK_SECRET=${HERMES_WEBHOOK_SECRET}
+            - BRAVE_SEARCH_API_KEY=${BRAVE_SEARCH_API_KEY}
             - IMAP_HOST=${IMAP_HOST}
             - IMAP_USERNAME=${IMAP_USERNAME}
             - IMAP_PASSWORD=${IMAP_PASSWORD}
@@ -165,6 +166,8 @@ services:
             - SOUL_DELEGATION=${SOUL_DELEGATION}
             - HERMES_DASHBOARD=1
             - OPENAI_API_KEY=not-needed
+            - FIRECRAWL_API_KEY=${FIRECRAWL_API_KEY}
+            - NOTION_API_KEY=${NOTION_API_KEY}
         mem_limit: 1g
         networks:
             - default
