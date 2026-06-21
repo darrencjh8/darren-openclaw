@@ -126,19 +126,20 @@ else
   cd "$RUNNER_DIR"
 
   sudo -u runner curl -o "$TARBALL" -L "${BASE_URL}/${TARBALL}"
-  sudo -u runner curl -o "${TARBALL}.sha256" -L "${BASE_URL}/${TARBALL}.sha256"
 
   echo "  Verifying SHA256 checksum..."
-  if sha256sum -c "${TARBALL}.sha256"; then
+  EXPECTED="0dbc9bf5a58620fc52cb6cc0448abcca964a8d74b5f39773b7afcad9ab691e19"
+  ACTUAL=$(sha256sum "$TARBALL" | awk '{print $1}')
+  if [[ "$ACTUAL" == "$EXPECTED" ]]; then
     echo -e "  ${GREEN}✓ Checksum verified${NC}"
   else
     echo -e "  ${RED}✗ SHA256 mismatch — aborting.${NC}"
-    rm -f "$TARBALL" "${TARBALL}.sha256"
+    rm -f "$TARBALL"
     exit 1
   fi
 
   sudo -u runner tar xzf "$TARBALL"
-  sudo -u runner rm -f "$TARBALL" "${TARBALL}.sha256"
+  sudo -u runner rm -f "$TARBALL"
   echo -e "  ${GREEN}✓ Runner v${RUNNER_VERSION} extracted${NC}"
 fi
 
