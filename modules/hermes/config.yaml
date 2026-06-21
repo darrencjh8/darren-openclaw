@@ -120,6 +120,10 @@ mcp_servers:
         url: http://ktmb-booking:8082/mcp
         tools:
             exclude: []
+        destructive:
+            - ktmb_reset_password
+            - ktmb_pause_worker
+            - ktmb_resume_worker
         supports_parallel_tool_calls: false
 
 platforms:
