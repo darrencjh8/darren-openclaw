@@ -119,6 +119,11 @@ jobs:
                       mkdir -p "/home/runner/data/$d"
                       touch "/home/runner/data/$d/.env"
                   done
+                  # Populate .env from shell (Docker Compose env_file loads these into containers)
+                  printenv > /home/runner/data/expense-tracker/.env
+                  printenv > /home/runner/data/portfolio-tracker/.env
+                  printenv > /home/runner/data/hermes/.env
+                  printenv > /home/runner/data/image-gen/.env
                   if [ "${DEPLOY_COMPONENTS}" = "all" ]; then
                       bash ./modules/deploy.sh --component all --non-interactive
                   else

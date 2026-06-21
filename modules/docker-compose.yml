@@ -7,7 +7,6 @@ services:
             - "127.0.0.1:8080:8080"
         volumes:
             - /home/runner/data/expense-tracker/data:/app/data
-            - /home/runner/data/expense-tracker/.env:/app/.env:ro
         environment:
             - ACTUAL_API_URL=http://actual-api:3000
             - NOTIFY_URL=http://hermes:8644/webhooks/notify
