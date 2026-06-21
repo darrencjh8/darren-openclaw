@@ -1,129 +1,129 @@
 services:
-  expense-tracker:
-    build:
-      context: ../modules/expense-tracker
-      dockerfile: docker/Dockerfile
-    ports:
-      - "127.0.0.1:8080:8080"
-    volumes:
-      - ../modules/expense-tracker/data:/app/data
-      - ../modules/expense-tracker/.env:/app/.env:ro
-    environment:
-      - ACTUAL_API_URL=http://actual-api:3000
-      - NOTIFY_URL=http://hermes:8644/webhooks/notify
-      - HERMES_WEBHOOK_SECRET=${HERMES_WEBHOOK_SECRET}
-    restart: unless-stopped
-    healthcheck:
-      test:
-        [
-          "CMD-SHELL",
-          'node -e ''require("http").get("http://localhost:8080/health",function(r){process.exit(r.statusCode===200?0:1)})''',
-        ]
-      interval: 10s
-      timeout: 5s
-      retries: 3
-      start_period: 20s
+    expense-tracker:
+        build:
+            context: ../modules/expense-tracker
+            dockerfile: docker/Dockerfile
+        ports:
+            - "127.0.0.1:8080:8080"
+        volumes:
+            - ../modules/expense-tracker/data:/app/data
+            - ../modules/expense-tracker/.env:/app/.env:ro
+        environment:
+            - ACTUAL_API_URL=http://actual-api:3000
+            - NOTIFY_URL=http://hermes:8644/webhooks/notify
+            - HERMES_WEBHOOK_SECRET=${HERMES_WEBHOOK_SECRET}
+        restart: unless-stopped
+        healthcheck:
+            test:
+                [
+                    "CMD-SHELL",
+                    'node -e ''require("http").get("http://localhost:8080/health",function(r){process.exit(r.statusCode===200?0:1)})''',
+                ]
+            interval: 10s
+            timeout: 5s
+            retries: 3
+            start_period: 20s
 
-  actual-api:
-    build:
-      context: ../modules/actual-api
-      dockerfile: Dockerfile
-    ports:
-      - "127.0.0.1:3000:3000"
-    env_file:
-      - ../modules/portfolio-tracker/.env
-    environment:
-      - BUDGET_SWITCH_DELAY_MS=5000
-    restart: unless-stopped
+    actual-api:
+        build:
+            context: ../modules/actual-api
+            dockerfile: Dockerfile
+        ports:
+            - "127.0.0.1:3000:3000"
+        env_file:
+            - ../modules/portfolio-tracker/.env
+        environment:
+            - BUDGET_SWITCH_DELAY_MS=5000
+        restart: unless-stopped
 
-  portfolio-tracker:
-    build:
-      context: ../modules/portfolio-tracker
-      dockerfile: docker/Dockerfile
-    ports:
-      - "127.0.0.1:8081:8081"
-    volumes:
-      - ../modules/portfolio-tracker/data:/app/data
-      - onedrive_data:/data/onedrive:rw
-      - ../modules/onedrive-sync/config/onedrive/refresh_token:/app/config/onedrive_refresh_token:rw
-      - ../modules/portfolio-tracker/config/google-service-account.json:/app/config/google-service-account.json:ro
-    environment:
-      - PP_XML_PATH=/data/onedrive/Portfolio/Portfolio.portfolio
-    env_file:
-      - ../modules/portfolio-tracker/.env
-    restart: unless-stopped
-    healthcheck:
-      test:
-        [
-          "CMD-SHELL",
-          'node -e ''require("http").get("http://localhost:8081/health",function(r){process.exit(r.statusCode===200?0:1)})''',
-        ]
-      interval: 10s
-      timeout: 5s
-      retries: 3
-      start_period: 30s
+    portfolio-tracker:
+        build:
+            context: ../modules/portfolio-tracker
+            dockerfile: docker/Dockerfile
+        ports:
+            - "127.0.0.1:8081:8081"
+        volumes:
+            - ../modules/portfolio-tracker/data:/app/data
+            - onedrive_data:/data/onedrive:rw
+            - ../modules/onedrive-sync/config/onedrive/refresh_token:/app/config/onedrive_refresh_token:rw
+            - ../modules/portfolio-tracker/config/google-service-account.json:/app/config/google-service-account.json:ro
+        environment:
+            - PP_XML_PATH=/data/onedrive/Portfolio/Portfolio.portfolio
+        env_file:
+            - ../modules/portfolio-tracker/.env
+        restart: unless-stopped
+        healthcheck:
+            test:
+                [
+                    "CMD-SHELL",
+                    'node -e ''require("http").get("http://localhost:8081/health",function(r){process.exit(r.statusCode===200?0:1)})''',
+                ]
+            interval: 10s
+            timeout: 5s
+            retries: 3
+            start_period: 30s
 
-  image-gen:
-    build:
-      context: ../modules/image-gen
-      dockerfile: Dockerfile
-    ports:
-      - "127.0.0.1:8083:8083"
-    volumes:
-      - ../gateway/workspace/skills/image-generation:/app/scripts:ro
-      - ../modules/perchance-gen:/app/modules/perchance-gen:ro
-      - image_gen_media:/app/.openclaw/workspace/media
-    env_file:
-      - ../modules/portfolio-tracker/.env
-      - ../modules/image-gen/.env
-    environment:
-      - CDP_URL=http://172.17.0.1:9223
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    restart: unless-stopped
+    image-gen:
+        build:
+            context: ../modules/image-gen
+            dockerfile: Dockerfile
+        ports:
+            - "127.0.0.1:8083:8083"
+        volumes:
+            - ../gateway/workspace/skills/image-generation:/app/scripts:ro
+            - ../modules/perchance-gen:/app/modules/perchance-gen:ro
+            - image_gen_media:/app/.openclaw/workspace/media
+        env_file:
+            - ../modules/portfolio-tracker/.env
+            - ../modules/image-gen/.env
+        environment:
+            - CDP_URL=http://172.17.0.1:9223
+        extra_hosts:
+            - "host.docker.internal:host-gateway"
+        restart: unless-stopped
 
-  ktmb-booking:
-    build:
-      context: ../modules/ktmb
-      dockerfile: docker/Dockerfile
-    ports:
-      - "127.0.0.1:8082:8082"
-    volumes:
-      - ../modules/ktmb/.env:/app/.env
-      - ../modules/ktmb/data:/app/data
-    environment:
-      - KTMB_DB_PATH=/app/data/ktmb_jobs.db
-      - KTMB_NOTIFY_URL=http://hermes:8644/webhooks/notify
-      - KTMB_NOTIFY_TOKEN=${HERMES_WEBHOOK_SECRET}
-    restart: unless-stopped
+    ktmb-booking:
+        build:
+            context: ../modules/ktmb
+            dockerfile: docker/Dockerfile
+        ports:
+            - "127.0.0.1:8082:8082"
+        volumes:
+            - ../modules/ktmb/.env:/app/.env
+            - ../modules/ktmb/data:/app/data
+        environment:
+            - KTMB_DB_PATH=/app/data/ktmb_jobs.db
+            - KTMB_NOTIFY_URL=http://hermes:8644/webhooks/notify
+            - KTMB_NOTIFY_TOKEN=${HERMES_WEBHOOK_SECRET}
+        restart: unless-stopped
 
-  hermes:
-    build:
-      context: ../modules/hermes
-      dockerfile: Dockerfile
-    container_name: hermes
-    restart: unless-stopped
-    command: gateway run
-    depends_on:
-      expense-tracker:
-        condition: service_healthy
-      portfolio-tracker:
-        condition: service_healthy
-    ports:
-      - "8642:8642"
-      - "9119:9119"
-      - "8644:8644"
-    volumes:
-      - ~/.hermes:/opt/data
-      - ~/workspace:/workspace
-      - /var/run/docker.sock:/var/run/docker.sock
-      - ../modules/expense-tracker/data:/opt/data/expense-tracker-data:ro
-    env_file:
-      - ../modules/hermes/.env
-    environment:
-      - HERMES_DASHBOARD=1
-    shm_size: 1g
+    hermes:
+        build:
+            context: ../modules/hermes
+            dockerfile: Dockerfile
+        container_name: hermes
+        restart: unless-stopped
+        command: gateway run
+        depends_on:
+            expense-tracker:
+                condition: service_healthy
+            portfolio-tracker:
+                condition: service_healthy
+        ports:
+            - "8642:8642"
+            - "9119:9119"
+            - "8644:8644"
+        volumes:
+            - ~/.hermes:/opt/data
+            - ~/workspace/hermes:/workspace
+            - /var/run/docker.sock:/var/run/docker.sock
+            - ../modules/expense-tracker/data:/opt/data/expense-tracker-data:ro
+        env_file:
+            - ../modules/hermes/.env
+        environment:
+            - HERMES_DASHBOARD=1
+        shm_size: 1g
 
 volumes:
-  onedrive_data:
-  image_gen_media:
+    onedrive_data:
+    image_gen_media:
