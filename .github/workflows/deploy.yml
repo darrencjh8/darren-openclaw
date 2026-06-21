@@ -31,20 +31,14 @@ jobs:
         runs-on: self-hosted
         environment:
             name: ${{ github.event.inputs.environment || 'darren-prod' }}
-        env:
-            DEPLOY_REF: ${{ github.event.inputs.ref || 'main' }}
-        defaults:
-            run:
-                working-directory: /home/darren/workspace/hermes/darren-openclaw
         steps:
             - uses: actions/checkout@v4
               with:
-                  path: _checkout
+                  ref: ${{ github.event.inputs.ref || '' }}
 
             - name: Deploy all services
               env:
                   HOME: /home/darren
-                  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
                   # ── Hermes: LLM ──
                   DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
                   GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
@@ -92,17 +86,4 @@ jobs:
                   GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
                   GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
               run: |
-                  set -euo pipefail
-                  # Copy auth config from checkout action into target repo
-                  CRED=$(cd "$GITHUB_WORKSPACE/_checkout" && git config --local http.https://github.com/.extraheader 2>/dev/null || true)
-                  TARGET=/home/darren/workspace/hermes/darren-openclaw
-                  export GIT_TERMINAL_PROMPT=0 GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=safe.directory GIT_CONFIG_VALUE_0="$TARGET"
-                  cd "$TARGET"
-                  git remote set-url origin https://github.com/darrencjh8/darren-openclaw.git
-                  [ -n "$CRED" ] && git config --local http.https://github.com/.extraheader "$CRED"
-                  git fetch origin
-                  git checkout "$DEPLOY_REF"
-                  if git show-ref --verify "refs/heads/$DEPLOY_REF" 2>/dev/null; then
-                      git pull origin "$DEPLOY_REF"
-                  fi
                   bash ./modules/deploy.sh --component all --non-interactive
