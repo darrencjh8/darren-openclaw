@@ -1,0 +1,44 @@
+name: Deploy to Production
+
+on:
+    push:
+        branches: [main]
+    workflow_dispatch:
+        inputs:
+            ref:
+                description: "Branch, tag, or commit SHA (default: main)"
+                type: string
+                default: "main"
+
+concurrency:
+    group: production-deploy
+    cancel-in-progress: false
+
+jobs:
+    test:
+        uses: ./.github/workflows/test.yml
+        secrets: inherit
+
+    deploy:
+        needs: test
+        runs-on: self-hosted
+        env:
+            DEPLOY_REF: ${{ github.event.inputs.ref || 'main' }}
+        defaults:
+            run:
+                working-directory: /home/darren/workspace/hermes/darren-openclaw
+        steps:
+            - name: Deploy all services
+              env:
+                  HOME: /home/darren
+              run: |
+                  set -euo pipefail
+                  ORIGIN_URL=$(git remote get-url origin)
+                  git remote set-url origin https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/darrencjh8/darren-openclaw.git
+                  git fetch origin
+                  git checkout "$DEPLOY_REF"
+                  if git show-ref --verify "refs/heads/$DEPLOY_REF" 2>/dev/null; then
+                      git pull origin "$DEPLOY_REF"
+                  fi
+                  bash ./modules/deploy.sh --component all --non-interactive
+                  git remote set-url origin "$ORIGIN_URL"
