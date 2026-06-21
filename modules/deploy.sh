@@ -420,7 +420,7 @@ cd "$MODULES_DIR"
 
 echo ""
 echo "--- Building & Deploying ---"
-export COMPOSE_DOCKER_CLI_BUILD=1 DOCKER_BUILDKIT=1
+export COMPOSE_DOCKER_CLI_BUILD=1 DOCKER_BUILDKIT=0
 if [[ " ${COMPONENTS[*]} " =~ " all " ]] || [[ ${#COMPONENTS[@]} -eq 1 && "${COMPONENTS[0]}" == "all" ]]; then
   echo "  Building all services..."
   docker-compose build
