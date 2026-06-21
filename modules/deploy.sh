@@ -247,7 +247,6 @@ fi
 
 # ---- pluggable modules (auto-discover from modules/*/module.env) ----
 
-if ! $GITHUB_MODE; then
 echo ""
 echo "--- Pluggable Modules ---"
 MODULE_COUNT=0
@@ -257,20 +256,25 @@ for mod_env in "$ROOT"/modules/*/module.env; do
   source "$mod_env"
   mod_dir="$(dirname "$mod_env")"
   echo -e "  ${GREEN}✓ Found: ${MODULE_NAME:-unknown} ($mod_dir)${NC}"
-  mod_env_file="${mod_dir}/${MODULE_ENV_FILE:-.env}"
-  if [ -f "$mod_env_file" ]; then
+  if $GITHUB_MODE; then
     for v in "${MODULE_REQUIRED_VARS[@]}"; do
-      check_var "$v" "$mod_env_file"
+      check_var "$v" ""
     done
   else
-    echo -e "  ${RED}✗ Module .env not found at $mod_env_file${NC}"
-    missing=$((missing + 1))
+    mod_env_file="${mod_dir}/${MODULE_ENV_FILE:-.env}"
+    if [ -f "$mod_env_file" ]; then
+      for v in "${MODULE_REQUIRED_VARS[@]}"; do
+        check_var "$v" "$mod_env_file"
+      done
+    else
+      echo -e "  ${RED}✗ Module .env not found at $mod_env_file${NC}"
+      missing=$((missing + 1))
+    fi
   fi
 done
 if [ "$MODULE_COUNT" -eq 0 ]; then
   echo "  (none — no modules/*/module.env found)"
-  fi
-fi  # ! GITHUB_MODE
+fi
 
 # ---- result ----
 

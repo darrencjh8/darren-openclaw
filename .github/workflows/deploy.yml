@@ -4,7 +4,6 @@ on:
     push:
         branches: [main]
         paths-ignore:
-            - "modules/ktmb/**"
             - ".gitmodules"
     workflow_dispatch:
         inputs:
@@ -40,6 +39,7 @@ jobs:
                   ref: ${{ github.event.inputs.ref || '' }}
                   fetch-depth: 2
                   clean: false
+                  submodules: recursive
 
             - name: Detect changed modules
               id: changes
@@ -51,6 +51,7 @@ jobs:
                   echo "$CHANGED" | grep -q "^modules/expense-tracker/" && COMPONENTS="$COMPONENTS expense-tracker"
                   echo "$CHANGED" | grep -q "^modules/portfolio-tracker/" && COMPONENTS="$COMPONENTS portfolio-tracker"
                   echo "$CHANGED" | grep -q "^modules/actual-api/"     && COMPONENTS="$COMPONENTS actual-api"
+                  echo "$CHANGED" | grep -qE "^modules/ktmb(/|$)"  && COMPONENTS="$COMPONENTS ktmb-booking"
                   echo "$CHANGED" | grep -q "^modules/image-gen/"      && COMPONENTS="$COMPONENTS image-gen"
                   echo "$CHANGED" | grep -q "^gateway/"                && COMPONENTS="$COMPONENTS hermes"
                   echo "$CHANGED" | grep -q "^\.github/"               && COMPONENTS="$COMPONENTS hermes"
@@ -61,7 +62,7 @@ jobs:
 
             - name: Build images
               run: |
-                  mkdir -p /home/runner/data/{expense-tracker/data,portfolio-tracker/data,hermes/{data,workspace}}
+                  mkdir -p /home/runner/data/{expense-tracker/data,portfolio-tracker/data,hermes/{data,workspace},ktmb/data}
                   if [ "${DEPLOY_COMPONENTS}" = "all" ]; then
                       bash ./modules/build.sh
                   else
@@ -87,6 +88,8 @@ jobs:
                   ONEDRIVE_CLIENT_ID: ${{ secrets.ONEDRIVE_CLIENT_ID }}
                   IBKR_FLEX_TOKEN: ${{ secrets.IBKR_FLEX_TOKEN }}
                   GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+                  KTMB_EMAIL: ${{ secrets.KTMB_EMAIL }}
+                  KTMB_CAPTCHA_KEY: ${{ secrets.KTMB_CAPTCHA_KEY }}
                   GITHUB_PAT: ${{ secrets.GITHUB_PAT }}
                   BRAVE_SEARCH_API_KEY: ${{ secrets.BRAVE_SEARCH_API_KEY }}
                   FIRECRAWL_API_KEY: ${{ secrets.FIRECRAWL_API_KEY }}
@@ -113,6 +116,9 @@ jobs:
                   IBKR_PP_SGD_ACCOUNT: ${{ vars.IBKR_PP_SGD_ACCOUNT }}
                   IBKR_PP_USD_ACCOUNT: ${{ vars.IBKR_PP_USD_ACCOUNT }}
                   GOOGLE_SHEET_ID: ${{ vars.GOOGLE_SHEET_ID }}
+                  KTMB_ACCOUNT_NAME: ${{ vars.KTMB_ACCOUNT_NAME }}
+                  KTMB_MAX_RETRIES: ${{ vars.KTMB_MAX_RETRIES }}
+                  KTMB_POLL_INTERVAL: ${{ vars.KTMB_POLL_INTERVAL }}
                   DEPLOY_COMPONENTS: ${{ steps.changes.outputs.components || 'all' }}
               run: |
                   if [ "${DEPLOY_COMPONENTS}" = "all" ]; then
