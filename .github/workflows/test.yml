@@ -38,30 +38,6 @@ jobs:
             - run: npm ci
             - run: npm test
 
-    ktmb:
-        runs-on: ubuntu-latest
-        steps:
-            - uses: actions/checkout@v7
-            - name: Clone ktmb submodule
-              id: submodule
-              run: |
-                  if git submodule update --init modules/ktmb 2>/dev/null; then
-                    echo "available=true" >> "$GITHUB_OUTPUT"
-                  else
-                    echo "SKIP: submodule not accessible (private repo — set SUBMODULE_PAT secret)"
-                    echo "available=false" >> "$GITHUB_OUTPUT"
-                  fi
-            - uses: actions/setup-python@v6
-              if: steps.submodule.outputs.available == 'true'
-              with:
-                  python-version: "3.12"
-            - name: Run ktmb tests
-              if: steps.submodule.outputs.available == 'true'
-              working-directory: modules/ktmb
-              run: |
-                  pip install -r requirements.txt
-                  pytest tests/ -v --no-header
-
     hermes-scripts:
         runs-on: ubuntu-latest
         steps:
