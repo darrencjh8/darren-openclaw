@@ -89,6 +89,7 @@ jobs:
               run: |
                   set -euo pipefail
                   export GIT_TERMINAL_PROMPT=0 GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=safe.directory GIT_CONFIG_VALUE_0=/home/darren/workspace/hermes/darren-openclaw
+                  git remote set-url origin https://github.com/darrencjh8/darren-openclaw.git
                   git fetch origin
                   git checkout "$DEPLOY_REF"
                   if git show-ref --verify "refs/heads/$DEPLOY_REF" 2>/dev/null; then
