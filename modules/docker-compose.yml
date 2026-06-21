@@ -117,7 +117,7 @@ services:
             - "8644:8644"
         volumes:
             - ~/.hermes:/opt/data
-            - ~/workspace:/workspace
+            - ~/workspace/hermes:/workspace
             - /var/run/docker.sock:/var/run/docker.sock
             - ../modules/expense-tracker/data:/opt/data/expense-tracker-data:ro
         env_file:
