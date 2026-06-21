@@ -114,8 +114,7 @@ jobs:
                   docker ps -q --filter name=gateway | xargs -r docker stop 2>/dev/null; true
                   docker stop hermes modules-portfolio-tracker-1 modules-expense-tracker-1 modules-actual-api-1 2>/dev/null; true
                   # Create data directories
-                  mkdir -p /home/runner/data/{expense-tracker/data,portfolio-tracker/data,onedrive-sync,hermes/{data,workspace}}
-                  touch /home/runner/data/onedrive-sync/refresh_token
+                  mkdir -p /home/runner/data/{expense-tracker/data,portfolio-tracker/data,hermes/{data,workspace}}
                   if [ "${DEPLOY_COMPONENTS}" = "all" ]; then
                       bash ./modules/deploy.sh --component all --non-interactive
                   else
