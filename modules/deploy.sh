@@ -13,11 +13,13 @@
 set -euo pipefail
 
 NON_INTERACTIVE=false
+SKIP_BUILD=false
 DOCKER_ARGS=()
 COMPONENTS=()
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --non-interactive) NON_INTERACTIVE=true ;;
+    --skip-build) SKIP_BUILD=true ;;
     --component) COMPONENTS+=("$2"); shift ;;
     *) DOCKER_ARGS+=("$1") ;;
   esac
@@ -120,6 +122,9 @@ should_deploy() {
 echo "========================================"
 echo " Environment Validation"
 echo "========================================"
+
+if $SKIP_BUILD; then
+  echo "  (skipped — using cached images)"
 
 # ---- Hermes ----
 
@@ -288,6 +293,7 @@ fi
 echo -e "  ${GREEN}All required variables present.${NC}"
 echo "========================================"
 echo ""
+fi  # SKIP_BUILD
 
 # ---- onedrive ----
 
@@ -406,6 +412,8 @@ fi
 
 # ---- pull latest code ----
 
+if ! $SKIP_BUILD; then
+
 echo ""
 echo "--- Git Pull ---"
 cd "$ROOT"
@@ -413,6 +421,7 @@ git stash push -m "auto-deploy-stash-$(date +%s)" 2>/dev/null || true
 git pull || true
 git stash drop 2>/dev/null || true
 echo -e "  ${GREEN}✓ code updated${NC}"
+fi  # SKIP_BUILD
 
 # ---- deploy ----
 
@@ -427,24 +436,29 @@ docker network create hermes_shared --driver bridge 2>/dev/null || true
 export COMPOSE_DOCKER_CLI_BUILD=1 DOCKER_BUILDKIT=1
 COMPOSE="docker-compose --project-name modules"
 if [[ " ${COMPONENTS[*]} " =~ " all " ]] || [[ ${#COMPONENTS[@]} -eq 1 && "${COMPONENTS[0]}" == "all" ]]; then
-  echo "  Building all services..."
   # ktmb is a private submodule — skip if not cloned
   if $GITHUB_MODE && [ ! -d "$ROOT/modules/ktmb/docker" ]; then
-    SERVICES=$($COMPOSE config --services | grep -v ktmb-booking | tr '\n' ' ')
+    TARGETS=$($COMPOSE config --services | grep -v ktmb-booking | tr '\n' ' ')
     echo "  (excluding ktmb-booking — private submodule not cloned)"
   else
-    SERVICES=""
+    TARGETS=""
   fi
-  $COMPOSE build $SERVICES
-  # Stop old containers before starting new ones (build first = minimal downtime)
+else
+  TARGETS="${COMPONENTS[*]}"
+fi
+
+# Build (skip if --skip-build)
+if ! $SKIP_BUILD; then
+  echo "  Building $TARGETS..."
+  $COMPOSE build $TARGETS
+fi
+
+# Deploy
+if [[ " ${COMPONENTS[*]} " =~ " all " ]]; then
   docker ps -q --filter name=gateway | xargs -r docker stop 2>/dev/null; true
   docker stop hermes modules-portfolio-tracker-1 modules-expense-tracker-1 modules-actual-api-1 2>/dev/null; true
-  $COMPOSE up -d $SERVICES
-else
-  echo "  Components: ${COMPONENTS[*]}"
-  $COMPOSE build "${COMPONENTS[@]}"
-  $COMPOSE up -d "${COMPONENTS[@]}"
 fi
+$COMPOSE up -d $TARGETS
 
 # ---- health checks ----
 
@@ -457,7 +471,8 @@ health_ok() {
   # Give the container a moment to bind the port
   sleep 2
   while [ "$attempt" -lt "$max_attempts" ]; do
-    code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 "$url" 2>/dev/null || echo "000")
+    code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 "$url" 2>/dev/null)
+    [ -z "$code" ] && code="000"
     if [[ "$code" =~ ^[23][0-9][0-9]$ ]]; then
       echo -e "  ${GREEN}✓ $name${NC}"
       return 0

@@ -113,9 +113,9 @@ jobs:
                   DEPLOY_COMPONENTS: ${{ steps.changes.outputs.components || 'all' }}
               run: |
                   if [ "${DEPLOY_COMPONENTS}" = "all" ]; then
-                      bash ./modules/deploy.sh --component all --non-interactive
+                      bash ./modules/deploy.sh --component all --non-interactive --skip-build
                   else
                       ARGS=""
                       for c in ${DEPLOY_COMPONENTS}; do ARGS="$ARGS --component $c"; done
-                      bash ./modules/deploy.sh $ARGS --non-interactive
+                      bash ./modules/deploy.sh $ARGS --non-interactive --skip-build
                   fi
