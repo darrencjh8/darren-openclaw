@@ -126,7 +126,7 @@ if check_file "$HERMES_ENV"; then
 
   # GitHub App
   echo "  [GitHub App]"
-  check_var "GITHUB_URL" "$HERMES_ENV"
+  check_var "MEMORY_REPO_URL" "$HERMES_ENV"
   check_var "GITHUB_APP_ID" "$HERMES_ENV"
   check_var "GITHUB_APP_INSTALLATION_ID" "$HERMES_ENV"
   check_var "GITHUB_APP_PRIVATE_KEY" "$HERMES_ENV"
