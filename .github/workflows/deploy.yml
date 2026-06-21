@@ -38,8 +38,28 @@ jobs:
             - uses: actions/checkout@v4
               with:
                   ref: ${{ github.event.inputs.ref || '' }}
+                  fetch-depth: 2
 
-            - name: Deploy all services
+            - name: Detect changed modules
+              id: changes
+              if: github.event_name == 'push'
+              run: |
+                  CHANGED=$(git diff --name-only HEAD~1 HEAD 2>/dev/null || echo "")
+                  COMPONENTS=""
+                  echo "$CHANGED" | grep -q "^modules/hermes/"          && COMPONENTS="$COMPONENTS hermes"
+                  echo "$CHANGED" | grep -q "^modules/expense-tracker/" && COMPONENTS="$COMPONENTS expense-tracker"
+                  echo "$CHANGED" | grep -q "^modules/portfolio-tracker/" && COMPONENTS="$COMPONENTS portfolio-tracker"
+                  echo "$CHANGED" | grep -q "^modules/actual-api/"     && COMPONENTS="$COMPONENTS actual-api"
+                  echo "$CHANGED" | grep -q "^modules/image-gen/"      && COMPONENTS="$COMPONENTS image-gen"
+                  echo "$CHANGED" | grep -q "^gateway/"                && COMPONENTS="$COMPONENTS hermes"
+                  echo "$CHANGED" | grep -q "^\.github/"               && COMPONENTS="$COMPONENTS hermes"
+                  # If nothing matched or ALL core files changed, deploy everything
+                  if [ -z "$COMPONENTS" ] || echo "$CHANGED" | grep -qE "^(\.github/|gateway/|Dockerfile|deploy\.sh)"; then
+                      COMPONENTS="all"
+                  fi
+                  echo "components=$COMPONENTS" >> "$GITHUB_OUTPUT"
+
+            - name: Deploy services
               env:
                   GITHUB_ACTIONS: true
                   HERMES_WORKSPACE: /home/darren/workspace/hermes
@@ -87,8 +107,16 @@ jobs:
                   IBKR_PP_SGD_ACCOUNT: ${{ vars.IBKR_PP_SGD_ACCOUNT }}
                   IBKR_PP_USD_ACCOUNT: ${{ vars.IBKR_PP_USD_ACCOUNT }}
                   GOOGLE_SHEET_ID: ${{ vars.GOOGLE_SHEET_ID }}
+                  DEPLOY_COMPONENTS: ${{ steps.changes.outputs.components || 'all' }}
               run: |
-                  # Docker Compose env_file directives need these to exist
                   mkdir -p modules/hermes modules/portfolio-tracker modules/expense-tracker modules/image-gen
                   touch modules/hermes/.env modules/portfolio-tracker/.env modules/expense-tracker/.env modules/image-gen/.env
-                  bash ./modules/deploy.sh --component all --non-interactive
+                  if [ "${DEPLOY_COMPONENTS}" = "all" ]; then
+                      bash ./modules/deploy.sh --component all --non-interactive
+                  else
+                      ARGS=""
+                      for c in ${DEPLOY_COMPONENTS}; do
+                          ARGS="$ARGS --component $c"
+                      done
+                      bash ./modules/deploy.sh $ARGS --non-interactive
+                  fi
