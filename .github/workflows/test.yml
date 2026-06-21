@@ -6,7 +6,6 @@ on:
     workflow_call:
         secrets:
             ONEDRIVE_CLIENT_ID:
-                required: true
 
 jobs:
     expense-tracker:
