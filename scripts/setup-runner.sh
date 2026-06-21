@@ -101,7 +101,7 @@ echo -e "${YELLOW}--- Step 4: Sudoers ---${NC}"
 # directory must be owned by 10000 for the container to write files.
 SUDOERS_FILE="/etc/sudoers.d/runner"
 CHOWN_PATH=$(which chown) || { echo -e "${RED}✗ chown not found in PATH${NC}"; exit 1; }
-SUDOERS_RULE="runner ALL=(root) NOPASSWD: $CHOWN_PATH ${HERMES_UID}:${HERMES_UID} /home/darren/workspace/hermes"
+SUDOERS_RULE="runner ALL=(root) NOPASSWD: $CHOWN_PATH [0-9]* /home/darren/workspace/hermes"
 
 if [[ -f "$SUDOERS_FILE" ]] && grep -qF "${HERMES_UID}:${HERMES_UID}" "$SUDOERS_FILE"; then
   echo "  sudoers entry already exists"
