@@ -453,7 +453,7 @@ health_ok() {
   local code attempt=0 max_attempts=5
   while [ "$attempt" -lt "$max_attempts" ]; do
     code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 "$url" 2>/dev/null || echo "000")
-    if [ "$code" = "200" ]; then
+    if [[ "$code" =~ ^[23][0-9][0-9]$ ]]; then
       echo -e "  ${GREEN}✓ $name${NC}"
       return 0
     fi
