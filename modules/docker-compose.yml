@@ -8,9 +8,19 @@ services:
         volumes:
             - /home/runner/data/expense-tracker/data:/app/data
         environment:
+            - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
+            - ACTUAL_BUDGET_URL=${ACTUAL_BUDGET_URL}
+            - ACTUAL_BUDGET_PASSWORD=${ACTUAL_BUDGET_PASSWORD}
+            - ACTUAL_PRIMARY_BUDGET_FILE=${ACTUAL_PRIMARY_BUDGET_FILE}
+            - ACTUAL_SECONDARY_BUDGET_FILE=${ACTUAL_SECONDARY_BUDGET_FILE}
+            - ACTUAL_PRIMARY_CURRENCY=${ACTUAL_PRIMARY_CURRENCY}
+            - ACTUAL_SECONDARY_CURRENCY=${ACTUAL_SECONDARY_CURRENCY}
             - ACTUAL_API_URL=http://actual-api:3000
-            - NOTIFY_URL=http://hermes:8644/webhooks/notify
+            - NOTIFY_URL=${NOTIFY_URL}
             - HERMES_WEBHOOK_SECRET=${HERMES_WEBHOOK_SECRET}
+            - IMAP_HOST=${IMAP_HOST}
+            - IMAP_USERNAME=${IMAP_USERNAME}
+            - IMAP_PASSWORD=${IMAP_PASSWORD}
         restart: unless-stopped
         healthcheck:
             test:
@@ -29,9 +39,11 @@ services:
             dockerfile: Dockerfile
         ports:
             - "127.0.0.1:3000:3000"
-        env_file:
-            - /home/runner/data/portfolio-tracker/.env
         environment:
+            - ACTUAL_BUDGET_URL=${ACTUAL_BUDGET_URL}
+            - ACTUAL_BUDGET_PASSWORD=${ACTUAL_BUDGET_PASSWORD}
+            - ACTUAL_PRIMARY_BUDGET_FILE=${ACTUAL_PRIMARY_BUDGET_FILE}
+            - ACTUAL_SECONDARY_BUDGET_FILE=${ACTUAL_SECONDARY_BUDGET_FILE}
             - BUDGET_SWITCH_DELAY_MS=5000
         restart: unless-stopped
 
@@ -47,9 +59,18 @@ services:
             - /home/runner/data/onedrive-sync/refresh_token:/app/config/onedrive_refresh_token:rw
             - /home/runner/data/portfolio-tracker/google-service-account.json:/app/config/google-service-account.json:ro
         environment:
+            - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
+            - ACTUAL_BUDGET_URL=${ACTUAL_BUDGET_URL}
+            - ACTUAL_BUDGET_PASSWORD=${ACTUAL_BUDGET_PASSWORD}
+            - ACTUAL_PRIMARY_BUDGET_FILE=${ACTUAL_PRIMARY_BUDGET_FILE}
+            - ACTUAL_SECONDARY_BUDGET_FILE=${ACTUAL_SECONDARY_BUDGET_FILE}
+            - ONEDRIVE_CLIENT_ID=${ONEDRIVE_CLIENT_ID}
+            - IBKR_FLEX_TOKEN=${IBKR_FLEX_TOKEN}
+            - IBKR_FLEX_QUERY_ID=${IBKR_FLEX_QUERY_ID}
+            - IBKR_PP_SGD_ACCOUNT=${IBKR_PP_SGD_ACCOUNT}
+            - IBKR_PP_USD_ACCOUNT=${IBKR_PP_USD_ACCOUNT}
+            - GOOGLE_SHEET_ID=${GOOGLE_SHEET_ID}
             - PP_XML_PATH=/data/onedrive/Portfolio/Portfolio.portfolio
-        env_file:
-            - /home/runner/data/portfolio-tracker/.env
         restart: unless-stopped
         healthcheck:
             test:
@@ -72,9 +93,6 @@ services:
             - ../gateway/workspace/skills/image-generation:/app/scripts:ro
             - ../modules/perchance-gen:/app/modules/perchance-gen:ro
             - image_gen_media:/app/.openclaw/workspace/media
-        env_file:
-            - /home/runner/data/portfolio-tracker/.env
-            - /home/runner/data/image-gen/.env
         environment:
             - CDP_URL=http://172.17.0.1:9223
         extra_hosts:
@@ -117,9 +135,26 @@ services:
             - /home/runner/data/hermes/workspace:/workspace
             - /var/run/docker.sock:/var/run/docker.sock
             - /home/runner/data/expense-tracker/data:/opt/data/expense-tracker-data:ro
-        env_file:
-            - /home/runner/data/hermes/.env
         environment:
+            - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
+            - GEMINI_API_KEY=${GEMINI_API_KEY}
+            - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+            - TELEGRAM_ALLOWED_USERS=${TELEGRAM_ALLOWED_USERS}
+            - TELEGRAM_HOME_CHANNEL=${TELEGRAM_HOME_CHANNEL}
+            - HERMES_WEBHOOK_SECRET=${HERMES_WEBHOOK_SECRET}
+            - MEMORY_REPO_URL=${MEMORY_REPO_URL}
+            - GH_APP_ID=${GH_APP_ID}
+            - GH_APP_INSTALLATION_ID=${GH_APP_INSTALLATION_ID}
+            - GH_APP_PRIVATE_KEY=${GH_APP_PRIVATE_KEY}
+            - HERMES_DASHBOARD_BASIC_AUTH_USERNAME=${HERMES_DASHBOARD_BASIC_AUTH_USERNAME}
+            - HERMES_DASHBOARD_BASIC_AUTH_PASSWORD=${HERMES_DASHBOARD_BASIC_AUTH_PASSWORD}
+            - IDENTITY_NAME=${IDENTITY_NAME}
+            - IDENTITY_EMOJI=${IDENTITY_EMOJI}
+            - IDENTITY_VIBE=${IDENTITY_VIBE}
+            - SOUL_VOICE_TONE=${SOUL_VOICE_TONE}
+            - SOUL_VOICE_STYLE=${SOUL_VOICE_STYLE}
+            - SOUL_VOICE_RULES=${SOUL_VOICE_RULES}
+            - SOUL_DELEGATION=${SOUL_DELEGATION}
             - HERMES_DASHBOARD=1
             - OPENAI_API_KEY=not-needed
         networks:
@@ -130,7 +165,3 @@ services:
 volumes:
     onedrive_data:
     image_gen_media:
-
-networks:
-    hermes_shared:
-        external: true
