@@ -123,9 +123,6 @@ echo "========================================"
 echo " Environment Validation"
 echo "========================================"
 
-if $SKIP_BUILD; then
-  echo "  (skipped — using cached images)"
-
 # ---- Hermes ----
 
 if should_deploy "hermes" || should_deploy "all"; then
@@ -293,7 +290,6 @@ fi
 echo -e "  ${GREEN}All required variables present.${NC}"
 echo "========================================"
 echo ""
-fi  # SKIP_BUILD
 
 # ---- onedrive ----
 
