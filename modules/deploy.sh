@@ -199,6 +199,7 @@ if $GITHUB_MODE || check_file "$PT_ENV"; then
     if $GITHUB_MODE; then
       mkdir -p "$(dirname "$sa_host_path")"
       echo "$sa_json" > "$sa_host_path"
+      chmod 600 "$sa_host_path"
       echo -e "  ${GREEN}✓ google-service-account.json (from secret)${NC}"
     elif [ -f "$sa_host_path" ]; then
       echo -e "  ${GREEN}✓ google-service-account.json${NC}"
