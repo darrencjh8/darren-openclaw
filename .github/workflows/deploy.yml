@@ -86,7 +86,7 @@ jobs:
                   GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
               run: |
                   set -euo pipefail
-                  git config --global --add safe.directory /home/darren/workspace/hermes/darren-openclaw
+                  export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=safe.directory GIT_CONFIG_VALUE_0=/home/darren/workspace/hermes/darren-openclaw
                   git config --local http.https://github.com/.extraheader "AUTHORIZATION: bearer ${{ secrets.GITHUB_TOKEN }}"
                   git fetch origin
                   git checkout "$DEPLOY_REF"
