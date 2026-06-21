@@ -39,6 +39,7 @@ jobs:
               with:
                   ref: ${{ github.event.inputs.ref || '' }}
                   fetch-depth: 2
+                  clean: false
 
             - name: Detect changed modules
               id: changes
