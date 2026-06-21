@@ -9,6 +9,10 @@ on:
                 description: "Branch, tag, or commit SHA (default: main)"
                 type: string
                 default: "main"
+            environment:
+                description: "Deployment environment"
+                type: environment
+                default: "darren-prod"
 
 concurrency:
     group: production-deploy
@@ -23,7 +27,8 @@ jobs:
     deploy:
         needs: test
         runs-on: self-hosted
-        environment: darren-prod
+        environment:
+            name: ${{ github.event.inputs.environment || 'darren-prod' }}
         env:
             DEPLOY_REF: ${{ github.event.inputs.ref || 'main' }}
         defaults:
