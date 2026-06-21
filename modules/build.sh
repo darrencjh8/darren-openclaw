@@ -36,3 +36,7 @@ fi
 echo "Building: $SERVICES"
 $COMPOSE build $SERVICES
 echo "✓ Build complete"
+
+# Prune old images and build cache (keep latest)
+docker image prune -f 2>/dev/null || true
+docker builder prune -f --keep-storage 2GB 2>/dev/null || true
