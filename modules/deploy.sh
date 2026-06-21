@@ -417,12 +417,12 @@ echo "--- Building & Deploying ---"
 export COMPOSE_DOCKER_CLI_BUILD=1 DOCKER_BUILDKIT=1
 if [[ " ${COMPONENTS[*]} " =~ " all " ]] || [[ ${#COMPONENTS[@]} -eq 1 && "${COMPONENTS[0]}" == "all" ]]; then
   echo "  Building all services..."
-  docker compose build
-  docker compose up -d "${DOCKER_ARGS[@]}"
+  docker-compose build
+  docker-compose up -d "${DOCKER_ARGS[@]}"
 else
   echo "  Components: ${COMPONENTS[*]}"
-  docker compose build "${COMPONENTS[@]}"
-  docker compose up -d "${COMPONENTS[@]}"
+  docker-compose build "${COMPONENTS[@]}"
+  docker-compose up -d "${COMPONENTS[@]}"
 fi
 
 # ---- health checks ----
@@ -477,7 +477,7 @@ done
 echo ""
 echo "========================================"
 if [ "$failed" -gt 0 ]; then
-  echo -e "  ${RED}$failed service(s) not healthy. Check: docker compose logs${NC}"
+  echo -e "  ${RED}$failed service(s) not healthy. Check: docker-compose logs${NC}"
   echo "========================================"
   exit 1
 fi
