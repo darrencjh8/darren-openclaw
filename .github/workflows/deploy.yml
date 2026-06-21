@@ -40,6 +40,7 @@ jobs:
             - name: Deploy all services
               env:
                   HOME: /home/darren
+                  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
                   # ── Hermes: LLM ──
                   DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
                   GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
@@ -88,12 +89,11 @@ jobs:
                   GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
               run: |
                   set -euo pipefail
-                  export GIT_TERMINAL_PROMPT=0 GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=safe.directory GIT_CONFIG_VALUE_0=/home/darren/workspace/hermes/darren-openclaw
-                  GIT="git -c credential.helper= -c protocol.version=2"
-                  $GIT remote set-url origin https://github.com/darrencjh8/darren-openclaw.git
-                  $GIT fetch origin
-                  $GIT checkout "$DEPLOY_REF"
+                  export GIT_TERMINAL_PROMPT=0 GIT_ASKPASS=/bin/true GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=safe.directory GIT_CONFIG_VALUE_0=/home/darren/workspace/hermes/darren-openclaw
+                  git remote set-url origin https://github.com/darrencjh8/darren-openclaw.git
+                  git fetch origin
+                  git checkout "$DEPLOY_REF"
                   if git show-ref --verify "refs/heads/$DEPLOY_REF" 2>/dev/null; then
-                      $GIT pull origin "$DEPLOY_REF"
+                      git pull origin "$DEPLOY_REF"
                   fi
                   bash ./modules/deploy.sh --component all --non-interactive
