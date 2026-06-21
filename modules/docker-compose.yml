@@ -108,12 +108,19 @@ services:
         ports:
             - "127.0.0.1:8082:8082"
         volumes:
-            - ../modules/ktmb/.env:/app/.env
-            - ../modules/ktmb/data:/app/data
+            - /home/runner/data/ktmb/.env:/app/.env
+            - /home/runner/data/ktmb/data:/app/data
         environment:
             - KTMB_DB_PATH=/app/data/ktmb_jobs.db
             - KTMB_NOTIFY_URL=http://hermes:8644/webhooks/notify
             - KTMB_NOTIFY_TOKEN=${HERMES_WEBHOOK_SECRET}
+            - KTMB_EMAIL=${KTMB_EMAIL}
+            - KTMB_CAPTCHA_KEY=${KTMB_CAPTCHA_KEY}
+            - KTMB_ACCOUNT_NAME=${KTMB_ACCOUNT_NAME:-KTMB}
+            - KTMB_MAX_RETRIES=${KTMB_MAX_RETRIES:-5}
+            - KTMB_POLL_INTERVAL=${KTMB_POLL_INTERVAL:-60}
+            - IMAP_USERNAME=${IMAP_USERNAME}
+            - IMAP_PASSWORD=${IMAP_PASSWORD}
         restart: unless-stopped
 
     hermes:
