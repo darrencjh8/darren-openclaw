@@ -35,7 +35,6 @@ jobs:
             - uses: actions/checkout@v4
               with:
                   ref: ${{ github.event.inputs.ref || '' }}
-                  submodules: recursive
 
             - name: Deploy all services
               env:

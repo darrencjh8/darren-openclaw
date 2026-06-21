@@ -423,8 +423,15 @@ echo "--- Building & Deploying ---"
 export COMPOSE_DOCKER_CLI_BUILD=1 DOCKER_BUILDKIT=0
 if [[ " ${COMPONENTS[*]} " =~ " all " ]] || [[ ${#COMPONENTS[@]} -eq 1 && "${COMPONENTS[0]}" == "all" ]]; then
   echo "  Building all services..."
-  docker-compose build
-  docker-compose up -d "${DOCKER_ARGS[@]}"
+  # ktmb is a private submodule — skip if not cloned
+  if $GITHUB_MODE && [ ! -d "$ROOT/modules/ktmb/docker" ]; then
+    SERVICES=$(docker-compose config --services | grep -v ktmb-booking | tr '\n' ' ')
+    echo "  (excluding ktmb-booking — private submodule not cloned)"
+  else
+    SERVICES=""
+  fi
+  docker-compose build $SERVICES
+  docker-compose up -d $SERVICES
 else
   echo "  Components: ${COMPONENTS[*]}"
   docker-compose build "${COMPONENTS[@]}"
