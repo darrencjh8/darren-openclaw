@@ -6,6 +6,7 @@ on:
     workflow_call:
         secrets:
             ONEDRIVE_CLIENT_ID:
+            SUBMODULE_PAT:
 
 jobs:
     expense-tracker:
