@@ -23,6 +23,7 @@ jobs:
     deploy:
         needs: test
         runs-on: self-hosted
+        environment: darren-prod
         env:
             DEPLOY_REF: ${{ github.event.inputs.ref || 'main' }}
         defaults:
