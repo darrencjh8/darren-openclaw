@@ -387,7 +387,13 @@ fi  # should_deploy portfolio-tracker
 # ---- hermes workspace ----
 
 if should_deploy "hermes" || should_deploy "all"; then
-  HERMES_WS="$HOME/workspace/hermes"
+  # Hermes workspace: use HERMES_WORKSPACE env var if set (GitHub mode),
+  # otherwise default to $HOME/workspace/hermes (local dev).
+  if [ -n "${HERMES_WORKSPACE:-}" ]; then
+    HERMES_WS="$HERMES_WORKSPACE"
+  else
+    HERMES_WS="$HOME/workspace/hermes"
+  fi
   mkdir -p "$HERMES_WS"
   if [ "$(stat -c '%u' "$HERMES_WS" 2>/dev/null)" != "10000" ]; then
     echo ""

@@ -38,8 +38,7 @@ jobs:
 
             - name: Deploy all services
               env:
-                  HOME: /home/darren
-                  DOCKER_CONFIG: /home/runner/.docker
+                  HERMES_WORKSPACE: /home/darren/workspace/hermes
                   # ── Hermes: Secrets ──
                   DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
                   GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
