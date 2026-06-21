@@ -3,6 +3,9 @@ name: Deploy to Production
 on:
     push:
         branches: [main]
+        paths-ignore:
+            - "modules/ktmb/**"
+            - ".gitmodules"
     workflow_dispatch:
         inputs:
             ref:
@@ -31,69 +34,91 @@ jobs:
         runs-on: self-hosted
         environment:
             name: ${{ github.event.inputs.environment || 'darren-prod' }}
-        env:
-            DEPLOY_REF: ${{ github.event.inputs.ref || 'main' }}
-        defaults:
-            run:
-                working-directory: /home/darren/workspace/hermes/darren-openclaw
         steps:
-            - name: Deploy all services
+            - uses: actions/checkout@v4
+              with:
+                  ref: ${{ github.event.inputs.ref || '' }}
+                  fetch-depth: 2
+                  clean: false
+
+            - name: Detect changed modules
+              id: changes
+              if: github.event_name == 'push'
+              run: |
+                  CHANGED=$(git diff --name-only HEAD~1 HEAD 2>/dev/null || echo "")
+                  COMPONENTS=""
+                  echo "$CHANGED" | grep -q "^modules/hermes/"          && COMPONENTS="$COMPONENTS hermes"
+                  echo "$CHANGED" | grep -q "^modules/expense-tracker/" && COMPONENTS="$COMPONENTS expense-tracker"
+                  echo "$CHANGED" | grep -q "^modules/portfolio-tracker/" && COMPONENTS="$COMPONENTS portfolio-tracker"
+                  echo "$CHANGED" | grep -q "^modules/actual-api/"     && COMPONENTS="$COMPONENTS actual-api"
+                  echo "$CHANGED" | grep -q "^modules/image-gen/"      && COMPONENTS="$COMPONENTS image-gen"
+                  echo "$CHANGED" | grep -q "^gateway/"                && COMPONENTS="$COMPONENTS hermes"
+                  echo "$CHANGED" | grep -q "^\.github/"               && COMPONENTS="$COMPONENTS hermes"
+                  if [ -z "$COMPONENTS" ] || echo "$CHANGED" | grep -qE "^(\.github/|gateway/|Dockerfile|deploy\.sh)"; then
+                      COMPONENTS="all"
+                  fi
+                  echo "components=$COMPONENTS" >> "$GITHUB_OUTPUT"
+
+            - name: Build images
+              run: |
+                  mkdir -p /home/runner/data/{expense-tracker/data,portfolio-tracker/data,hermes/{data,workspace}}
+                  if [ "${DEPLOY_COMPONENTS}" = "all" ]; then
+                      bash ./modules/build.sh
+                  else
+                      ARGS=""
+                      for c in ${DEPLOY_COMPONENTS}; do ARGS="$ARGS --component $c"; done
+                      bash ./modules/build.sh $ARGS
+                  fi
+
+            - name: Deploy services
               env:
-                  HOME: /home/darren
-                  # ── Hermes: LLM ──
+                  GITHUB_ACTIONS: true
+                  HERMES_WORKSPACE: /home/darren/workspace/hermes
                   DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
                   GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-                  # ── Hermes: Telegram ──
                   TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-                  TELEGRAM_ALLOWED_USERS: ${{ secrets.TELEGRAM_ALLOWED_USERS }}
-                  TELEGRAM_HOME_CHANNEL: ${{ secrets.TELEGRAM_HOME_CHANNEL }}
-                  # ── Hermes: Webhook ──
                   HERMES_WEBHOOK_SECRET: ${{ secrets.HERMES_WEBHOOK_SECRET }}
-                  # ── Hermes: GitHub App ──
-                  MEMORY_REPO_URL: ${{ secrets.MEMORY_REPO_URL }}
-                  GITHUB_APP_ID: ${{ secrets.GITHUB_APP_ID }}
-                  GITHUB_APP_INSTALLATION_ID: ${{ secrets.GITHUB_APP_INSTALLATION_ID }}
-                  GITHUB_APP_PRIVATE_KEY: ${{ secrets.GITHUB_APP_PRIVATE_KEY }}
-                  # ── Hermes: Dashboard Auth ──
+                  GH_APP_PRIVATE_KEY: ${{ secrets.GH_APP_PRIVATE_KEY }}
                   HERMES_DASHBOARD_BASIC_AUTH_USERNAME: ${{ secrets.HERMES_DASHBOARD_BASIC_AUTH_USERNAME }}
                   HERMES_DASHBOARD_BASIC_AUTH_PASSWORD: ${{ secrets.HERMES_DASHBOARD_BASIC_AUTH_PASSWORD }}
-                  # ── Hermes: Persona ──
-                  IDENTITY_NAME: ${{ secrets.IDENTITY_NAME }}
-                  IDENTITY_EMOJI: ${{ secrets.IDENTITY_EMOJI }}
-                  IDENTITY_VIBE: ${{ secrets.IDENTITY_VIBE }}
-                  SOUL_VOICE_TONE: ${{ secrets.SOUL_VOICE_TONE }}
-                  SOUL_VOICE_STYLE: ${{ secrets.SOUL_VOICE_STYLE }}
-                  SOUL_VOICE_RULES: ${{ secrets.SOUL_VOICE_RULES }}
-                  SOUL_DELEGATION: ${{ secrets.SOUL_DELEGATION }}
-                  # ── Hermes: Optional (create these secrets or remove lines) ──
-                  # ── Actual Budget ──
-                  ACTUAL_BUDGET_URL: ${{ secrets.ACTUAL_BUDGET_URL }}
                   ACTUAL_BUDGET_PASSWORD: ${{ secrets.ACTUAL_BUDGET_PASSWORD }}
-                  ACTUAL_PRIMARY_BUDGET_FILE: ${{ secrets.ACTUAL_PRIMARY_BUDGET_FILE }}
-                  ACTUAL_SECONDARY_BUDGET_FILE: ${{ secrets.ACTUAL_SECONDARY_BUDGET_FILE }}
-                  ACTUAL_PRIMARY_CURRENCY: ${{ secrets.ACTUAL_PRIMARY_CURRENCY }}
-                  ACTUAL_SECONDARY_CURRENCY: ${{ secrets.ACTUAL_SECONDARY_CURRENCY }}
-                  # ── Expense Tracker ──
-                  NOTIFY_URL: ${{ secrets.NOTIFY_URL }}
-                  IMAP_HOST: ${{ secrets.IMAP_HOST }}
                   IMAP_USERNAME: ${{ secrets.IMAP_USERNAME }}
                   IMAP_PASSWORD: ${{ secrets.IMAP_PASSWORD }}
-                  # ── Portfolio Tracker ──
                   ONEDRIVE_CLIENT_ID: ${{ secrets.ONEDRIVE_CLIENT_ID }}
                   IBKR_FLEX_TOKEN: ${{ secrets.IBKR_FLEX_TOKEN }}
-                  IBKR_FLEX_QUERY_ID: ${{ secrets.IBKR_FLEX_QUERY_ID }}
-                  IBKR_PP_SGD_ACCOUNT: ${{ secrets.IBKR_PP_SGD_ACCOUNT }}
-                  IBKR_PP_USD_ACCOUNT: ${{ secrets.IBKR_PP_USD_ACCOUNT }}
                   GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
-                  GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
+                  GITHUB_PAT: ${{ secrets.GITHUB_PAT }}
+                  BRAVE_SEARCH_API_KEY: ${{ secrets.BRAVE_SEARCH_API_KEY }}
+                  FIRECRAWL_API_KEY: ${{ secrets.FIRECRAWL_API_KEY }}
+                  TELEGRAM_ALLOWED_USERS: ${{ vars.TELEGRAM_ALLOWED_USERS }}
+                  TELEGRAM_HOME_CHANNEL: ${{ vars.TELEGRAM_HOME_CHANNEL }}
+                  MEMORY_REPO_URL: ${{ vars.MEMORY_REPO_URL }}
+                  GH_APP_ID: ${{ vars.GH_APP_ID }}
+                  GH_APP_INSTALLATION_ID: ${{ vars.GH_APP_INSTALLATION_ID }}
+                  IDENTITY_NAME: ${{ vars.IDENTITY_NAME }}
+                  IDENTITY_EMOJI: ${{ vars.IDENTITY_EMOJI }}
+                  IDENTITY_VIBE: ${{ vars.IDENTITY_VIBE }}
+                  SOUL_VOICE_TONE: ${{ vars.SOUL_VOICE_TONE }}
+                  SOUL_VOICE_STYLE: ${{ vars.SOUL_VOICE_STYLE }}
+                  SOUL_VOICE_RULES: ${{ vars.SOUL_VOICE_RULES }}
+                  SOUL_DELEGATION: ${{ vars.SOUL_DELEGATION }}
+                  ACTUAL_BUDGET_URL: ${{ vars.ACTUAL_BUDGET_URL }}
+                  ACTUAL_PRIMARY_BUDGET_FILE: ${{ vars.ACTUAL_PRIMARY_BUDGET_FILE }}
+                  ACTUAL_SECONDARY_BUDGET_FILE: ${{ vars.ACTUAL_SECONDARY_BUDGET_FILE }}
+                  ACTUAL_PRIMARY_CURRENCY: ${{ vars.ACTUAL_PRIMARY_CURRENCY }}
+                  ACTUAL_SECONDARY_CURRENCY: ${{ vars.ACTUAL_SECONDARY_CURRENCY }}
+                  NOTIFY_URL: ${{ vars.NOTIFY_URL }}
+                  IMAP_HOST: ${{ vars.IMAP_HOST }}
+                  IBKR_FLEX_QUERY_ID: ${{ vars.IBKR_FLEX_QUERY_ID }}
+                  IBKR_PP_SGD_ACCOUNT: ${{ vars.IBKR_PP_SGD_ACCOUNT }}
+                  IBKR_PP_USD_ACCOUNT: ${{ vars.IBKR_PP_USD_ACCOUNT }}
+                  GOOGLE_SHEET_ID: ${{ vars.GOOGLE_SHEET_ID }}
+                  DEPLOY_COMPONENTS: ${{ steps.changes.outputs.components || 'all' }}
               run: |
-                  set -euo pipefail
-                  export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=safe.directory GIT_CONFIG_VALUE_0=/home/darren/workspace/hermes/darren-openclaw
-                  git config --local http.https://github.com/.extraheader "AUTHORIZATION: bearer ${{ secrets.GITHUB_TOKEN }}"
-                  git fetch origin
-                  git checkout "$DEPLOY_REF"
-                  if git show-ref --verify "refs/heads/$DEPLOY_REF" 2>/dev/null; then
-                      git pull origin "$DEPLOY_REF"
+                  if [ "${DEPLOY_COMPONENTS}" = "all" ]; then
+                      bash ./modules/deploy.sh --component all --non-interactive --skip-build
+                  else
+                      ARGS=""
+                      for c in ${DEPLOY_COMPONENTS}; do ARGS="$ARGS --component $c"; done
+                      bash ./modules/deploy.sh $ARGS --non-interactive --skip-build
                   fi
-                  bash ./modules/deploy.sh --component all --non-interactive
-                  git config --local --unset http.https://github.com/.extraheader

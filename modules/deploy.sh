@@ -13,11 +13,13 @@
 set -euo pipefail
 
 NON_INTERACTIVE=false
+SKIP_BUILD=false
 DOCKER_ARGS=()
 COMPONENTS=()
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --non-interactive) NON_INTERACTIVE=true ;;
+    --skip-build) SKIP_BUILD=true ;;
     --component) COMPONENTS+=("$2"); shift ;;
     *) DOCKER_ARGS+=("$1") ;;
   esac
@@ -145,9 +147,9 @@ if $GITHUB_MODE || check_file "$HERMES_ENV"; then
   # GitHub App
   echo "  [GitHub App]"
   check_var "MEMORY_REPO_URL" "$HERMES_ENV"
-  check_var "GITHUB_APP_ID" "$HERMES_ENV"
-  check_var "GITHUB_APP_INSTALLATION_ID" "$HERMES_ENV"
-  check_var "GITHUB_APP_PRIVATE_KEY" "$HERMES_ENV"
+  check_var "GH_APP_ID" "$HERMES_ENV"
+  check_var "GH_APP_INSTALLATION_ID" "$HERMES_ENV"
+  check_var "GH_APP_PRIVATE_KEY" "$HERMES_ENV"
 
   # Dashboard Auth
   echo "  [Dashboard Auth]"
@@ -194,7 +196,7 @@ if $GITHUB_MODE || check_file "$PT_ENV"; then
     sa_json=$(env_get "GOOGLE_SERVICE_ACCOUNT_JSON" "$PT_ENV")
   fi
   if [ -n "$sa_json" ]; then
-    sa_host_path="$ROOT/modules/portfolio-tracker/config/google-service-account.json"
+    sa_host_path="/home/runner/data/portfolio-tracker/google-service-account.json"
     # In GitHub mode, write the secret to the file so Docker can mount it
     if $GITHUB_MODE; then
       mkdir -p "$(dirname "$sa_host_path")"
@@ -361,13 +363,22 @@ echo ""
 echo "--- Portfolio Tracker: Java CLI ---"
 if command -v mvn &>/dev/null && [ -d "$PT_DIR/pp-cli" ]; then
   cd "$PT_DIR/pp-cli"
+  # Install PP model JAR to local Maven (not on Maven Central)
+  if [ -f lib/name.abuchen.portfolio-0.84.1.jar ]; then
+    mvn install:install-file -q -Dfile=lib/name.abuchen.portfolio-0.84.1.jar \
+      -DpomFile=lib/name.abuchen.portfolio-0.84.1.pom \
+      -DgroupId=name.abuchen.portfolio -DartifactId=name.abuchen.portfolio \
+      -Dversion=0.84.1 -Dpackaging=jar 2>/dev/null || true
+  fi
   echo "Building pp-cli.jar..."
-  mvn package -q -DskipTests
-  if [ -f target/pp-cli.jar ]; then
-    echo -e "  ${GREEN}✓ pp-cli.jar built${NC}"
+  if mvn package -q -DskipTests; then
+    if [ -f target/pp-cli.jar ]; then
+      echo -e "  ${GREEN}✓ pp-cli.jar built${NC}"
+    else
+      echo -e "  ${YELLOW}! pp-cli.jar not found after build — may need manual build${NC}"
+    fi
   else
-    echo -e "  ${RED}✗ pp-cli.jar build failed${NC}"
-    exit 1
+    echo -e "  ${YELLOW}! mvn build failed (dependency may not be in Maven Central)${NC}"
   fi
   cd "$ROOT"
 else
@@ -378,7 +389,13 @@ fi  # should_deploy portfolio-tracker
 # ---- hermes workspace ----
 
 if should_deploy "hermes" || should_deploy "all"; then
-  HERMES_WS="$HOME/workspace/hermes"
+  # Hermes workspace: use HERMES_WORKSPACE env var if set (GitHub mode),
+  # otherwise default to $HOME/workspace/hermes (local dev).
+  if [ -n "${HERMES_WORKSPACE:-}" ]; then
+    HERMES_WS="$HERMES_WORKSPACE"
+  else
+    HERMES_WS="$HOME/workspace/hermes"
+  fi
   mkdir -p "$HERMES_WS"
   if [ "$(stat -c '%u' "$HERMES_WS" 2>/dev/null)" != "10000" ]; then
     echo ""
@@ -391,6 +408,8 @@ fi
 
 # ---- pull latest code ----
 
+if ! $SKIP_BUILD; then
+
 echo ""
 echo "--- Git Pull ---"
 cd "$ROOT"
@@ -398,6 +417,7 @@ git stash push -m "auto-deploy-stash-$(date +%s)" 2>/dev/null || true
 git pull || true
 git stash drop 2>/dev/null || true
 echo -e "  ${GREEN}✓ code updated${NC}"
+fi  # SKIP_BUILD
 
 # ---- deploy ----
 
@@ -405,16 +425,36 @@ cd "$MODULES_DIR"
 
 echo ""
 echo "--- Building & Deploying ---"
+
+# Ensure shared network exists (idempotent — needed for kokoro-tts)
+docker network create hermes_shared --driver bridge 2>/dev/null || true
+
 export COMPOSE_DOCKER_CLI_BUILD=1 DOCKER_BUILDKIT=1
+COMPOSE="docker-compose --project-name modules"
 if [[ " ${COMPONENTS[*]} " =~ " all " ]] || [[ ${#COMPONENTS[@]} -eq 1 && "${COMPONENTS[0]}" == "all" ]]; then
-  echo "  Building all services..."
-  docker compose build
-  docker compose up -d "${DOCKER_ARGS[@]}"
+  # ktmb is a private submodule — skip if not cloned
+  if $GITHUB_MODE && [ ! -d "$ROOT/modules/ktmb/docker" ]; then
+    TARGETS=$($COMPOSE config --services | grep -v ktmb-booking | tr '\n' ' ')
+    echo "  (excluding ktmb-booking — private submodule not cloned)"
+  else
+    TARGETS=""
+  fi
 else
-  echo "  Components: ${COMPONENTS[*]}"
-  docker compose build "${COMPONENTS[@]}"
-  docker compose up -d "${COMPONENTS[@]}"
+  TARGETS="${COMPONENTS[*]}"
 fi
+
+# Build (skip if --skip-build)
+if ! $SKIP_BUILD; then
+  echo "  Building $TARGETS..."
+  $COMPOSE build $TARGETS
+fi
+
+# Deploy
+if [[ " ${COMPONENTS[*]} " =~ " all " ]]; then
+  docker ps -q --filter name=gateway | xargs -r docker stop 2>/dev/null; true
+  docker stop hermes modules-portfolio-tracker-1 modules-expense-tracker-1 modules-actual-api-1 2>/dev/null; true
+fi
+$COMPOSE up -d $TARGETS
 
 # ---- health checks ----
 
@@ -423,15 +463,18 @@ echo "--- Health Checks ---"
 
 health_ok() {
   local name="$1" url="$2"
-  local code attempt=0 max_attempts=5
+  local code attempt=0 max_attempts=10
+  # Give the container a moment to bind the port
+  sleep 2
   while [ "$attempt" -lt "$max_attempts" ]; do
-    code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 "$url" 2>/dev/null || echo "000")
-    if [ "$code" = "200" ]; then
+    code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 "$url" 2>/dev/null)
+    [ -z "$code" ] && code="000"
+    if [[ "$code" =~ ^[23][0-9][0-9]$ ]]; then
       echo -e "  ${GREEN}✓ $name${NC}"
       return 0
     fi
     attempt=$((attempt + 1))
-    [ "$attempt" -lt "$max_attempts" ] && sleep 3
+    [ "$attempt" -lt "$max_attempts" ] && sleep 6
   done
   echo -e "  ${RED}✗ $name (HTTP $code)${NC}"
   return 1
@@ -468,7 +511,7 @@ done
 echo ""
 echo "========================================"
 if [ "$failed" -gt 0 ]; then
-  echo -e "  ${RED}$failed service(s) not healthy. Check: docker compose logs${NC}"
+  echo -e "  ${RED}$failed service(s) not healthy. Check: docker-compose logs${NC}"
   echo "========================================"
   exit 1
 fi

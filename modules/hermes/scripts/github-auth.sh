@@ -1,6 +1,6 @@
 #!/bin/bash
 # Generate short-lived GitHub App installation token and auth gh CLI.
-# Requires: GITHUB_APP_ID, GITHUB_APP_INSTALLATION_ID, GITHUB_APP_PRIVATE_KEY
+# Requires: GH_APP_ID, GH_APP_INSTALLATION_ID, GH_APP_PRIVATE_KEY
 #
 # Idempotent — safe to run on every boot. Exits 0 on success, 1 on failure.
 set -euo pipefail
@@ -14,14 +14,14 @@ for cmd in openssl curl python3 gh; do
 done
 
 # ---- check required env vars ----
-[ -z "${GITHUB_APP_ID:-}" ]           && { log "GITHUB_APP_ID not set — skipping"; exit 0; }
-[ -z "${GITHUB_APP_INSTALLATION_ID:-}" ] && { log "GITHUB_APP_INSTALLATION_ID not set — skipping"; exit 0; }
-[ -z "${GITHUB_APP_PRIVATE_KEY:-}" ]    && { log "GITHUB_APP_PRIVATE_KEY not set — skipping"; exit 0; }
+[ -z "${GH_APP_ID:-}" ]           && { log "GH_APP_ID not set — skipping"; exit 0; }
+[ -z "${GH_APP_INSTALLATION_ID:-}" ] && { log "GH_APP_INSTALLATION_ID not set — skipping"; exit 0; }
+[ -z "${GH_APP_PRIVATE_KEY:-}" ]    && { log "GH_APP_PRIVATE_KEY not set — skipping"; exit 0; }
 
 # ---- decode private key (env vars escape \n as literal backslash-n) ----
-PRIVATE_KEY=$(echo -e "$GITHUB_APP_PRIVATE_KEY")
+PRIVATE_KEY=$(echo -e "$GH_APP_PRIVATE_KEY")
 if ! echo "$PRIVATE_KEY" | grep -q "BEGIN.*PRIVATE KEY"; then
-    die "private key does not contain BEGIN.*PRIVATE KEY header — check GITHUB_APP_PRIVATE_KEY format"
+    die "private key does not contain BEGIN.*PRIVATE KEY header — check GH_APP_PRIVATE_KEY format"
 fi
 
 # ---- generate JWT ----
@@ -29,7 +29,7 @@ NOW=$(date +%s)
 EXP=$((NOW + 600))
 b64url() { base64 -w0 | tr '+/' '-_' | tr -d '='; }
 HEADER=$(echo -n '{"alg":"RS256","typ":"JWT"}' | b64url)
-PAYLOAD=$(echo -n "{\"iat\":$NOW,\"exp\":$EXP,\"iss\":\"$GITHUB_APP_ID\"}" | b64url)
+PAYLOAD=$(echo -n "{\"iat\":$NOW,\"exp\":$EXP,\"iss\":\"$GH_APP_ID\"}" | b64url)
 if ! SIGNATURE=$(echo -n "$HEADER.$PAYLOAD" | openssl dgst -sha256 -sign <(echo "$PRIVATE_KEY") -binary 2>&1 | b64url); then
     die "openssl signing failed — is the private key valid?"
 fi
@@ -39,7 +39,7 @@ JWT="$HEADER.$PAYLOAD.$SIGNATURE"
 RESP=$(curl -s -w "\n%{http_code}" -X POST \
   -H "Authorization: Bearer $JWT" \
   -H "Accept: application/vnd.github+json" \
-  "https://api.github.com/app/installations/$GITHUB_APP_INSTALLATION_ID/access_tokens")
+  "https://api.github.com/app/installations/$GH_APP_INSTALLATION_ID/access_tokens")
 HTTP_CODE=$(echo "$RESP" | tail -1)
 BODY=$(echo "$RESP" | sed '$d')
 

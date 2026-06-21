@@ -35,7 +35,7 @@ chown -R hermes:hermes /opt/data/memories-backup 2>/dev/null || true
 
 # Seed github-auth-refresh cron job (idempotent — refreshes installation token every 50 min)
 # GitHub App installation tokens expire after 1 hour; this keeps gh CLI auth alive.
-if [ -n "${GITHUB_APP_ID}" ] && [ -n "${GITHUB_APP_INSTALLATION_ID}" ] && [ -n "${GITHUB_APP_PRIVATE_KEY}" ]; then
+if [ -n "${GH_APP_ID}" ] && [ -n "${GH_APP_INSTALLATION_ID}" ] && [ -n "${GH_APP_PRIVATE_KEY}" ]; then
     python3 -c '
 import os, json, uuid, datetime
 jobs_path = "/opt/data/cron/jobs.json"
@@ -89,7 +89,7 @@ with open("/opt/data/config.yaml", "w") as f:
 
 # Seed memory-backup cron job (idempotent — skips if already present)
 # Uses GitHub App token primarily, PAT as fallback
-if [ -n "${MEMORY_REPO_URL}" ] && ( [ -n "${GITHUB_APP_ID}" ] || [ -n "${GITHUB_PAT}" ] ); then
+if [ -n "${MEMORY_REPO_URL}" ] && ( [ -n "${GH_APP_ID}" ] || [ -n "${GITHUB_PAT}" ] ); then
     python3 -c '
 import os, json, uuid, datetime
 jobs_path = "/opt/data/cron/jobs.json"
@@ -120,6 +120,11 @@ if not any(j.get("name") == "memory-backup" for j in jobs if isinstance(j, dict)
 ' || true
 fi
 
+# Restore memories from friday-memory repo on first boot (idempotent)
+if [ -n "${MEMORY_REPO_URL}" ]; then
+    /opt/data/scripts/memory-restore.sh 2>/dev/null || true
+fi
+
 # Seed portfolio-sync cron job (idempotent)
 python3 -c '
 import os, json, uuid, datetime
@@ -131,22 +136,22 @@ try:
     jobs = data.get("jobs", []) if isinstance(data, dict) else data
 except (FileNotFoundError, json.JSONDecodeError):
     jobs = []
-    if not any(j.get("name") == "portfolio-daily-sync" for j in jobs if isinstance(j, dict)):
-        jobs.append({
-            "id": uuid.uuid4().hex[:12],
-            "name": "portfolio-daily-sync",
-            "schedule": {"kind": "cron", "expr": "0 10 * * *", "display": "0 10 * * *"},
+if not any(j.get("name") == "portfolio-daily-sync" for j in jobs if isinstance(j, dict)):
+    jobs.append({
+        "id": uuid.uuid4().hex[:12],
+        "name": "portfolio-daily-sync",
+        "schedule": {"kind": "cron", "expr": "0 10 * * *", "display": "0 10 * * *"},
         "schedule_display": "0 10 * * *",
-            "prompt": "Run portfolio_sync to pull IBKR flex trades, sync AB balances, and export taxonomies. If any step fails (especially OneDrive auth), tell the user what went wrong and what action they need to take (e.g. /onedrive setup).",
-            "enabled": True,
-            "deliver": "telegram",
-            "deliver_extra": {"chat_id": os.environ.get("TELEGRAM_HOME_CHANNEL", "")},
-            "next_run_at": None,
-            "created_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
-        })
-        with open(jobs_path, "w") as f:
-            json.dump({"jobs": jobs, "updated_at": datetime.datetime.now(datetime.timezone.utc).isoformat()}, f, indent=2)
-            print("cron: portfolio-daily-sync seeded")
+        "prompt": "Run portfolio_sync to pull IBKR flex trades, sync AB balances, and export taxonomies. If any step fails (especially OneDrive auth), tell the user what went wrong and what action they need to take (e.g. /onedrive setup).",
+        "enabled": True,
+        "deliver": "telegram",
+        "deliver_extra": {"chat_id": os.environ.get("TELEGRAM_HOME_CHANNEL", "")},
+        "next_run_at": None,
+        "created_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+    })
+    with open(jobs_path, "w") as f:
+        json.dump({"jobs": jobs, "updated_at": datetime.datetime.now(datetime.timezone.utc).isoformat()}, f, indent=2)
+        print("cron: portfolio-daily-sync seeded")
 ' || true
 
 # Disable profile gateways (workers don't need their own gateways — they compete for Telegram token)

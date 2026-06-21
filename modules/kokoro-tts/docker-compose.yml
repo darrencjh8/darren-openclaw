@@ -1,0 +1,36 @@
+services:
+    kokoro-tts:
+        image: ghcr.io/remsky/kokoro-fastapi-cpu:latest
+        container_name: kokoro-tts
+        ports:
+            - "127.0.0.1:8880:8880"
+        volumes:
+            - kokoro_models:/app/models
+        environment:
+            - PYTHONUNBUFFERED=1
+            - DOWNLOAD_MODEL=true
+        deploy:
+            resources:
+                limits:
+                    memory: 1g
+        restart: unless-stopped
+        shm_size: 256m
+        networks:
+            - hermes_shared
+        healthcheck:
+            test:
+                [
+                    "CMD-SHELL",
+                    'python -c "import urllib.request; urllib.request.urlopen(''http://localhost:8880/health'')" || exit 1',
+                ]
+            interval: 30s
+            timeout: 10s
+            retries: 3
+            start_period: 120s
+
+volumes:
+    kokoro_models:
+
+networks:
+    hermes_shared:
+        external: true
