@@ -247,7 +247,7 @@ Core rules:
 - If found → retry extraction with password; if not → check email body → ask user
 - After successful extraction → learn_fact to store password
 
-Currency routing: SGD → "My Budget", MYR → "My MYR Budget" (via ACTUAL_BUDGET_FILE / MYR_BUDGET_FILE env vars).
+Currency routing: SGD → "My Budget", MYR → "My MYR Budget" (via ACTUAL_PRIMARY_BUDGET_FILE / ACTUAL_SECONDARY_BUDGET_FILE env vars).
 
 ### 8.3 Portfolio Tracker Prompt — Missing-PDF Rule (deepseek-chat, thinking=adaptive)
 

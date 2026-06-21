@@ -281,9 +281,9 @@ describe("STATEMENT_FEW_SHOT", () => {
 // Edge cases — env var handling for budget file names
 // ---------------------------------------------------------------------------
 describe("STATEMENT_PROMPT env var edge cases", () => {
-    it("defaults BUDGET_FILE to 'My Budget' when ACTUAL_BUDGET_FILE is unset", () => {
+    it("defaults BUDGET_FILE to 'My Budget' when ACTUAL_PRIMARY_BUDGET_FILE is unset", () => {
         // The prompt is evaluated at import time with process.env values.
-        // In test environments without ACTUAL_BUDGET_FILE set, it should default.
+        // In test environments without ACTUAL_PRIMARY_BUDGET_FILE set, it should default.
         expect(STATEMENT_PROMPT).toContain('"My Budget"');
     });
 
