@@ -3,6 +3,9 @@
 # Deploy Script — Hermes Agent + Services
 # Validates all required environment variables, builds + deploys via Compose.
 #
+# On GitHub Actions (GITHUB_ACTIONS=true): reads secrets from environment.
+# Locally: reads .env files.
+#
 # Usage: ./modules/deploy.sh --component <name> [--component <name>...] [--non-interactive]
 #   --component <name>  Required. One of: all, hermes, portfolio-tracker, expense-tracker, actual-api, image-gen, ktmb-booking
 #   --non-interactive    Skip OneDrive auth prompt
@@ -46,6 +49,11 @@ ET_DIR="$ROOT/modules/expense-tracker"
 HERMES_DIR="$ROOT/modules/hermes"
 HERMES_ENV="$HERMES_DIR/.env"
 
+# Auto-detect: GitHub Actions uses secrets via environment;
+# local dev reads .env files.
+GITHUB_MODE=false
+[[ "${GITHUB_ACTIONS:-}" == "true" ]] && GITHUB_MODE=true
+
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -59,9 +67,14 @@ env_get() {
 }
 
 check_var() {
-  local name="$1" file="$2"
+  local name="$1"
   local val
-  val=$(env_get "$name" "$file")
+  if $GITHUB_MODE; then
+    val="${!name:-}"
+  else
+    local file="$2"
+    val=$(env_get "$name" "$file")
+  fi
   if [ -z "$val" ]; then
     echo -e "  ${RED}✗ MISSING: $name${NC}"
     missing=$((missing + 1))
@@ -71,9 +84,14 @@ check_var() {
 }
 
 check_var_optional() {
-  local name="$1" file="$2"
+  local name="$1"
   local val
-  val=$(env_get "$name" "$file")
+  if $GITHUB_MODE; then
+    val="${!name:-}"
+  else
+    local file="$2"
+    val=$(env_get "$name" "$file")
+  fi
   if [ -z "$val" ]; then
     echo -e "  ${YELLOW}○ $name (not set)${NC}"
   else
@@ -108,7 +126,7 @@ echo "========================================"
 if should_deploy "hermes" || should_deploy "all"; then
 echo ""
 echo "--- Hermes (.env) ---"
-if check_file "$HERMES_ENV"; then
+if $GITHUB_MODE || check_file "$HERMES_ENV"; then
   # LLM
   echo "  [LLM Providers]"
   check_var "DEEPSEEK_API_KEY" "$HERMES_ENV"
@@ -126,7 +144,7 @@ if check_file "$HERMES_ENV"; then
 
   # GitHub App
   echo "  [GitHub App]"
-  check_var "GITHUB_URL" "$HERMES_ENV"
+  check_var "MEMORY_REPO_URL" "$HERMES_ENV"
   check_var "GITHUB_APP_ID" "$HERMES_ENV"
   check_var "GITHUB_APP_INSTALLATION_ID" "$HERMES_ENV"
   check_var "GITHUB_APP_PRIVATE_KEY" "$HERMES_ENV"
@@ -160,7 +178,7 @@ if should_deploy "portfolio-tracker" || should_deploy "all"; then
 echo ""
 echo "--- Portfolio Tracker (.env) ---"
 PT_ENV="$PT_DIR/.env"
-if check_file "$PT_ENV"; then
+if $GITHUB_MODE || check_file "$PT_ENV"; then
   for v in DEEPSEEK_API_KEY ACTUAL_BUDGET_URL ACTUAL_BUDGET_PASSWORD \
            ACTUAL_PRIMARY_BUDGET_FILE ACTUAL_SECONDARY_BUDGET_FILE \
            ONEDRIVE_CLIENT_ID \
@@ -170,10 +188,20 @@ if check_file "$PT_ENV"; then
     check_var "$v" "$PT_ENV"
   done
   # Validate service account JSON exists
-  sa_json=$(env_get "GOOGLE_SERVICE_ACCOUNT_JSON" "$PT_ENV")
+  if $GITHUB_MODE; then
+    sa_json="${GOOGLE_SERVICE_ACCOUNT_JSON:-}"
+  else
+    sa_json=$(env_get "GOOGLE_SERVICE_ACCOUNT_JSON" "$PT_ENV")
+  fi
   if [ -n "$sa_json" ]; then
     sa_host_path="$ROOT/modules/portfolio-tracker/config/google-service-account.json"
-    if [ -f "$sa_host_path" ]; then
+    # In GitHub mode, write the secret to the file so Docker can mount it
+    if $GITHUB_MODE; then
+      mkdir -p "$(dirname "$sa_host_path")"
+      echo "$sa_json" > "$sa_host_path"
+      chmod 600 "$sa_host_path"
+      echo -e "  ${GREEN}✓ google-service-account.json (from secret)${NC}"
+    elif [ -f "$sa_host_path" ]; then
       echo -e "  ${GREEN}✓ google-service-account.json${NC}"
     else
       echo -e "  ${RED}✗ google-service-account.json NOT FOUND at $sa_host_path${NC}"
@@ -189,7 +217,7 @@ if should_deploy "expense-tracker" || should_deploy "all"; then
 echo ""
 echo "--- Expense Tracker (.env) ---"
 ET_ENV="$ET_DIR/.env"
-if check_file "$ET_ENV"; then
+if $GITHUB_MODE || check_file "$ET_ENV"; then
   for v in DEEPSEEK_API_KEY ACTUAL_BUDGET_URL ACTUAL_BUDGET_PASSWORD \
            ACTUAL_PRIMARY_BUDGET_FILE ACTUAL_SECONDARY_BUDGET_FILE \
            ACTUAL_PRIMARY_CURRENCY ACTUAL_SECONDARY_CURRENCY \
@@ -206,17 +234,18 @@ if should_deploy "actual-api" || should_deploy "all"; then
 echo ""
 echo "--- actual-api (.env) ---"
 PT_ENV="$PT_DIR/.env"
-if check_file "$PT_ENV"; then
+if $GITHUB_MODE || check_file "$PT_ENV"; then
   for v in ACTUAL_BUDGET_PASSWORD ACTUAL_PRIMARY_BUDGET_FILE ACTUAL_BUDGET_URL; do
     check_var "$v" "$PT_ENV"
   done
-else
+elif ! $GITHUB_MODE; then
   echo -e "  ${YELLOW}(portfolio-tracker/.env not found — cannot validate actual-api vars)${NC}"
 fi
 fi
 
 # ---- pluggable modules (auto-discover from modules/*/module.env) ----
 
+if ! $GITHUB_MODE; then
 echo ""
 echo "--- Pluggable Modules ---"
 MODULE_COUNT=0
@@ -238,7 +267,8 @@ for mod_env in "$ROOT"/modules/*/module.env; do
 done
 if [ "$MODULE_COUNT" -eq 0 ]; then
   echo "  (none — no modules/*/module.env found)"
-fi
+  fi
+fi  # ! GITHUB_MODE
 
 # ---- result ----
 
@@ -246,7 +276,11 @@ echo ""
 echo "========================================"
 if [ "$missing" -gt 0 ]; then
   echo -e "  ${RED}$missing variable(s) missing or empty.${NC}"
-  echo "  Fill them in the corresponding .env files and re-run."
+  if $GITHUB_MODE; then
+    echo "  Ensure all required secrets are set in GitHub → Settings → Secrets."
+  else
+    echo "  Fill them in the corresponding .env files and re-run."
+  fi
   echo "========================================"
   exit 1
 fi

@@ -4,6 +4,8 @@ on:
     pull_request:
         branches: [main]
     workflow_call:
+        secrets:
+            ONEDRIVE_CLIENT_ID:
 
 jobs:
     expense-tracker:

@@ -11,7 +11,7 @@ const testEnv = {
     DEEPSEEK_API_KEY: "sk-test",
     ACTUAL_BUDGET_URL: "http://test:5006",
     ACTUAL_BUDGET_PASSWORD: "pw",
-    ACTUAL_BUDGET_FILE: "test-budget",
+    ACTUAL_PRIMARY_BUDGET_FILE: "test-budget",
     DEDUP_DB_PATH: ":memory:",
 };
 
@@ -64,9 +64,7 @@ describe("MCP server tool registration", () => {
         expect(
             tool.function.parameters.properties.ab_transaction_ids.type,
         ).toBe("array");
-        expect(
-            tool.function.parameters.properties.statement_ref,
-        ).toBeDefined();
+        expect(tool.function.parameters.properties.statement_ref).toBeDefined();
     });
 
     it("fetch_unreconciled_transactions schema has date range fields", () => {
@@ -130,14 +128,11 @@ describe("reconcile_transaction handler — negative cases", () => {
         });
 
         try {
-            const result = await registry.executeTool(
-                "reconcile_transaction",
-                {
-                    ab_transaction_ids: ["txn-a", "txn-b", "txn-c"],
-                    statement_ref: "Jun 2026",
-                    budget_id: "test-budget",
-                },
-            );
+            const result = await registry.executeTool("reconcile_transaction", {
+                ab_transaction_ids: ["txn-a", "txn-b", "txn-c"],
+                statement_ref: "Jun 2026",
+                budget_id: "test-budget",
+            });
             expect(result.cleared).toBe(3);
             expect(result.failed).toBe(0);
             expect(result.results.length).toBe(3);
@@ -173,13 +168,10 @@ describe("reconcile_transaction handler — negative cases", () => {
         });
 
         try {
-            const result = await registry.executeTool(
-                "reconcile_transaction",
-                {
-                    ab_transaction_ids: ["txn-ok", "txn-fail", "txn-ok2"],
-                    budget_id: "test-budget",
-                },
-            );
+            const result = await registry.executeTool("reconcile_transaction", {
+                ab_transaction_ids: ["txn-ok", "txn-fail", "txn-ok2"],
+                budget_id: "test-budget",
+            });
             expect(result.cleared).toBe(2);
             expect(result.failed).toBe(1);
             expect(result.results.length).toBe(3);
@@ -202,13 +194,10 @@ describe("reconcile_transaction handler — negative cases", () => {
         });
 
         try {
-            const result = await registry.executeTool(
-                "reconcile_transaction",
-                {
-                    ab_transaction_ids: ["txn-x", "txn-y"],
-                    budget_id: "test-budget",
-                },
-            );
+            const result = await registry.executeTool("reconcile_transaction", {
+                ab_transaction_ids: ["txn-x", "txn-y"],
+                budget_id: "test-budget",
+            });
             expect(result.cleared).toBe(0);
             expect(result.failed).toBe(2);
             expect(result.results.every((r) => r.status === "error")).toBe(

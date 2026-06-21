@@ -482,7 +482,7 @@ SHA-256(key) where key = "date|amount_cents|account_id|payee_name"
 | `DEEPSEEK_API_KEY` | ✅ | DeepSeek API key |
 | `ACTUAL_BUDGET_URL` | ✅ | `http://your-server.example.com` |
 | `ACTUAL_BUDGET_PASSWORD` | ✅ | Actual Budget server password |
-| `ACTUAL_BUDGET_FILE` | ✅ | Budget file ID or name |
+| `ACTUAL_PRIMARY_BUDGET_FILE` | ✅ | Primary budget file ID or name |
 | `ACTUAL_BUDGET_ENCRYPTION_PASSWORD` | ❌ | Optional encryption password |
 | `IMAP_HOST` | ✅ | `imap.example.com` |
 | `IMAP_PORT` | ❌ | Default: `993` |
