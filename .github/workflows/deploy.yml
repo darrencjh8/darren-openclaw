@@ -3,6 +3,9 @@ name: Deploy to Production
 on:
     push:
         branches: [main]
+        paths-ignore:
+            - "modules/ktmb/**"
+            - ".gitmodules"
     workflow_dispatch:
         inputs:
             ref:
