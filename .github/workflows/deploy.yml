@@ -62,7 +62,13 @@ jobs:
             - name: Build images
               run: |
                   mkdir -p /home/runner/data/{expense-tracker/data,portfolio-tracker/data,hermes/{data,workspace}}
-                  bash ./modules/build.sh
+                  if [ "${DEPLOY_COMPONENTS}" = "all" ]; then
+                      bash ./modules/build.sh
+                  else
+                      ARGS=""
+                      for c in ${DEPLOY_COMPONENTS}; do ARGS="$ARGS --component $c"; done
+                      bash ./modules/build.sh $ARGS
+                  fi
 
             - name: Deploy services
               env:
@@ -104,5 +110,12 @@ jobs:
                   IBKR_PP_SGD_ACCOUNT: ${{ vars.IBKR_PP_SGD_ACCOUNT }}
                   IBKR_PP_USD_ACCOUNT: ${{ vars.IBKR_PP_USD_ACCOUNT }}
                   GOOGLE_SHEET_ID: ${{ vars.GOOGLE_SHEET_ID }}
+                  DEPLOY_COMPONENTS: ${{ steps.changes.outputs.components || 'all' }}
               run: |
-                  bash ./modules/deploy.sh --component all --non-interactive
+                  if [ "${DEPLOY_COMPONENTS}" = "all" ]; then
+                      bash ./modules/deploy.sh --component all --non-interactive
+                  else
+                      ARGS=""
+                      for c in ${DEPLOY_COMPONENTS}; do ARGS="$ARGS --component $c"; done
+                      bash ./modules/deploy.sh $ARGS --non-interactive
+                  fi
