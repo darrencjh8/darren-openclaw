@@ -165,3 +165,7 @@ services:
 volumes:
     onedrive_data:
     image_gen_media:
+
+networks:
+    hermes_shared:
+        external: true
