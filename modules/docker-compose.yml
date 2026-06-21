@@ -6,8 +6,8 @@ services:
         ports:
             - "127.0.0.1:8080:8080"
         volumes:
-            - /var/lib/darren-openclaw/expense-tracker/data:/app/data
-            - /var/lib/darren-openclaw/expense-tracker/.env:/app/.env:ro
+            - /home/runner/data/expense-tracker/data:/app/data
+            - /home/runner/data/expense-tracker/.env:/app/.env:ro
         environment:
             - ACTUAL_API_URL=http://actual-api:3000
             - NOTIFY_URL=http://hermes:8644/webhooks/notify
@@ -31,7 +31,7 @@ services:
         ports:
             - "127.0.0.1:3000:3000"
         env_file:
-            - /var/lib/darren-openclaw/portfolio-tracker/.env
+            - /home/runner/data/portfolio-tracker/.env
         environment:
             - BUDGET_SWITCH_DELAY_MS=5000
         restart: unless-stopped
@@ -43,14 +43,14 @@ services:
         ports:
             - "127.0.0.1:8081:8081"
         volumes:
-            - /var/lib/darren-openclaw/portfolio-tracker/data:/app/data
+            - /home/runner/data/portfolio-tracker/data:/app/data
             - onedrive_data:/data/onedrive:rw
-            - /var/lib/darren-openclaw/onedrive-sync/refresh_token:/app/config/onedrive_refresh_token:rw
-            - /var/lib/darren-openclaw/portfolio-tracker/google-service-account.json:/app/config/google-service-account.json:ro
+            - /home/runner/data/onedrive-sync/refresh_token:/app/config/onedrive_refresh_token:rw
+            - /home/runner/data/portfolio-tracker/google-service-account.json:/app/config/google-service-account.json:ro
         environment:
             - PP_XML_PATH=/data/onedrive/Portfolio/Portfolio.portfolio
         env_file:
-            - /var/lib/darren-openclaw/portfolio-tracker/.env
+            - /home/runner/data/portfolio-tracker/.env
         restart: unless-stopped
         healthcheck:
             test:
@@ -74,8 +74,8 @@ services:
             - ../modules/perchance-gen:/app/modules/perchance-gen:ro
             - image_gen_media:/app/.openclaw/workspace/media
         env_file:
-            - /var/lib/darren-openclaw/portfolio-tracker/.env
-            - /var/lib/darren-openclaw/image-gen/.env
+            - /home/runner/data/portfolio-tracker/.env
+            - /home/runner/data/image-gen/.env
         environment:
             - CDP_URL=http://172.17.0.1:9223
         extra_hosts:
@@ -114,12 +114,12 @@ services:
             - "9119:9119"
             - "8644:8644"
         volumes:
-            - /var/lib/darren-openclaw/hermes/data:/opt/data
-            - /var/lib/darren-openclaw/hermes/workspace:/workspace
+            - /home/runner/data/hermes/data:/opt/data
+            - /home/runner/data/hermes/workspace:/workspace
             - /var/run/docker.sock:/var/run/docker.sock
-            - /var/lib/darren-openclaw/expense-tracker/data:/opt/data/expense-tracker-data:ro
+            - /home/runner/data/expense-tracker/data:/opt/data/expense-tracker-data:ro
         env_file:
-            - /var/lib/darren-openclaw/hermes/.env
+            - /home/runner/data/hermes/.env
         environment:
             - HERMES_DASHBOARD=1
             - OPENAI_API_KEY=not-needed
