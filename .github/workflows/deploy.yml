@@ -87,6 +87,9 @@ jobs:
                   ONEDRIVE_CLIENT_ID: ${{ secrets.ONEDRIVE_CLIENT_ID }}
                   IBKR_FLEX_TOKEN: ${{ secrets.IBKR_FLEX_TOKEN }}
                   GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+                  GITHUB_PAT: ${{ secrets.GITHUB_PAT }}
+                  BRAVE_SEARCH_API_KEY: ${{ secrets.BRAVE_SEARCH_API_KEY }}
+                  FIRECRAWL_API_KEY: ${{ secrets.FIRECRAWL_API_KEY }}
                   TELEGRAM_ALLOWED_USERS: ${{ vars.TELEGRAM_ALLOWED_USERS }}
                   TELEGRAM_HOME_CHANNEL: ${{ vars.TELEGRAM_HOME_CHANNEL }}
                   MEMORY_REPO_URL: ${{ vars.MEMORY_REPO_URL }}
