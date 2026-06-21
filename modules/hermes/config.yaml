@@ -131,7 +131,9 @@ platforms:
                 notify:
                     secret: ${HERMES_WEBHOOK_SECRET}
                     prompt: |
-                        SYSTEM: A notification arrived. Relay it.
+                        SYSTEM: {SOUL_MD}
+
+                        A notification arrived. Relay it in your natural voice.
                         NOTIFICATION: {message}
                     deliver: telegram
                     deliver_extra:
