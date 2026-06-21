@@ -54,17 +54,20 @@ jobs:
                   echo "$CHANGED" | grep -q "^modules/image-gen/"      && COMPONENTS="$COMPONENTS image-gen"
                   echo "$CHANGED" | grep -q "^gateway/"                && COMPONENTS="$COMPONENTS hermes"
                   echo "$CHANGED" | grep -q "^\.github/"               && COMPONENTS="$COMPONENTS hermes"
-                  # If nothing matched or ALL core files changed, deploy everything
                   if [ -z "$COMPONENTS" ] || echo "$CHANGED" | grep -qE "^(\.github/|gateway/|Dockerfile|deploy\.sh)"; then
                       COMPONENTS="all"
                   fi
                   echo "components=$COMPONENTS" >> "$GITHUB_OUTPUT"
 
+            - name: Build images
+              run: |
+                  mkdir -p /home/runner/data/{expense-tracker/data,portfolio-tracker/data,hermes/{data,workspace}}
+                  bash ./modules/build.sh
+
             - name: Deploy services
               env:
                   GITHUB_ACTIONS: true
                   HERMES_WORKSPACE: /home/darren/workspace/hermes
-                  # ── Hermes: Secrets ──
                   DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
                   GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
                   TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
@@ -72,16 +75,12 @@ jobs:
                   GH_APP_PRIVATE_KEY: ${{ secrets.GH_APP_PRIVATE_KEY }}
                   HERMES_DASHBOARD_BASIC_AUTH_USERNAME: ${{ secrets.HERMES_DASHBOARD_BASIC_AUTH_USERNAME }}
                   HERMES_DASHBOARD_BASIC_AUTH_PASSWORD: ${{ secrets.HERMES_DASHBOARD_BASIC_AUTH_PASSWORD }}
-                  # ── Actual Budget: Secrets ──
                   ACTUAL_BUDGET_PASSWORD: ${{ secrets.ACTUAL_BUDGET_PASSWORD }}
-                  # ── Expense Tracker: Secrets ──
                   IMAP_USERNAME: ${{ secrets.IMAP_USERNAME }}
                   IMAP_PASSWORD: ${{ secrets.IMAP_PASSWORD }}
-                  # ── Portfolio Tracker: Secrets ──
                   ONEDRIVE_CLIENT_ID: ${{ secrets.ONEDRIVE_CLIENT_ID }}
                   IBKR_FLEX_TOKEN: ${{ secrets.IBKR_FLEX_TOKEN }}
                   GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
-                  # ── Hermes: Variables ──
                   TELEGRAM_ALLOWED_USERS: ${{ vars.TELEGRAM_ALLOWED_USERS }}
                   TELEGRAM_HOME_CHANNEL: ${{ vars.TELEGRAM_HOME_CHANNEL }}
                   MEMORY_REPO_URL: ${{ vars.MEMORY_REPO_URL }}
@@ -94,30 +93,16 @@ jobs:
                   SOUL_VOICE_STYLE: ${{ vars.SOUL_VOICE_STYLE }}
                   SOUL_VOICE_RULES: ${{ vars.SOUL_VOICE_RULES }}
                   SOUL_DELEGATION: ${{ vars.SOUL_DELEGATION }}
-                  # ── Actual Budget: Variables ──
                   ACTUAL_BUDGET_URL: ${{ vars.ACTUAL_BUDGET_URL }}
                   ACTUAL_PRIMARY_BUDGET_FILE: ${{ vars.ACTUAL_PRIMARY_BUDGET_FILE }}
                   ACTUAL_SECONDARY_BUDGET_FILE: ${{ vars.ACTUAL_SECONDARY_BUDGET_FILE }}
                   ACTUAL_PRIMARY_CURRENCY: ${{ vars.ACTUAL_PRIMARY_CURRENCY }}
                   ACTUAL_SECONDARY_CURRENCY: ${{ vars.ACTUAL_SECONDARY_CURRENCY }}
-                  # ── Expense Tracker: Variables ──
                   NOTIFY_URL: ${{ vars.NOTIFY_URL }}
                   IMAP_HOST: ${{ vars.IMAP_HOST }}
-                  # ── Portfolio Tracker: Variables ──
                   IBKR_FLEX_QUERY_ID: ${{ vars.IBKR_FLEX_QUERY_ID }}
                   IBKR_PP_SGD_ACCOUNT: ${{ vars.IBKR_PP_SGD_ACCOUNT }}
                   IBKR_PP_USD_ACCOUNT: ${{ vars.IBKR_PP_USD_ACCOUNT }}
                   GOOGLE_SHEET_ID: ${{ vars.GOOGLE_SHEET_ID }}
-                  DEPLOY_COMPONENTS: ${{ steps.changes.outputs.components || 'all' }}
               run: |
-                  # Create data directories
-                  mkdir -p /home/runner/data/{expense-tracker/data,portfolio-tracker/data,hermes/{data,workspace}}
-                  if [ "${DEPLOY_COMPONENTS}" = "all" ]; then
-                      bash ./modules/deploy.sh --component all --non-interactive
-                  else
-                      ARGS=""
-                      for c in ${DEPLOY_COMPONENTS}; do
-                          ARGS="$ARGS --component $c"
-                      done
-                      bash ./modules/deploy.sh $ARGS --non-interactive
-                  fi
+                  bash ./modules/deploy.sh --component all --non-interactive
