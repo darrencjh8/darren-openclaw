@@ -121,6 +121,9 @@ mcp_servers:
         tools:
             exclude:
                 - ktmb_reset_password
+        destructive:
+            - ktmb_pause_worker
+            - ktmb_resume_worker
         supports_parallel_tool_calls: false
     image-gen-pollinations:
         url: https://gen.pollinations.ai/mcp
