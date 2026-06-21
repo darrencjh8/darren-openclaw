@@ -120,6 +120,11 @@ if not any(j.get("name") == "memory-backup" for j in jobs if isinstance(j, dict)
 ' || true
 fi
 
+# Restore memories from friday-memory repo on first boot (idempotent)
+if [ -n "${MEMORY_REPO_URL}" ]; then
+    /opt/data/scripts/memory-restore.sh 2>/dev/null || true
+fi
+
 # Seed portfolio-sync cron job (idempotent)
 python3 -c '
 import os, json, uuid, datetime
