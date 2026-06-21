@@ -57,10 +57,7 @@ jobs:
                   SOUL_VOICE_STYLE: ${{ secrets.SOUL_VOICE_STYLE }}
                   SOUL_VOICE_RULES: ${{ secrets.SOUL_VOICE_RULES }}
                   SOUL_DELEGATION: ${{ secrets.SOUL_DELEGATION }}
-                  # ── Hermes: Optional ──
-                  GITHUB_PAT: ${{ secrets.GITHUB_PAT }}
-                  BRAVE_SEARCH_API_KEY: ${{ secrets.BRAVE_SEARCH_API_KEY }}
-                  FIRECRAWL_API_KEY: ${{ secrets.FIRECRAWL_API_KEY }}
+                  # ── Hermes: Optional (create these secrets or remove lines) ──
                   # ── Actual Budget ──
                   ACTUAL_BUDGET_URL: ${{ secrets.ACTUAL_BUDGET_URL }}
                   ACTUAL_BUDGET_PASSWORD: ${{ secrets.ACTUAL_BUDGET_PASSWORD }}
