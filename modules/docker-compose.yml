@@ -159,6 +159,7 @@ services:
             - SOUL_DELEGATION=${SOUL_DELEGATION}
             - HERMES_DASHBOARD=1
             - OPENAI_API_KEY=not-needed
+        mem_limit: 1g
         networks:
             - default
             - hermes_shared
