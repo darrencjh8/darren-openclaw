@@ -85,4 +85,7 @@ jobs:
                   IBKR_PP_USD_ACCOUNT: ${{ vars.IBKR_PP_USD_ACCOUNT }}
                   GOOGLE_SHEET_ID: ${{ vars.GOOGLE_SHEET_ID }}
               run: |
+                  # Docker Compose env_file directives need these to exist
+                  mkdir -p modules/hermes modules/portfolio-tracker modules/expense-tracker modules/image-gen
+                  touch modules/hermes/.env modules/portfolio-tracker/.env modules/expense-tracker/.env modules/image-gen/.env
                   bash ./modules/deploy.sh --component all --non-interactive
