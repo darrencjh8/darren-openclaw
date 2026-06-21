@@ -194,7 +194,7 @@ if $GITHUB_MODE || check_file "$PT_ENV"; then
     sa_json=$(env_get "GOOGLE_SERVICE_ACCOUNT_JSON" "$PT_ENV")
   fi
   if [ -n "$sa_json" ]; then
-    sa_host_path="$ROOT/modules/portfolio-tracker/config/google-service-account.json"
+    sa_host_path="/var/lib/darren-openclaw/portfolio-tracker/google-service-account.json"
     # In GitHub mode, write the secret to the file so Docker can mount it
     if $GITHUB_MODE; then
       mkdir -p "$(dirname "$sa_host_path")"

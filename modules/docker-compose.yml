@@ -43,10 +43,10 @@ services:
         ports:
             - "127.0.0.1:8081:8081"
         volumes:
-            - ../modules/portfolio-tracker/data:/app/data
+            - /var/lib/darren-openclaw/portfolio-tracker/data:/app/data
             - onedrive_data:/data/onedrive:rw
-            - ../modules/onedrive-sync/config/onedrive/refresh_token:/app/config/onedrive_refresh_token:rw
-            - ../modules/portfolio-tracker/config/google-service-account.json:/app/config/google-service-account.json:ro
+            - /var/lib/darren-openclaw/onedrive-sync/refresh_token:/app/config/onedrive_refresh_token:rw
+            - /var/lib/darren-openclaw/portfolio-tracker/google-service-account.json:/app/config/google-service-account.json:ro
         environment:
             - PP_XML_PATH=/data/onedrive/Portfolio/Portfolio.portfolio
         env_file:
