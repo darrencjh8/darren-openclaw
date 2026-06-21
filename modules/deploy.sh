@@ -145,9 +145,9 @@ if $GITHUB_MODE || check_file "$HERMES_ENV"; then
   # GitHub App
   echo "  [GitHub App]"
   check_var "MEMORY_REPO_URL" "$HERMES_ENV"
-  check_var "GITHUB_APP_ID" "$HERMES_ENV"
-  check_var "GITHUB_APP_INSTALLATION_ID" "$HERMES_ENV"
-  check_var "GITHUB_APP_PRIVATE_KEY" "$HERMES_ENV"
+  check_var "GH_APP_ID" "$HERMES_ENV"
+  check_var "GH_APP_INSTALLATION_ID" "$HERMES_ENV"
+  check_var "GH_APP_PRIVATE_KEY" "$HERMES_ENV"
 
   # Dashboard Auth
   echo "  [Dashboard Auth]"

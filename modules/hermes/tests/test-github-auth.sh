@@ -61,17 +61,17 @@ echo "=== graceful exit without credentials ==="
 # Script should exit 0 when no env vars are set
 output=$(bash "$AUTH_SCRIPT" 2>&1) && rc=$? || rc=$?
 if [ "$rc" -eq 0 ]; then
-    ok "exits 0 without GITHUB_APP_ID"
+    ok "exits 0 without GH_APP_ID"
 else
-    nope "exits 0 without GITHUB_APP_ID" "got exit code $rc"
+    nope "exits 0 without GH_APP_ID" "got exit code $rc"
 fi
 
 # Only APP_ID set, missing INSTALLATION_ID — should skip
-output=$(GITHUB_APP_ID=123 bash "$AUTH_SCRIPT" 2>&1) && rc=$? || rc=$?
+output=$(GH_APP_ID=123 bash "$AUTH_SCRIPT" 2>&1) && rc=$? || rc=$?
 if [ "$rc" -eq 0 ]; then
-    ok "exits 0 with only GITHUB_APP_ID set"
+    ok "exits 0 with only GH_APP_ID set"
 else
-    nope "exits 0 with only GITHUB_APP_ID set" "got exit code $rc"
+    nope "exits 0 with only GH_APP_ID set" "got exit code $rc"
 fi
 
 # Missing openssl should die with message
@@ -79,7 +79,7 @@ if command -v openssl >/dev/null; then
     ok "openssl available (pre-flight would pass)"
 
     # Bad private key format should die
-    output=$(GITHUB_APP_ID=123 GITHUB_APP_INSTALLATION_ID=456 GITHUB_APP_PRIVATE_KEY="not-a-key" bash "$AUTH_SCRIPT" 2>&1) && rc=$? || rc=$?
+    output=$(GH_APP_ID=123 GH_APP_INSTALLATION_ID=456 GH_APP_PRIVATE_KEY="not-a-key" bash "$AUTH_SCRIPT" 2>&1) && rc=$? || rc=$?
     if [ "$rc" -eq 1 ] && echo "$output" | grep -q "BEGIN.*PRIVATE KEY"; then
         ok "dies on bad private key format"
     else

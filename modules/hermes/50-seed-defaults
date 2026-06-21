@@ -35,7 +35,7 @@ chown -R hermes:hermes /opt/data/memories-backup 2>/dev/null || true
 
 # Seed github-auth-refresh cron job (idempotent — refreshes installation token every 50 min)
 # GitHub App installation tokens expire after 1 hour; this keeps gh CLI auth alive.
-if [ -n "${GITHUB_APP_ID}" ] && [ -n "${GITHUB_APP_INSTALLATION_ID}" ] && [ -n "${GITHUB_APP_PRIVATE_KEY}" ]; then
+if [ -n "${GH_APP_ID}" ] && [ -n "${GH_APP_INSTALLATION_ID}" ] && [ -n "${GH_APP_PRIVATE_KEY}" ]; then
     python3 -c '
 import os, json, uuid, datetime
 jobs_path = "/opt/data/cron/jobs.json"
@@ -89,7 +89,7 @@ with open("/opt/data/config.yaml", "w") as f:
 
 # Seed memory-backup cron job (idempotent — skips if already present)
 # Uses GitHub App token primarily, PAT as fallback
-if [ -n "${MEMORY_REPO_URL}" ] && ( [ -n "${GITHUB_APP_ID}" ] || [ -n "${GITHUB_PAT}" ] ); then
+if [ -n "${MEMORY_REPO_URL}" ] && ( [ -n "${GH_APP_ID}" ] || [ -n "${GITHUB_PAT}" ] ); then
     python3 -c '
 import os, json, uuid, datetime
 jobs_path = "/opt/data/cron/jobs.json"
