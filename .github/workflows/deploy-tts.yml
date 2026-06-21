@@ -1,0 +1,23 @@
+name: Deploy Kokoro TTS
+
+on:
+    push:
+        branches: [main]
+        paths:
+            - "modules/kokoro-tts/**"
+    workflow_dispatch:
+
+concurrency:
+    group: kokoro-tts-deploy
+    cancel-in-progress: false
+
+jobs:
+    deploy:
+        runs-on: self-hosted
+        steps:
+            - uses: actions/checkout@v4
+              with:
+                  clean: false
+
+            - name: Deploy kokoro-tts
+              run: bash ./modules/kokoro-tts/deploy-tts.sh
