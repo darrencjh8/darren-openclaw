@@ -71,8 +71,12 @@ fi
 
 # Restore skills (no-clobber — baked-in skills from image take precedence)
 if [ -d "$TMP_DIR/skills" ]; then
+    # Sync to /opt/data/skills/ (baked-in skills path)
     mkdir -p /opt/data/skills
     cp -rn "$TMP_DIR/skills/"* /opt/data/skills/ 2>/dev/null || true
+    # Also sync to /opt/data/memories/skills/ (agent runtime path)
+    mkdir -p /opt/data/memories/skills
+    cp -rn "$TMP_DIR/skills/"* /opt/data/memories/skills/ 2>/dev/null || true
     log "restored skills"
 fi
 
