@@ -16,7 +16,7 @@ const REDIRECT_URI =
 async function getAccessToken() {
     const refreshTokenPath =
         process.env.ONEDRIVE_REFRESH_TOKEN_PATH ||
-        "/app/config/onedrive_refresh_token";
+        "/app/config/onedrive/refresh_token";
     const clientId = process.env.ONEDRIVE_CLIENT_ID;
 
     if (!existsSync(refreshTokenPath)) {

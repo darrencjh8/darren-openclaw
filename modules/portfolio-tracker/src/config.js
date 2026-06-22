@@ -117,7 +117,7 @@ export class Config {
         // OneDrive
         this.onedriveRefreshTokenPath =
             env.ONEDRIVE_REFRESH_TOKEN_PATH ||
-            "/app/config/onedrive_refresh_token";
+            "/app/config/onedrive/refresh_token";
         this.onedriveDataDir = env.ONEDRIVE_DATA_DIR || "/data/onedrive";
         if (!env.ONEDRIVE_CLIENT_ID) {
             throw new Error(
