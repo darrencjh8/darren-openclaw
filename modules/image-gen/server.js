@@ -4,6 +4,7 @@ import { createServer } from "http";
 import { execFile } from "child_process";
 import { existsSync, mkdirSync } from "fs";
 import { join } from "path";
+import { z } from "zod";
 
 const SCRIPTS_DIR = "/app/scripts";
 const OUTPUT_DIR = "/app/.openclaw/workspace/media";
@@ -29,25 +30,10 @@ mcp.tool(
     "image_gen_perchance",
     "Generate an image using Perchance. Pass the user's prompt verbatim — do NOT modify, enhance, or rephrase.",
     {
-        prompt: {
-            type: "string",
-            description: "Exact user prompt — do not modify",
-        },
-        shape: {
-            type: "string",
-            description: "square, landscape, or portrait",
-            default: "square",
-        },
-        negativePrompt: {
-            type: "string",
-            description: "Things to avoid in the image",
-            default: "",
-        },
-        guidance: {
-            type: "string",
-            description: "Guidance scale (1-20)",
-            default: "7",
-        },
+        prompt: z.string().describe("Exact user prompt — do not modify"),
+        shape: z.enum(["square", "landscape", "portrait"]).default("square"),
+        negativePrompt: z.string().default(""),
+        guidance: z.string().default("7"),
     },
     async ({ prompt, shape, negativePrompt, guidance }) => {
         const outputFile = join(OUTPUT_DIR, `img-${Date.now()}.png`);
@@ -108,6 +94,7 @@ mcp.tool(
 // ── HTTP Server ─────────────────────────────────────────────────────────
 
 const transport = new StreamableHTTPServerTransport();
+await mcp.connect(transport);
 
 const server = createServer(async (req, res) => {
     if (req.method === "GET" && req.url === "/health") {
@@ -117,7 +104,6 @@ const server = createServer(async (req, res) => {
     }
 
     if (req.method === "POST" && req.url === "/mcp") {
-        await mcp.connect(transport);
         await transport.handleRequest(req, res);
         return;
     }
