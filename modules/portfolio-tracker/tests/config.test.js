@@ -244,7 +244,7 @@ describe("Config — OneDrive", () => {
     it("loads OneDrive configuration with defaults", () => {
         const cfg = new Config(REQUIRED_ENV);
         expect(cfg.onedriveRefreshTokenPath).toBe(
-            "/app/config/onedrive_refresh_token",
+            "/app/config/onedrive/refresh_token",
         );
         expect(cfg.onedriveDataDir).toBe("/data/onedrive");
         expect(cfg.onedriveClientId).toBe("test-client-id");

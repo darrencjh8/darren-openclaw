@@ -83,7 +83,7 @@ function createTools(server, registry) {
             if (!registry._ppBridge) {
                 const tokenPath =
                     process.env.ONEDRIVE_REFRESH_TOKEN_PATH ||
-                    "/app/config/onedrive_refresh_token";
+                    "/app/config/onedrive/refresh_token";
                 const hasToken = existsSync(tokenPath);
                 if (!hasToken)
                     return tx({
@@ -132,7 +132,7 @@ function createTools(server, registry) {
         async () => {
             const tokenPath =
                 process.env.ONEDRIVE_REFRESH_TOKEN_PATH ||
-                "/app/config/onedrive_refresh_token";
+                "/app/config/onedrive/refresh_token";
             const clientId = process.env.ONEDRIVE_CLIENT_ID || "";
             if (!existsSync(tokenPath))
                 return tx({

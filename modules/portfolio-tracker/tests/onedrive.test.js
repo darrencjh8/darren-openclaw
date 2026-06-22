@@ -29,7 +29,7 @@ describe("onedrive", () => {
     let pullFromOneDrive;
     let pushToOneDrive;
 
-    const REFRESH_TOKEN_PATH = "/app/config/onedrive_refresh_token";
+    const REFRESH_TOKEN_PATH = "/app/config/onedrive/refresh_token";
     const DEFAULT_PP_PATH = "/data/onedrive/Portfolio/Portfolio.portfolio";
 
     beforeEach(async () => {
