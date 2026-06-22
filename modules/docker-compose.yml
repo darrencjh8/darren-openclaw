@@ -170,6 +170,7 @@ services:
             - OPENAI_API_KEY=not-needed
             - FIRECRAWL_API_KEY=${FIRECRAWL_API_KEY}
             - NOTION_API_KEY=${NOTION_API_KEY}
+            - POLLINATIONS_API_KEY=${POLLINATIONS_API_KEY}
         mem_limit: 1g
         networks:
             - default
