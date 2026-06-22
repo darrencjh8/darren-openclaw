@@ -172,10 +172,6 @@ services:
             - FIRECRAWL_API_KEY=${FIRECRAWL_API_KEY}
             - NOTION_API_KEY=${NOTION_API_KEY}
             - POLLINATIONS_API_KEY=${POLLINATIONS_API_KEY}
-            - SIGNAL_HTTP_URL=http://signal-cli:8080
-            - SIGNAL_ACCOUNT=${SIGNAL_ACCOUNT}
-            - SIGNAL_ALLOWED_USERS=${SIGNAL_ALLOWED_USERS}
-            - SIGNAL_HOME_CHANNEL=${SIGNAL_HOME_CHANNEL}
         mem_limit: 1g
         networks:
             - default
