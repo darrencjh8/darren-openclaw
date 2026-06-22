@@ -11,12 +11,11 @@ FIRST_BOOT=false
 
 log() { echo "[memory-restore] $*" >&2; }
 
-# Auth via GitHub App token or PAT (same as memory-backup.sh)
-/opt/data/scripts/github-auth.sh 2>/dev/null || true
-if [ -f /opt/data/.gh_token ]; then
-    AUTH_TOKEN=$(cat /opt/data/.gh_token)
-elif [ -n "${GITHUB_PAT}" ]; then
-    AUTH_TOKEN="${GITHUB_PAT}"
+# Auth: use gh CLI token, then GITHUB_TOKEN env
+if AUTH_TOKEN=$(gh auth token 2>/dev/null); then
+    :
+elif [ -n "${GITHUB_TOKEN:-}" ]; then
+    AUTH_TOKEN="${GITHUB_TOKEN}"
 else
     log "no auth token — skipping restore"
     exit 0
