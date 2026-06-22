@@ -94,10 +94,6 @@ for profile_dir in /opt/data/profiles/*/; do
     fi
 done
 
-# ---- Skills backup ----
-mkdir -p "$CLONE_DIR/skills"
-cp -r /opt/data/skills/* "$CLONE_DIR/skills/" 2>/dev/null || true
-
 # ---- Cron jobs backup ----
 mkdir -p "$CLONE_DIR/cron"
 if [ -f /opt/data/cron/jobs.json ]; then
