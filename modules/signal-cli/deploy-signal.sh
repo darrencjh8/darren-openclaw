@@ -30,8 +30,7 @@ docker compose up -d
 echo ""
 echo "--- Health Check ---"
 for i in $(seq 1 10); do
-    code=$(docker exec signal-cli signal-cli --version 2>/dev/null && echo 0 || echo 1)
-    if [ "$code" = "0" ]; then
+    if curl -sf http://127.0.0.1:8084/api/v1/check >/dev/null 2>&1; then
         echo "  ✓ signal-cli running"
         echo ""
         echo "=== Deploy complete ==="
