@@ -30,41 +30,9 @@ done
 mkdir -p /opt/data/memories-backup
 chown -R hermes:hermes /opt/data/memories-backup 2>/dev/null || true
 
-# Generate GitHub App token for workers
-# (errors logged to stderr → docker logs; never blocks boot)
-/opt/data/scripts/github-auth.sh || true
-chown hermes:hermes /opt/data/.gh_token 2>/dev/null || true
-
-# Seed github-auth-refresh cron job (idempotent — refreshes installation token every 50 min)
-# GitHub App installation tokens expire after 1 hour; this keeps gh CLI auth alive.
-if [ -n "${GH_APP_ID}" ] && [ -n "${GH_APP_INSTALLATION_ID}" ] && [ -n "${GH_APP_PRIVATE_KEY}" ]; then
-    python3 -c '
-import os, json, uuid, datetime
-jobs_path = "/opt/data/cron/jobs.json"
-os.makedirs(os.path.dirname(jobs_path), exist_ok=True)
-try:
-    with open(jobs_path) as f:
-        data = json.load(f)
-    jobs = data.get("jobs", []) if isinstance(data, dict) else data
-except (FileNotFoundError, json.JSONDecodeError):
-    jobs = []
-if not any(j.get("name") == "github-auth-refresh" for j in jobs if isinstance(j, dict)):
-    jobs.append({
-        "id": uuid.uuid4().hex[:12],
-        "name": "github-auth-refresh",
-        "schedule": {"kind": "interval", "minutes": 50, "display": "every 50m"},
-        "schedule_display": "every 50m",
-        "script": "github-auth.sh",
-        "no_agent": True,
-        "enabled": True,
-        "deliver": "local",
-        "next_run_at": None,
-        "created_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
-    })
-    with open(jobs_path, "w") as f:
-        json.dump({"jobs": jobs, "updated_at": datetime.datetime.now(datetime.timezone.utc).isoformat()}, f, indent=2)
-    print("cron: github-auth-refresh seeded")
-' || true
+# Configure gh CLI with GITHUB_TOKEN from hermes
+if [ -n "${GITHUB_TOKEN:-}" ]; then
+    echo "$GITHUB_TOKEN" | su -s /bin/sh hermes -c "gh auth login --with-token" 2>/dev/null || true
 fi
 
 python3 -c '
@@ -78,20 +46,10 @@ for path in paths:
     content = re.sub(r"\$\{(\w+)\}", lambda m: os.environ.get(m.group(1), m.group(0)), content)
     with open(path, "w") as f:
         f.write(content)
-
-# Inject resolved SOUL.md content into config.yaml {SOUL_MD} placeholder
-with open("/opt/data/config.yaml") as f:
-    config = f.read()
-with open("/opt/data/SOUL.md") as f:
-    soul = f.read()
-config = config.replace("{SOUL_MD}", soul)
-with open("/opt/data/config.yaml", "w") as f:
-    f.write(config)
 '
 
 # Seed memory-backup cron job (idempotent — skips if already present)
-# Uses GitHub App token primarily, PAT as fallback
-if [ -n "${MEMORY_REPO_URL}" ] && ( [ -n "${GH_APP_ID}" ] || [ -n "${GITHUB_PAT}" ] ); then
+if [ -n "${MEMORY_REPO_URL}" ]; then
     python3 -c '
 import os, json, uuid, datetime
 jobs_path = "/opt/data/cron/jobs.json"
@@ -122,9 +80,13 @@ if not any(j.get("name") == "memory-backup" for j in jobs if isinstance(j, dict)
 ' || true
 fi
 
-# Restore memories from friday-memory repo on first boot (idempotent)
-if [ -n "${MEMORY_REPO_URL}" ]; then
-    /opt/data/scripts/memory-restore.sh 2>/dev/null || true
+# Restore memories from friday-memory repo on first boot
+if [ -n "${MEMORY_REPO_URL}" ] && [ ! -f "/opt/data/memories/MEMORY.md" ]; then
+    rm -rf /tmp/friday-memory-clone
+    git clone "${MEMORY_REPO_URL}" /tmp/friday-memory-clone 2>/dev/null && \
+    cp -r /tmp/friday-memory-clone/. /opt/data/memories/ && \
+    chown -R hermes:hermes /opt/data/memories/ && \
+    rm -rf /tmp/friday-memory-clone || true
 fi
 
 # Seed portfolio-sync cron job (idempotent)

@@ -1,22 +1,20 @@
 #!/bin/bash
 # Restore memories from friday-memory repo on first boot.
-# Skills are always synced on every boot (not just first).
+# Idempotent — skips if MEMORY.md already exists locally.
 set -e
 
 SRC_DIR="/opt/data/memories"
-FIRST_BOOT=false
-[ -f "$SRC_DIR/MEMORY.md" ] || FIRST_BOOT=true
+[ -f "$SRC_DIR/MEMORY.md" ] && exit 0  # already exists
 
 [ -z "${MEMORY_REPO_URL}" ] && exit 0
 
 log() { echo "[memory-restore] $*" >&2; }
 
-# Auth via GitHub App token or PAT (same as memory-backup.sh)
-/opt/data/scripts/github-auth.sh 2>/dev/null || true
-if [ -f /opt/data/.gh_token ]; then
-    AUTH_TOKEN=$(cat /opt/data/.gh_token)
-elif [ -n "${GITHUB_PAT}" ]; then
-    AUTH_TOKEN="${GITHUB_PAT}"
+# Auth: use gh CLI token, then GITHUB_TOKEN env
+if AUTH_TOKEN=$(gh auth token 2>/dev/null); then
+    :
+elif [ -n "${GITHUB_TOKEN:-}" ]; then
+    AUTH_TOKEN="${GITHUB_TOKEN}"
 else
     log "no auth token — skipping restore"
     exit 0
@@ -31,15 +29,13 @@ git clone -q "$REPO_URL" "$TMP_DIR" 2>/dev/null || { log "clone failed — skipp
 
 mkdir -p "$SRC_DIR"
 
-# Restore core memory files (first boot only)
-if $FIRST_BOOT; then
-    for f in MEMORY.md USER.md; do
-        if [ -f "$TMP_DIR/$f" ]; then
-            cp "$TMP_DIR/$f" "$SRC_DIR/"
-            log "restored $f"
-        fi
-    done
-fi
+# Restore core memory files
+for f in MEMORY.md USER.md; do
+    if [ -f "$TMP_DIR/$f" ]; then
+        cp "$TMP_DIR/$f" "$SRC_DIR/"
+        log "restored $f"
+    fi
+done
 
 # Restore expense tracker data
 EXPENSE_DIR="${EXPENSE_TRACKER_DATA:-}"
@@ -71,12 +67,8 @@ fi
 
 # Restore skills (no-clobber — baked-in skills from image take precedence)
 if [ -d "$TMP_DIR/skills" ]; then
-    # Sync to /opt/data/skills/ (baked-in skills path)
     mkdir -p /opt/data/skills
     cp -rn "$TMP_DIR/skills/"* /opt/data/skills/ 2>/dev/null || true
-    # Also sync to /opt/data/memories/skills/ (agent runtime path)
-    mkdir -p /opt/data/memories/skills
-    cp -rn "$TMP_DIR/skills/"* /opt/data/memories/skills/ 2>/dev/null || true
     log "restored skills"
 fi
 
