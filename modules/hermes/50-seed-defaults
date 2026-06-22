@@ -106,7 +106,7 @@ if not any(j.get("name") == "portfolio-daily-sync" for j in jobs if isinstance(j
         "name": "portfolio-daily-sync",
         "schedule": {"kind": "cron", "expr": "0 10 * * *", "display": "0 10 * * *"},
         "schedule_display": "0 10 * * *",
-        "prompt": "Run portfolio_sync to pull IBKR flex trades, sync AB balances, and export taxonomies. If any step fails (especially OneDrive auth), tell the user what went wrong and what action they need to take (e.g. /onedrive setup).",
+        "prompt": "Run portfolio_sync to pull IBKR flex trades, sync AB balances, and export taxonomies. Then compose a Telegram summary following SOUL.md formatting rules: use markdown tables (| col | col |), bold key names with *asterisks*, one idea per line. Include sync status, portfolio totals (Total/Equity/Cash), top holdings table, and any errors. If any step fails (especially OneDrive auth), tell the user what went wrong and what action they need to take (e.g. /onedrive setup).",
         "enabled": True,
         "deliver": "telegram",
         "deliver_extra": {"chat_id": os.environ.get("TELEGRAM_HOME_CHANNEL", "")},
