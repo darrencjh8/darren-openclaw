@@ -159,7 +159,8 @@ quick_commands:
             -H "Content-Type: application/json" -d '{}'
     portfolio-status:
         type: exec
-        command: curl -s -X POST http://portfolio-tracker:8081/tools/pp-status -H "Content-Type: application/json" -d '{}'
+        command: >-
+            curl -s -X POST http://portfolio-tracker:8081/tools/pp-status -H "Content-Type: application/json" -d '{}'
     image-gen:
         type: exec
         command: echo "Use /skills image-gen or describe the image you want"
