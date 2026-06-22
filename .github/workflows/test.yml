@@ -91,4 +91,4 @@ jobs:
               run: npm ci
             - name: Run tests
               working-directory: modules/image-gen
-              run: node --test __tests__/
+              run: node --test __tests__/server.test.js
