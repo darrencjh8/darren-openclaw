@@ -1,4 +1,4 @@
-FROM nousresearch/hermes-agent:v2026.6.5
+FROM nousresearch/hermes-agent:v2026.6.19
 RUN apt-get update && apt-get install -y --no-install-recommends gh && rm -rf /var/lib/apt/lists/*
 RUN npm install --global ntn
 COPY config.yaml SOUL.md.template /opt/hermes-defaults/
