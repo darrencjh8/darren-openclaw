@@ -119,7 +119,8 @@ mcp_servers:
     ktmb-booking:
         url: http://ktmb-booking:8082/mcp
         tools:
-            exclude: []
+            exclude:
+                - ktmb_reset_password
         supports_parallel_tool_calls: false
 
 platforms:
@@ -131,7 +132,7 @@ platforms:
             routes:
                 notify:
                     secret: ${HERMES_WEBHOOK_SECRET}
-                    prompt: "NOTIFICATION: {message}"
+                    prompt: "NOTIFICATION — do NOT call any tools or skills: {message}"
                     deliver: telegram
                     deliver_extra:
                         chat_id: "${TELEGRAM_HOME_CHANNEL}"
