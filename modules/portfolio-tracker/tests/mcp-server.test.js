@@ -33,7 +33,7 @@ describe("MCP Server — portfolio_sync pre-check", () => {
         // Simulate what portfolio_sync does when bridge is null
         const tokenPath =
             process.env.ONEDRIVE_REFRESH_TOKEN_PATH ||
-            "/app/config/onedrive_refresh_token";
+            "/app/config/onedrive/refresh_token";
         const hasToken = existsSync(tokenPath);
 
         expect(hasToken).toBe(false);

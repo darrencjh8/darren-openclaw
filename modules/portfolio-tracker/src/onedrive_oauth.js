@@ -10,8 +10,10 @@ import { writeFileSync, existsSync, mkdirSync } from "fs";
 import { dirname } from "path";
 
 const TOKEN_URL = "https://login.microsoftonline.com/common/oauth2/v2.0/token";
-const REDIRECT_URI = "https://login.microsoftonline.com/common/oauth2/nativeclient";
-const SCOPE = "Files.ReadWrite Files.ReadWrite.All Sites.ReadWrite.All offline_access";
+const REDIRECT_URI =
+    "https://login.microsoftonline.com/common/oauth2/nativeclient";
+const SCOPE =
+    "Files.ReadWrite Files.ReadWrite.All Sites.ReadWrite.All offline_access";
 
 /**
  * Build the Microsoft OAuth authorization URL.
@@ -43,7 +45,9 @@ export async function exchangeCodeForToken(redirectUri) {
     const url = new URL(redirectUri);
     const code = url.searchParams.get("code");
     if (!code) {
-        throw new Error("No authorization code found in redirect URI. Expected ?code=... in the URL.");
+        throw new Error(
+            "No authorization code found in redirect URI. Expected ?code=... in the URL.",
+        );
     }
 
     const clientId = process.env.ONEDRIVE_CLIENT_ID;
@@ -67,15 +71,21 @@ export async function exchangeCodeForToken(redirectUri) {
 
     if (!resp.ok) {
         const err = await resp.text();
-        throw new Error(`Token exchange failed: HTTP ${resp.status}: ${err.slice(0, 200)}`);
+        throw new Error(
+            `Token exchange failed: HTTP ${resp.status}: ${err.slice(0, 200)}`,
+        );
     }
 
     const data = await resp.json();
     if (!data.refresh_token) {
-        throw new Error("No refresh_token in response. The authorization code may have expired or been used already.");
+        throw new Error(
+            "No refresh_token in response. The authorization code may have expired or been used already.",
+        );
     }
 
-    const tokenPath = process.env.ONEDRIVE_REFRESH_TOKEN_PATH || "/app/config/onedrive_refresh_token";
+    const tokenPath =
+        process.env.ONEDRIVE_REFRESH_TOKEN_PATH ||
+        "/app/config/onedrive/refresh_token";
     const dir = dirname(tokenPath);
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
     writeFileSync(tokenPath, data.refresh_token);
