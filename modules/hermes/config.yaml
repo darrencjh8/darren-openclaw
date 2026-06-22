@@ -154,7 +154,9 @@ platforms:
 quick_commands:
     portfolio-sync:
         type: exec
-        command: curl -s -X POST http://portfolio-tracker:8081/tools/pp-sync-all -H 'Content-Type: application/json' -d '{}'
+        command: >-
+            curl -s -X POST http://portfolio-tracker:8081/tools/pp-sync-all
+            -H "Content-Type: application/json" -d '{}'
     portfolio-status:
         type: exec
         command: curl -s http://portfolio-tracker:8081/tools/pp-status
