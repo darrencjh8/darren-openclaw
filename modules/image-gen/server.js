@@ -19,82 +19,81 @@ function run(cmd, args, timeout) {
     });
 }
 
-// ── MCP Server ──────────────────────────────────────────────────────────
+function createMcpServer() {
+    const mcp = new McpServer({
+        name: "image-gen-perchance",
+        version: "1.0.0",
+    });
 
-const mcp = new McpServer({
-    name: "image-gen-perchance",
-    version: "1.0.0",
-});
-
-mcp.tool(
-    "image_gen_perchance",
-    "Generate an image using Perchance. Pass the user's prompt verbatim — do NOT modify, enhance, or rephrase.",
-    {
-        prompt: z.string().describe("Exact user prompt — do not modify"),
-        shape: z.enum(["square", "landscape", "portrait"]).default("square"),
-        negativePrompt: z.string().default(""),
-        guidance: z.string().default("7"),
-    },
-    async ({ prompt, shape, negativePrompt, guidance }) => {
-        const outputFile = join(OUTPUT_DIR, `img-${Date.now()}.png`);
-        try {
-            await run(
-                "bash",
-                [
-                    join(SCRIPTS_DIR, "gen-perchance.sh"),
-                    prompt,
-                    outputFile,
-                    shape || "square",
-                    "",
-                    negativePrompt || "",
-                    String(guidance || "7"),
-                ],
-                120000,
-            );
-            if (existsSync(outputFile)) {
+    mcp.tool(
+        "image_gen_perchance",
+        "Generate an image using Perchance. Pass the user's prompt verbatim — do NOT modify, enhance, or rephrase.",
+        {
+            prompt: z.string().describe("Exact user prompt — do not modify"),
+            shape: z
+                .enum(["square", "landscape", "portrait"])
+                .default("square"),
+            negativePrompt: z.string().default(""),
+            guidance: z.string().default("7"),
+        },
+        async ({ prompt, shape, negativePrompt, guidance }) => {
+            const outputFile = join(OUTPUT_DIR, `img-${Date.now()}.png`);
+            try {
+                await run(
+                    "bash",
+                    [
+                        join(SCRIPTS_DIR, "gen-perchance.sh"),
+                        prompt,
+                        outputFile,
+                        shape || "square",
+                        "",
+                        negativePrompt || "",
+                        String(guidance || "7"),
+                    ],
+                    120000,
+                );
+                if (existsSync(outputFile)) {
+                    return {
+                        content: [
+                            {
+                                type: "text",
+                                text: JSON.stringify({
+                                    path: outputFile,
+                                    tier: "perchance",
+                                }),
+                            },
+                        ],
+                    };
+                }
+            } catch (e) {
                 return {
                     content: [
                         {
                             type: "text",
                             text: JSON.stringify({
-                                path: outputFile,
-                                tier: "perchance",
+                                error: `Perchance failed: ${e.message?.slice(0, 200)}`,
                             }),
                         },
                     ],
+                    isError: true,
                 };
             }
-        } catch (e) {
             return {
                 content: [
                     {
                         type: "text",
                         text: JSON.stringify({
-                            error: `Perchance failed: ${e.message?.slice(0, 200)}`,
+                            error: "Perchance generation failed — no output file",
                         }),
                     },
                 ],
                 isError: true,
             };
-        }
-        return {
-            content: [
-                {
-                    type: "text",
-                    text: JSON.stringify({
-                        error: "Perchance generation failed — no output file",
-                    }),
-                },
-            ],
-            isError: true,
-        };
-    },
-);
+        },
+    );
 
-// ── HTTP Server ─────────────────────────────────────────────────────────
-
-const transport = new StreamableHTTPServerTransport();
-await mcp.connect(transport);
+    return mcp;
+}
 
 const server = createServer(async (req, res) => {
     if (req.method === "GET" && req.url === "/health") {
@@ -104,7 +103,11 @@ const server = createServer(async (req, res) => {
     }
 
     if (req.method === "POST" && req.url === "/mcp") {
+        const mcp = createMcpServer();
+        const transport = new StreamableHTTPServerTransport();
+        await mcp.connect(transport);
         await transport.handleRequest(req, res);
+        await mcp.close();
         return;
     }
 
