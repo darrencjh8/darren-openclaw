@@ -1,0 +1,16 @@
+services:
+    signal-cli:
+        image: ghcr.io/asamk/signal-cli:latest
+        container_name: signal-cli
+        restart: unless-stopped
+        command: daemon --http 0.0.0.0:8080
+        volumes:
+            - /home/runner/data/signal-cli:/home/signal-cli/.local/share/signal-cli
+        ports:
+            - "127.0.0.1:8080:8080"
+        networks:
+            - hermes_shared
+
+networks:
+    hermes_shared:
+        external: true

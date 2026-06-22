@@ -1,0 +1,23 @@
+name: Deploy Signal CLI
+
+on:
+    push:
+        branches: [main]
+        paths:
+            - "modules/signal-cli/**"
+    workflow_dispatch:
+
+concurrency:
+    group: signal-cli-deploy
+    cancel-in-progress: false
+
+jobs:
+    deploy:
+        runs-on: self-hosted
+        steps:
+            - uses: actions/checkout@v4
+              with:
+                  clean: false
+
+            - name: Deploy signal-cli
+              run: bash ./modules/signal-cli/deploy-signal.sh
