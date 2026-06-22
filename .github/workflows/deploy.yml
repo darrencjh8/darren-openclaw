@@ -97,6 +97,9 @@ jobs:
                   FIRECRAWL_API_KEY: ${{ secrets.FIRECRAWL_API_KEY }}
                   NOTION_API_KEY: ${{ secrets.NOTION_API_KEY }}
                   POLLINATIONS_API_KEY: ${{ secrets.POLLINATIONS_API_KEY }}
+                  SIGNAL_ACCOUNT: ${{ secrets.SIGNAL_ACCOUNT }}
+                  SIGNAL_ALLOWED_USERS: ${{ secrets.SIGNAL_ALLOWED_USERS }}
+                  SIGNAL_HOME_CHANNEL: ${{ secrets.SIGNAL_HOME_CHANNEL }}
                   TELEGRAM_ALLOWED_USERS: ${{ vars.TELEGRAM_ALLOWED_USERS }}
                   TELEGRAM_HOME_CHANNEL: ${{ vars.TELEGRAM_HOME_CHANNEL }}
                   MEMORY_REPO_URL: ${{ vars.MEMORY_REPO_URL }}
