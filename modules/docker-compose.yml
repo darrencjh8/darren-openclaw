@@ -121,6 +121,7 @@ services:
             - KTMB_ACCOUNT_NAME=${KTMB_ACCOUNT_NAME:-KTMB}
             - KTMB_MAX_RETRIES=${KTMB_MAX_RETRIES:-10}
             - KTMB_POLL_INTERVAL=${KTMB_POLL_INTERVAL:-2}
+            - KTMB_GROUP_DELAY=${KTMB_GROUP_DELAY:-8}
             - IMAP_USERNAME=${IMAP_USERNAME}
             - IMAP_PASSWORD=${IMAP_PASSWORD}
         restart: unless-stopped
