@@ -76,6 +76,10 @@ check_var() {
   else
     local file="$2"
     val=$(env_get "$name" "$file")
+    # Fall back to shell environment
+    if [ -z "$val" ]; then
+      val="${!name:-}"
+    fi
   fi
   if [ -z "$val" ]; then
     echo -e "  ${RED}✗ MISSING: $name${NC}"
@@ -93,6 +97,10 @@ check_var_optional() {
   else
     local file="$2"
     val=$(env_get "$name" "$file")
+    # Fall back to shell environment (e.g. exported from secrets manager)
+    if [ -z "$val" ]; then
+      val="${!name:-}"
+    fi
   fi
   if [ -z "$val" ]; then
     echo -e "  ${YELLOW}○ $name (not set)${NC}"
