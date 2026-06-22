@@ -13,8 +13,8 @@ mkdirSync(OUTPUT_DIR, { recursive: true });
 
 function run(cmd, args, timeout) {
     return new Promise((resolve, reject) => {
-        execFile(cmd, args, { timeout }, (err, stdout) => {
-            if (err) return reject(err);
+        execFile(cmd, args, { timeout }, (err, stdout, stderr) => {
+            if (err) { const detail = (stderr || err.message || "").trim(); return reject(new Error(detail || "Unknown error")); }
             resolve(stdout);
         });
     });
@@ -51,7 +51,7 @@ function createMcpServer() {
                         negativePrompt || "",
                         String(guidance || "7"),
                     ],
-                    240000,
+                    360000,
                 );
                 if (existsSync(outputFile)) {
                     return {
@@ -72,7 +72,7 @@ function createMcpServer() {
                         {
                             type: "text",
                             text: JSON.stringify({
-                                error: `Perchance failed: ${e.message?.slice(0, 200)}`,
+                                error: `Perchance failed: ${e.message}`,
                             }),
                         },
                     ],

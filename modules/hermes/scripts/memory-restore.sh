@@ -1,10 +1,11 @@
 #!/bin/bash
 # Restore memories from friday-memory repo on first boot.
-# Idempotent — skips if MEMORY.md already exists locally.
+# Skills are always synced on every boot (not just first).
 set -e
 
 SRC_DIR="/opt/data/memories"
-[ -f "$SRC_DIR/MEMORY.md" ] && exit 0  # already exists
+FIRST_BOOT=false
+[ -f "$SRC_DIR/MEMORY.md" ] || FIRST_BOOT=true
 
 [ -z "${MEMORY_REPO_URL}" ] && exit 0
 
@@ -29,13 +30,15 @@ git clone -q "$REPO_URL" "$TMP_DIR" 2>/dev/null || { log "clone failed — skipp
 
 mkdir -p "$SRC_DIR"
 
-# Restore core memory files
-for f in MEMORY.md USER.md; do
-    if [ -f "$TMP_DIR/$f" ]; then
-        cp "$TMP_DIR/$f" "$SRC_DIR/"
-        log "restored $f"
-    fi
-done
+# Restore core memory files (first boot only)
+if $FIRST_BOOT; then
+    for f in MEMORY.md USER.md; do
+        if [ -f "$TMP_DIR/$f" ]; then
+            cp "$TMP_DIR/$f" "$SRC_DIR/"
+            log "restored $f"
+        fi
+    done
+fi
 
 # Restore SOUL.md if backed up
 if [ -f "$TMP_DIR/SOUL.md" ]; then

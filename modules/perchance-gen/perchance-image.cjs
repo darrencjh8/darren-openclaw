@@ -39,7 +39,7 @@ async function connectCDP(url) {
 
 /** Wait for an <img> inside the embed iframe, grab it, save as PNG */
 async function waitForImageAndSave(embedFrame) {
-    for (var i = 0; i < 90; i++) {
+    for (var i = 0; i < 150; i++) {
         await new Promise((r) => setTimeout(r, 1000));
         try {
             var b64 = await embedFrame.evaluate(async function () {
