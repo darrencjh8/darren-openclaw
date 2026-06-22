@@ -129,6 +129,9 @@ done
 # Initialize kanban board (idempotent — no-op if already exists)
 su -s /bin/sh hermes -c "hermes kanban init 2>/dev/null" || true
 
+# Ensure all seeded files are owned by hermes (container runs as hermes)
+chown -R hermes:hermes /opt/data 2>/dev/null || true
+
 # Send startup notification to Telegram
 if [ -n "${TELEGRAM_BOT_TOKEN:-}" ] && [ -n "${TELEGRAM_HOME_CHANNEL:-}" ]; then
     curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
