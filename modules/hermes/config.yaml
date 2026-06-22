@@ -151,11 +151,11 @@ quick_commands:
         type: exec
         command: >-
             curl -s -X POST http://portfolio-tracker:8081/tools/pp-sync-all
-            -H "Content-Type: application/json" -d '{}'
+            -H "Content-Type: application/json" -d '{}' --max-time 60
     portfolio-status:
         type: exec
         command: >-
             curl -s -X POST http://portfolio-tracker:8081/tools/pp-status -H "Content-Type: application/json" -d '{}'
     image-gen:
-        type: exec
-        command: echo "Use /skills image-gen or describe the image you want"
+        type: alias
+        target: /skills image-gen

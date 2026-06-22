@@ -25,22 +25,30 @@ var fullPrompt = systemPrefixArg ? systemPrefixArg + " " + prompt : prompt;
 var negativePromptStr = negativePromptArg || "";
 var guidance = parseFloat(guidanceArg) || 7.0;
 
+/** Retry CDP connection up to 3 times */
+async function connectCDP(url) {
+    for (var i = 0; i < 3; i++) {
+        try {
+            return await chromium.connectOverCDP(url);
+        } catch (e) {
+            if (i === 2) throw e;
+            await new Promise((r) => setTimeout(r, 2000 * (i + 1)));
+        }
+    }
+}
+
 /** Wait for an <img> inside the embed iframe, grab it, save as PNG */
 async function waitForImageAndSave(embedFrame) {
-    for (var i = 0; i < 60; i++) {
-        await new Promise(function (r) {
-            setTimeout(r, 1000);
-        });
+    for (var i = 0; i < 90; i++) {
+        await new Promise((r) => setTimeout(r, 1000));
         try {
             var b64 = await embedFrame.evaluate(async function () {
                 var imgs = document.querySelectorAll("img");
                 for (var img of imgs) {
                     if (img.naturalWidth > 100) {
-                        // Try data: URI first, then draw to canvas
                         if (img.src && img.src.startsWith("data:image")) {
                             return img.src;
                         }
-                        // Draw cross-origin image to canvas for extraction
                         try {
                             var c = document.createElement("canvas");
                             c.width = img.naturalWidth;
@@ -62,65 +70,92 @@ async function waitForImageAndSave(embedFrame) {
             }
         } catch (e) {}
     }
-    throw new Error("No image found in embed iframe after 60s");
+    throw new Error("No image found in embed iframe after 90s");
 }
 
 (async function () {
-    var page;
-    var browser;
-    var exitCode = 1;
+    var page,
+        browser,
+        exitCode = 1;
     try {
-        browser = await chromium.connectOverCDP(HOST_CDP);
+        browser = await connectCDP(HOST_CDP);
         var context =
             browser.contexts()[0] ||
             browser.contexts()[Object.keys(browser.contexts())[0]];
         page = await context.newPage();
 
-        // Navigate to the generator page
+        // Navigate to the generator page with network idle wait
         await page.goto("https://perchance.org/ai-character-generator", {
-            waitUntil: "domcontentloaded",
-            timeout: 30000,
+            waitUntil: "networkidle",
+            timeout: 45000,
         });
-        await new Promise(function (r) {
-            setTimeout(r, 3000);
-        });
+        await new Promise((r) => setTimeout(r, 5000));
 
-        // Find the generator iframe
+        // Find the generator iframe with retry
         var genFrame = null;
-        for (var f of page.frames()) {
-            if (
-                f.url().includes(".perchance.org/ai-character-generator") &&
-                !f
-                    .url()
-                    .startsWith("https://perchance.org/ai-character-generator")
-            ) {
-                genFrame = f;
-                break;
+        for (var retry = 0; retry < 3 && !genFrame; retry++) {
+            for (var f of page.frames()) {
+                if (
+                    f.url().includes(".perchance.org/ai-character-generator") &&
+                    !f
+                        .url()
+                        .startsWith(
+                            "https://perchance.org/ai-character-generator",
+                        )
+                ) {
+                    genFrame = f;
+                    break;
+                }
             }
+            if (!genFrame) await new Promise((r) => setTimeout(r, 3000));
         }
         if (!genFrame) throw new Error("Generator iframe not found");
 
-        // Set resolution/shape: resize the textarea then select shape
-        var shapeBtn = genFrame.locator("button[data-name=" + shapeArg + "]");
-        if ((await shapeBtn.count()) > 0) await shapeBtn.click();
+        // Set resolution/shape
+        if (shapeArg && SHAPES[shapeArg]) {
+            try {
+                var shapeBtn = genFrame.locator(
+                    "button[data-name=" + shapeArg + "]",
+                );
+                if ((await shapeBtn.count()) > 0) await shapeBtn.click();
+                await new Promise((r) => setTimeout(r, 500));
+            } catch (e) {}
+        }
 
-        // Type the real prompt
-        await genFrame
-            .locator("textarea[data-name=description]")
-            .fill(fullPrompt);
-        await new Promise(function (r) {
-            setTimeout(r, 500);
-        });
+        // Set negative prompt if provided
+        if (negativePromptStr) {
+            try {
+                await genFrame
+                    .locator("textarea[data-name=negativePrompt]")
+                    .fill(negativePromptStr);
+                await new Promise((r) => setTimeout(r, 300));
+            } catch (e) {}
+        }
+
+        // Set guidance if not default
+        if (guidance !== 7.0) {
+            try {
+                var guideSlider = genFrame.locator(
+                    "input[data-name=guidanceScale]",
+                );
+                if ((await guideSlider.count()) > 0) {
+                    await guideSlider.fill(String(guidance));
+                }
+            } catch (e) {}
+        }
+
+        // Type the prompt
+        var descTextarea = genFrame.locator("textarea[data-name=description]");
+        await descTextarea.fill(fullPrompt);
+        await new Promise((r) => setTimeout(r, 1000));
 
         // Click Generate
         await genFrame.locator("#generateButtonEl").click();
 
-        // Wait for the embed iframe to appear
+        // Wait for the embed iframe to appear (up to 60s)
         var embedFrame = null;
-        for (var i = 0; i < 15 && !embedFrame; i++) {
-            await new Promise(function (r) {
-                setTimeout(r, 2000);
-            });
+        for (var i = 0; i < 30 && !embedFrame; i++) {
+            await new Promise((r) => setTimeout(r, 2000));
             for (var f of page.frames()) {
                 if (f.url().includes("image-generation.perchance.org/embed")) {
                     embedFrame = f;
@@ -128,7 +163,7 @@ async function waitForImageAndSave(embedFrame) {
                 }
             }
         }
-        if (!embedFrame) throw new Error("Embed iframe not found after 30s");
+        if (!embedFrame) throw new Error("Embed iframe not found after 60s");
 
         // Wait for image and save
         var size = await waitForImageAndSave(embedFrame);
@@ -137,7 +172,7 @@ async function waitForImageAndSave(embedFrame) {
     } catch (e) {
         console.error(e.message);
     } finally {
-        // Close all pages to prevent tab accumulation (keep about:blank alive)
+        // Close all pages to prevent tab accumulation
         try {
             var ctx = browser ? browser.contexts()[0] : null;
             if (ctx) {
