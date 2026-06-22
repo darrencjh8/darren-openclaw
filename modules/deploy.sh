@@ -187,7 +187,8 @@ if $GITHUB_MODE || check_file "$PT_ENV"; then
            ONEDRIVE_CLIENT_ID \
            IBKR_FLEX_TOKEN IBKR_FLEX_QUERY_ID \
            IBKR_PP_SGD_ACCOUNT IBKR_PP_USD_ACCOUNT \
-           GOOGLE_SERVICE_ACCOUNT_JSON GOOGLE_SHEET_ID; do
+           GOOGLE_SERVICE_ACCOUNT_JSON GOOGLE_SHEET_ID \
+           TAXONOMY_SHEET_MAPPING TAXONOMY_NAMES; do
     check_var "$v" "$PT_ENV"
   done
   # Validate service account JSON exists
