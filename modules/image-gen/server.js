@@ -51,7 +51,7 @@ function createMcpServer() {
                         negativePrompt || "",
                         String(guidance || "7"),
                     ],
-                    120000,
+                    240000,
                 );
                 if (existsSync(outputFile)) {
                     return {
