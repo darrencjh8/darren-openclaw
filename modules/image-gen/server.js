@@ -6,7 +6,7 @@ import { existsSync, mkdirSync } from "fs";
 import { join } from "path";
 import { z } from "zod";
 
-const SCRIPTS_DIR = "/app/scripts";
+const PERCHANCE_SCRIPT = "/app/modules/perchance-gen/perchance-image.cjs";
 const OUTPUT_DIR = "/app/.openclaw/workspace/media";
 mkdirSync(OUTPUT_DIR, { recursive: true });
 
@@ -40,9 +40,9 @@ function createMcpServer() {
             const outputFile = join(OUTPUT_DIR, `img-${Date.now()}.png`);
             try {
                 await run(
-                    "bash",
+                    "node",
                     [
-                        join(SCRIPTS_DIR, "gen-perchance.sh"),
+                        PERCHANCE_SCRIPT,
                         prompt,
                         outputFile,
                         shape || "square",
