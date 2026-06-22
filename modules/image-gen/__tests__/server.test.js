@@ -110,6 +110,46 @@ function startServer() {
                         };
                     },
                 );
+                mcp.tool(
+                    "image_gen_pollinations",
+                    "Generate an image using Pollinations.ai.",
+                    {
+                        prompt: z.string().describe("Image prompt"),
+                        model: z.string().default("flux"),
+                        width: z.number().default(1024),
+                        height: z.number().default(1024),
+                    },
+                    async ({ prompt, model, width, height }) => {
+                        if (!process.env.POLLINATIONS_API_KEY) {
+                            return {
+                                content: [
+                                    {
+                                        type: "text",
+                                        text: "Pollinations image generation is unavailable — POLLINATIONS_API_KEY is not configured. Use image_gen_perchance instead.",
+                                    },
+                                ],
+                                isError: true,
+                            };
+                        }
+                        const url =
+                            `https://gen.pollinations.ai/image/${encodeURIComponent(prompt)}` +
+                            `?model=${encodeURIComponent(model)}&width=${width}&height=${height}`;
+                        return {
+                            content: [
+                                {
+                                    type: "text",
+                                    text: JSON.stringify({
+                                        url,
+                                        tier: "pollinations",
+                                        model,
+                                        width,
+                                        height,
+                                    }),
+                                },
+                            ],
+                        };
+                    },
+                );
                 const transport = new StreamableHTTPServerTransport();
                 await mcp.connect(transport);
                 await transport.handleRequest(req, res);
@@ -209,5 +249,99 @@ describe("image-gen MCP server", () => {
         assert.equal(parsed.tier, "perchance");
         assert.ok(existsSync(parsed.path), "Output file exists");
         unlinkSync(parsed.path);
+    });
+
+    it("tools/list includes image_gen_pollinations", async () => {
+        await postMCP({
+            jsonrpc: "2.0",
+            id: 0,
+            method: "initialize",
+            params: {
+                protocolVersion: "2024-11-05",
+                capabilities: {},
+                clientInfo: { name: "test", version: "1.0.0" },
+            },
+        });
+        await postMCP({ jsonrpc: "2.0", method: "notifications/initialized" });
+        const res = await postMCP({
+            jsonrpc: "2.0",
+            id: 1,
+            method: "tools/list",
+        });
+        const tools = res.result?.tools || [];
+        const names = tools.map((t) => t.name);
+        assert.ok(
+            names.includes("image_gen_pollinations"),
+            `Tools: ${names.join(", ")}`,
+        );
+    });
+
+    it("tools/call pollinations returns error when key is missing", async () => {
+        delete process.env.POLLINATIONS_API_KEY;
+        await postMCP({
+            jsonrpc: "2.0",
+            id: 0,
+            method: "initialize",
+            params: {
+                protocolVersion: "2024-11-05",
+                capabilities: {},
+                clientInfo: { name: "test", version: "1.0.0" },
+            },
+        });
+        await postMCP({ jsonrpc: "2.0", method: "notifications/initialized" });
+        const res = await postMCP({
+            jsonrpc: "2.0",
+            id: 1,
+            method: "tools/call",
+            params: {
+                name: "image_gen_pollinations",
+                arguments: { prompt: "test sunset", model: "flux" },
+            },
+        });
+        assert.ok(res.result?.isError, "Should be an error when key missing");
+        assert.match(
+            res.result.content[0].text,
+            /POLLINATIONS_API_KEY/,
+            "Error message should mention the missing key",
+        );
+    });
+
+    it("tools/call pollinations returns URL when key is set", async () => {
+        process.env.POLLINATIONS_API_KEY = "sk_test123";
+        await postMCP({
+            jsonrpc: "2.0",
+            id: 0,
+            method: "initialize",
+            params: {
+                protocolVersion: "2024-11-05",
+                capabilities: {},
+                clientInfo: { name: "test", version: "1.0.0" },
+            },
+        });
+        await postMCP({ jsonrpc: "2.0", method: "notifications/initialized" });
+        const res = await postMCP({
+            jsonrpc: "2.0",
+            id: 1,
+            method: "tools/call",
+            params: {
+                name: "image_gen_pollinations",
+                arguments: {
+                    prompt: "test sunset",
+                    model: "flux",
+                    width: 512,
+                    height: 512,
+                },
+            },
+        });
+        assert.ok(res.result?.content, "Should have content");
+        const parsed = JSON.parse(res.result.content[0].text);
+        assert.equal(parsed.tier, "pollinations");
+        assert.equal(parsed.model, "flux");
+        assert.match(parsed.url, /^https:\/\/gen\.pollinations\.ai\/image\//);
+        // Key should NOT appear in the returned URL (it's stripped from test tool)
+        assert.ok(
+            !parsed.url.includes("sk_test123"),
+            "API key must not leak into URL",
+        );
     });
 });

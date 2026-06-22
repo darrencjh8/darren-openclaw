@@ -7,6 +7,7 @@ import { join } from "path";
 import { z } from "zod";
 
 const PERCHANCE_SCRIPT = "/app/modules/perchance-gen/perchance-image.cjs";
+const POLLINATIONS_KEY = process.env.POLLINATIONS_API_KEY || "";
 const OUTPUT_DIR = "/app/.openclaw/workspace/media";
 mkdirSync(OUTPUT_DIR, { recursive: true });
 
@@ -88,6 +89,52 @@ function createMcpServer() {
                     },
                 ],
                 isError: true,
+            };
+        },
+    );
+
+    mcp.tool(
+        "image_gen_pollinations",
+        "Generate an image using Pollinations.ai. Premium quality with many models. Use this when Perchance fails or user requests a specific Pollinations model.",
+        {
+            prompt: z.string().describe("Image prompt — do not modify"),
+            model: z
+                .string()
+                .default("flux")
+                .describe(
+                    "Model: flux, kontext, nanobanana, seedream, ideogram-v4-turbo, gptimage, etc.",
+                ),
+            width: z.number().default(1024).describe("Image width"),
+            height: z.number().default(1024).describe("Image height"),
+        },
+        async ({ prompt, model, width, height }) => {
+            if (!POLLINATIONS_KEY) {
+                return {
+                    content: [
+                        {
+                            type: "text",
+                            text: "Pollinations image generation is unavailable — POLLINATIONS_API_KEY is not configured. Use image_gen_perchance instead.",
+                        },
+                    ],
+                    isError: true,
+                };
+            }
+            const url =
+                `https://gen.pollinations.ai/image/${encodeURIComponent(prompt)}` +
+                `?model=${encodeURIComponent(model)}&width=${width}&height=${height}&key=${POLLINATIONS_KEY}`;
+            return {
+                content: [
+                    {
+                        type: "text",
+                        text: JSON.stringify({
+                            url,
+                            tier: "pollinations",
+                            model,
+                            width,
+                            height,
+                        }),
+                    },
+                ],
             };
         },
     );
