@@ -59,13 +59,15 @@ jobs:
             - name: Clone ktmb submodule
               id: submodule
               run: |
-                  git config --global url."https://${SUBMODULE_PAT}@github.com/".insteadOf "https://github.com/"
-                  if git submodule update --init modules/ktmb 2>/dev/null; then
-                    echo "available=true" >> "$GITHUB_OUTPUT"
-                  else
-                    echo "SKIP: submodule not accessible"
-                    echo "available=false" >> "$GITHUB_OUTPUT"
+                  if [ -z "${SUBMODULE_PAT}" ]; then
+                    echo "::error::SUBMODULE_PAT secret is not set — add it in repo Settings > Secrets and variables > Actions"
+                    exit 1
                   fi
+                  # Unset GITHUB_TOKEN extraheader (checkout@v4 sets it on local config)
+                  # to avoid auth conflict with the PAT used below
+                  git config --local --unset-all http.https://github.com/.extraheader || true
+                  git -c url."https://x-access-token:${SUBMODULE_PAT}@github.com/".insteadOf="https://github.com/" submodule update --init modules/ktmb
+                  echo "available=true" >> "$GITHUB_OUTPUT"
             - uses: actions/setup-python@v5
               if: steps.submodule.outputs.available == 'true'
               with:
