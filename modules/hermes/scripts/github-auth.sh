@@ -51,9 +51,11 @@ fi
 TOKEN=$(echo "$BODY" | python3 -c "import sys,json; print(json.load(sys.stdin).get('token',''))") || die "failed to parse token from API response"
 [ -z "$TOKEN" ] && die "API returned empty token"
 
-# ---- store token ----
-echo "$TOKEN" > /opt/data/.gh_token
-chmod 644 /opt/data/.gh_token
+	# ---- store token ----
+	# Remove stale root-owned file first (hermes can delete in its own dir)
+	rm -f /opt/data/.gh_token
+	echo "$TOKEN" > /opt/data/.gh_token
+	chmod 644 /opt/data/.gh_token
 export GITHUB_TOKEN="$TOKEN"
 log "token stored (expires $(echo "$BODY" | python3 -c "import sys,json; print(json.load(sys.stdin).get('expires_at','unknown'))"))"
 

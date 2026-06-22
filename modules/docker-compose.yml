@@ -71,6 +71,8 @@ services:
             - IBKR_PP_USD_ACCOUNT=${IBKR_PP_USD_ACCOUNT}
             - GOOGLE_SERVICE_ACCOUNT_JSON=/app/config/google-service-account.json
             - GOOGLE_SHEET_ID=${GOOGLE_SHEET_ID}
+            - TAXONOMY_SHEET_MAPPING=${TAXONOMY_SHEET_MAPPING}
+            - TAXONOMY_NAMES=${TAXONOMY_NAMES:-Sector,Geography,Asset Class}
             - PP_XML_PATH=/data/onedrive/Portfolio/Portfolio.portfolio
         mem_limit: 512m
         restart: unless-stopped
@@ -118,7 +120,7 @@ services:
             - KTMB_CAPTCHA_KEY=${KTMB_CAPTCHA_KEY}
             - KTMB_ACCOUNT_NAME=${KTMB_ACCOUNT_NAME:-KTMB}
             - KTMB_MAX_RETRIES=${KTMB_MAX_RETRIES:-5}
-            - KTMB_POLL_INTERVAL=${KTMB_POLL_INTERVAL:-1}
+            - KTMB_POLL_INTERVAL=${KTMB_POLL_INTERVAL:-2}
             - IMAP_USERNAME=${IMAP_USERNAME}
             - IMAP_PASSWORD=${IMAP_PASSWORD}
         restart: unless-stopped

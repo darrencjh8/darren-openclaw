@@ -14,7 +14,12 @@ else
     exit 0
 fi
 
-REPO_URL="https://${AUTH_TOKEN}@${MEMORY_REPO_URL#https://}"
+# GitHub App tokens (ghs_) need x-access-token as username; PATs work bare
+if echo "$AUTH_TOKEN" | grep -q '^ghs_'; then
+    REPO_URL="https://x-access-token:${AUTH_TOKEN}@${MEMORY_REPO_URL#https://}"
+else
+    REPO_URL="https://${AUTH_TOKEN}@${MEMORY_REPO_URL#https://}"
+fi
 CLONE_DIR="/opt/data/memories-backup"
 SRC_DIR="/opt/data/memories"
 EXPENSE_DIR="${EXPENSE_TRACKER_DATA:-}"

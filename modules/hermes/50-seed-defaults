@@ -32,6 +32,7 @@ chown -R hermes:hermes /opt/data/memories-backup 2>/dev/null || true
 # Generate GitHub App token for workers
 # (errors logged to stderr → docker logs; never blocks boot)
 /opt/data/scripts/github-auth.sh || true
+chown hermes:hermes /opt/data/.gh_token 2>/dev/null || true
 
 # Seed github-auth-refresh cron job (idempotent — refreshes installation token every 50 min)
 # GitHub App installation tokens expire after 1 hour; this keeps gh CLI auth alive.
