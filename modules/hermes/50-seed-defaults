@@ -170,7 +170,7 @@ su -s /bin/sh hermes -c "hermes kanban init 2>/dev/null" || true
 if [ -n "${TELEGRAM_BOT_TOKEN:-}" ] && [ -n "${TELEGRAM_HOME_CHANNEL:-}" ]; then
     curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
         -d chat_id="${TELEGRAM_HOME_CHANNEL}" \
-        -d text="${IDENTITY_EMOJI:-} Friday is online and ready." \
+        -d text="🟢 Friday is online and ready." \
         -d disable_notification=true \
         >/dev/null 2>&1 || true
 fi
