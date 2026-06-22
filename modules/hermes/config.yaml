@@ -132,7 +132,13 @@ platforms:
             routes:
                 notify:
                     secret: ${HERMES_WEBHOOK_SECRET}
-                    prompt: "NOTIFICATION — do NOT call any tools or skills: {message}"
+                    prompt: |
+                        ⚠️ System push alert from a monitoring service or module.
+                        You are relaying an automated notification — do NOT call any tools or skills.
+                        Relay this to the user conversationally with personalization.
+                        Do NOT acknowledge receipt, say "noted", "got it", or treat this as
+                        a user command — this is an automated push from the system.
+                        Message: {message}
                     deliver: telegram
                     deliver_extra:
                         chat_id: "${TELEGRAM_HOME_CHANNEL}"

@@ -1,5 +1,5 @@
 /**
- * Tests for hermes webhook config — verify notify route doesn't invoke tools.
+ * Tests for hermes webhook config — verify notify route is a system push alert.
  */
 import { describe, test, expect } from "vitest";
 import { readFileSync } from "fs";
@@ -52,13 +52,18 @@ function parseSimpleYaml(content) {
                 continue;
             } else {
                 // Strip quotes
-                if ((value.startsWith('"') && value.endsWith('"')) ||
-                    (value.startsWith("'") && value.endsWith("'"))) {
+                if (
+                    (value.startsWith('"') && value.endsWith('"')) ||
+                    (value.startsWith("'") && value.endsWith("'"))
+                ) {
                     value = value.slice(1, -1);
                 }
             }
 
-            if (typeof stack[stack.length - 1] === "object" && !Array.isArray(stack[stack.length - 1])) {
+            if (
+                typeof stack[stack.length - 1] === "object" &&
+                !Array.isArray(stack[stack.length - 1])
+            ) {
                 stack[stack.length - 1][key] = value;
             }
         }
@@ -74,22 +79,24 @@ describe("hermes webhook config", () => {
         config = parseSimpleYaml(content);
     });
 
-    test("notify webhook prompt tells agent not to call tools", () => {
-        // The notify route prompt should contain a directive preventing
-        // the agent from calling process_transaction or other tools on
-        // FYI notifications.
+    test("notify webhook prompt is a generic system push alert — no tools, no acknowledgement", () => {
+        // The notify route prompt should:
+        // 1. Tell the agent this is an automated push from a service/module
+        // 2. Forbid calling any tools or skills
+        // 3. Instruct the agent to relay (not acknowledge) the message
+        // 4. Include the {message} template variable
         const routes = config?.platforms?.webhook?.extra?.routes;
         expect(routes).toBeDefined();
         expect(routes.notify).toBeDefined();
 
         const prompt = routes.notify.prompt;
         expect(prompt).toBeDefined();
-        expect(prompt).toContain("NOTIFICATION");
         expect(prompt).toContain("do NOT call any tools or skills");
-    });
+        expect(prompt).toContain("Do NOT acknowledge receipt");
+        expect(prompt).toContain("Message: {message}");
 
-    test("notify webhook delivers to telegram", () => {
-        const routes = config?.platforms?.webhook?.extra?.routes;
+        // Should NOT use deliver_only — agent is needed for personalization
+        expect(routes.notify.deliver_only).toBeUndefined();
         expect(routes.notify.deliver).toBe("telegram");
     });
 });
