@@ -142,3 +142,14 @@ platforms:
                     deliver: telegram
                     deliver_extra:
                         chat_id: "${TELEGRAM_HOME_CHANNEL}"
+
+quick_commands:
+    portfolio-sync:
+        type: exec
+        command: curl -s -X POST http://portfolio-tracker:8081/tools/pp-sync-all -H 'Content-Type: application/json' -d '{}'
+    portfolio-status:
+        type: exec
+        command: curl -s http://portfolio-tracker:8081/tools/pp-status
+    image-gen:
+        type: exec
+        command: echo "Use /skills image-gen or describe the image you want"
