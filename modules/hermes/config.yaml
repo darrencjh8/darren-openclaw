@@ -156,6 +156,3 @@ quick_commands:
         type: exec
         command: >-
             curl -s -X POST http://portfolio-tracker:8081/tools/pp-status -H "Content-Type: application/json" -d '{}'
-    image-gen:
-        type: alias
-        target: /skills image-gen
