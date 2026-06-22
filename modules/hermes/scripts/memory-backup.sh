@@ -94,6 +94,16 @@ for profile_dir in /opt/data/profiles/*/; do
     fi
 done
 
+# ---- Skills backup ----
+mkdir -p "$CLONE_DIR/skills"
+cp -r /opt/data/skills/* "$CLONE_DIR/skills/" 2>/dev/null || true
+
+# ---- Cron jobs backup ----
+mkdir -p "$CLONE_DIR/cron"
+if [ -f /opt/data/cron/jobs.json ]; then
+    cp /opt/data/cron/jobs.json "$CLONE_DIR/cron/" 2>/dev/null || true
+fi
+
 cd "$CLONE_DIR"
 # Check if there are changes (handles empty repo with no HEAD)
 if ! git rev-parse HEAD >/dev/null 2>&1; then
