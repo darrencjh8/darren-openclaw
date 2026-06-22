@@ -158,6 +158,48 @@ const server = createServer(async (req, res) => {
         return;
     }
 
+    if (req.method === "POST" && req.url === "/generate") {
+        let body = "";
+        req.on("data", (c) => (body += c));
+        req.on("end", async () => {
+            try {
+                const { prompt, shape } = JSON.parse(body);
+                const outputFile = join(OUTPUT_DIR, `img-${Date.now()}.png`);
+                await run(
+                    "node",
+                    [
+                        PERCHANCE_SCRIPT,
+                        prompt,
+                        outputFile,
+                        shape || "square",
+                        "",
+                        "",
+                        "7",
+                    ],
+                    480000,
+                );
+                if (existsSync(outputFile)) {
+                    res.writeHead(200, { "Content-Type": "application/json" });
+                    res.end(JSON.stringify({ ok: true, path: outputFile }));
+                } else {
+                    res.writeHead(500, { "Content-Type": "application/json" });
+                    res.end(
+                        JSON.stringify({ ok: false, error: "no output file" }),
+                    );
+                }
+            } catch (e) {
+                res.writeHead(500, { "Content-Type": "application/json" });
+                res.end(
+                    JSON.stringify({
+                        ok: false,
+                        error: e.message.slice(0, 200),
+                    }),
+                );
+            }
+        });
+        return;
+    }
+
     res.writeHead(404);
     res.end();
 });
