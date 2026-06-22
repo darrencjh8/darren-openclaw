@@ -56,7 +56,7 @@ services:
         volumes:
             - /home/runner/data/portfolio-tracker/data:/app/data
             - onedrive_data:/data/onedrive:rw
-            - onedrive_token:/app/config/onedrive:rw
+            - /home/runner/data/portfolio-tracker/onedrive_token:/app/config/onedrive:rw
             - /home/runner/data/portfolio-tracker/google-service-account.json:/app/config/google-service-account.json:ro
         environment:
             - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
@@ -176,7 +176,6 @@ services:
 
 volumes:
     onedrive_data:
-    onedrive_token:
     image_gen_media:
 
 networks:
