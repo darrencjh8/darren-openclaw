@@ -66,6 +66,13 @@ if [ -d "$TMP_DIR/kanban" ] && command -v sqlite3 >/dev/null 2>&1; then
     log "restored kanban"
 fi
 
+# Restore skills (no-clobber — baked-in skills from image take precedence)
+if [ -d "$TMP_DIR/skills" ]; then
+    mkdir -p /opt/data/skills
+    cp -rn "$TMP_DIR/skills/"* /opt/data/skills/ 2>/dev/null || true
+    log "restored skills"
+fi
+
 # Restore profiles
 if [ -d "$TMP_DIR/profiles" ]; then
     for profile_dir in "$TMP_DIR/profiles/"*/; do
