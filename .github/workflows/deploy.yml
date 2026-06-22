@@ -154,6 +154,7 @@ jobs:
                   KTMB_ACCOUNT_NAME: ${{ vars.KTMB_ACCOUNT_NAME }}
                   KTMB_MAX_RETRIES: ${{ vars.KTMB_MAX_RETRIES }}
                   KTMB_POLL_INTERVAL: ${{ vars.KTMB_POLL_INTERVAL }}
+                  SUBMODULE_PAT: ${{ secrets.SUBMODULE_PAT }}
                   DEPLOY_COMPONENTS: ${{ steps.changes.outputs.components || 'all' }}
                   FORCE_ALL: ${{ inputs.force_all || 'false' }}
                   DEPLOY_COMPONENTS_OVERRIDE: ${{ inputs.components || '' }}

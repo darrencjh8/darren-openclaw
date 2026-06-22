@@ -430,9 +430,19 @@ echo ""
 echo "--- Git Pull ---"
 cd "$ROOT"
 git stash push -m "auto-deploy-stash-$(date +%s)" 2>/dev/null || true
-git pull || true
+
+# Configure private submodule access
+if [ -n "${SUBMODULE_PAT:-}" ]; then
+  git config --local url."https://x-access-token:${SUBMODULE_PAT}@github.com/".insteadOf "https://github.com/"
+fi
+
+if git pull; then
+  git submodule update --init --recursive 2>/dev/null || true
+  echo -e "  ${GREEN}✓ code updated${NC}"
+else
+  echo -e "  ${RED}✗ git pull failed${NC}"
+fi
 git stash drop 2>/dev/null || true
-echo -e "  ${GREEN}✓ code updated${NC}"
 fi  # SKIP_BUILD
 
 # ---- deploy ----
