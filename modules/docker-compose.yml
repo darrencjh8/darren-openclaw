@@ -94,7 +94,6 @@ services:
         ports:
             - "127.0.0.1:8083:8083"
         volumes:
-            - ../gateway/workspace/skills/image-generation:/app/scripts:ro
             - ../modules/perchance-gen:/app/modules/perchance-gen:ro
             - image_gen_media:/app/.openclaw/workspace/media
         environment:

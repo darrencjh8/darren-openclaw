@@ -7,6 +7,7 @@ cp /opt/hermes-defaults/config.yaml /opt/data/config.yaml
 cp /opt/hermes-defaults/SOUL.md.template /opt/data/SOUL.md
 mkdir -p /opt/data/skills
 cp -r /opt/hermes-defaults/skills/* /opt/data/skills/
+chown -R hermes:hermes /opt/data/skills 2>/dev/null || true
 mkdir -p /opt/data/scripts
 cp -r /opt/hermes-defaults/scripts/* /opt/data/scripts/
 chmod +x /opt/data/scripts/*.sh
