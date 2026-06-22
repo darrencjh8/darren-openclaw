@@ -1,9 +1,9 @@
 {
-  "name": "image-gen",
-  "version": "1.0.0",
-  "private": true,
-  "type": "module",
-  "dependencies": {
-    "express": "^5.1.0"
-  }
+    "name": "image-gen",
+    "version": "1.0.0",
+    "private": true,
+    "type": "module",
+    "dependencies": {
+        "@modelcontextprotocol/sdk": "^1.0.0"
+    }
 }
