@@ -98,6 +98,7 @@ services:
             - image_gen_media:/app/.openclaw/workspace/media
         environment:
             - CDP_URL=http://172.17.0.1:9223
+            - POLLINATIONS_API_KEY=${POLLINATIONS_API_KEY}
         extra_hosts:
             - "host.docker.internal:host-gateway"
         restart: unless-stopped

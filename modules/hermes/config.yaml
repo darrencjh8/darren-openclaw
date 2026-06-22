@@ -125,12 +125,7 @@ mcp_servers:
             - ktmb_pause_worker
             - ktmb_resume_worker
         supports_parallel_tool_calls: false
-    image-gen-pollinations:
-        url: https://gen.pollinations.ai/mcp
-        env:
-            POLLINATIONS_API_KEY: ${POLLINATIONS_API_KEY}
-        supports_parallel_tool_calls: false
-    image-gen-perchance:
+    image-gen:
         url: http://image-gen:8083/mcp
         supports_parallel_tool_calls: false
 
