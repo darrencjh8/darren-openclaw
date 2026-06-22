@@ -42,6 +42,8 @@ else
 fi
 
 cp "$SRC_DIR/MEMORY.md" "$SRC_DIR/USER.md" "$CLONE_DIR/" 2>/dev/null || true
+# Backup SOUL.md (evolves over time)
+cp /opt/data/SOUL.md "$CLONE_DIR/" 2>/dev/null || true
 if [ -n "$EXPENSE_DIR" ]; then
     mkdir -p "$CLONE_DIR/expense-tracker"
     cp "$EXPENSE_DIR/MEMORY.md" "$CLONE_DIR/expense-tracker/" 2>/dev/null || true

@@ -40,6 +40,12 @@ if $FIRST_BOOT; then
     done
 fi
 
+# Restore SOUL.md if backed up
+if [ -f "$TMP_DIR/SOUL.md" ]; then
+    cp "$TMP_DIR/SOUL.md" /opt/data/
+    log "restored SOUL.md"
+fi
+
 # Restore expense tracker data
 EXPENSE_DIR="${EXPENSE_TRACKER_DATA:-}"
 if [ -n "$EXPENSE_DIR" ]; then

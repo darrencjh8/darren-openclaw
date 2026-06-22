@@ -4,7 +4,7 @@
 # Seed baked-in config, SOUL, skills, and scripts on every boot.
 # Then resolve any remaining ${VAR} placeholders that Hermes doesn't auto-substitute.
 cp /opt/hermes-defaults/config.yaml /opt/data/config.yaml
-cp /opt/hermes-defaults/SOUL.md.template /opt/data/SOUL.md
+[ ! -f /opt/data/SOUL.md ] && cp /opt/hermes-defaults/SOUL.md.template /opt/data/SOUL.md
 mkdir -p /opt/data/skills
 cp -r /opt/hermes-defaults/skills/* /opt/data/skills/
 chown -R hermes:hermes /opt/data/skills 2>/dev/null || true
@@ -128,6 +128,9 @@ done
 
 # Initialize kanban board (idempotent — no-op if already exists)
 su -s /bin/sh hermes -c "hermes kanban init 2>/dev/null" || true
+
+# Ensure all seeded files are owned by hermes (container runs as hermes)
+chown -R hermes:hermes /opt/data 2>/dev/null || true
 
 # Send startup notification to Telegram
 if [ -n "${TELEGRAM_BOT_TOKEN:-}" ] && [ -n "${TELEGRAM_HOME_CHANNEL:-}" ]; then
