@@ -15,6 +15,23 @@ on:
                 description: "Deployment environment"
                 type: environment
                 default: "darren-prod"
+            force_all:
+                description: "Force deploy all components (ignore changed-files detection)"
+                type: boolean
+                default: false
+            components:
+                description: "Specific component(s) to deploy (overrides detection)"
+                type: choice
+                default: ""
+                options:
+                    - ""
+                    - all
+                    - hermes
+                    - portfolio-tracker
+                    - expense-tracker
+                    - actual-api
+                    - image-gen
+                    - ktmb-booking
 
 concurrency:
     group: production-deploy
@@ -45,8 +62,17 @@ jobs:
 
             - name: Detect changed modules
               id: changes
-              if: github.event_name == 'push'
               run: |
+                  # Workflow dispatch with explicit components: use them directly
+                  if [ -n "${DEPLOY_COMPONENTS_OVERRIDE:-}" ]; then
+                      echo "components=${DEPLOY_COMPONENTS_OVERRIDE}" >> "$GITHUB_OUTPUT"
+                      exit 0
+                  fi
+                  # Workflow dispatch with force_all: deploy everything
+                  if [ "${FORCE_ALL:-false}" = "true" ]; then
+                      echo "components=all" >> "$GITHUB_OUTPUT"
+                      exit 0
+                  fi
                   CHANGED=$(git diff --name-only HEAD~1 HEAD 2>/dev/null || echo "")
                   COMPONENTS=""
                   echo "$CHANGED" | grep -q "^modules/hermes/"          && COMPONENTS="$COMPONENTS hermes"
@@ -57,7 +83,7 @@ jobs:
                   echo "$CHANGED" | grep -q "^modules/image-gen/"      && COMPONENTS="$COMPONENTS image-gen"
                   echo "$CHANGED" | grep -q "^gateway/"                && COMPONENTS="$COMPONENTS hermes"
                   echo "$CHANGED" | grep -q "^\.github/"               && COMPONENTS="$COMPONENTS hermes"
-                  if [ -z "$COMPONENTS" ] || echo "$CHANGED" | grep -qE "^(\.github/|gateway/|Dockerfile|deploy\.sh)"; then
+                  if [ -z "$COMPONENTS" ] || echo "$CHANGED" | grep -qE "^(Dockerfile|deploy\.sh)"; then
                       COMPONENTS="all"
                   fi
                   echo "components=$COMPONENTS" >> "$GITHUB_OUTPUT"
@@ -129,6 +155,8 @@ jobs:
                   KTMB_MAX_RETRIES: ${{ vars.KTMB_MAX_RETRIES }}
                   KTMB_POLL_INTERVAL: ${{ vars.KTMB_POLL_INTERVAL }}
                   DEPLOY_COMPONENTS: ${{ steps.changes.outputs.components || 'all' }}
+                  FORCE_ALL: ${{ inputs.force_all || 'false' }}
+                  DEPLOY_COMPONENTS_OVERRIDE: ${{ inputs.components || '' }}
               run: |
                   if [ "${DEPLOY_COMPONENTS}" = "all" ]; then
                       bash ./modules/deploy.sh --component all --non-interactive --skip-build
