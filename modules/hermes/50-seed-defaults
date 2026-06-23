@@ -32,7 +32,9 @@ chown -R hermes:hermes /opt/data/memories-backup 2>/dev/null || true
 
 # Configure gh CLI with GITHUB_TOKEN from hermes
 if [ -n "${GITHUB_TOKEN:-}" ]; then
-    echo "$GITHUB_TOKEN" | su -s /bin/sh hermes -c "gh auth login --with-token" 2>/dev/null || true
+    printf '%s' "$GITHUB_TOKEN" > /tmp/.gh-token-init
+    su -s /bin/sh hermes -c "gh auth login --with-token < /tmp/.gh-token-init" 2>/dev/null || true
+    rm -f /tmp/.gh-token-init
 fi
 
 python3 -c '
