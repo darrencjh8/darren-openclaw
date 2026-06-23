@@ -60,6 +60,34 @@ public class PpClientTest {
     }
 
     @Test
+    public void testMainInsertAcceptsFractionalShares() {
+        // Should NOT throw NumberFormatException for fractional shares
+        try {
+            Main.main(new String[]{
+                "insert",
+                "--file", "/data/test.xml",
+                "--account-id", "acct-1",
+                "--type", "Buy",
+                "--date", "2026-01-01",
+                "--shares", "473.41746",
+                "--price", "100",
+                "--currency", "SGD",
+            });
+            fail("Expected IOException (file not found), not NumberFormatException");
+        } catch (Exception e) {
+            // We expect "not found" — NOT "NumberFormatException"
+            assertFalse(
+                "Should NOT throw NumberFormatException for fractional shares",
+                e instanceof NumberFormatException
+            );
+            assertTrue(
+                "Should be file-not-found, got: " + e.getClass().getSimpleName(),
+                e.getMessage().contains("not found")
+            );
+        }
+    }
+
+    @Test
     public void testMainBalanceFileNotFound() {
         try {
             Main.main(new String[]{
