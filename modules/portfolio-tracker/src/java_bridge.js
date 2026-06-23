@@ -227,7 +227,7 @@ export class PpJavaBridge {
                 "--date",
                 date,
                 "--shares",
-                String(Math.round(shares)),
+                String(shares),
                 "--price",
                 String(price),
                 "--currency",
