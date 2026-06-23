@@ -314,22 +314,7 @@ if should_deploy "portfolio-tracker"; then
 ONEDRIVE_CONF_DIR="$ROOT/modules/onedrive-sync/config/onedrive"
 ONEDRIVE_TOKEN="$ONEDRIVE_CONF_DIR/refresh_token"
 
-if [ "$NON_INTERACTIVE" = true ]; then
-  if [ ! -f "$ONEDRIVE_TOKEN" ]; then
-    echo ""
-    echo "--- OneDrive ---"
-    echo -e "  ${YELLOW}⚠ No refresh_token found. OneDrive is not initialized.${NC}"
-    echo ""
-    echo "  Initialize via MCP (no shell needed):"
-    echo "    1. In Telegram: /onedrive setup"
-    echo "    2. Hermes will give you a URL to open in your browser"
-    echo "    3. After authorizing, paste the redirect URL back in Telegram"
-    echo ""
-    echo "  Or run deploy.sh interactively:"
-    echo "    cd ~/darren-openclaw && ./modules/deploy.sh --component portfolio-tracker"
-    echo ""
-  fi
-elif [ ! -f "$ONEDRIVE_TOKEN" ]; then
+if [ "$NON_INTERACTIVE" != true ] && [ ! -f "$ONEDRIVE_TOKEN" ]; then
   echo ""
   echo "----------------------------------------"
   echo " OneDrive Auth Setup"
@@ -556,4 +541,25 @@ for mcp_name in expense-tracker portfolio-tracker; do
   fi
 done
 
+# ---- onedrive reminder (non-interactive only) ----
+if [ "$NON_INTERACTIVE" = true ] && should_deploy "portfolio-tracker"; then
+  ONEDRIVE_TOKEN="$ROOT/modules/onedrive-sync/config/onedrive/refresh_token"
+  if [ ! -f "$ONEDRIVE_TOKEN" ]; then
+    echo ""
+    echo "--- OneDrive ---"
+    echo -e "  ${YELLOW}⚠ No refresh_token found. OneDrive is not initialized.${NC}"
+    echo ""
+    echo "  Initialize via MCP (no shell needed):"
+    echo "    1. In Telegram: /onedrive setup"
+    echo "    2. Hermes will give you a URL to open in your browser"
+    echo "    3. After authorizing, paste the redirect URL back in Telegram"
+    echo ""
+    echo "  Or run deploy.sh interactively:"
+    echo "    cd ~/darren-openclaw && ./modules/deploy.sh --component portfolio-tracker"
+    echo ""
+  fi
+fi
+
 echo "========================================"
+
+echo ""
