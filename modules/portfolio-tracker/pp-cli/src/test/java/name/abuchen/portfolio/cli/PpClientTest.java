@@ -60,6 +60,29 @@ public class PpClientTest {
     }
 
     @Test
+    public void testMainInsertRejectsNaN() {
+        // Should throw IllegalArgumentException for NaN shares
+        try {
+            Main.main(new String[]{
+                "insert",
+                "--file", "/data/test.xml",
+                "--account-id", "acct-1",
+                "--type", "Buy",
+                "--date", "2026-01-01",
+                "--shares", "NaN",
+                "--price", "100",
+                "--currency", "SGD",
+            });
+            fail("Expected IllegalArgumentException for NaN shares");
+        } catch (Exception e) {
+            assertTrue(
+                "Should reject NaN with clear message",
+                e.getMessage().contains("must be a finite non-negative number")
+            );
+        }
+    }
+
+    @Test
     public void testMainInsertAcceptsFractionalShares() {
         // Should NOT throw NumberFormatException for fractional shares
         try {

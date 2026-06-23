@@ -41,18 +41,18 @@ public class Main {
                             params.get("security-id"),
                             require(params, "type"),
                             require(params, "date"),
-                            Double.parseDouble(params.getOrDefault("shares", "0")),
-                            Double.parseDouble(require(params, "price")),
+                            parseFiniteNonNegative(params.getOrDefault("shares", "0"), "shares"),
+                            parseFiniteNonNegative(require(params, "price"), "price"),
                             require(params, "currency"),
-                            Double.parseDouble(params.getOrDefault("fees", "0")),
-                            Double.parseDouble(params.getOrDefault("taxes", "0")),
+                            parseFiniteNonNegative(params.getOrDefault("fees", "0"), "fees"),
+                            parseFiniteNonNegative(params.getOrDefault("taxes", "0"), "taxes"),
                             params.getOrDefault("notes", "")
                     );
                     break;
                 case "balance":
                     result = ppc.updateBalance(
                             require(params, "account-id"),
-                            Double.parseDouble(require(params, "amount")),
+                            parseFinite(require(params, "amount"), "amount"),
                             require(params, "currency"),
                             require(params, "date"),
                             params.getOrDefault("notes", "")
@@ -128,6 +128,24 @@ public class Main {
         String value = params.get(key);
         if (value == null || value.isEmpty()) {
             throw new IllegalArgumentException("Missing required parameter: " + key);
+        }
+        return value;
+    }
+
+    private static double parseFiniteNonNegative(String raw, String name) {
+        double value = Double.parseDouble(raw);
+        if (!Double.isFinite(value) || value < 0) {
+            throw new IllegalArgumentException(
+                name + " must be a finite non-negative number, got: " + raw);
+        }
+        return value;
+    }
+
+    private static double parseFinite(String raw, String name) {
+        double value = Double.parseDouble(raw);
+        if (!Double.isFinite(value)) {
+            throw new IllegalArgumentException(
+                name + " must be a finite number, got: " + raw);
         }
         return value;
     }
