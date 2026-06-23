@@ -39,6 +39,26 @@ jobs:
             - run: npm ci
             - run: npm test
 
+    pp-cli:
+        runs-on: ubuntu-latest
+        defaults:
+            run:
+                working-directory: modules/portfolio-tracker/pp-cli
+        steps:
+            - uses: actions/checkout@v4
+            - uses: actions/setup-java@v4
+              with:
+                  java-version: "21"
+                  distribution: temurin
+            - name: Install PP model to local Maven repo
+              run: |
+                  mvn install:install-file -q -Dfile=lib/name.abuchen.portfolio-0.84.1.jar \
+                    -DpomFile=lib/name.abuchen.portfolio-0.84.1.pom \
+                    -DgroupId=name.abuchen.portfolio -DartifactId=name.abuchen.portfolio \
+                    -Dversion=0.84.1 -Dpackaging=jar
+            - name: Run Java tests
+              run: mvn test
+
     hermes-scripts:
         runs-on: ubuntu-latest
         steps:
