@@ -34,6 +34,33 @@ else
 fi
 
 echo "Building: $SERVICES"
+
+# ---- Pre-build: pp-cli.jar (Java CLI for Portfolio Performance) ----
+if [[ " $SERVICES " =~ " portfolio-tracker " ]] || [[ " $SERVICES " =~ " all " ]]; then
+  PT_DIR="$MODULES_DIR/portfolio-tracker"
+  if command -v mvn &>/dev/null && [ -d "$PT_DIR/pp-cli" ]; then
+    cd "$PT_DIR/pp-cli"
+    # Install PP model JAR to local Maven (not on Maven Central)
+    if [ -f lib/name.abuchen.portfolio-0.84.1.jar ]; then
+      mvn install:install-file -q -Dfile=lib/name.abuchen.portfolio-0.84.1.jar \
+        -DpomFile=lib/name.abuchen.portfolio-0.84.1.pom \
+        -DgroupId=name.abuchen.portfolio -DartifactId=name.abuchen.portfolio \
+        -Dversion=0.84.1 -Dpackaging=jar 2>/dev/null || true
+    fi
+    echo "Building pp-cli.jar..."
+    if mvn package -q -DskipTests; then
+      if [ -f target/pp-cli.jar ]; then
+        echo "  pp-cli.jar built"
+      fi
+    else
+      echo "  WARNING: mvn build failed — Docker build will fail if JAR is missing" >&2
+    fi
+    cd "$ROOT" || cd "$MODULES_DIR/.."
+  else
+    echo "  (skipping pp-cli — mvn not found or pp-cli not present)"
+  fi
+fi
+
 $COMPOSE build $SERVICES
 echo "✓ Build complete"
 

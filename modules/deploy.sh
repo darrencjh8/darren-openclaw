@@ -373,35 +373,6 @@ elif [ ! -f "$ONEDRIVE_TOKEN" ]; then
 fi
 fi  # should_deploy portfolio-tracker
 
-# ---- Portfolio Tracker: Java CLI ----
-if should_deploy "portfolio-tracker"; then
-echo ""
-echo "--- Portfolio Tracker: Java CLI ---"
-if command -v mvn &>/dev/null && [ -d "$PT_DIR/pp-cli" ]; then
-  cd "$PT_DIR/pp-cli"
-  # Install PP model JAR to local Maven (not on Maven Central)
-  if [ -f lib/name.abuchen.portfolio-0.84.1.jar ]; then
-    mvn install:install-file -q -Dfile=lib/name.abuchen.portfolio-0.84.1.jar \
-      -DpomFile=lib/name.abuchen.portfolio-0.84.1.pom \
-      -DgroupId=name.abuchen.portfolio -DartifactId=name.abuchen.portfolio \
-      -Dversion=0.84.1 -Dpackaging=jar 2>/dev/null || true
-  fi
-  echo "Building pp-cli.jar..."
-  if mvn package -q -DskipTests; then
-    if [ -f target/pp-cli.jar ]; then
-      echo -e "  ${GREEN}✓ pp-cli.jar built${NC}"
-    else
-      echo -e "  ${YELLOW}! pp-cli.jar not found after build — may need manual build${NC}"
-    fi
-  else
-    echo -e "  ${YELLOW}! mvn build failed (dependency may not be in Maven Central)${NC}"
-  fi
-  cd "$ROOT"
-else
-  echo -e "  ${YELLOW}! mvn not found or pp-cli not present — skipping (will use cached JAR if exists)${NC}"
-fi
-fi  # should_deploy portfolio-tracker
-
 # ---- hermes workspace ----
 
 if should_deploy "hermes" || should_deploy "all"; then

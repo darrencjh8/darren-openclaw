@@ -41,7 +41,7 @@ public class Main {
                             params.get("security-id"),
                             require(params, "type"),
                             require(params, "date"),
-                            Long.parseLong(params.getOrDefault("shares", "0")),
+                            Double.parseDouble(params.getOrDefault("shares", "0")),
                             Double.parseDouble(require(params, "price")),
                             require(params, "currency"),
                             Double.parseDouble(params.getOrDefault("fees", "0")),
