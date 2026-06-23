@@ -156,6 +156,7 @@ jobs:
                   KTMB_POLL_INTERVAL: ${{ vars.KTMB_POLL_INTERVAL }}
                   KTMB_GROUP_DELAY: ${{ vars.KTMB_GROUP_DELAY }}
                   SUBMODULE_PAT: ${{ secrets.SUBMODULE_PAT }}
+                  FRIDAY_PAT: ${{ secrets.FRIDAY_PAT }}
                   DEPLOY_COMPONENTS: ${{ steps.changes.outputs.components || 'all' }}
                   FORCE_ALL: ${{ inputs.force_all || 'false' }}
                   DEPLOY_COMPONENTS_OVERRIDE: ${{ inputs.components || '' }}

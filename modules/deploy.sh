@@ -177,6 +177,7 @@ if $GITHUB_MODE || check_file "$HERMES_ENV"; then
   # Optional
   echo "  [Optional]"
   check_var_optional "GITHUB_PAT" "$HERMES_ENV"
+  check_var_optional "FRIDAY_PAT" "$HERMES_ENV"
   check_var_optional "BRAVE_SEARCH_API_KEY" "$HERMES_ENV"
   check_var_optional "FIRECRAWL_API_KEY" "$HERMES_ENV"
   check_var_optional "NOTION_API_KEY" "$HERMES_ENV"
