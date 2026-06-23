@@ -532,7 +532,9 @@ health_ok() {
 failed=0
 
 # Hermes dashboard (always check if hermes being deployed)
+# Needs extra wait: config migration + profile seeding runs before port binds
 if should_deploy "hermes" || should_deploy "all"; then
+  sleep 30
   health_ok "hermes" "http://localhost:9119/" || failed=$((failed + 1))
 fi
 
