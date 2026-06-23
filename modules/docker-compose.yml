@@ -126,6 +126,7 @@ services:
             - IMAP_PASSWORD=${IMAP_PASSWORD}
             - KTMB_BOT_TOKEN=${KTMB_BOT_TOKEN:-}
             - KTMB_BOT_PASSPORT=${KTMB_BOT_PASSPORT:-}
+            - KTMB_BOT_ALLOWED_CHAT_ID=${KTMB_BOT_ALLOWED_CHAT_ID:-}
         restart: unless-stopped
 
     hermes:
