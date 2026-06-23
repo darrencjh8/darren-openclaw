@@ -15,6 +15,23 @@ const IBKR_SEND_URL =
 const USER_AGENT = "Node.js/24";
 
 /**
+ * Check if the IBKR Flex response XML indicates a failure.
+ * @param {string} xml - Raw XML response from IBKR
+ * @returns {{isFail: boolean, errorCode?: string, errorMessage?: string}|null}
+ *          null if the response isn't a FlexStatementResponse at all
+ */
+function checkFlexError(xml) {
+    if (!xml.includes("<Status>Fail</Status>")) return null;
+    const codeMatch = xml.match(/<ErrorCode>(.*?)<\/ErrorCode>/);
+    const msgMatch = xml.match(/<ErrorMessage>(.*?)<\/ErrorMessage>/);
+    return {
+        isFail: true,
+        errorCode: codeMatch ? codeMatch[1] : "unknown",
+        errorMessage: msgMatch ? msgMatch[1] : "Unknown IBKR Flex error",
+    };
+}
+
+/**
  * Pull the latest IBKR flex query XML.
  * @returns {Promise<{success: boolean, xml?: string, error?: string}>}
  */
@@ -47,6 +64,22 @@ export async function pullFlexXml() {
         }
 
         const text = await resp.text();
+
+        // Check if the response indicates a failure (e.g. token expired)
+        const flexError = checkFlexError(text);
+        if (flexError) {
+            console.log(
+                JSON.stringify({
+                    event: "ibkr_flex_error",
+                    errorCode: flexError.errorCode,
+                    errorMessage: flexError.errorMessage,
+                }),
+            );
+            return {
+                success: false,
+                error: `IBKR Flex error ${flexError.errorCode}: ${flexError.errorMessage}`,
+            };
+        }
 
         // Step 2: Fetch the statement using the reference code
         // Response: <FlexStatementResponse><Status>Success</Status><ReferenceCode>1234567890</ReferenceCode><url>...</url></FlexStatementResponse>
@@ -83,6 +116,23 @@ export async function pullFlexXml() {
             }
 
             const refText = await refResp.text();
+
+            // Check the second response for failures too
+            const refFlexError = checkFlexError(refText);
+            if (refFlexError) {
+                console.log(
+                    JSON.stringify({
+                        event: "ibkr_flex_error",
+                        errorCode: refFlexError.errorCode,
+                        errorMessage: refFlexError.errorMessage,
+                    }),
+                );
+                return {
+                    success: false,
+                    error: `IBKR Flex error ${refFlexError.errorCode}: ${refFlexError.errorMessage}`,
+                };
+            }
+
             return { success: true, xml: refText };
         }
 
