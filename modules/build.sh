@@ -3,6 +3,10 @@
 # Usage: ./modules/build.sh --component hermes --component portfolio-tracker
 set -euo pipefail
 
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+NC='\033[0m'
+
 COMPONENTS=()
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -36,6 +40,33 @@ fi
 echo "Building: $SERVICES"
 $COMPOSE build $SERVICES
 echo "✓ Build complete"
+
+# ---- Portfolio Tracker: Java CLI ----
+if [[ " ${COMPONENTS[*]} " =~ " all " ]] || [[ " ${COMPONENTS[*]} " =~ " portfolio-tracker " ]]; then
+  PT_DIR="$ROOT/modules/portfolio-tracker"
+  if command -v mvn &>/dev/null && [ -d "$PT_DIR/pp-cli" ]; then
+    cd "$PT_DIR/pp-cli"
+    if [ -f lib/name.abuchen.portfolio-0.84.1.jar ]; then
+      mvn install:install-file -q -Dfile=lib/name.abuchen.portfolio-0.84.1.jar \
+        -DpomFile=lib/name.abuchen.portfolio-0.84.1.pom \
+        -DgroupId=name.abuchen.portfolio -DartifactId=name.abuchen.portfolio \
+        -Dversion=0.84.1 -Dpackaging=jar 2>/dev/null || true
+    fi
+    echo "Building pp-cli.jar..."
+    if mvn package -q -DskipTests; then
+      if [ -f target/pp-cli.jar ]; then
+        echo -e "  ${GREEN}✓ pp-cli.jar built${NC}"
+      else
+        echo -e "  ${YELLOW}! pp-cli.jar not found after build — may need manual build${NC}"
+      fi
+    else
+      echo -e "  ${YELLOW}! mvn build failed — will use cached JAR if exists${NC}"
+    fi
+  else
+    echo -e "  ${YELLOW}! mvn not found or pp-cli not present — skipping (will use cached JAR if exists)${NC}"
+  fi
+  cd "$MODULES_DIR"
+fi
 
 # Prune old images and build cache (keep latest)
 docker image prune -f 2>/dev/null || true

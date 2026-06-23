@@ -314,22 +314,7 @@ if should_deploy "portfolio-tracker"; then
 ONEDRIVE_CONF_DIR="$ROOT/modules/onedrive-sync/config/onedrive"
 ONEDRIVE_TOKEN="$ONEDRIVE_CONF_DIR/refresh_token"
 
-if [ "$NON_INTERACTIVE" = true ]; then
-  if [ ! -f "$ONEDRIVE_TOKEN" ]; then
-    echo ""
-    echo "--- OneDrive ---"
-    echo -e "  ${YELLOW}⚠ No refresh_token found. OneDrive is not initialized.${NC}"
-    echo ""
-    echo "  Initialize via MCP (no shell needed):"
-    echo "    1. In Telegram: /onedrive setup"
-    echo "    2. Hermes will give you a URL to open in your browser"
-    echo "    3. After authorizing, paste the redirect URL back in Telegram"
-    echo ""
-    echo "  Or run deploy.sh interactively:"
-    echo "    cd ~/darren-openclaw && ./modules/deploy.sh --component portfolio-tracker"
-    echo ""
-  fi
-elif [ ! -f "$ONEDRIVE_TOKEN" ]; then
+if [ "$NON_INTERACTIVE" != true ] && [ ! -f "$ONEDRIVE_TOKEN" ]; then
   echo ""
   echo "----------------------------------------"
   echo " OneDrive Auth Setup"
@@ -370,35 +355,6 @@ elif [ ! -f "$ONEDRIVE_TOKEN" ]; then
     fi
   fi
   echo ""
-fi
-fi  # should_deploy portfolio-tracker
-
-# ---- Portfolio Tracker: Java CLI ----
-if should_deploy "portfolio-tracker"; then
-echo ""
-echo "--- Portfolio Tracker: Java CLI ---"
-if command -v mvn &>/dev/null && [ -d "$PT_DIR/pp-cli" ]; then
-  cd "$PT_DIR/pp-cli"
-  # Install PP model JAR to local Maven (not on Maven Central)
-  if [ -f lib/name.abuchen.portfolio-0.84.1.jar ]; then
-    mvn install:install-file -q -Dfile=lib/name.abuchen.portfolio-0.84.1.jar \
-      -DpomFile=lib/name.abuchen.portfolio-0.84.1.pom \
-      -DgroupId=name.abuchen.portfolio -DartifactId=name.abuchen.portfolio \
-      -Dversion=0.84.1 -Dpackaging=jar 2>/dev/null || true
-  fi
-  echo "Building pp-cli.jar..."
-  if mvn package -q -DskipTests; then
-    if [ -f target/pp-cli.jar ]; then
-      echo -e "  ${GREEN}✓ pp-cli.jar built${NC}"
-    else
-      echo -e "  ${YELLOW}! pp-cli.jar not found after build — may need manual build${NC}"
-    fi
-  else
-    echo -e "  ${YELLOW}! mvn build failed (dependency may not be in Maven Central)${NC}"
-  fi
-  cd "$ROOT"
-else
-  echo -e "  ${YELLOW}! mvn not found or pp-cli not present — skipping (will use cached JAR if exists)${NC}"
 fi
 fi  # should_deploy portfolio-tracker
 
@@ -585,4 +541,25 @@ for mcp_name in expense-tracker portfolio-tracker; do
   fi
 done
 
+# ---- onedrive reminder (non-interactive only) ----
+if [ "$NON_INTERACTIVE" = true ] && should_deploy "portfolio-tracker"; then
+  ONEDRIVE_TOKEN="$ROOT/modules/onedrive-sync/config/onedrive/refresh_token"
+  if [ ! -f "$ONEDRIVE_TOKEN" ]; then
+    echo ""
+    echo "--- OneDrive ---"
+    echo -e "  ${YELLOW}⚠ No refresh_token found. OneDrive is not initialized.${NC}"
+    echo ""
+    echo "  Initialize via MCP (no shell needed):"
+    echo "    1. In Telegram: /onedrive setup"
+    echo "    2. Hermes will give you a URL to open in your browser"
+    echo "    3. After authorizing, paste the redirect URL back in Telegram"
+    echo ""
+    echo "  Or run deploy.sh interactively:"
+    echo "    cd ~/darren-openclaw && ./modules/deploy.sh --component portfolio-tracker"
+    echo ""
+  fi
+fi
+
 echo "========================================"
+
+echo ""
