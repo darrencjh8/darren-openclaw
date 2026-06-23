@@ -480,6 +480,29 @@ if [[ " ${COMPONENTS[*]} " =~ " all " ]]; then
   docker ps -q --filter name=gateway | xargs -r docker stop 2>/dev/null; true
   docker stop hermes modules-portfolio-tracker-1 modules-expense-tracker-1 modules-actual-api-1 2>/dev/null; true
 fi
+
+# ── Graceful ktmb-booking shutdown ─────────────────────────────────
+if [[ " ${COMPONENTS[*]} " =~ " ktmb-booking " || " ${COMPONENTS[*]} " =~ " all " ]]; then
+  CONTAINER="modules-ktmb-booking-1"
+  if docker ps -q --filter name="$CONTAINER" | grep -q .; then
+    echo ""
+    echo "--- Graceful KTMB Shutdown ---"
+    echo "Stopping cron worker..."
+    docker exec "$CONTAINER" sh -c 'rm -f /etc/cron.d/ktmb-worker; pkill cron 2>/dev/null; touch /tmp/ktmb_worker.stop' 2>/dev/null || true
+
+    echo "Waiting for worker to finish (up to 11 min)..."
+    for i in $(seq 1 660); do
+      if ! docker exec "$CONTAINER" test -f /tmp/ktmb_worker.lock 2>/dev/null; then
+        echo "  Worker finished after ${i}s"
+        break
+      fi
+      sleep 1
+    done
+    echo "  Done"
+  fi
+fi
+# ────────────────────────────────────────────────────────────────────
+
 $COMPOSE up -d $TARGETS
 
 # ---- health checks ----
