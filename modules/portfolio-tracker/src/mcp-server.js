@@ -198,6 +198,32 @@ function createTools(server, registry) {
         {},
         async () => tx(await pushToOneDrive()),
     );
+    server.tool(
+        "portfolio_insert_transaction",
+        "Insert a trade, dividend, deposit, withdrawal, fee, tax, or interest into Portfolio Performance via Java CLI.",
+        {
+            account_id: z.string().min(1),
+            security_id: z.string().optional().default(""),
+            type: z.enum(["Buy","Sell","Dividend","Deposit","Withdrawal","Fee","Tax","Interest"]),
+            date: z.string().min(1),
+            shares: z.number(),
+            price: z.number(),
+            currency_code: z.string().min(1),
+            fees: z.number().default(0),
+            taxes: z.number().default(0),
+            notes: z.string().optional().default(""),
+        },
+        async (args) => tx(await registry.executeTool("insert_pp_transaction", args)),
+    );
+    server.tool(
+        "portfolio_get_all",
+        "Get all portfolio accounts, securities, and holdings. Use before inserting transactions.",
+        {},
+        async () => {
+            if (!registry._ppBridge) return tx({ error: "PP bridge not configured" });
+            return tx(await registry.executeTool("fetch_pp_portfolio", {}));
+        },
+    );
 }
 
 export function createMcpServer(registry, app) {

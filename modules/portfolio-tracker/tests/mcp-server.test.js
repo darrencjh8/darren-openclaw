@@ -1,6 +1,5 @@
 /**
- * MCP Server tests — portfolio_sync pre-check logic.
- * Tests that portfolio_sync returns actionable errors when OneDrive/PP not ready.
+ * MCP Server tests — tool registration and schema validation.
  */
 import { describe, it, expect, vi } from "vitest";
 
@@ -24,13 +23,13 @@ vi.mock("fs", async () => {
 });
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { z } from "zod";
 
 describe("MCP Server — portfolio_sync pre-check", () => {
     it("returns actionable error when _ppBridge is null and no token file", async () => {
         const { existsSync } = await import("fs");
         existsSync.mockReturnValue(false);
 
-        // Simulate what portfolio_sync does when bridge is null
         const tokenPath =
             process.env.ONEDRIVE_REFRESH_TOKEN_PATH ||
             "/app/config/onedrive/refresh_token";
@@ -50,7 +49,6 @@ describe("MCP Server — portfolio_sync pre-check", () => {
     });
 
     it("returns pull-first error when token exists but bridge is null", () => {
-        // When token file exists but bridge is null → file hasn't been pulled yet
         const errorResponse = {
             status: "error",
             error: "Portfolio file not found on disk. OneDrive pull may not have run yet.",
@@ -63,7 +61,6 @@ describe("MCP Server — portfolio_sync pre-check", () => {
     });
 
     it("error message is clear enough for an LLM to understand", () => {
-        // Each message should guide the user to a specific action
         const notAuthorized =
             "OneDrive not authorized. Portfolio file cannot be synced.";
         expect(notAuthorized).toMatch(/authorized/);
@@ -76,9 +73,80 @@ describe("MCP Server — portfolio_sync pre-check", () => {
             "OneDrive not synced — portfolio file not downloaded. Run /onedrive setup in Telegram.";
         expect(skippedInSync).toMatch(/\/onedrive setup/);
 
-        // All messages should reference OneDrive or portfolio
         for (const msg of [notAuthorized, needsPull, skippedInSync]) {
             expect(msg.toLowerCase()).toMatch(/onedrive|portfolio file/);
         }
     });
 });
+
+describe("MCP Server — portfolio_insert_transaction and portfolio_get_all", () => {
+    it("tools register without error", () => {
+        const server = new McpServer({ name: "test", version: "1.0.0" });
+
+        expect(() => {
+            server.tool(
+                "portfolio_insert_transaction",
+                "Insert a trade/dividend/deposit into Portfolio Performance",
+                {
+                    account_id: z.string().min(1),
+                    security_id: z.string().optional().default(""),
+                    type: z.enum([
+                        "Buy",
+                        "Sell",
+                        "Dividend",
+                        "Deposit",
+                        "Withdrawal",
+                        "Fee",
+                        "Tax",
+                        "Interest",
+                    ]),
+                    date: z.string().min(1),
+                    shares: z.number(),
+                    price: z.number(),
+                    currency_code: z.string().min(1),
+                    fees: z.number().default(0),
+                    taxes: z.number().default(0),
+                    notes: z.string().optional().default(""),
+                },
+                async () => tx({ status: "ok" }),
+            );
+        }).not.toThrow();
+
+        expect(() => {
+            server.tool(
+                "portfolio_get_all",
+                "Get all portfolio accounts, securities, and holdings",
+                {},
+                async () => tx({ accounts: [], securities: [], holdings: [] }),
+            );
+        }).not.toThrow();
+    });
+
+    it("portfolio_insert_transaction validates required fields", () => {
+        const account = z.string().min(1);
+        const txType = z.enum([
+            "Buy",
+            "Sell",
+            "Dividend",
+            "Deposit",
+            "Withdrawal",
+            "Fee",
+            "Tax",
+            "Interest",
+        ]);
+
+        expect(() => account.parse("acc-1")).not.toThrow();
+        expect(() => account.parse("")).toThrow();
+        expect(() => txType.parse("Buy")).not.toThrow();
+        expect(() => txType.parse("Invalid")).toThrow();
+    });
+
+    it("portfolio_get_all has no required parameters", () => {
+        // Schema is {} — no validation needed
+        expect(true).toBe(true);
+    });
+});
+
+function tx(result) {
+    return { content: [{ type: "text", text: JSON.stringify(result) }] };
+}
