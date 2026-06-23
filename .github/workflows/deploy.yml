@@ -120,6 +120,7 @@ jobs:
                   KTMB_CAPTCHA_KEY: ${{ secrets.KTMB_CAPTCHA_KEY }}
                   KTMB_BOT_TOKEN: ${{ secrets.KTMB_BOT_TOKEN }}
                   KTMB_BOT_PASSPORT: ${{ secrets.KTMB_BOT_PASSPORT }}
+                  KTMB_BOT_ALLOWED_CHAT_ID: ${{ secrets.KTMB_BOT_ALLOWED_CHAT_ID }}
                   GITHUB_PAT: ${{ secrets.GITHUB_PAT }}
                   BRAVE_SEARCH_API_KEY: ${{ secrets.BRAVE_SEARCH_API_KEY }}
                   FIRECRAWL_API_KEY: ${{ secrets.FIRECRAWL_API_KEY }}
