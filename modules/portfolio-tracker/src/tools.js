@@ -756,19 +756,19 @@ export class ToolRegistry {
 
             const targets = [
                 {
-                    account_id: "444b04eb-8c55-4efc-9df3-c529612fd2f3",
+                    account_id: this._config.ppEmergencyPrimaryAccount || "444b04eb-8c55-4efc-9df3-c529612fd2f3",
                     name: "Emergency Funds - SGD",
                     amount: (sgd.emergency_total || 0) / 100,
                     currency: "SGD",
                 },
                 {
-                    account_id: "a5f42a18-b882-4225-bea6-90c9eea720b5",
+                    account_id: this._config.ppEmergencySecondaryAccount || "a5f42a18-b882-4225-bea6-90c9eea720b5",
                     name: "Emergency Funds - MYR",
                     amount: (myr.emergency_total || 0) / 100,
                     currency: "MYR",
                 },
                 {
-                    account_id: "68815371-05f3-43e9-9669-08b368fe1e9d",
+                    account_id: this._config.ppWarchestPrimaryAccount || "68815371-05f3-43e9-9669-08b368fe1e9d",
                     name: "Warchest",
                     amount: (sgd.investment_total || 0) / 100,
                     currency: "SGD",

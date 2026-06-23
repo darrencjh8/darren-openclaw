@@ -59,7 +59,7 @@ if [[ " $SERVICES " =~ " portfolio-tracker " ]] || [[ " $SERVICES " =~ " all " ]
     else
       echo "  WARNING: mvn build failed — Docker build will fail if JAR is missing" >&2
     fi
-    cd "$ROOT" || cd "$MODULES_DIR/.."
+    cd "$MODULES_DIR"
   else
     echo "  (skipping pp-cli — mvn not found or pp-cli not present)"
   fi
