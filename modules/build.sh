@@ -45,7 +45,7 @@ if [[ " $SERVICES " =~ " portfolio-tracker " ]] || [[ " $SERVICES " =~ " all " ]
       mvn install:install-file -q -Dfile=lib/name.abuchen.portfolio-0.84.1.jar \
         -DpomFile=lib/name.abuchen.portfolio-0.84.1.pom \
         -DgroupId=name.abuchen.portfolio -DartifactId=name.abuchen.portfolio \
-        -Dversion=0.84.1 -Dpackaging=jar 2>/dev/null || true
+        -Dversion=0.84.1 -Dpackaging=jar
     fi
     echo "Building pp-cli.jar..."
     if mvn package -q -DskipTests; then
