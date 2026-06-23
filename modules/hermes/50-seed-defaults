@@ -34,7 +34,7 @@ chown -R hermes:hermes /opt/data/memories-backup 2>/dev/null || true
 # Available at boot time — no racing with dashboard UI
 if [ -n "${FRIDAY_PAT:-}" ]; then
     printf '%s' "$FRIDAY_PAT" > /tmp/.gh-token-init
-    su -s /bin/sh hermes -c "gh auth login --with-token < /tmp/.gh-token-init" 2>/dev/null || true
+    su -s /bin/sh hermes -c "gh auth login --with-token < /tmp/.gh-token-init" || echo "[50-seed-defaults] gh auth login failed (non-fatal)" >&2
     rm -f /tmp/.gh-token-init
 fi
 
