@@ -200,11 +200,20 @@ function createTools(server, registry) {
     );
     server.tool(
         "portfolio_insert_transaction",
-        "Insert a trade, dividend, deposit, withdrawal, fee, tax, or interest into Portfolio Performance via Java CLI.",
+        "Pull from OneDrive → insert transaction via Java CLI → push back to OneDrive. Fully self-contained.",
         {
             account_id: z.string().min(1),
             security_id: z.string().optional().default(""),
-            type: z.enum(["Buy","Sell","Dividend","Deposit","Withdrawal","Fee","Tax","Interest"]),
+            type: z.enum([
+                "Buy",
+                "Sell",
+                "Dividend",
+                "Deposit",
+                "Withdrawal",
+                "Fee",
+                "Tax",
+                "Interest",
+            ]),
             date: z.string().min(1),
             shares: z.number(),
             price: z.number(),
@@ -213,14 +222,56 @@ function createTools(server, registry) {
             taxes: z.number().default(0),
             notes: z.string().optional().default(""),
         },
-        async (args) => tx(await registry.executeTool("insert_pp_transaction", args)),
+        async (args) => {
+            const result = {};
+
+            // 1. Pull from OneDrive
+            try {
+                result.pull = await pullFromOneDrive();
+            } catch (e) {
+                return tx({ error: "OneDrive pull failed", detail: e.message });
+            }
+            if (result.pull?.status === "error") {
+                return tx({
+                    error: "OneDrive pull failed",
+                    detail: result.pull,
+                });
+            }
+
+            // 2. Insert transaction
+            try {
+                result.insert = await registry.executeTool(
+                    "insert_pp_transaction",
+                    args,
+                );
+            } catch (e) {
+                return tx({
+                    error: "Transaction insert failed",
+                    detail: e.message,
+                    pull: result.pull,
+                });
+            }
+            if (result.insert?.error) {
+                return tx({ ...result.insert, pull: result.pull });
+            }
+
+            // 3. Push back to OneDrive
+            try {
+                result.push = await pushToOneDrive();
+            } catch (e) {
+                result.push = { status: "error", detail: e.message };
+            }
+
+            return tx(result);
+        },
     );
     server.tool(
         "portfolio_get_all",
         "Get all portfolio accounts, securities, and holdings. Use before inserting transactions.",
         {},
         async () => {
-            if (!registry._ppBridge) return tx({ error: "PP bridge not configured" });
+            if (!registry._ppBridge)
+                return tx({ error: "PP bridge not configured" });
             return tx(await registry.executeTool("fetch_pp_portfolio", {}));
         },
     );
