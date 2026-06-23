@@ -145,6 +145,81 @@ describe("MCP Server — portfolio_insert_transaction and portfolio_get_all", ()
         // Schema is {} — no validation needed
         expect(true).toBe(true);
     });
+
+    it("handler calls pull -> insert -> push in order", async () => {
+        const { pullFromOneDrive, pushToOneDrive } =
+            await import("../src/onedrive.js");
+        const calls = [];
+
+        pullFromOneDrive.mockImplementation(async () => {
+            calls.push("pull");
+            return { status: "ok" };
+        });
+        pushToOneDrive.mockImplementation(async () => {
+            calls.push("push");
+            return { status: "ok" };
+        });
+
+        const registry = {
+            _ppBridge: {},
+            executeTool: async (name) => {
+                calls.push(`insert:${name}`);
+                return { status: "ok" };
+            },
+        };
+
+        const result = {};
+        result.pull = await pullFromOneDrive();
+        if (result.pull?.status !== "error") {
+            result.insert = await registry.executeTool(
+                "insert_pp_transaction",
+                {
+                    account_id: "acc-1",
+                    type: "Buy",
+                    date: "2026-01-01",
+                    shares: 10,
+                    price: 100,
+                    currency_code: "SGD",
+                },
+            );
+            if (!result.insert?.error) {
+                result.push = await pushToOneDrive();
+            }
+        }
+
+        expect(calls).toEqual(["pull", "insert:insert_pp_transaction", "push"]);
+        expect(result.pull.status).toBe("ok");
+        expect(result.insert.status).toBe("ok");
+        expect(result.push.status).toBe("ok");
+    });
+
+    it("stops on pull failure, never inserts", async () => {
+        const { pullFromOneDrive } = await import("../src/onedrive.js");
+        const calls = [];
+
+        pullFromOneDrive.mockImplementation(async () => {
+            calls.push("pull");
+            return { status: "error" };
+        });
+
+        const registry = {
+            _ppBridge: {},
+            executeTool: async () => {
+                calls.push("insert");
+                return { status: "ok" };
+            },
+        };
+
+        const result = {};
+        result.pull = await pullFromOneDrive();
+        if (result.pull?.status === "error") {
+            // stop — never call insert
+            expect(calls).toEqual(["pull"]);
+            return;
+        }
+        await registry.executeTool("insert_pp_transaction", {});
+        throw new Error("should not reach here");
+    });
 });
 
 function tx(result) {

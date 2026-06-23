@@ -121,7 +121,6 @@ jobs:
                   KTMB_BOT_TOKEN: ${{ secrets.KTMB_BOT_TOKEN }}
                   KTMB_BOT_PASSPORT: ${{ secrets.KTMB_BOT_PASSPORT }}
                   KTMB_BOT_ALLOWED_CHAT_ID: ${{ secrets.KTMB_BOT_ALLOWED_CHAT_ID }}
-                  GITHUB_PAT: ${{ secrets.GITHUB_PAT }}
                   BRAVE_SEARCH_API_KEY: ${{ secrets.BRAVE_SEARCH_API_KEY }}
                   FIRECRAWL_API_KEY: ${{ secrets.FIRECRAWL_API_KEY }}
                   NOTION_API_KEY: ${{ secrets.NOTION_API_KEY }}
@@ -156,6 +155,7 @@ jobs:
                   KTMB_POLL_INTERVAL: ${{ vars.KTMB_POLL_INTERVAL }}
                   KTMB_GROUP_DELAY: ${{ vars.KTMB_GROUP_DELAY }}
                   SUBMODULE_PAT: ${{ secrets.SUBMODULE_PAT }}
+                  FRIDAY_PAT: ${{ secrets.FRIDAY_PAT }}
                   DEPLOY_COMPONENTS: ${{ steps.changes.outputs.components || 'all' }}
                   FORCE_ALL: ${{ inputs.force_all || 'false' }}
                   DEPLOY_COMPONENTS_OVERRIDE: ${{ inputs.components || '' }}

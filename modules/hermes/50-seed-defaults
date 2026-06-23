@@ -30,14 +30,10 @@ done
 mkdir -p /opt/data/memories-backup
 chown -R hermes:hermes /opt/data/memories-backup 2>/dev/null || true
 
-# Configure gh CLI with GITHUB_TOKEN for hermes user
-# Token is set via Hermes dashboard UI (not docker-compose), stored in /opt/data/.env.
-# At init time it may not be in env yet — fall back to reading .env file.
-if [ -z "${GITHUB_TOKEN:-}" ] && [ -f /opt/data/.env ]; then
-    export "$(grep '^GITHUB_TOKEN=' /opt/data/.env)"
-fi
-if [ -n "${GITHUB_TOKEN:-}" ]; then
-    printf '%s' "$GITHUB_TOKEN" > /tmp/.gh-token-init
+# Configure gh CLI with FRIDAY_PAT (injected via GitHub Actions secret)
+# Available at boot time — no racing with dashboard UI
+if [ -n "${FRIDAY_PAT:-}" ]; then
+    printf '%s' "$FRIDAY_PAT" > /tmp/.gh-token-init
     su -s /bin/sh hermes -c "gh auth login --with-token < /tmp/.gh-token-init" 2>/dev/null || true
     rm -f /tmp/.gh-token-init
 fi
