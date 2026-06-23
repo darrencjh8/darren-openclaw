@@ -490,17 +490,14 @@ if [[ " ${COMPONENTS[*]} " =~ " ktmb-booking " || " ${COMPONENTS[*]} " =~ " all 
     echo "Stopping cron worker..."
     docker exec "$CONTAINER" sh -c 'rm -f /etc/cron.d/ktmb-worker; pkill cron 2>/dev/null; touch /tmp/ktmb_worker.stop' 2>/dev/null || true
 
-    echo "Waiting for worker to finish..."
-    for i in $(seq 1 120); do
+    echo "Waiting for worker to finish (up to 11 min)..."
+    for i in $(seq 1 660); do
       if ! docker exec "$CONTAINER" test -f /tmp/ktmb_worker.lock 2>/dev/null; then
         echo "  Worker finished after ${i}s"
         break
       fi
       sleep 1
     done
-
-    echo "Waiting 10s grace period..."
-    sleep 10
     echo "  Done"
   fi
 fi
