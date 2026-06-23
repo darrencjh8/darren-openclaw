@@ -118,6 +118,8 @@ jobs:
                   GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
                   KTMB_EMAIL: ${{ secrets.KTMB_EMAIL }}
                   KTMB_CAPTCHA_KEY: ${{ secrets.KTMB_CAPTCHA_KEY }}
+                  KTMB_BOT_TOKEN: ${{ secrets.KTMB_BOT_TOKEN }}
+                  KTMB_BOT_PASSPORT: ${{ secrets.KTMB_BOT_PASSPORT }}
                   GITHUB_PAT: ${{ secrets.GITHUB_PAT }}
                   BRAVE_SEARCH_API_KEY: ${{ secrets.BRAVE_SEARCH_API_KEY }}
                   FIRECRAWL_API_KEY: ${{ secrets.FIRECRAWL_API_KEY }}
@@ -151,6 +153,7 @@ jobs:
                   KTMB_ACCOUNT_NAME: ${{ vars.KTMB_ACCOUNT_NAME }}
                   KTMB_MAX_RETRIES: ${{ vars.KTMB_MAX_RETRIES }}
                   KTMB_POLL_INTERVAL: ${{ vars.KTMB_POLL_INTERVAL }}
+                  KTMB_GROUP_DELAY: ${{ vars.KTMB_GROUP_DELAY }}
                   SUBMODULE_PAT: ${{ secrets.SUBMODULE_PAT }}
                   DEPLOY_COMPONENTS: ${{ steps.changes.outputs.components || 'all' }}
                   FORCE_ALL: ${{ inputs.force_all || 'false' }}
