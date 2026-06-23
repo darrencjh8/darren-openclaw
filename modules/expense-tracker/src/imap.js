@@ -177,7 +177,7 @@ export class ImapIdleHandler {
                         if (settled) return;
                         settled = true;
                         cleanup();
-                        logger.info({
+                        logger.debug({
                             event: "imap_keepalive",
                             msg: "Keepalive NOOP to break IDLE",
                         });
