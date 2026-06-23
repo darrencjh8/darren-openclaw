@@ -459,7 +459,11 @@ if [[ " ${COMPONENTS[*]} " =~ " ktmb-booking " || " ${COMPONENTS[*]} " =~ " all 
 fi
 # ────────────────────────────────────────────────────────────────────
 
-$COMPOSE up -d $TARGETS
+if [ "${FORCE_ALL:-false}" = "true" ]; then
+    $COMPOSE up -d --force-recreate $TARGETS
+else
+    $COMPOSE up -d $TARGETS
+fi
 
 # ---- health checks ----
 
