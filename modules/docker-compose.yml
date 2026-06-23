@@ -176,6 +176,7 @@ services:
             - NOTION_API_KEY=${NOTION_API_KEY}
             - POLLINATIONS_API_KEY=${POLLINATIONS_API_KEY}
             - FRIDAY_PAT=${FRIDAY_PAT}
+            - GH_TOKEN=${FRIDAY_PAT}
         mem_limit: 1g
         networks:
             - default
