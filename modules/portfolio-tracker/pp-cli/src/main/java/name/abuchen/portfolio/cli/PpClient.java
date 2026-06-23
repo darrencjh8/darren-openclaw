@@ -132,7 +132,7 @@ public class PpClient {
     }
 
     public Map<String, Object> insertTransaction(String accountId, String securityId, String type,
-            String dateStr, long shares, double price, String currencyCode,
+            String dateStr, double shares, double price, String currencyCode,
             double fees, double taxes, String notes) throws IOException {
 
         Client client = load();
