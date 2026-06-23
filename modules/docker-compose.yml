@@ -124,6 +124,8 @@ services:
             - KTMB_GROUP_DELAY=${KTMB_GROUP_DELAY:-8}
             - IMAP_USERNAME=${IMAP_USERNAME}
             - IMAP_PASSWORD=${IMAP_PASSWORD}
+            - KTMB_BOT_TOKEN=${KTMB_BOT_TOKEN:-}
+            - KTMB_BOT_PASSPORT=${KTMB_BOT_PASSPORT:-}
         restart: unless-stopped
 
     hermes:
