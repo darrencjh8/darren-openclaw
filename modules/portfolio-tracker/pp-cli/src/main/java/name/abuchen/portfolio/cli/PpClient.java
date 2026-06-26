@@ -6,9 +6,11 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
@@ -369,6 +371,7 @@ public class PpClient {
             Map<String, Object> h = new HashMap<>();
             h.put("currency", account.getCurrencyCode());
             h.put("market_value_native", balance / Values.Amount.divider());
+            h.put("name", account.getName());
             accountBalances.put(account.getUUID(), h);
         }
 
@@ -395,10 +398,51 @@ public class PpClient {
                 }
             }
 
+            // Collect all assigned vehicle UUIDs for this taxonomy
+            Set<String> assignedIds = new HashSet<>();
+            collectAssignedIds(root, assignedIds);
+
+            // Compute unclassified (Without Classification) residual
+            double unclassifiedNative = 0;
+            Map<String, Double> unclassifiedCurrencies = new LinkedHashMap<>();
+            int unclassifiedCount = 0;
+            List<Map<String, Object>> unclassifiedChildren = new ArrayList<>();
+            for (Map.Entry<String, Map<String, Object>> e : securityHoldings.entrySet()) {
+                if (!assignedIds.contains(e.getKey())) {
+                    Map<String, Object> h = e.getValue();
+                    double val = (Double) h.get("market_value_native");
+                    unclassifiedNative += val;
+                    unclassifiedCurrencies.merge((String) h.get("currency"), val, Double::sum);
+                    unclassifiedCount++;
+                    Map<String, Object> child = new HashMap<>();
+                    child.put("name", h.get("name"));
+                    child.put("ticker", h.getOrDefault("ticker", ""));
+                    child.put("currency", h.get("currency"));
+                    child.put("valuation_native", Math.round(val * 100.0) / 100.0);
+                    unclassifiedChildren.add(child);
+                }
+            }
+            for (Map.Entry<String, Map<String, Object>> e : accountBalances.entrySet()) {
+                if (!assignedIds.contains(e.getKey())) {
+                    Map<String, Object> h = e.getValue();
+                    double val = (Double) h.get("market_value_native");
+                    unclassifiedNative += val;
+                    unclassifiedCurrencies.merge((String) h.get("currency"), val, Double::sum);
+                    unclassifiedCount++;
+                    Map<String, Object> child = new HashMap<>();
+                    child.put("name", h.getOrDefault("name", "Account " + e.getKey()));
+                    child.put("ticker", "");
+                    child.put("currency", h.get("currency"));
+                    child.put("valuation_native", Math.round(val * 100.0) / 100.0);
+                    unclassifiedChildren.add(child);
+                }
+            }
+
             double grandNative = 0;
             for (Map<String, Object> agg : aggregated.values()) {
                 grandNative += (Double) agg.get("total_native");
             }
+            double fullTotal = grandNative + unclassifiedNative;
 
             List<Map<String, Object>> values = new ArrayList<>();
             for (Map.Entry<String, Map<String, Object>> entry : aggregated.entrySet()) {
@@ -409,10 +453,25 @@ public class PpClient {
                 v.put("valuation_native", Math.round(nativeTotal * 100.0) / 100.0);
                 v.put("currency", agg.get("currency"));
                 v.put("count", agg.get("count"));
-                v.put("currencies", agg.get("currencies"));  // per-currency native breakdown
-                v.put("share_pct", grandNative > 0
-                        ? Math.round(nativeTotal / grandNative * 10000.0) / 100.0 : 0.0);
+                v.put("currencies", agg.get("currencies"));
+                v.put("children", agg.get("children"));
+                v.put("share_pct", fullTotal > 0
+                        ? Math.round(nativeTotal / fullTotal * 10000.0) / 100.0 : 0.0);
                 values.add(v);
+            }
+
+            // Add Without Classification if there are unassigned holdings
+            if (unclassifiedCount > 0) {
+                Map<String, Object> wc = new HashMap<>();
+                wc.put("value", "Without Classification");
+                wc.put("valuation_native", Math.round(unclassifiedNative * 100.0) / 100.0);
+                wc.put("currency", unclassifiedCurrencies.keySet().iterator().next());
+                wc.put("count", unclassifiedCount);
+                wc.put("currencies", unclassifiedCurrencies);
+                wc.put("children", unclassifiedChildren);
+                wc.put("share_pct", fullTotal > 0
+                        ? Math.round(unclassifiedNative / fullTotal * 10000.0) / 100.0 : 0.0);
+                values.add(wc);
             }
 
             Map<String, Object> tax = new HashMap<>();
@@ -436,6 +495,16 @@ public class PpClient {
         }
     }
 
+    /** Recursively collect all assigned investment vehicle UUIDs in a taxonomy. */
+    private void collectAssignedIds(Classification cls, Set<String> ids) {
+        for (Assignment assignment : cls.getAssignments()) {
+            ids.add(assignment.getInvestmentVehicle().getUUID());
+        }
+        for (Classification child : cls.getChildren()) {
+            collectAssignedIds(child, ids);
+        }
+    }
+
     private void aggregateAssignmentsFlat(Classification cls, String groupName,
             Map<String, Map<String, Object>> securityHoldings,
             Map<String, Map<String, Object>> accountBalances,
@@ -454,6 +523,7 @@ public class PpClient {
             Map<String, Map<String, Object>> aggregated) {
         String vehicleId = assignment.getInvestmentVehicle().getUUID();
         Map<String, Object> holding = securityHoldings.get(vehicleId);
+        boolean isSecurity = holding != null;
         if (holding == null) {
             holding = accountBalances.get(vehicleId);
         }
@@ -468,6 +538,7 @@ public class PpClient {
             agg.put("count", 0);
             agg.put("total_native", 0.0);
             agg.put("currencies", new LinkedHashMap<String, Double>());
+            agg.put("children", new ArrayList<Map<String, Object>>());
             return agg;
         });
         Map<String, Object> agg = aggregated.get(groupName);
@@ -477,6 +548,15 @@ public class PpClient {
         Map<String, Double> currencies = (Map<String, Double>) agg.get("currencies");
         currencies.merge(currency, prorated, Double::sum);
         agg.put("currency", currency);  // primary currency (may be overwritten)
+
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> children = (List<Map<String, Object>>) agg.get("children");
+        Map<String, Object> child = new HashMap<>();
+        child.put("name", holding.get("name"));
+        child.put("ticker", holding.getOrDefault("ticker", ""));
+        child.put("currency", currency);
+        child.put("valuation_native", Math.round(prorated * 100.0) / 100.0);
+        children.add(child);
     }
 
     public Map<String, Object> dumpPortfolio() throws IOException {
@@ -679,6 +759,26 @@ public class PpClient {
                 }
             }
         }
+        // Compute cost basis: sum of all BUY transactions only
+        long totalCostCents = 0;
+        long totalBoughtShares = 0;
+        for (Portfolio portfolio : client.getPortfolios()) {
+            for (PortfolioTransaction t : portfolio.getTransactions()) {
+                if (found.equals(t.getSecurity()) && t.getType() == PortfolioTransaction.Type.BUY) {
+                    totalCostCents += t.getMonetaryAmount().getAmount();
+                    totalBoughtShares += t.getShares();
+                }
+            }
+        }
+        double costBasis = totalCostCents / 100.0;
+        result.put("total_cost_basis", Math.round(costBasis * 100.0) / 100.0);
+        if (totalBoughtShares > 0) {
+            double avgCostPerShare = costBasis / (Math.abs(totalBoughtShares) / Values.Share.divider());
+            result.put("avg_cost_per_share", Math.round(avgCostPerShare * 100.0) / 100.0);
+        } else {
+            result.put("avg_cost_per_share", 0.0);
+        }
+
         if (latest != null) {
             long quote = latest.getValue();
             double price = quote / Values.Quote.divider();
