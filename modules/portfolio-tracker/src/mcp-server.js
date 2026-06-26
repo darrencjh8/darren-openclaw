@@ -275,6 +275,20 @@ function createTools(server, registry) {
             return tx(await registry.executeTool("fetch_pp_portfolio", {}));
         },
     );
+    server.tool(
+        "portfolio_query_security",
+        "Query a security by ticker, ISIN, or name. Returns shares held, latest price, market value, and cost basis (total_cost_basis, avg_cost_per_share).",
+        { search: z.string().min(1) },
+        async (args) => {
+            if (!registry._ppBridge)
+                return tx({ error: "PP bridge not configured" });
+            return tx(
+                await registry.executeTool("query_pp_security", {
+                    search: args.search,
+                }),
+            );
+        },
+    );
 }
 
 export function createMcpServer(registry, app) {

@@ -662,4 +662,260 @@ public class PpClientTest {
         assertNotNull("total_value_native missing", summary.get("total_value_native"));
         assertNotNull("equity_value_native missing", summary.get("equity_value_native"));
     }
+
+    // ---- Unit tests for querySecurity cost basis ----
+
+    private Client buildCostBasisTestClient() {
+        Client client = new Client();
+        client.setBaseCurrency("SGD");
+
+        Security sec = new Security();
+        sec.setName("AAPL Test");
+        sec.setTickerSymbol("AAPL");
+        sec.setCurrencyCode("USD");
+        // Latest price: $150
+        sec.addPrice(new SecurityPrice(LocalDate.now().minusDays(1), 150_00000000L));
+        sec.setLatest(new LatestSecurityPrice(LocalDate.now().minusDays(1), 150_00000000L));
+        client.addSecurity(sec);
+
+        Portfolio portfolio = new Portfolio();
+        portfolio.setName("Test Portfolio");
+        client.addPortfolio(portfolio);
+
+        // Values.Share.divider() = 100_000_000, so 1 share = 100_000_000L internal units
+        // Buy 100 shares @ $150 = $15,000 total
+        PortfolioTransaction t1 = new PortfolioTransaction(
+                LocalDateTime.of(2023, 1, 1, 0, 0), "USD", 15000_00L, sec,
+                100_00000000L, PortfolioTransaction.Type.BUY, 0, 0);
+        portfolio.addTransaction(t1);
+
+        // Buy 50 shares @ $160 = $8,000 total
+        PortfolioTransaction t2 = new PortfolioTransaction(
+                LocalDateTime.of(2023, 6, 1, 0, 0), "USD", 8000_00L, sec,
+                50_00000000L, PortfolioTransaction.Type.BUY, 0, 0);
+        portfolio.addTransaction(t2);
+
+        // Sell 30 shares (should NOT affect cost basis)
+        PortfolioTransaction t3 = new PortfolioTransaction(
+                LocalDateTime.of(2024, 1, 1, 0, 0), "USD", 6000_00L, sec,
+                30_00000000L, PortfolioTransaction.Type.SELL, 0, 0);
+        portfolio.addTransaction(t3);
+
+        return client;
+    }
+
+    @Test
+    public void testQuerySecurityReturnsCostBasis() throws Exception {
+        Client client = buildCostBasisTestClient();
+        File tmpFile = File.createTempFile("pp-costbasis-", ".xml");
+        tmpFile.deleteOnExit();
+        PpClient ppClient = new PpClient(tmpFile) {
+            @Override
+            public Client load() { return client; }
+        };
+
+        Map<String, Object> result = ppClient.querySecurity("AAPL");
+        assertNotNull(result);
+
+        // total_cost_basis: only BUY transactions = $15,000 + $8,000 = $23,000
+        double costBasis = ((Number) result.get("total_cost_basis")).doubleValue();
+        assertEquals("total_cost_basis should be $23,000 (only BUY, not SELL)",
+                23000.0, costBasis, 0.01);
+
+        // avg_cost_per_share: $23,000 / 150 shares = $153.33
+        double avgCost = ((Number) result.get("avg_cost_per_share")).doubleValue();
+        assertEquals("avg_cost_per_share should be $23,000/150 = $153.33",
+                153.33, avgCost, 0.01);
+    }
+
+    @Test
+    public void testQuerySecurityCostBasisZeroWhenNoBuys() throws Exception {
+        Client client = new Client();
+        client.setBaseCurrency("SGD");
+
+        Security sec = new Security();
+        sec.setName("ZERO Test");
+        sec.setTickerSymbol("ZERO");
+        sec.setCurrencyCode("USD");
+        sec.addPrice(new SecurityPrice(LocalDate.now().minusDays(1), 50_00000000L));
+        client.addSecurity(sec);
+
+        // Only SELL, no BUY (e.g., inherited shares)
+        Portfolio portfolio = new Portfolio();
+        portfolio.setName("Test Portfolio");
+        client.addPortfolio(portfolio);
+        PortfolioTransaction t1 = new PortfolioTransaction(
+                LocalDateTime.of(2024, 1, 1, 0, 0), "USD", 5000_00L, sec,
+                100_000000L, PortfolioTransaction.Type.SELL, 0, 0);
+        portfolio.addTransaction(t1);
+
+        File tmpFile = File.createTempFile("pp-costbasis-zero-", ".xml");
+        tmpFile.deleteOnExit();
+        PpClient ppClient = new PpClient(tmpFile) {
+            @Override
+            public Client load() { return client; }
+        };
+
+        Map<String, Object> result = ppClient.querySecurity("ZERO");
+        assertEquals("total_cost_basis should be 0 when no BUY",
+                0.0, ((Number) result.get("total_cost_basis")).doubleValue(), 0.01);
+        assertEquals("avg_cost_per_share should be 0 when no BUY",
+                0.0, ((Number) result.get("avg_cost_per_share")).doubleValue(), 0.01);
+    }
+
+    // ---- Unit tests for queryTaxonomies Without Classification ----
+
+    private Client buildTaxonomyWithUnclassifiedClient() {
+        Client client = new Client();
+        client.setBaseCurrency("SGD");
+
+        // Security 1: classified as "America"
+        Security sec1 = new Security();
+        sec1.setName("AMD");
+        sec1.setTickerSymbol("AMD");
+        sec1.setCurrencyCode("USD");
+        sec1.addPrice(new SecurityPrice(LocalDate.now().minusDays(1), 100_00000000L));
+        client.addSecurity(sec1);
+
+        // Security 2: NOT classified (illiquid)
+        Security sec2 = new Security();
+        sec2.setName("CPF OA");
+        sec2.setTickerSymbol("CPFOA");
+        sec2.setCurrencyCode("SGD");
+        sec2.addPrice(new SecurityPrice(LocalDate.now().minusDays(1), 200_00000000L));
+        client.addSecurity(sec2);
+
+        Portfolio portfolio = new Portfolio();
+        portfolio.setName("Test Portfolio");
+        client.addPortfolio(portfolio);
+
+        PortfolioTransaction t1 = new PortfolioTransaction(
+                LocalDateTime.of(2023, 1, 1, 0, 0), "USD", 0, sec1,
+                100_000000L, PortfolioTransaction.Type.BUY, 0, 0);
+        portfolio.addTransaction(t1);
+
+        PortfolioTransaction t2 = new PortfolioTransaction(
+                LocalDateTime.of(2023, 1, 1, 0, 0), "SGD", 0, sec2,
+                200_000000L, PortfolioTransaction.Type.BUY, 0, 0);
+        portfolio.addTransaction(t2);
+
+        // Account: NOT classified
+        Account account = new Account();
+        account.setName("CPFIA Cash");
+        account.setCurrencyCode("SGD");
+        client.addAccount(account);
+        AccountTransaction dep = new AccountTransaction();
+        dep.setType(AccountTransaction.Type.DEPOSIT);
+        dep.setDateTime(LocalDateTime.of(2024, 1, 1, 0, 0));
+        dep.setCurrencyCode("SGD");
+        dep.setAmount(5000_00L);
+        account.addTransaction(dep);
+
+        // Taxonomy: only sec1 classified
+        Taxonomy taxonomy = new Taxonomy("test-taxonomy");
+        taxonomy.setRootNode(new Classification("root", "Root"));
+        Classification america = new Classification(taxonomy.getRoot(), "America", "America");
+        america.addAssignment(new Classification.Assignment(sec1, Classification.ONE_HUNDRED_PERCENT));
+        taxonomy.getRoot().addChild(america);
+        client.addTaxonomy(taxonomy);
+
+        return client;
+    }
+
+    @Test
+    public void testQueryTaxonomiesIncludesWithoutClassification() throws Exception {
+        Client client = buildTaxonomyWithUnclassifiedClient();
+        File tmpFile = File.createTempFile("pp-tax-wc-", ".xml");
+        tmpFile.deleteOnExit();
+        PpClient ppClient = new PpClient(tmpFile) {
+            @Override
+            public Client load() { return client; }
+        };
+
+        Map<String, Object> result = ppClient.queryTaxonomies(List.of("test-taxonomy"));
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> values = (List<Map<String, Object>>)
+                ((List<Map<String, Object>>) result.get("taxonomies")).get(0).get("values");
+
+        // Should have 2 entries: America + Without Classification
+        assertEquals("should have America and Without Classification", 2, values.size());
+
+        boolean foundWc = false;
+        boolean foundAmerica = false;
+        for (Map<String, Object> v : values) {
+            String name = (String) v.get("value");
+            if ("Without Classification".equals(name)) {
+                foundWc = true;
+                // sec2: 2 shares x $200 = $400 SGD + account: $5,000 SGD = $5,400 SGD
+                assertEquals("unclassified valuation should be $5,400 (sec2 $400 + acct $5k)",
+                        5400.0, ((Number) v.get("valuation_native")).doubleValue(), 0.01);
+                assertEquals("count should be 2 (1 security + 1 account)", 2,
+                        ((Number) v.get("count")).intValue());
+                @SuppressWarnings("unchecked")
+                List<Map<String, Object>> children = (List<Map<String, Object>>) v.get("children");
+                assertNotNull("children missing for Without Classification", children);
+                assertEquals("children count should be 2", 2, children.size());
+                // One security + one account
+                boolean foundSec2 = false, foundAcct = false;
+                for (Map<String, Object> c : children) {
+                    String cname = (String) c.get("name");
+                    if ("CPF OA".equals(cname)) {
+                        foundSec2 = true;
+                        assertEquals(400.0, ((Number) c.get("valuation_native")).doubleValue(), 0.01);
+                        assertEquals("SGD", c.get("currency"));
+                        assertEquals("CPFOA", c.get("ticker"));
+                    } else if ("CPFIA Cash".equals(cname)) {
+                        foundAcct = true;
+                        assertEquals(5000.0, ((Number) c.get("valuation_native")).doubleValue(), 0.01);
+                        assertEquals("SGD", c.get("currency"));
+                    }
+                }
+                assertTrue("CPF OA not found in Without Classification children", foundSec2);
+                assertTrue("CPFIA Cash not found in Without Classification children", foundAcct);
+
+                @SuppressWarnings("unchecked")
+                Map<String, Double> currencies = (Map<String, Double>) v.get("currencies");
+                assertNotNull("currencies missing for Without Classification", currencies);
+                assertTrue("SGD missing from Without Classification currencies", currencies.containsKey("SGD"));
+                assertEquals(5400.0, currencies.get("SGD"), 0.01);
+            } else if ("America".equals(name)) {
+                foundAmerica = true;
+                // sec1: 1 share x $100 = $100 USD
+                assertEquals(100.0, ((Number) v.get("valuation_native")).doubleValue(), 0.01);
+                @SuppressWarnings("unchecked")
+                List<Map<String, Object>> children = (List<Map<String, Object>>) v.get("children");
+                assertNotNull("children missing for America", children);
+                assertEquals("children count should be 1", 1, children.size());
+                assertEquals("AMD", children.get(0).get("ticker"));
+                assertEquals(100.0, ((Number) children.get(0).get("valuation_native")).doubleValue(), 0.01);
+            }
+        }
+        assertTrue("Without Classification entry missing", foundWc);
+        assertTrue("America entry missing", foundAmerica);
+    }
+
+    @Test
+    public void testQueryTaxonomiesNoWithoutClassificationWhenAllClassified() throws Exception {
+        Client client = buildTestClient(); // all securities classified
+        File tmpFile = File.createTempFile("pp-tax-nowc-", ".xml");
+        tmpFile.deleteOnExit();
+        PpClient ppClient = new PpClient(tmpFile) {
+            @Override
+            public Client load() { return client; }
+        };
+
+        Map<String, Object> result = ppClient.queryTaxonomies(List.of("test-taxonomy"));
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> values = (List<Map<String, Object>>)
+                ((List<Map<String, Object>>) result.get("taxonomies")).get(0).get("values");
+
+        // Should only have 2 entries (America + Crypto), no Without Classification
+        boolean foundWc = false;
+        for (Map<String, Object> v : values) {
+            if ("Without Classification".equals(v.get("value"))) {
+                foundWc = true;
+            }
+        }
+        assertFalse("Without Classification should NOT appear when all classified", foundWc);
+    }
 }
