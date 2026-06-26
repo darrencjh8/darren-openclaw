@@ -26,6 +26,34 @@ function formatSyncResult(raw) {
         );
     }
 
+    // Taxonomy: liquid / illiquid split
+    const taxonomyData = raw.taxonomy_data;
+    if (taxonomyData?.taxonomies?.length) {
+        const tax = taxonomyData.taxonomies[0];
+        const values = tax.values || [];
+        let liquidTotal = 0;
+        let illiquidTotal = 0;
+        let illiquidCount = 0;
+        for (const v of values) {
+            if (v.value === "Without Classification") {
+                illiquidTotal = v.valuation_native || 0;
+                illiquidCount = v.count || 0;
+            } else {
+                liquidTotal += v.valuation_native || 0;
+            }
+        }
+        const grandTotal = liquidTotal + illiquidTotal;
+        lines.push("");
+        lines.push(
+            `Liquid    SGD ${liquidTotal.toLocaleString("en-SG", { minimumFractionDigits: 0, maximumFractionDigits: 0 })} (${grandTotal > 0 ? Math.round((liquidTotal / grandTotal) * 100) : 0}%)`,
+        );
+        if (illiquidCount > 0) {
+            lines.push(
+                `Illiquid  SGD ${illiquidTotal.toLocaleString("en-SG", { minimumFractionDigits: 0, maximumFractionDigits: 0 })} (${grandTotal > 0 ? Math.round((illiquidTotal / grandTotal) * 100) : 0}%) — ${illiquidCount} holdings`,
+            );
+        }
+    }
+
     // Portfolio totals
     const s = raw.portfolio_status?.summary;
     if (s) {
@@ -285,6 +313,20 @@ function createTools(server, registry) {
             return tx(
                 await registry.executeTool("query_pp_security", {
                     search: args.search,
+                }),
+            );
+        },
+    );
+    server.tool(
+        "portfolio_taxonomy",
+        "Query taxonomy breakdown with per-cell children. Returns liquid/illiquid split, each classification's valuation, share_pct, and individual holding children (name, ticker, currency, valuation_native). 'Without Classification' = illiquid assets.",
+        { names: z.array(z.string()).optional().default(["Regions (Liquid)"]) },
+        async (args) => {
+            if (!registry._ppBridge)
+                return tx({ error: "PP bridge not configured" });
+            return tx(
+                await registry.executeTool("query_pp_taxonomies", {
+                    taxonomy_names: args.names,
                 }),
             );
         },

@@ -756,19 +756,25 @@ export class ToolRegistry {
 
             const targets = [
                 {
-                    account_id: this._config.ppEmergencyPrimaryAccount || "444b04eb-8c55-4efc-9df3-c529612fd2f3",
+                    account_id:
+                        this._config.ppEmergencyPrimaryAccount ||
+                        "444b04eb-8c55-4efc-9df3-c529612fd2f3",
                     name: "Emergency Funds - SGD",
                     amount: (sgd.emergency_total || 0) / 100,
                     currency: "SGD",
                 },
                 {
-                    account_id: this._config.ppEmergencySecondaryAccount || "a5f42a18-b882-4225-bea6-90c9eea720b5",
+                    account_id:
+                        this._config.ppEmergencySecondaryAccount ||
+                        "a5f42a18-b882-4225-bea6-90c9eea720b5",
                     name: "Emergency Funds - MYR",
                     amount: (myr.emergency_total || 0) / 100,
                     currency: "MYR",
                 },
                 {
-                    account_id: this._config.ppWarchestPrimaryAccount || "68815371-05f3-43e9-9669-08b368fe1e9d",
+                    account_id:
+                        this._config.ppWarchestPrimaryAccount ||
+                        "68815371-05f3-43e9-9669-08b368fe1e9d",
                     name: "Warchest",
                     amount: (sgd.investment_total || 0) / 100,
                     currency: "SGD",
@@ -823,6 +829,18 @@ export class ToolRegistry {
         // Step 4: Export taxonomies to Google Sheets
         const taxonomyResult = await this._exportTaxonomiesToSheet();
 
+        // Step 4b: Also query taxonomy data for MCP (liquid/illiquid split)
+        let taxonomyData = null;
+        if (this._ppBridge) {
+            try {
+                taxonomyData = await this._ppBridge.queryTaxonomies(
+                    this._config.taxonomyNames || ["Regions (Liquid)"],
+                );
+            } catch (e) {
+                console.warn(`Failed to query taxonomies: ${e.message}`);
+            }
+        }
+
         // Step 5: Get status with SGD-converted totals
         let statusSgd = null;
         if (this._ppBridge) {
@@ -843,6 +861,7 @@ export class ToolRegistry {
             flex_import: flexImportResult,
             push: pushResult,
             taxonomy_export: taxonomyResult,
+            taxonomy_data: taxonomyData,
             portfolio_status: statusSgd,
         };
     }
