@@ -25,6 +25,9 @@ CLONE_DIR="/opt/data/memories-backup"
 SRC_DIR="/opt/data/memories"
 EXPENSE_DIR="${EXPENSE_TRACKER_DATA:-}"
 
+# Fix read-only permissions from prior git operations
+[ -d "$CLONE_DIR" ] && chmod -R u+w "$CLONE_DIR" 2>/dev/null || true
+
 if [ ! -d "$CLONE_DIR/.git" ]; then
     git clone "$REPO_URL" "$CLONE_DIR"
     cd "$CLONE_DIR"
@@ -39,7 +42,9 @@ if [ ! -d "$CLONE_DIR/.git" ]; then
     fi
 else
     cd "$CLONE_DIR"
-    git pull origin main 2>/dev/null || true
+    # Update remote URL with current token before pull (token may change between runs)
+    git remote set-url origin "$REPO_URL" 2>/dev/null || true
+    git pull --rebase origin main 2>/dev/null || true
     HAS_REMOTE=true
 fi
 
