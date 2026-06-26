@@ -26,7 +26,9 @@ SRC_DIR="/opt/data/memories"
 EXPENSE_DIR="${EXPENSE_TRACKER_DATA:-}"
 
 # Fix read-only permissions from prior git operations
-[ -d "$CLONE_DIR" ] && chmod -R u+w "$CLONE_DIR" 2>/dev/null || true
+if [ -d "$CLONE_DIR" ]; then
+    chmod -R u+w "$CLONE_DIR" 2>/dev/null || true
+fi
 
 if [ ! -d "$CLONE_DIR/.git" ]; then
     git clone "$REPO_URL" "$CLONE_DIR"
