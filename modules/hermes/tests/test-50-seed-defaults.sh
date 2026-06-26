@@ -172,8 +172,8 @@ if not any(j.get("name") == "portfolio-daily-sync" for j in jobs if isinstance(j
     jobs.append({
         "id": uuid.uuid4().hex[:12],
         "name": "portfolio-daily-sync",
-        "schedule": {"kind": "cron", "expr": "0 10 * * *", "display": "0 10 * * *"},
-        "schedule_display": "0 10 * * *",
+        "schedule": {"kind": "cron", "expr": "0 12 * * *", "display": "0 12 * * *"},
+        "schedule_display": "0 12 * * *",
         "prompt": "Run portfolio_sync",
         "enabled": True,
         "deliver": "telegram",
@@ -199,7 +199,7 @@ with open('$TMPDIR/cron/jobs.json') as f:
 for j in data.get('jobs', []):
     print(j.get('schedule', {}).get('expr', 'missing'))
 ")
-[ "$expr_val" = "0 10 * * *" ] && ok "cron expr is correct" || nope "cron expr" "got: $expr_val"
+[ "$expr_val" = "0 12 * * *" ] && ok "cron expr is correct" || nope "cron expr" "got: $expr_val"
 
 echo ""
 echo "========================================="
