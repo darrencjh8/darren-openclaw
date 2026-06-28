@@ -237,4 +237,107 @@ export class ImapIdleHandler {
         }
         logger.info({ event: "imap_idle_stopped" });
     }
+
+    /**
+     * One-shot IMAP connection for on-demand inbox queries.
+     * Creates a temporary connection, fetches data, and disconnects.
+     * Does NOT mark messages as read. Does NOT interfere with IDLE loop.
+     */
+    async _connectOnce() {
+        const client = new ImapFlow({
+            host: this._host,
+            port: this._port,
+            secure: true,
+            auth: { user: this._username, pass: this._password },
+            logger: false,
+            disableAutoIdle: true,
+        });
+        await client.connect();
+        return client;
+    }
+
+    /**
+     * List recent inbox emails without marking them read.
+     * @param {{limit?: number}} opts
+     * @returns {Promise<Array<{uid:number, from:string, fromName:string, subject:string, date:string}>>}
+     */
+    async listInbox({ limit = 50 } = {}) {
+        let client = null;
+        try {
+            client = await this._connectOnce();
+            await client.mailboxOpen(this._mailbox);
+            const results = [];
+            const count = Math.min(limit, 500);
+            // Fetch in reverse to get newest first. mailbox.exists is the total
+            // message count; compute start UID so we get the last `count` messages.
+            const total = client.mailbox.exists || 0;
+            const start = total > count ? total - count + 1 : 1;
+            for await (const msg of client.fetch(
+                { uid: String(start) + ":*" },
+                { envelope: true, source: false },
+            )) {
+                results.push({
+                    uid: msg.uid,
+                    from: msg.envelope?.from?.[0]?.address || "",
+                    fromName: msg.envelope?.from?.[0]?.name || "",
+                    subject: msg.envelope?.subject || "",
+                    date: msg.envelope?.date?.toISOString() || "",
+                });
+            }
+            // Reverse so newest (highest UID) comes first
+            results.reverse();
+            // Trim to limit if still over (safety)
+            return results.slice(0, count);
+        } finally {
+            if (client) {
+                try {
+                    await client.logout();
+                } catch {}
+            }
+        }
+    }
+
+    /**
+     * Read a single email by UID without marking it read.
+     * @param {number} uid
+     * @returns {Promise<{uid:number, from:string, fromName:string, subject:string, date:string, text:string, html:string}|null>}
+     */
+    async readInboxEmail(uid) {
+        let client = null;
+        try {
+            client = await this._connectOnce();
+            await client.mailboxOpen(this._mailbox);
+            for await (const msg of client.fetch(
+                { uid: String(uid) },
+                { source: true, envelope: true },
+            )) {
+                const parsed = msg.source
+                    ? await simpleParser(
+                          Buffer.isBuffer(msg.source)
+                              ? msg.source
+                              : Buffer.from(msg.source),
+                      )
+                    : null;
+                const fromAddr = msg.envelope?.from?.[0]?.address || "";
+                const fromDisplay = parsed?.from?.text || fromAddr;
+                return {
+                    uid: msg.uid,
+                    from: fromAddr,
+                    fromName: msg.envelope?.from?.[0]?.name || "",
+                    fromDisplay: fromDisplay,
+                    subject: parsed?.subject || "",
+                    date: parsed?.date?.toISOString() || "",
+                    text: parsed?.text || "",
+                    html: parsed?.html || "",
+                };
+            }
+            return null;
+        } finally {
+            if (client) {
+                try {
+                    await client.logout();
+                } catch {}
+            }
+        }
+    }
 }

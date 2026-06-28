@@ -429,3 +429,160 @@ describe("ImapIdleHandler idleLoop UID pre-check", () => {
     expect(dedup.recordProcessed).toHaveBeenCalledWith("102");
   });
 });
+// ── One-shot IMAP query (read-only, no IDLE, no mark-read) ─────────
+
+describe("ImapIdleHandler.listInbox", () => {
+  it("returns empty array when no messages match", async () => {
+    const handler = new ImapIdleHandler("h", 993, "u", "p");
+    const mockClient = {
+      mailbox: { exists: 0 },
+      mailboxOpen: vi.fn(async function () { this.mailbox = { exists: 0 }; }),
+      fetch: vi.fn(() => ({
+        [Symbol.asyncIterator]() { return { async next() { return { done: true }; } }; },
+      })),
+      logout: vi.fn(async () => {}),
+    };
+    handler._connectOnce = vi.fn(async () => mockClient);
+    const result = await handler.listInbox({ limit: 10 });
+    expect(result).toEqual([]);
+    expect(mockClient.mailboxOpen).toHaveBeenCalledWith("INBOX");
+    expect(mockClient.logout).toHaveBeenCalled();
+  });
+
+  it("returns message metadata in newest-first order", async () => {
+    const handler = new ImapIdleHandler("h", 993, "u", "p");
+    // IMAP returns ascending UID order; listInbox reverses so newest is first
+    const mockMessages = [
+      { uid: 500, envelope: { date: new Date("2026-06-15T10:00:00Z"), subject: "Hello world", from: [{ address: "sender@test.com", name: "Sender" }] } },
+      { uid: 501, envelope: { date: new Date("2026-06-16T12:00:00Z"), subject: "Meeting notes", from: [{ address: "boss@test.com", name: "Boss" }] } },
+    ];
+    const mockClient = {
+      mailbox: { exists: 502 },
+      mailboxOpen: vi.fn(async function () { this.mailbox = { exists: 502 }; }),
+      fetch: vi.fn(() => ({
+        [Symbol.asyncIterator]() {
+          let idx = 0;
+          return { async next() { if (idx < mockMessages.length) return { value: mockMessages[idx++], done: false }; return { done: true }; } };
+        },
+      })),
+      logout: vi.fn(async () => {}),
+    };
+    handler._connectOnce = vi.fn(async () => mockClient);
+    const result = await handler.listInbox({ limit: 5 });
+    expect(result).toHaveLength(2);
+    // After reverse(), newest (uid 501) should be first
+    expect(result[0]).toEqual({ uid: 501, from: "boss@test.com", fromName: "Boss", subject: "Meeting notes", date: "2026-06-16T12:00:00.000Z" });
+    expect(result[1].uid).toBe(500);
+    expect(mockClient.messageFlagsAdd).toBeUndefined();
+  });
+
+  it("respects limit parameter", async () => {
+    const handler = new ImapIdleHandler("h", 993, "u", "p");
+    const mockMessages = [
+      { uid: 1, envelope: { date: new Date(), subject: "A", from: [{ address: "a@a.com" }] } },
+      { uid: 2, envelope: { date: new Date(), subject: "B", from: [{ address: "b@b.com" }] } },
+      { uid: 3, envelope: { date: new Date(), subject: "C", from: [{ address: "c@c.com" }] } },
+    ];
+    const mockClient = {
+      mailbox: { exists: 100 },
+      mailboxOpen: vi.fn(async function () { this.mailbox = { exists: 100 }; }),
+      fetch: vi.fn(() => ({
+        [Symbol.asyncIterator]() {
+          let idx = 0;
+          return { async next() { if (idx < mockMessages.length) return { value: mockMessages[idx++], done: false }; return { done: true }; } };
+        },
+      })),
+      logout: vi.fn(async () => {}),
+    };
+    handler._connectOnce = vi.fn(async () => mockClient);
+    const result = await handler.listInbox({ limit: 2 });
+    expect(result).toHaveLength(2);
+  });
+
+  it("fetches newest messages using computed uid range", async () => {
+    const handler = new ImapIdleHandler("h", 993, "u", "p");
+    let fetchCalledWith = null;
+    const mockClient = {
+      mailbox: { exists: 500 },
+      mailboxOpen: vi.fn(async function () { this.mailbox = { exists: 500 }; }),
+      fetch: vi.fn((range, opts) => {
+        fetchCalledWith = { range, opts };
+        return { [Symbol.asyncIterator]() { return { async next() { return { done: true }; } }; } };
+      }),
+      logout: vi.fn(async () => {}),
+    };
+    handler._connectOnce = vi.fn(async () => mockClient);
+    await handler.listInbox({ limit: 20 });
+    // 500 total, limit 20 => should fetch UIDs 481-500
+    expect(fetchCalledWith.range).toEqual({ uid: "481:*" });
+    expect(fetchCalledWith.opts).toEqual({ envelope: true, source: false });
+  });
+
+  it("cleans up client on error", async () => {
+    const handler = new ImapIdleHandler("h", 993, "u", "p");
+    const mockClient = {
+      mailboxOpen: vi.fn(async () => { throw new Error("Mailbox not found"); }),
+      logout: vi.fn(async () => {}),
+    };
+    handler._connectOnce = vi.fn(async () => mockClient);
+    await expect(handler.listInbox({ limit: 10 })).rejects.toThrow("Mailbox not found");
+    expect(mockClient.logout).toHaveBeenCalled();
+  });
+});
+
+describe("ImapIdleHandler.readInboxEmail", () => {
+  it("fetches full email by UID without marking read", async () => {
+    const handler = new ImapIdleHandler("h", 993, "u", "p");
+    const raw = "From: test@test.com\r\nSubject: Test Email\r\nDate: Mon, 16 Jun 2026 10:00:00 +0000\r\n\r\nEmail body here.";
+    const emailSource = Buffer.from(raw);
+    let fetchCalledWith = null;
+    const mockClient = {
+      mailboxOpen: vi.fn(async () => {}),
+      fetch: vi.fn((range, opts) => {
+        fetchCalledWith = { range, opts };
+        return {
+          [Symbol.asyncIterator]() {
+            let yielded = false;
+            return { async next() { if (!yielded) { yielded = true; return { value: { uid: 42, source: emailSource, envelope: { from: [{ address: "test@test.com", name: "Tester" }] } }, done: false }; } return { done: true }; } };
+          },
+        };
+      }),
+      logout: vi.fn(async () => {}),
+    };
+    handler._connectOnce = vi.fn(async () => mockClient);
+    const result = await handler.readInboxEmail(42);
+    expect(result).toBeDefined();
+    expect(result.uid).toBe(42);
+    expect(result.subject).toBe("Test Email");
+    expect(result.from).toBe("test@test.com");
+    expect(result.fromDisplay).toBe("test@test.com");
+    expect(result.text).toContain("Email body here");
+    expect(fetchCalledWith.range).toEqual({ uid: "42" });
+    expect(fetchCalledWith.opts).toEqual({ source: true, envelope: true });
+    expect(mockClient.messageFlagsAdd).toBeUndefined();
+  });
+
+  it("returns null when email not found", async () => {
+    const handler = new ImapIdleHandler("h", 993, "u", "p");
+    const mockClient = {
+      mailboxOpen: vi.fn(async () => {}),
+      fetch: vi.fn(() => ({ [Symbol.asyncIterator]() { return { async next() { return { done: true }; } }; } })),
+      logout: vi.fn(async () => {}),
+    };
+    handler._connectOnce = vi.fn(async () => mockClient);
+    const result = await handler.readInboxEmail(99999);
+    expect(result).toBeNull();
+  });
+
+  it("cleans up client on error", async () => {
+    const handler = new ImapIdleHandler("h", 993, "u", "p");
+    const mockClient = {
+      mailboxOpen: vi.fn(async () => {}),
+      fetch: vi.fn(() => { throw new Error("Connection lost"); }),
+      logout: vi.fn(async () => {}),
+    };
+    handler._connectOnce = vi.fn(async () => mockClient);
+    await expect(handler.readInboxEmail(42)).rejects.toThrow("Connection lost");
+    expect(mockClient.logout).toHaveBeenCalled();
+  });
+});

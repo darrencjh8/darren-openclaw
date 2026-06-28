@@ -149,6 +149,113 @@ describe("ToolRegistry", () => {
         expect(result).toBe(true);
     });
 
+    it("list_inbox_emails delegates to imapHandler.listInbox", async () => {
+        const { vi } = await import("vitest");
+        const cfg = new Config(testEnv);
+        const registry = new ToolRegistry(cfg);
+
+        const mockImapHandler = {
+            listInbox: vi
+                .fn()
+                .mockResolvedValue([
+                    {
+                        uid: 1,
+                        from: "a@test.com",
+                        subject: "Hello",
+                        date: "2026-06-15T10:00:00.000Z",
+                    },
+                ]),
+        };
+        registry.setEmailContext(null, null, mockImapHandler);
+
+        const result = await registry.executeTool("list_inbox_emails", {
+            limit: 20,
+        });
+        expect(mockImapHandler.listInbox).toHaveBeenCalledWith({ limit: 20 });
+        expect(result).toHaveLength(1);
+        expect(result[0].subject).toBe("Hello");
+    });
+
+    it("list_inbox_emails returns error when no imapHandler", async () => {
+        const cfg = new Config(testEnv);
+        const registry = new ToolRegistry(cfg);
+
+        const result = await registry.executeTool("list_inbox_emails", {
+            limit: 10,
+        });
+        expect(result).toHaveProperty("error");
+        expect(result.error).toContain("not connected");
+    });
+
+    it("list_inbox_emails uses default limit when not provided", async () => {
+        const { vi } = await import("vitest");
+        const cfg = new Config(testEnv);
+        const registry = new ToolRegistry(cfg);
+
+        const mockImapHandler = {
+            listInbox: vi.fn().mockResolvedValue([]),
+        };
+        registry.setEmailContext(null, null, mockImapHandler);
+
+        await registry.executeTool("list_inbox_emails", {});
+        expect(mockImapHandler.listInbox).toHaveBeenCalledWith({ limit: 50 });
+    });
+
+    it("read_inbox_email delegates to imapHandler.readInboxEmail", async () => {
+        const { vi } = await import("vitest");
+        const cfg = new Config(testEnv);
+        const registry = new ToolRegistry(cfg);
+
+        const mockEmail = {
+            uid: 42,
+            from: "sender@test.com",
+            subject: "Important",
+            text: "Body text",
+            html: "<p>Body</p>",
+            date: "2026-06-16T12:00:00.000Z",
+        };
+
+        const mockImapHandler = {
+            readInboxEmail: vi.fn().mockResolvedValue(mockEmail),
+        };
+        registry.setEmailContext(null, null, mockImapHandler);
+
+        const result = await registry.executeTool("read_inbox_email", {
+            uid: 42,
+        });
+        expect(mockImapHandler.readInboxEmail).toHaveBeenCalledWith(42);
+        expect(result.subject).toBe("Important");
+        expect(result.text).toBe("Body text");
+    });
+
+    it("read_inbox_email returns error when no imapHandler", async () => {
+        const cfg = new Config(testEnv);
+        const registry = new ToolRegistry(cfg);
+
+        const result = await registry.executeTool("read_inbox_email", {
+            uid: 1,
+        });
+        expect(result).toHaveProperty("error");
+        expect(result.error).toContain("not connected");
+    });
+
+    it("read_inbox_email returns not-found when email missing", async () => {
+        const { vi } = await import("vitest");
+        const cfg = new Config(testEnv);
+        const registry = new ToolRegistry(cfg);
+
+        const mockImapHandler = {
+            readInboxEmail: vi.fn().mockResolvedValue(null),
+        };
+        registry.setEmailContext(null, null, mockImapHandler);
+
+        const result = await registry.executeTool("read_inbox_email", {
+            uid: 999,
+        });
+        expect(result).toHaveProperty("error");
+        expect(result.error).toContain("not found");
+    });
+
     it("throws on unknown tool", async () => {
         const cfg = new Config(testEnv);
         const registry = new ToolRegistry(cfg);
