@@ -47,6 +47,12 @@ const schemas = {
         date_to: z.string().min(1),
         budget_id: z.string().min(1),
     }),
+    list_inbox_emails: z.object({
+        limit: z.number().int().min(1).max(500).optional().default(50),
+    }),
+    read_inbox_email: z.object({
+        uid: z.number().int().positive(),
+    }),
 };
 
 describe("MCP Zod schemas — budget_id rejects empty string", () => {
@@ -279,6 +285,73 @@ describe("MCP Zod schemas — budget_id rejects empty string", () => {
                 budget_id: "My Budget",
             });
             expect(r.success).toBe(true);
+        });
+    });
+
+    describe("list_inbox_emails", () => {
+        test("accepts no arguments (uses defaults)", () => {
+            const r = schemas.list_inbox_emails.safeParse({});
+            expect(r.success).toBe(true);
+            expect(r.data.limit).toBe(50);
+        });
+
+        test("accepts valid limit", () => {
+            const r = schemas.list_inbox_emails.safeParse({ limit: 10 });
+            expect(r.success).toBe(true);
+            expect(r.data.limit).toBe(10);
+        });
+
+        test("rejects non-integer limit", () => {
+            const r = schemas.list_inbox_emails.safeParse({ limit: 3.5 });
+            expect(r.success).toBe(false);
+        });
+
+        test("rejects zero limit", () => {
+            const r = schemas.list_inbox_emails.safeParse({ limit: 0 });
+            expect(r.success).toBe(false);
+        });
+
+        test("rejects negative limit", () => {
+            const r = schemas.list_inbox_emails.safeParse({ limit: -1 });
+            expect(r.success).toBe(false);
+        });
+
+        test("rejects limit over 500", () => {
+            const r = schemas.list_inbox_emails.safeParse({ limit: 501 });
+            expect(r.success).toBe(false);
+        });
+
+        test("accepts limit of 500", () => {
+            const r = schemas.list_inbox_emails.safeParse({ limit: 500 });
+            expect(r.success).toBe(true);
+        });
+    });
+
+    describe("read_inbox_email", () => {
+        test("rejects missing uid", () => {
+            const r = schemas.read_inbox_email.safeParse({});
+            expect(r.success).toBe(false);
+        });
+
+        test("rejects zero uid", () => {
+            const r = schemas.read_inbox_email.safeParse({ uid: 0 });
+            expect(r.success).toBe(false);
+        });
+
+        test("rejects negative uid", () => {
+            const r = schemas.read_inbox_email.safeParse({ uid: -1 });
+            expect(r.success).toBe(false);
+        });
+
+        test("rejects non-integer uid", () => {
+            const r = schemas.read_inbox_email.safeParse({ uid: "abc" });
+            expect(r.success).toBe(false);
+        });
+
+        test("accepts valid uid", () => {
+            const r = schemas.read_inbox_email.safeParse({ uid: 42 });
+            expect(r.success).toBe(true);
+            expect(r.data.uid).toBe(42);
         });
     });
 });

@@ -91,6 +91,22 @@ function createTools(server, registry) {
     tx(await registry.executeTool("mark_email_read", {})),
   );
   server.tool(
+    "list_inbox_emails",
+    "List recent emails from the IMAP inbox. Returns metadata only (uid, from, fromName, subject, date). Does NOT mark emails as read. Use read_inbox_email to get full content. Opens a separate temporary IMAP connection.",
+    {
+      limit: z.number().int().min(1).max(500).optional().default(50),
+    },
+    async (a) => tx(await registry.executeTool("list_inbox_emails", a)),
+  );
+  server.tool(
+    "read_inbox_email",
+    "Read a single email from the IMAP inbox by UID. Returns full content (from, fromName, subject, date, text, html). Does NOT mark as read. Use list_inbox_emails first to get UIDs.",
+    {
+      uid: z.number().int().positive(),
+    },
+    async (a) => tx(await registry.executeTool("read_inbox_email", a)),
+  );
+  server.tool(
     "resolve_merchant",
     "Resolve merchant to payee using memory, Brave search, and AI classification. Returns {payee, source}.",
     { merchant: z.string().min(1), budget_id: z.string().min(1) },

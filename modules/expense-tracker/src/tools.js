@@ -692,6 +692,36 @@ const TOOLS = [
       required: ["raw_text"],
     },
   },
+  {
+    name: "list_inbox_emails",
+    description:
+      "List recent emails from the connected IMAP inbox. Returns metadata only (uid, from, fromName, subject, date) — does NOT mark emails as read. Use read_inbox_email to fetch full content. Opens a separate temporary IMAP connection and does not interfere with the background email processing pipeline.",
+    schema: {
+      type: "object",
+      properties: {
+        limit: {
+          type: "integer",
+          description: "Maximum number of recent emails to return (1-500, default 50).",
+          default: 50,
+        },
+      },
+    },
+  },
+  {
+    name: "read_inbox_email",
+    description:
+      "Read a single email from the inbox by UID. Returns full parsed content (from, fromName, subject, date, text, html). Does NOT mark the email as read. Use list_inbox_emails first to find UIDs. Opens a separate temporary IMAP connection.",
+    schema: {
+      type: "object",
+      properties: {
+        uid: {
+          type: "integer",
+          description: "The UID of the email to fetch (from list_inbox_emails).",
+        },
+      },
+      required: ["uid"],
+    },
+  },
 ];
 
 const TOOL_MAP = Object.fromEntries(TOOLS.map((t) => [t.name, t]));
@@ -767,6 +797,34 @@ export class ToolRegistry {
           : JSON.stringify(result).slice(0, 200),
     });
     return result;
+  }
+
+  // ── IMAP inbox browsing handlers (on-demand, read-only) ────────
+
+  async _handle_list_inbox_emails({ limit = 50 } = {}) {
+    if (!this._imapHandler) {
+      return { error: "IMAP not connected — no email inbox available" };
+    }
+    try {
+      return await this._imapHandler.listInbox({ limit });
+    } catch (e) {
+      return { error: "Failed to list inbox: " + e.message };
+    }
+  }
+
+  async _handle_read_inbox_email({ uid }) {
+    if (!this._imapHandler) {
+      return { error: "IMAP not connected — no email inbox available" };
+    }
+    try {
+      const email = await this._imapHandler.readInboxEmail(uid);
+      if (!email) {
+        return { error: "Email with UID " + uid + " not found" };
+      }
+      return email;
+    } catch (e) {
+      return { error: "Failed to read email: " + e.message };
+    }
   }
 
   // ── Memory tools ──────────────────────────────────────────────

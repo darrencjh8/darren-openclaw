@@ -19,10 +19,14 @@ title = "gitleaks config"
     regex = '''\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b'''
     keywords = ["@"]
     [rules.allowlist]
-        description = "ignore known-safe patterns"
+        description = "ignore known-safe patterns and test fixtures"
         regexes = [
             "@example\\.com",
             "@test\\.com",
+        ]
+        paths = [
+            '''tests/''',
+            '''__tests__/''',
         ]
 
 [[rules]]
