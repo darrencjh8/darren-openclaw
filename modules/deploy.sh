@@ -414,12 +414,14 @@ docker network create hermes_shared --driver bridge 2>/dev/null || true
 export COMPOSE_DOCKER_CLI_BUILD=1 DOCKER_BUILDKIT=1
 COMPOSE="docker-compose --project-name modules"
 if [[ " ${COMPONENTS[*]} " =~ " all " ]] || [[ ${#COMPONENTS[@]} -eq 1 && "${COMPONENTS[0]}" == "all" ]]; then
-  # ktmb is a private submodule — skip if not cloned
+  # Always resolve the full service list — never leave TARGETS empty.
+  # An empty TARGETS causes docker compose to silently ignore --force-recreate
+  # and only touch services with changed images/configs.
+  TARGETS=$($COMPOSE config --services | tr '\n' ' ')
+  # ktmb is a private submodule — exclude if not cloned
   if $GITHUB_MODE && [ ! -d "$ROOT/modules/ktmb/docker" ]; then
-    TARGETS=$($COMPOSE config --services | grep -v ktmb-booking | tr '\n' ' ')
+    TARGETS=$(echo "$TARGETS" | tr ' ' '\n' | grep -v ktmb-booking | tr '\n' ' ')
     echo "  (excluding ktmb-booking — private submodule not cloned)"
-  else
-    TARGETS=""
   fi
 else
   TARGETS="${COMPONENTS[*]}"
