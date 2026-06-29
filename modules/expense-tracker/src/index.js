@@ -150,6 +150,7 @@ async function main() {
         "check_statement_duplicate",
         "resolve_merchant",
         "update_transaction",
+        "extract_inbox_pdf",
     ];
 
     for (const name of toolNames) {
