@@ -83,6 +83,9 @@ async function main() {
         dedupJournal,
         cfg.imapMailbox,
     );
+    // Seed imapHandler at startup so list_inbox_emails / read_inbox_email
+    // work immediately without waiting for the first email to arrive.
+    registry.setEmailContext(null, null, imapHandler);
 
     async function onNewEmail(msg) {
         let result = null;
