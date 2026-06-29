@@ -107,6 +107,15 @@ function createTools(server, registry) {
     async (a) => tx(await registry.executeTool("read_inbox_email", a)),
   );
   server.tool(
+    "extract_inbox_pdf",
+    "Fetch email by UID, extract first PDF attachment, decrypt if password provided, return text. All server-side — avoids large base64 payloads over MCP.",
+    {
+      uid: z.number().int().positive(),
+      password: z.string().optional().default(""),
+    },
+    async (a) => tx(await registry.executeTool("extract_inbox_pdf", a)),
+  );
+  server.tool(
     "resolve_merchant",
     "Resolve merchant to payee using memory, Brave search, and AI classification. Returns {payee, source}.",
     { merchant: z.string().min(1), budget_id: z.string().min(1) },
