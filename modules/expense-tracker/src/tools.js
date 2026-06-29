@@ -719,6 +719,26 @@ const TOOLS = [
           description: "The UID of the email to fetch (from list_inbox_emails).",
         },
       },
+    },
+  },
+  {
+    name: "extract_inbox_pdf",
+    description:
+      "Fetch an email by UID, extract the first PDF attachment, decrypt it (if password provided), and return the text. All server-side — avoids large base64 payloads. Use this instead of read_inbox_email when you need PDF content from an email attachment.",
+    schema: {
+      type: "object",
+      properties: {
+        uid: {
+          type: "integer",
+          description: "The UID of the email to fetch (from list_inbox_emails).",
+        },
+        password: {
+          type: "string",
+          description:
+            "Password for encrypted PDFs (e.g., SC eStatement password). Omit for unencrypted PDFs.",
+          default: "",
+        },
+      },
       required: ["uid"],
     },
   },
@@ -824,6 +844,17 @@ export class ToolRegistry {
       return email;
     } catch (e) {
       return { error: "Failed to read email: " + e.message };
+    }
+  }
+
+  async _handle_extract_inbox_pdf({ uid, password = "" } = {}) {
+    if (!this._imapHandler) {
+      return { error: "IMAP not connected — no email inbox available" };
+    }
+    try {
+      return await this._imapHandler.extractInboxPdf(uid, password);
+    } catch (e) {
+      return { error: "Failed to extract PDF: " + e.message };
     }
   }
 

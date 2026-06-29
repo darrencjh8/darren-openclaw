@@ -7,6 +7,7 @@
 import { ImapFlow } from "imapflow";
 import { simpleParser } from "mailparser";
 import { logger } from "./logging.js";
+import { extractPdfFromBuffer } from "./extractors.js";
 
 export class ImapIdleHandler {
     IDLE_TIMEOUT = 15; // fast retry, dedup prevents re-processing
@@ -333,13 +334,59 @@ export class ImapIdleHandler {
                         filename: att.filename || "",
                         contentType: att.contentType || "",
                         size: att.size || 0,
-                        contentBase64: att.content
-                            ? Buffer.from(att.content).toString("base64")
-                            : "",
                     })),
                 };
             }
             return null;
+        } finally {
+            if (client) {
+                try {
+                    await client.logout();
+                } catch {}
+            }
+        }
+    }
+
+    /**
+     * Fetch email by UID, extract first PDF attachment, decrypt (if password
+     * provided), and return the text. All server-side to avoid large base64
+     * payloads over MCP.
+     * @param {number} uid
+     * @param {string} [password]
+     * @returns {Promise<{text:string, filename:string}|{error:string}>}
+     */
+    async extractInboxPdf(uid, password = "") {
+        let client = null;
+        try {
+            client = await this._connectOnce();
+            await client.mailboxOpen(this._mailbox);
+            for await (const msg of client.fetch(
+                { uid: String(uid) },
+                { source: true },
+            )) {
+                const parsed = await simpleParser(
+                    Buffer.isBuffer(msg.source)
+                        ? msg.source
+                        : Buffer.from(msg.source),
+                );
+                const attachments = parsed?.attachments || [];
+                const pdf = attachments.find(
+                    (a) => a.contentType === "application/pdf" ||
+                           (a.filename || "").toLowerCase().endsWith(".pdf"),
+                );
+                if (!pdf || !pdf.content) {
+                    return { error: "No PDF attachment found in this email" };
+                }
+                const text = await extractPdfFromBuffer(
+                    pdf.content,
+                    password || null,
+                );
+                return {
+                    filename: pdf.filename || "attachment.pdf",
+                    text,
+                };
+            }
+            return { error: "Email with UID " + uid + " not found" };
         } finally {
             if (client) {
                 try {
