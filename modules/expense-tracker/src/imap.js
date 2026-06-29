@@ -346,7 +346,6 @@ export class ImapIdleHandler {
             }
         }
     }
-}
 
     /**
      * Fetch email by UID, extract first PDF attachment, decrypt (if password
