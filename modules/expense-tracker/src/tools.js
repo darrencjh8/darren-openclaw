@@ -719,6 +719,8 @@ const TOOLS = [
           description: "The UID of the email to fetch (from list_inbox_emails).",
         },
       },
+    },
+  },
   {
     name: "extract_inbox_pdf",
     description:
