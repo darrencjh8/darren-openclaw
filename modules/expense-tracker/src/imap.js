@@ -329,6 +329,14 @@ export class ImapIdleHandler {
                     date: parsed?.date?.toISOString() || "",
                     text: parsed?.text || "",
                     html: parsed?.html || "",
+                    attachments: (parsed?.attachments || []).map((att) => ({
+                        filename: att.filename || "",
+                        contentType: att.contentType || "",
+                        size: att.size || 0,
+                        contentBase64: att.content
+                            ? Buffer.from(att.content).toString("base64")
+                            : "",
+                    })),
                 };
             }
             return null;
