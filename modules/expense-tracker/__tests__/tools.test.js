@@ -181,6 +181,35 @@ describe("ToolRegistry — budget_id validation", () => {
             });
             expect(result).toEqual({ error: "budget_id is required" });
         });
+
+        test("payee_name resolves to payee ID in PATCH body", async () => {
+            // Mock GET /payees — returns a payee with id and name
+            mockFetch
+                .mockResolvedValueOnce({
+                    ok: true,
+                    json: () => [
+                        { id: "payee-uuid-123", name: "Shopping" },
+                        { id: "payee-uuid-456", name: "Groceries" },
+                    ],
+                })
+                // Mock PATCH /transactions/:id
+                .mockResolvedValueOnce({
+                    ok: true,
+                    json: () => ({ status: "updated", id: "txn-1" }),
+                });
+
+            await registry.executeTool("update_transaction", {
+                id: "txn-1",
+                budget_id: "My Budget",
+                payee_name: "Shopping",
+            });
+
+            // The PATCH call is the second fetch call
+            const patchCall = mockFetch.mock.calls[1];
+            const patchBody = JSON.parse(patchCall[1].body);
+            // Must send payee ID, not payee name
+            expect(patchBody.payee).toBe("payee-uuid-123");
+        });
     });
 
     describe("check_duplicate", () => {

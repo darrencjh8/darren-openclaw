@@ -409,6 +409,48 @@ export class AgentOrchestrator {
                     }
                 }
 
+                // Memory-aware account check: if account is valid but memory
+                // suggests a different account for this merchant, force retry.
+                let memoryAccountHints = null;
+                if (
+                    !output.skip &&
+                    output.account_id &&
+                    !invalidFields.includes("account_id") &&
+                    output.merchant &&
+                    liveAccounts.length > 0
+                ) {
+                    try {
+                        const hints = await this._tools.executeTool(
+                            "search_memory",
+                            { query: output.merchant + " account" },
+                        );
+                        const relevant = (hints?.results || []).filter(
+                            (r) => r.score >= 0.5,
+                        );
+                        if (relevant.length > 0) {
+                            const mentionsDifferent = relevant.some((r) => {
+                                const text = (r.text || "").toLowerCase();
+                                return liveAccounts.some(
+                                    (a) =>
+                                        a.id !== output.account_id &&
+                                        !a.closed &&
+                                        text.includes(a.name.toLowerCase()),
+                                );
+                            });
+                            if (mentionsDifferent) {
+                                invalidFields.push("account_id");
+                                memoryAccountHints = relevant;
+                                logger.info({
+                                    event: "memory_account_override",
+                                    merchant: output.merchant,
+                                    currentAccount: output.account_name,
+                                    hints: relevant.map((r) => r.text),
+                                });
+                            }
+                        }
+                    } catch {}
+                }
+
                 if (invalidFields.length > 0 && attempt < MAX_RETRIES) {
                     const feedback = invalidFields
                         .map((f) => {
@@ -421,6 +463,9 @@ export class AgentOrchestrator {
                                     .filter((a) => !a.closed)
                                     .map((a) => a.name)
                                     .join(", ");
+                                if (memoryAccountHints) {
+                                    return `Memory suggests a different account for "${output.merchant}". Available: [${names}]`;
+                                }
                                 return `account_id ${output.account_id || "(missing)"} not found or closed. Pick from: [${names}]`;
                             }
                             return f;
@@ -433,19 +478,30 @@ export class AgentOrchestrator {
                         invalidFields.includes("account_id") &&
                         output.merchant
                     ) {
-                        try {
-                            const hints = await this._tools.executeTool(
-                                "search_memory",
-                                {
-                                    query: output.merchant + " account",
-                                },
-                            );
-                            if (hints?.results?.length > 0) {
-                                hintText =
-                                    " Memory hints: " +
-                                    hints.results.map((r) => r.text).join("; ");
-                            }
-                        } catch {}
+                        if (memoryAccountHints) {
+                            hintText =
+                                " Memory hints: " +
+                                memoryAccountHints
+                                    .map((r) => r.text)
+                                    .join("; ");
+                        } else {
+                            try {
+                                const hints = await this._tools.executeTool(
+                                    "search_memory",
+                                    {
+                                        query:
+                                            output.merchant + " account",
+                                    },
+                                );
+                                if (hints?.results?.length > 0) {
+                                    hintText =
+                                        " Memory hints: " +
+                                        hints.results
+                                            .map((r) => r.text)
+                                            .join("; ");
+                                }
+                            } catch {}
+                        }
                     }
 
                     messages.push({
