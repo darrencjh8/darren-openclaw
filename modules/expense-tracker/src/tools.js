@@ -1504,7 +1504,7 @@ export class ToolRegistry {
         return {
           error: `Payee "${payee_name}" not found in payee list. Use a valid payee from fetch_payees.`,
         };
-      fields.payee = payeeMatch.name;
+      fields.payee = payeeMatch.id;
     }
     if (notes !== undefined) fields.notes = notes;
     if (amount !== undefined) fields.amount = amount;
