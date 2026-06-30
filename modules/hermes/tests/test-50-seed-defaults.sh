@@ -259,6 +259,15 @@ echo "$prompt_content" | grep -q 'search for news impacting the portfolio' \
     || nope "prompt contains news search instructions" "missing news search section"
 
 echo ""
+echo "=== SOUL.md always overwritten ==="
+
+# Verify the init script always copies SOUL.md.template (no conditional guard)
+soul_line=$(grep 'SOUL.md.template' "$SEED_SCRIPT" | grep 'cp ')
+echo "$soul_line" | grep -qv '! -f' \
+    && ok "SOUL.md copy is unconditional (always overwritten on boot)" \
+    || nope "SOUL.md copy is unconditional" "found conditional guard: $soul_line"
+
+echo ""
 echo "========================================="
 echo -e " Results: ${GREEN}$pass passed${NC}, ${RED}$fail failed${NC}"
 echo "========================================="

@@ -4,7 +4,7 @@
 # Seed baked-in config, SOUL, skills, and scripts on every boot.
 # Then resolve any remaining ${VAR} placeholders that Hermes doesn't auto-substitute.
 cp /opt/hermes-defaults/config.yaml /opt/data/config.yaml
-[ ! -f /opt/data/SOUL.md ] && cp /opt/hermes-defaults/SOUL.md.template /opt/data/SOUL.md
+cp /opt/hermes-defaults/SOUL.md.template /opt/data/SOUL.md
 mkdir -p /opt/data/skills
 cp -r /opt/hermes-defaults/skills/* /opt/data/skills/
 chown -R hermes:hermes /opt/data/skills 2>/dev/null || true
