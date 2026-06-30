@@ -6,13 +6,13 @@
 **Constitution Hash:** v1.0.0  
 **Runtime:** Node.js 22 (ESM) — `modules/expense-tracker`
 
-> **Canonical baseline.** This is the single source-of-truth baseline spec for the expense-tracker, consolidated to match the **current code** (Node.js). Delta specs build on this:
-> - Spec 015 (merchant-resolver) — note: keyword table FR-005 was **removed** by Spec 021; resolution is memory → web → fallback.
-> - Spec 020 (deterministic finalize) — **SUPERSEDED** by Spec 021.
-> - Spec 021 (three-phase refactor) — defines the current 3-phase orchestrator pipeline.
+> **Canonical baseline.** This is the single source-of-truth baseline spec for the expense-tracker, consolidated to match the **current code** (Node.js). Delta specs:
+> - ~~Spec 015 (merchant-resolver)~~ — **folded** into this spec (see Merchant Resolution section below). Keyword table FR-005 was removed by Spec 021.
+> - ~~Spec 020 (deterministic finalize)~~ — **deleted** (SUPERSEDED by Spec 021 → then folded into this baseline).
+> - Spec 021 (three-phase refactor) — defines the current 3-phase orchestrator pipeline (rationale doc, still in repo).
 > Module design detail: `modules/expense-tracker/docs/design.md`. Agent runtime guide: `modules/hermes/skills/expense-tracker/SKILL.md`.
 >
-> **v2.0.0 consolidation (spec-drift audit):** corrected Python→Node.js, tool counts (16 → **26 REST / 22 MCP**), 3-phase pipeline, MEMORY.md fact storage, no keyword table. See `specs/030-spec-drift/`.
+> **v2.0.0 consolidation (spec-drift audit):** corrected Python→Node.js, tool counts (16 → **26 REST / 22 MCP**), 3-phase pipeline, MEMORY.md fact storage, no keyword table, folded 015 merchant-resolver + 015 transaction-update. See `specs/030-spec-drift/`.
 
 ---
 
@@ -162,6 +162,36 @@ Incoming emails are pre-classified by a lightweight LLM call into one of three c
 - [x] `"skip"` → email is silently marked as read with NO LLM processing and NO user notification. This covers: IBKR Activity Flex statements, trade confirmations, portfolio reports, investment summaries, securities transaction notices
 - [x] If the classification LLM fails (API error, timeout), the email defaults to `"transaction"` as a safe fallback
 - [x] Portfolio/trade emails are handled by the separate portfolio-tracker module which independently monitors the same inbox
+
+---
+
+## Merchant Resolution (`resolve_merchant`)
+
+> Folded from Spec 015 (merchant-resolver). The keyword heuristic step (FR-005) was removed by Spec 021; resolution is memory → web → fallback.
+
+**API:** `POST /tools/resolve-merchant` — `{ merchant: string, budget_id: string }` → `{ payee: string, source: "memory"|"web"|"fallback" }`.
+Exposed as MCP tool `resolve_merchant` (`src/mcp-server.js`). `budget_id` is required for payee-list validation.
+
+**Resolution chain** (`src/tools.js:_handle_resolve_merchant`), short-circuits on first match:
+1. `MemoryStore.search()` lookup in MEMORY.md → `source: "memory"`
+2. Web search (Brave, if `BRAVE_SEARCH_API_KEY` configured) + DeepSeek LLM classification (`temperature: 0.1`, reasoning `adaptive`) → `source: "web"`
+3. `"Misc"` fallback → `source: "fallback"`
+
+**Behaviors:**
+- After `"web"` resolution, `MemoryStore.add()` persists the mapping for future memory hits. `"memory"` and `"fallback"` resolutions do NOT trigger learning.
+- Resolved payee is validated against the live payee list (via actual-api). If the payee doesn't match any live payee, falls back to `"Misc"`.
+- Timeout: ≤500ms (memory path) or ≤20s (web search path). Timeout at any step falls through to the next step — no crash.
+- Concurrent calls for the same merchant run independently; the second `learn_fact` is a no-op (dedup in MemoryStore).
+
+## Transaction Update (`update_transaction`)
+
+> Also folded from Spec 015.
+
+**API:** `POST /tools/update-transaction` — `{ id: string, budget_id?: string, payee_name?, notes?, amount?, date?, category_id?, account_id? }`. At least one optional field required.
+
+- `payee_name` is validated against live payee list → unknown payees rejected (not defaulted to Misc).
+- `category_id` is validated against live category list → unknown categories rejected.
+- `insert_transaction` validation differs: unknown payee → `"Misc"`, unknown category → `"Fun Money"`.
 
 ---
 

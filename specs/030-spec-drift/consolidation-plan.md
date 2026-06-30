@@ -1,6 +1,6 @@
 # Spec Consolidation Plan
 
-**Status:** SCAFFOLD (pending approval)
+**Status:** EXECUTED
 **Goal:** Make the **code-accurate** baseline easy for future agents to consume by consolidating scattered, partly-contradictory specs into one canonical doc per module, and turning historical specs into thin pointers.
 
 ---
