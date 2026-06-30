@@ -257,6 +257,19 @@ describe("Config — data paths", () => {
         expect(cfg.dedupDbPath).toBe("data/dedup.db");
         expect(cfg.mappingsPath).toBe("data/mappings.json");
     });
+
+    it("defaults portfolioMemoryPath to data/MEMORY.md", () => {
+        const cfg = new Config(REQUIRED_ENV);
+        expect(cfg.portfolioMemoryPath).toBe("data/MEMORY.md");
+    });
+
+    it("honors PORTFOLIO_MEMORY_PATH override", () => {
+        const cfg = new Config({
+            ...REQUIRED_ENV,
+            PORTFOLIO_MEMORY_PATH: "/data/custom/MEMORY.md",
+        });
+        expect(cfg.portfolioMemoryPath).toBe("/data/custom/MEMORY.md");
+    });
 });
 
 describe("Config — balance sync", () => {

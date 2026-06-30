@@ -2,8 +2,7 @@
  * Tool Registry for the portfolio tracker.
  * Ported 1:1 from src/agent/tools.py
  *
- * ALL 19 tools with full schemas and handlers.
- * No stubs. No TODOs.
+ * Full schemas and handlers for all tools. No stubs. No TODOs.
  */
 
 import { parseIBKRFlexQuery } from "./ibkr_parser.js";
@@ -13,6 +12,30 @@ import { SheetsClient } from "./sheets_client.js";
 import { pullFromOneDrive, pushToOneDrive } from "./onedrive.js";
 import { existsSync } from "fs";
 import { PpJavaBridge } from "./java_bridge.js";
+
+/** Keys whose values must never be written to logs. */
+const SECRET_KEYS = new Set(["password", "passwd", "pwd"]);
+/** Keys whose (large) values are truncated in logs to reduce noise. */
+const BULKY_KEYS = new Set(["pdf_bytes_b64", "xml_content"]);
+
+/**
+ * Return a shallow copy of an args object sanitized for logging: secret values
+ * are redacted and bulky values truncated. Non-objects are returned unchanged.
+ */
+function redactSecrets(args) {
+    if (!args || typeof args !== "object") return args;
+    const out = {};
+    for (const [k, v] of Object.entries(args)) {
+        if (SECRET_KEYS.has(k.toLowerCase()) && v) {
+            out[k] = "[REDACTED]";
+        } else if (BULKY_KEYS.has(k) && typeof v === "string" && v.length > 64) {
+            out[k] = `[${v.length} chars]`;
+        } else {
+            out[k] = v;
+        }
+    }
+    return out;
+}
 
 // ---------------------------------------------------------------------------
 // Tool schemas
@@ -42,8 +65,17 @@ const TOOL_SCHEMAS = [
         function: {
             name: "extract_email_content",
             description:
-                "Extract and clean text from the current email, including PDF attachments.",
-            parameters: { type: "object", properties: {} },
+                "Extract and clean text from the current email, including PDF attachments. For password-protected PDFs, pass the password to decrypt before extraction.",
+            parameters: {
+                type: "object",
+                properties: {
+                    password: {
+                        type: "string",
+                        description:
+                            "Optional password to decrypt encrypted PDF attachments. Omit for unencrypted emails.",
+                    },
+                },
+            },
         },
     },
     {
@@ -51,7 +83,7 @@ const TOOL_SCHEMAS = [
         function: {
             name: "extract_pdf_text",
             description:
-                "OCR a PDF trade confirmation from base64-encoded bytes.",
+                "Extract text from a PDF (trade confirmation or statement) from base64-encoded bytes using pdftotext. For encrypted PDFs, provide the password to decrypt with qpdf first.",
             parameters: {
                 type: "object",
                 properties: {
@@ -59,8 +91,49 @@ const TOOL_SCHEMAS = [
                         type: "string",
                         description: "Base64-encoded PDF bytes",
                     },
+                    password: {
+                        type: "string",
+                        description:
+                            "Optional password for encrypted PDFs. Omit for unencrypted PDFs.",
+                    },
                 },
                 required: ["pdf_bytes_b64"],
+            },
+        },
+    },
+    {
+        type: "function",
+        function: {
+            name: "search_memory",
+            description:
+                "Search the portfolio tracker's learned facts (e.g. broker statement passwords, security/account notes) by semantic similarity. Use a SINGLE keyword such as a broker name (\"IBKR\", \"POEMS\") or \"password\".",
+            parameters: {
+                type: "object",
+                properties: {
+                    query: {
+                        type: "string",
+                        description: "Single-keyword search query",
+                    },
+                },
+                required: ["query"],
+            },
+        },
+    },
+    {
+        type: "function",
+        function: {
+            name: "learn_fact",
+            description:
+                "Record a free-form fact in the portfolio tracker's memory for future use (e.g. \"POEMS statement password is X\"). Deduplicated automatically.",
+            parameters: {
+                type: "object",
+                properties: {
+                    fact: {
+                        type: "string",
+                        description: "The fact text to remember",
+                    },
+                },
+                required: ["fact"],
             },
         },
     },
@@ -367,6 +440,7 @@ export class ToolRegistry {
      * @param {import('./memory.js').MemoryStore} memoryStore
      * @param {import('./java_bridge.js').PpJavaBridge|null} ppBridge
      * @param {object|null} abClient - Actual Budget client (optional)
+     * @param {import('./memory_facts.js').FactsMemory|null} factsMemory - semantic facts/password store
      */
     constructor(
         config,
@@ -374,12 +448,14 @@ export class ToolRegistry {
         memoryStore,
         ppBridge = null,
         abClient = null,
+        factsMemory = null,
     ) {
         this._config = config;
         this._dedup = dedupJournal;
         this._memory = memoryStore;
         this.__ppBridge = ppBridge;
         this._abClient = abClient;
+        this._facts = factsMemory;
         this._currentPdfBytes = Buffer.alloc(0);
         this._currentRawEmail = Buffer.alloc(0);
         this._sheetsClient = null;
@@ -432,7 +508,7 @@ export class ToolRegistry {
             JSON.stringify({
                 event: "tool_exec",
                 tool: name,
-                args: JSON.stringify(args),
+                args: JSON.stringify(redactSecrets(args)),
             }),
         );
         try {
@@ -463,13 +539,30 @@ export class ToolRegistry {
             // Email / PDF
             case "extract_email_content":
                 return {
-                    text: await extractEmailContent(this._currentRawEmail),
+                    text: await extractEmailContent(
+                        this._currentRawEmail,
+                        args.password || null,
+                    ),
                 };
 
             case "extract_pdf_text": {
                 const b64 = args.pdf_bytes_b64 || "";
                 const buf = Buffer.from(b64, "base64");
-                return { text: await extractPdfText(buf) };
+                return {
+                    text: await extractPdfText(buf, args.password || null),
+                };
+            }
+
+            // Semantic facts / passwords memory
+            case "search_memory": {
+                if (!this._facts) return { results: [] };
+                return { results: await this._facts.search(args.query || "") };
+            }
+
+            case "learn_fact": {
+                if (!this._facts)
+                    return { added: false, reason: "no facts store" };
+                return await this._facts.add(args.fact || "");
             }
 
             // PP queries

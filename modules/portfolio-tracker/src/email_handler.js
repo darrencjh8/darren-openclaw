@@ -11,9 +11,10 @@ import { extractPdfText } from "./pdf_extractor.js";
 /**
  * Extract clean text content from a raw email (RFC 2822).
  * @param {Buffer|string} rawEmail - Raw email bytes or string
+ * @param {string|null} [password] - Optional password for encrypted PDF attachments
  * @returns {Promise<string>}
  */
-export async function extractEmailContent(rawEmail) {
+export async function extractEmailContent(rawEmail, password = null) {
     const raw = Buffer.isBuffer(rawEmail)
         ? rawEmail
         : Buffer.from(rawEmail, "utf8");
@@ -65,8 +66,12 @@ export async function extractEmailContent(rawEmail) {
                         Buffer.isBuffer(pdfBytes)
                             ? pdfBytes
                             : Buffer.from(pdfBytes),
+                        password,
                     );
-                    if (pdfText && !pdfText.startsWith("[PDF_OCR_")) {
+                    // Surface ALL results — including [PDF_ENCRYPTED] /
+                    // [PDF_OCR_*] / [PDF_EXTRACTION_ERROR] sentinels — so the
+                    // LLM can react (e.g. look up the password and retry).
+                    if (pdfText) {
                         pdfTexts.push(pdfText);
                     }
                 }
