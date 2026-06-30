@@ -59,7 +59,8 @@ describe("SYSTEM_PROMPT", () => {
 
     it("contains WORKFLOW section", async () => {
         const mod = await import("../src/prompts.js");
-        expect(mod.SYSTEM_PROMPT).toContain("WORKFLOW (per inbound event):");
+        expect(mod.SYSTEM_PROMPT).toContain("WORKFLOW — DAILY SYNC");
+        expect(mod.SYSTEM_PROMPT).toContain("WORKFLOW — MANUAL TRADE");
         expect(mod.SYSTEM_PROMPT).toContain("Classify intent");
     });
 

@@ -2,26 +2,23 @@
 
 Process bank transaction alerts into Actual Budget. Trigger: email from UOB, CIMB, Maybank, transaction alert, spent, charged, receipt, payment.
 
-## Pipeline (4-phase memory-first design)
+## Pipeline (3-phase design — see `src/orchestrator.js`)
 
-The expense-tracker orchestrator handles ALL phases internally. Hermes only routes emails — the orchestrator does field extraction, memory lookup, LLM audit with live data cross-referencing, web search fallback, and execution.
+The expense-tracker orchestrator handles ALL phases internally. Hermes only routes emails — the orchestrator does LLM analysis, code-driven resolution, and execution. (Spec 021 replaced the earlier 4-phase / V2-V3 gate design.)
 
-**Phase 1a — Field Extraction:** LLM extracts merchant, amount, date, currency from raw email. `reasoning=disabled`, no tools.
+**Phase 1 — LLM Analysis:** Single LLM call (`reasoning=adaptive`) with the `fetch_context` tool to read live accounts/categories/payees. Extracts merchant, amount, date, currency and proposes payee/category, leaving fields blank when unsure. 1 retry.
 
-**Phase 1b — Deterministic Mapping:** Currency → budget_id. 3× search_memory for payee/account/category candidates.
+**Phase 2 — Resolution (code-driven, no LLM gates):** Deterministic fill-in of blanks:
+- **payee:** memory → `resolve_merchant` (memory → web search → classification) → `"Misc"`
+- **category:** memory → LLM category picker (`getCategoryPickerPrompt`) → `null`
 
-**Phase 2 — LLM Audit:** Cross-references memory hints against live accounts/categories/payees via `fetch_context`. `reasoning=adaptive`. Leaves blank if unsure. V2 validation gate blanks invalid fields, retries ≤ 3×.
-
-**Phase 3 — Web Search:** Runs `resolve_merchant` (memory → web search → classification) for missing payee/category. V3 gate validates, retries ≤ 2×. Only runs if payee/category blank after Phase 2.
-
-**Phase 4 — Execute:** Insert with duplicate check, notify, learn facts. Skip for non-transactions. Notify on exhaustion.
+**Phase 3 — Execute:** Insert with duplicate check, notify, `learn_fact` ×1. Skip for non-transactions. Notify on exhaustion.
 
 ## Key design principles
 
-- **Leave blank > guess:** LLM leaves fields empty when unsure. Code handles blanks with web search or user notification.
-- **Validation gates:** Every LLM-chosen field validated against live data. Invalid values blanked before retry. No hallucination amplification.
-- **Memory-first:** Memory hints gathered before LLM audit. LLM cross-references hints against live data.
-- **No keyword table:** Payee matching is memory + web search. No hardcoded keyword→payee mappings.
+- **Leave blank > guess:** LLM leaves fields empty when unsure. Phase 2 code resolves blanks via memory/web search or falls back to `Misc`/`null`.
+- **Memory-first:** Memory is consulted first in both payee and category resolution before any web/LLM step.
+- **No keyword table:** Payee matching is memory + web search. No hardcoded keyword→payee mappings (no `src/keywords.js`).
 
 ## Output style
 

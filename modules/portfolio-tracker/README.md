@@ -42,20 +42,20 @@ This produces `pp-cli/target/pp-cli.jar`.
 cp .env.example .env
 # Edit .env with your credentials:
 #   DEEPSEEK_API_KEY, ACTUAL_BUDGET_URL/PASSWORD, ACTUAL_PRIMARY_BUDGET_FILE, ACTUAL_SECONDARY_BUDGET_FILE
-#   GOOGLE_SERVICE_ACCOUNT_JSON, GOOGLE_SHEET_ID (optional)
+#   GOOGLE_SERVICE_ACCOUNT_JSON, GOOGLE_SHEET_ID (required — enforced by guardEnv() at startup; see index.js)
 #   PP_XML_PATH, PP_EMERGENCY_SGD_ACCOUNT, etc.
 ```
 
-### 3. Install Python Dependencies
+### 3. Install Dependencies
 
 ```bash
-pip install -r requirements.txt
+npm install --production
 ```
 
 ### 4. Run
 
 ```bash
-python -m src.main
+node src/index.js
 ```
 
 OneDrive sync is handled by `pp-pull` and `pp-push` tools (Microsoft Graph API via `src/onedrive.js`), not a separate `onedrive-sync` container. These tools no longer require the Java bridge — the bridge lazy-initializes when the XML file is first downloaded.

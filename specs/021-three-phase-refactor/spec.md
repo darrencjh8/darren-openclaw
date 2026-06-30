@@ -2,9 +2,12 @@
 
 **Feature:** three-phase-orchestrator-refactor
 **Spec Version:** 1.0.0
-**Status:** Draft
+**Status:** Implemented (current pipeline)
 **Created:** 2026-06-20
 **Replaces:** Spec 020 (orchestrator-deterministic-finalize)
+**Baseline:** `specs/002-expense-tracking/spec.md`
+
+> **Current pipeline.** This delta defines the **active** 3-phase orchestrator (Phase 1 LLM Analysis → Phase 2 code-driven Resolution → Phase 3 Execute), implemented in `modules/expense-tracker/src/orchestrator.js`. No keyword step. Matches `modules/hermes/skills/expense-tracker/SKILL.md`.
 
 ---
 

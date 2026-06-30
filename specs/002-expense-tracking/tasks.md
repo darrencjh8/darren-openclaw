@@ -2,8 +2,10 @@
 
 **Feature:** expense-tracking  
 **Tasks Version:** 1.0.0  
-**Status:** Tasked  
+**Status:** Done (HISTORICAL — Python prototype)  
 **Constitution Hash:** v1.0.0  
+
+> **Historical.** Python prototype task ledger (all completed). The module is now **Node.js** — file names and libraries below are outdated. For the current baseline see `spec.md` and `plan.md`; for the code layout see `modules/expense-tracker/docs/design.md`.
 
 ---
 

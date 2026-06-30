@@ -1,9 +1,11 @@
 # Technical Plan: Automated Expense Tracking
 
 **Feature:** expense-tracking  
-**Plan Version:** 1.0.0  
-**Status:** Planned  
+**Plan Version:** 2.0.0  
+**Status:** Implemented  
 **Constitution Hash:** v1.0.0  
+
+> Sections 1 (Technology Stack), 2 (Architecture), 10 (Dockerfile), and 11 (Project Structure) reflect the current **Node.js** implementation. Behavioral pseudocode in other sections describes language-agnostic logic — the authoritative source is `modules/expense-tracker/src/` (see `modules/expense-tracker/docs/design.md` for the component map).
 
 ---
 
@@ -11,88 +13,50 @@
 
 | Layer | Choice | Version | Rationale |
 |---|---|---|---|
-| Runtime | Python | 3.12-slim | Lightweight (~80MB base), async I/O, mature IMAP/HTTP libraries |
+| Runtime | Node.js | 22 (ESM) | Single runtime shared with actual-api and other modules; strong async I/O |
 | LLM Provider | DeepSeek | `deepseek-chat` | $0.14/1M input, $0.28/1M output, OpenAI-compatible API, strong at structured extraction |
-| LLM Client | `openai` (Python SDK) | >=1.0 | DeepSeek is OpenAI-API-compatible (`base_url="https://api.deepseek.com/v1"`) |
-| IMAP Library | `aioimaplib` | latest | Async IMAP IDLE support, lightweight |
-| HTTP Client | `aiohttp` | latest | Async HTTP for actual-api Node.js service |
-| HTML Parsing | `beautifulsoup4` + `lxml` | latest | Extract plain text from HTML email bodies |
-| PDF OCR | `pytesseract` + `pdf2image` | latest | Optional; Tesseract binary must be in Docker image |
-| Config | `.env` + `os.environ` | — | 12-factor app; no YAML/JSON config parsing needed |
-| Dedup DB | `sqlite3` (stdlib) | built-in | Zero-dependency; single-file journal |
-| Logging | `json` + `logging` (stdlib) | built-in | JSON-line structured logs to stdout |
-| Container | Docker Compose | — | `Dockerfile` + `docker-compose.yml` |
+| LLM Client | `openai` (Node SDK) | latest | DeepSeek is OpenAI-API-compatible (`baseURL: "https://api.deepseek.com/v1"`) |
+| IMAP Library | `imapflow` | latest | IMAP IDLE + inbox browsing (list/read) |
+| HTTP Client | `fetch` (built-in) | Node 22 | Native fetch for actual-api Node.js service |
+| HTML Parsing | MIME-aware extractor | — | `src/extractors.js` strips HTML email bodies to text |
+| PDF Text | `pdftotext` (poppler) + `qpdf` | system bins | Extract text from PDF attachments; `qpdf` decrypts encrypted PDFs (binaries in Docker image) |
+| Memory | `MEMORY.md` + WASM embeddings | — | `src/memory.js` semantic fact store (replaces `mappings.json`) |
+| Config | `.env` + `process.env` | — | 12-factor app; `src/config.js` Config class |
+| Dedup/Statement DB | `better-sqlite3` | latest | Single-file journals (`data/dedup.db`, `data/statement.db`) |
+| MCP | `@modelcontextprotocol/sdk` | latest | Streamable HTTP MCP server (`src/mcp-server.js`) — 22 tools |
+| Logging | JSON-line to stdout | — | `src/logging.js` structured logs |
+| Container | Docker Compose | — | `docker/Dockerfile` + `modules/docker-compose.yml` |
 
 ---
 
 ## 2. Architecture Diagram
 
-```
-┌──────────────────────────────────────────────────────────────┐
-│  Ubuntu Laptop (Docker): expense-tracker (~150MB RAM)        │
-│                                                              │
-│  ┌────────────────────────────────────────────────────────┐  │
-│  │  main.py (entry point)                                  │  │
-│  │  ┌──────────────────┐    ┌──────────────────────────┐  │  │
-│  │  │ IMAP IDLE Loop    │    │ Agent Orchestrator       │  │  │
-│  │  │ (imap/idle_       │───▶│ (agent/orchestrator.py)  │  │  │
-│  │  │  handler.py)      │    │                          │  │  │
-│  │  │                   │    │  For each new email:     │  │  │
-│  │  │ - Persistent conn │    │  1. extract_content()    │  │  │
-│  │  │ - Auto-reconnect  │    │  2. Build system prompt  │  │  │
-│  │  │ - Catch-up fetch  │    │  3. Send to DeepSeek     │  │  │
-│  │  └──────────────────┘    │  4. LLM returns tool_call │  │  │
-│  │                          │  5. Execute tool(s)       │  │  │
-│  │                          │  6. Feed results back     │  │  │
-│  │                          │  7. LLM makes final call  │  │  │
-│  │                          │     (insert or notify)    │  │  │
-│  │                          └──────────┬───────────────┘  │  │
-│  │                                     │                   │  │
-│  │  ┌──────────────────────────────────┼────────────────┐  │  │
-│  │  │  Tools (agent/tools.py)          │                 │  │  │
-│  │  │                                  ▼                 │  │  │
-│  │  │  ┌─────────────────────────────────────────────┐   │  │  │
-│  │  │  │ extract_email_content()                     │   │  │  │
-│  │  │  │  → extractors/html_extractor.py             │   │  │  │
-│  │  │  │  → extractors/pdf_extractor.py              │   │  │  │
-│  │  │  │  → extractors/text_cleaner.py               │   │  │  │
-│  │  │  └─────────────────────────────────────────────┘   │  │  │
-│  │  │  ┌─────────────────────────────────────────────┐   │  │  │
-│  │  │  │ fetch_accounts()  ┐                          │   │  │
-│  │  │  │ fetch_categories()├─→ client/actual_client.py│   │  │  │
-│  │  │  │ fetch_payees()    │  (actual-api Node.js)    │   │  │  │
-│  │  │  │ fetch_recent_txns()┘                         │   │  │  │
-│  │  │  │ insert_transaction()                         │   │  │  │
-│  │  │  └─────────────────────────────────────────────┘   │  │  │
-│  │  │  ┌─────────────────────────────────────────────┐   │  │  │
-│  │  │  │ check_duplicate() → utils/dedup.py          │   │  │  │
-│  │  │  └─────────────────────────────────────────────┘   │  │  │
-│  │  │  ┌─────────────────────────────────────────────┐   │  │  │
-│  │  │  │ mark_email_read() → imap/idle_handler.py    │   │  │  │
-│  │  │  └─────────────────────────────────────────────┘   │  │  │
-│  │  │  ┌─────────────────────────────────────────────┐   │  │  │
-│  │  │  │ notify_user() → notifier/email_notifier.py  │   │  │  │
-│  │  │  └─────────────────────────────────────────────┘   │  │  │
-│  │  │  ┌─────────────────────────────────────────────┐   │  │  │
-│  │  │  │ log_decision() → utils/logging.py           │   │  │  │
-│  │  │  └─────────────────────────────────────────────┘   │  │  │
-│  │  └──────────────────────────────────────────────────┘  │  │
-│  └────────────────────────────────────────────────────────┘  │
-│                                                              │
-│  ┌──────────────────────┐  ┌─────────────────────────────────┐   │
-│  │  SQLite Journal       │  │  IMAP Connection               │   │
-│  │  (data/dedup.db)      │  │  imap.example.com:993             │   │
-│  └──────────────────────┘  │  (SSL)                         │   │
-│                            └─────────────────────────────────┘   │
-└──────────────────────────────────────────────────────────────┘
-         │                          │
-         │ Internal network         │ Public internet
-         ▼                          ▼
-┌─────────────────────┐    ┌─────────────────────┐
-│  Actual Budget       │    │  DeepSeek API        │
-│  actual-budget       │    │  api.deepseek.com    │
-│  .internal:5006      │    │  :443 (HTTPS)        │
-└─────────────────────┘    └─────────────────────┘
+```mermaid
+flowchart TB
+    subgraph ET["expense-tracker (Node.js 22, Docker)"]
+        IDX["src/index.js — entry: Express, 26 REST /tools/*, MCP server, IMAP"]
+        IMAP["src/imap.js (imapflow)<br/>IMAP IDLE: persistent conn, auto-reconnect, catch-up"]
+        CLS["src/classify.js<br/>pre-classify: transaction | statement | skip"]
+        ORCH["src/orchestrator.js — 3-phase alert pipeline<br/>P1 LLM Analysis (fetch_context)<br/>P2 Resolution (memory→web→Misc / category picker)<br/>P3 Execute (insert/skip/notify, learn_fact)"]
+        STMT["src/statement/orchestrator.js<br/>statement reconciliation"]
+        TOOLS["src/tools.js — ToolRegistry<br/>AB CRUD, check_duplicate, resolve_merchant, memory, extractors"]
+        MEM["src/memory.js — MEMORY.md + WASM embeddings"]
+        EXT["src/extractors.js — HTML strip, pdftotext + qpdf"]
+        DB["data/dedup.db + data/statement.db (SQLite)"]
+    end
+
+    INBOX["Burner inbox (IMAP IDLE, :993 SSL)"] --> IMAP --> CLS
+    CLS -->|transaction| ORCH
+    CLS -->|statement| STMT
+    CLS -->|skip| IMAP
+    ORCH --> TOOLS
+    STMT --> TOOLS
+    TOOLS --> MEM
+    TOOLS --> EXT
+    TOOLS --> DB
+    TOOLS -->|fetch| AB["Actual Budget via actual-api (Node.js)"]
+    ORCH -->|chat| DS["DeepSeek API (api.deepseek.com)"]
+    MCP["Hermes MCP client"] <-->|Streamable HTTP /mcp| IDX
 ```
 
 ---
@@ -109,10 +73,10 @@ IMAP IDLE detects new message → fires callback
 Raw email fetched (MIME envelope + body + attachments)
     │
     ▼
-extract_email_content() tool:
-    ├── HTML body → BeautifulSoup → plain text
-    ├── Plain text body → text_cleaner (normalize whitespace, strip signatures)
-    └── PDF attachment → pdf2image → pytesseract → text
+extract_email_content() / extract_pdf_text() tool (src/extractors.js):
+    ├── HTML body → MIME-aware strip → plain text
+    ├── Plain text body → normalize whitespace, strip signatures, truncate
+    └── PDF attachment → pdftotext (qpdf decrypt if encrypted) → text
     │
     ▼
 Agent Orchestrator builds LLM conversation:
@@ -125,7 +89,7 @@ LLM responds with tool_call(s):
     Example: [fetch_accounts, fetch_categories, fetch_recent_transactions]
     │
     ▼
-Python executes requested tools, returns results to LLM
+Orchestrator (Node.js) executes requested tools, returns results to LLM
     │
     ▼
 LLM makes final decision:
@@ -306,7 +270,7 @@ On successful insert: mark_email_read() + log_decision("inserted")
 
 ## 5. LLM System Prompt (Core Instructions)
 
-The system prompt is the **only place** where business logic lives. It is stored in `src/agent/prompts.py` as a Python string constant.
+The system prompt is the **only place** where business logic lives. It is stored in `src/prompts.js` (Phase-1 analysis prompt) as a JS string constant; `src/statement/prompts.js` holds the statement/classification prompts.
 
 ```
 You are an expense-tracking agent connected to Actual Budget. Your job is to
@@ -392,10 +356,10 @@ Actual Budget's API uses a simple API key or token. Configured via `ACTUAL_BUDGE
 - **Mailbox:** `INBOX`
 - **Auth note:** Most IMAP providers support app-specific passwords. Generate an app password under your email provider's settings. OAuth2 is supported as an alternative but adds complexity.
 
-### IDLE Loop (pseudocode)
+### IDLE Loop (illustrative pseudocode — actual impl: `src/imap.js` with imapflow)
 
-```python
-async def idle_loop(self):
+```text
+async idleLoop():
     while True:
         try:
             await self.connect()
@@ -502,26 +466,27 @@ SHA-256(key) where key = "date|amount_cents|account_id|payee_name"
 ### Dockerfile (High-Level)
 
 ```dockerfile
-FROM python:3.12-slim
+FROM node:22-slim
 
-# Install Tesseract only if PDF support needed
+# poppler-utils (pdftotext) + qpdf (decrypt encrypted PDFs)
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    tesseract-ocr \
     poppler-utils \
+    qpdf \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+COPY package.json .
+RUN npm install --production
 
 COPY src/ ./src/
-COPY config/ ./config/
 
-# Create persistent volume mount point for dedup DB
+# Create persistent volume mount point for dedup/statement DB + MEMORY.md
 RUN mkdir -p /app/data
 
-CMD ["python", "-m", "src.main"]
+EXPOSE 8080
+
+CMD ["node", "src/index.js"]
 ```
 
 ### docker-compose.yml (High-Level)
@@ -554,54 +519,30 @@ darren-openclaw/
 │           ├── spec.md
 │           ├── plan.md
 │           └── tasks.md
-├── config/
-│   └── email_config.json           # Only: imap_host (imap.example.com), imap_port (993)
 ├── src/
-│   ├── __init__.py
-│   ├── main.py                     # Entry point
-│   ├── agent/
-│   │   ├── __init__.py
-│   │   ├── orchestrator.py         # LLM conversation loop
-│   │   ├── tools.py                # 10 tool function implementations
-│   │   └── prompts.py              # System prompt constant
-│   ├── imap/
-│   │   ├── __init__.py
-│   │   └── idle_handler.py
-│   ├── extractors/
-│   │   ├── __init__.py
-│   │   ├── html_extractor.py
-│   │   ├── pdf_extractor.py
-│   │   └── text_cleaner.py
-│   ├── client/
-│   │   ├── __init__.py
-│   │   └── actual_client.py
-│   ├── notifier/
-│   │   ├── __init__.py
-│   │   └── email_notifier.py
-│   └── utils/
-│       ├── __init__.py
-│       ├── dedup.py
-│       └── logging.py
+│   ├── index.js                    # Entry: Express, 26 REST /tools/*, MCP, IMAP wiring
+│   ├── config.js                   # Env-var Config class
+│   ├── mcp-server.js               # MCP Streamable HTTP server (22 tools)
+│   ├── orchestrator.js             # 3-phase alert pipeline + DeepSeekClient
+│   ├── prompts.js                  # Phase-1 prompt + category picker prompt
+│   ├── tools.js                    # ToolRegistry: schemas + handlers
+│   ├── memory.js                   # MEMORY.md fact store + WASM embeddings
+│   ├── extractors.js               # HTML strip + pdftotext/qpdf PDF text
+│   ├── imap.js                     # IMAP IDLE (imapflow) + inbox browsing
+│   ├── classify.js                 # Pre-classification + dispatch routing
+│   ├── dedup.js                    # SHA-256 dedup journal (better-sqlite3)
+│   ├── logging.js                  # JSON-line structured logging
+│   └── statement/
+│       ├── orchestrator.js         # Statement reconciliation pipeline
+│       ├── prompts.js              # Classification + statement prompts
+│       └── matcher.js              # Fuzzy match: amount/date/merchant
 ├── docker/
 │   └── Dockerfile
-├── tests/
-│   ├── __init__.py
-│   ├── conftest.py                 # Shared fixtures (mock Actual Budget, mock IMAP)
-│   ├── fixtures/
-│   │   ├── dbs_alert.txt
-│   │   ├── ocbc_alert.html
-│   │   ├── grab_receipt.html
-│   │   ├── myr_tng_alert.txt
-│   │   └── bank_promo.html
-│   ├── test_tools.py
-│   ├── test_actual_client.py
-│   ├── test_agent_orchestrator.py
-│   ├── test_dedup.py
-│   ├── test_imap_handler.py
-│   └── test_extractors.py
+├── docs/
+│   └── design.md                   # Module design (current component map)
+├── data/                           # Persistent: dedup.db, statement.db, MEMORY.md
 ├── .env.example
-├── .gitignore
-├── requirements.txt
+├── package.json
 └── README.md
 ```
 

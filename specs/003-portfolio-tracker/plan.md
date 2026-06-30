@@ -16,7 +16,7 @@ Add an MCP SSE server to portfolio-tracker exposing tools in three groups: **syn
 flowchart LR
     subgraph Hermes["Hermes Agent"]
         MCP_C["MCP Client"]
-        CRON["Cron<br/>daily 3 AM"]
+        CRON["Cron<br/>0 12 * * * (noon)"]
         TG["Telegram<br/>/sync /onedrive"]
     end
 
@@ -152,8 +152,10 @@ Fetches the latest IBKR flex query XML from the IBKR Flex Web Service.
 // src/ibkr_flex.js (NEW)
 
 const IBKR_SEND_URL = "https://ndcdyn.interactivebrokers.com/AccountManagement/FlexWebService/SendRequest";
-const IBKR_GET_URL = "https://ndcdyn.interactivebrokers.com/AccountManagement/FlexWebService/GetStatement";
 const USER_AGENT = "Node.js/24";
+// NOTE: There is no hardcoded GetStatement URL. After SendRequest, the GET URL is
+// read dynamically from the response (`<Url>...</Url>`, can be gdcdyn/ndcdyn/etc.),
+// falling back to gdcdyn.../GetStatement only if absent. See ibkr_flex.js:98-100.
 
 /**
  * Pull the latest IBKR flex query XML from IBKR Flex Web Service.

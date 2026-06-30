@@ -2,7 +2,7 @@
 
 **Module:** `modules/expense-tracker`  
 **Last Updated:** 2026-06-10
-**Python:** 3.12-slim | **LLM:** DeepSeek `deepseek-chat` | **Budget:** Actual Budget REST API
+**Runtime:** Node.js 22 (ESM) | **LLM:** DeepSeek `deepseek-chat` | **Budget:** Actual Budget REST API
 
 For workflow, tool schemas, and deployment, see `.speckit/features/expense-tracking/plan.md` and `.speckit/agent.md`.
 
@@ -18,13 +18,13 @@ For workflow, tool schemas, and deployment, see `.speckit/features/expense-track
                        │ IMAP IDLE
                        ▼
 ┌─────────────────────────────────────────────────────────────┐
-│  src/imap/idle_handler.py — ImapIdleHandler                 │
+│  src/imap.js — ImapIdleHandler (imapflow)                   │
 │  Persistent IMAP IDLE, auto-reconnect, catch-up fetch        │
 └──────────────────────┬──────────────────────────────────────┘
                        │ on_new_email(msg)
                        ▼
 ┌─────────────────────────────────────────────────────────────┐
-│  src/main.py — _classify_email()                             │
+│  src/classify.js — classifyEmail() / dispatchEmail()        │
 │  Lightweight LLM call (no tools):                            │
 │    "statement" | "transaction" | "skip"                      │
 └──────────────────────┬──────────────────────────────────────┘
@@ -38,8 +38,9 @@ For workflow, tool schemas, and deployment, see `.speckit/features/expense-track
    ┌────────┐  ┌──────────────┐  ┌──────────────────┐
    │ mark   │  │ Statement-   │  │ Agent-           │
    │ read   │  │ Processor    │  │ Orchestrator     │
-   │ only   │  │ (v4 style,   │  │ (flash style,    │
-   │        │  │  20 iter)    │  │  5 iter)         │
+   │ only   │  │ (statement   │  │ (3-phase:        │
+   │        │  │  reconcile)  │  │  analyze→resolve │
+   │        │  │              │  │  →execute)       │
    └────────┘  └──────┬───────┘  └────────┬─────────┘
                       │                    │
                       └────────┬───────────┘
@@ -47,8 +48,8 @@ For workflow, tool schemas, and deployment, see `.speckit/features/expense-track
                                ▼
                     ┌──────────────────┐
                     │  ToolRegistry    │
-                    │  16 tools via    │
-                    │  HTTP API (8080) │
+                    │  22 MCP / 26 REST│
+                    │  tools (:8080)   │
                     └────────┬─────────┘
                              │
               ┌──────────────┼──────────────┐
@@ -78,43 +79,30 @@ The expense-tracker's pre-classification returns `"skip"` for IBKR/trade emails,
 
 ## Component Map
 
+> **Implementation note:** This module is **Node.js / JavaScript** (ESM). It was ported from an earlier Python prototype; all `.py` references in older docs are historical.
+
 ```
 src/
-├── __init__.py                  (empty)
-├── __main__.py                  Entry: python -m src → main()
-├── main.py                      (164 lines) App entry: wiring, classification, dispatch, health server
-├── config.py                    (91 lines)  Env-var typed Config dataclass
-├── tools_api.py                 (64 lines)  16 HTTP POST endpoints bridging LLM tools → REST
+├── index.js                     (194 lines) App entry: wiring, Express, 26 REST /tools/* routes, MCP server, IMAP
+├── config.js                    (88 lines)  Env-var Config class (MEMORY_PATH = data/MEMORY.md)
+├── mcp-server.js                (275 lines) MCP Streamable HTTP server — 22 server.tool() registrations
+├── orchestrator.js              (876 lines) 3-phase alert pipeline (LLM Analysis → Resolution → Execute) + DeepSeekClient
+├── prompts.js                   (88 lines)  Phase-1 prompt + category picker prompt
+├── tools.js                     (1562 lines) ToolRegistry: tool schemas + handlers (Actual Budget CRUD, dedup, memory, resolve_merchant)
+├── memory.js                    (716 lines) MEMORY.md fact store with WASM semantic embeddings + dedup/cleanup
+├── extractors.js                (194 lines) MIME-aware email content + PDF text (pdftotext via child_process)
+├── imap.js                      (398 lines) IMAP IDLE (imapflow) + inbox browsing (list/read/extract)
+├── classify.js                  (145 lines) Email pre-classification + dispatch routing
+├── dedup.js                     (93 lines)  SHA-256 dedup journal (data/dedup.db)
+├── logging.js                   (31 lines)  Structured JSON-line logging
 │
-├── agent/
-│   ├── __init__.py              (empty)
-│   ├── orchestrator.py          (157 lines) Alert pipeline: LLM conversation loop, max 5 iter
-│   ├── prompts.py               (415 lines) SYSTEM_PROMPT + FEW_SHOT_EXAMPLES + learned mappings
-│   └── tools.py                 (474 lines) ToolRegistry: 16 tool schemas + handlers
-│
-├── statement/
-│   ├── __init__.py              (empty)
-│   ├── orchestrator.py          (182 lines) Statement pipeline: LLM conversation loop, max 20 iter
-│   ├── prompts.py               (131 lines) CLASSIFICATION_PROMPT + STATEMENT_PROMPT + FEW_SHOT
-│   ├── journal.py               (170 lines) StatementJournal: SQLite tracking for processed periods
-│   └── matcher.py               (80 lines)  fuzzy_match(): amount/date/merchant scoring
-│
-├── extractors/
-│   ├── __init__.py              (68 lines)  MIME-aware email content extraction
-│   ├── html_extractor.py        (15 lines)  BeautifulSoup HTML → plain text
-│   ├── pdf_extractor.py         (69 lines)  Tesseract OCR PDF → text
-│   └── text_cleaner.py          (25 lines)  Whitespace normalize + 60K char truncation
-│
-├── imap/
-│   ├── __init__.py              (empty)
-│   └── idle_handler.py          (140 lines) Async IMAP IDLE with auto-reconnect
-│
-└── utils/
-    ├── __init__.py              (empty)
-    ├── logging.py               (73 lines)  Structured JSON-line logging
-    ├── dedup.py                 (94 lines)  SHA-256 dedup journal (data/dedup.db)
-    └── asked_tracker.py         (45 lines)  Tracks pending questions (data/asked.json)
+└── statement/
+    ├── orchestrator.js          (278 lines) Statement reconciliation pipeline
+    ├── prompts.js               (194 lines) Classification + statement prompts
+    └── matcher.js               (86 lines)  fuzzy match: amount/date/merchant scoring
 ```
+
+The module registers **26 REST `/tools/*` POST endpoints** (`index.js:127-154`) and **22 MCP tools** (`mcp-server.js`). The dedup and statement journals are SQLite (`data/dedup.db`, `data/statement.db`); statement tracking lives in `src/statement/`.
 
 ---
 
@@ -170,28 +158,31 @@ CREATE TABLE statement_transactions (
 );
 ```
 
-### Learned Mappings (`data/mappings.json`)
+### Learned Facts (`data/MEMORY.md`)
 
-```json
-{
-  "accounts": {"DBS Yuu": "debit card", "UOB One": "credit card", ...},
-  "payees": {"toast box": "Food", "ntuc": "Groceries", ...},
-  "categories": {"food": "Food", "transport": "Transport", ...}
-}
+Learned mappings are stored as free-form + structured facts in `MEMORY.md` (config key `MEMORY_PATH`, default `data/MEMORY.md`), searched via WASM semantic embeddings (`src/memory.js`). On first run, the legacy `data/mappings.json` (accounts/payees/categories dictionaries) is migrated into `MEMORY.md` (`index.js:52-61`); `mappings.json` is no longer read afterward.
+
 ```
+# MEMORY.md (example facts)
+- "toast box" maps to Food payee
+- DBS Yuu is a debit card account
+- ntuc transactions are Groceries
+```
+
+Memory tools: `search_memory`, `learn_fact`, `list_facts`, `update_fact`, `delete_fact`, `compact_facts`, `cleanup_facts`.
 
 ---
 
 ## Test Strategy
 
-**Total:** 24 test files, ~4,100 lines, 282 passing tests (2 skipped)
+**Note:** The figures below ("24 test files, ~4,100 lines, 282 passing") are from the historical Python prototype and are retained only as a coverage reference; the current JS test suite differs.
 
 | Category | What's Tested |
 |---|---|
 | **Classification** | `_classify_email()` returns correct category; `dispatch_email()` routing logic |
 | **Agent Orchestrator** | Orchestrator construction, message building, SYSTEM_PROMPT content, happy-path flow with mocked LLM |
 | **Statement Pipeline** | StatementProcessor, fuzzy matcher, journal CRUD, reconcile, fetch-unreconciled, record, history |
-| **Tool Registry** | 16 tool schemas, tool dispatch, individual tool handlers |
+| **Tool Registry** | 22 MCP tool schemas / 26 REST endpoints, tool dispatch, individual tool handlers |
 | **Extractors** | HTML → text, PDF → OCR, MIME multipart extraction, text cleaning |
 | **IMAP** | IMAP connect/fetch/mark-read, idle loop with mocks |
 | **Dedup Journal** | Hash computation, insert/check cycles, duplicate detection |

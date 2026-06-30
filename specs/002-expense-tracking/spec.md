@@ -1,19 +1,26 @@
 # Feature Specification: Automated Expense Tracking
 
 **Feature:** expense-tracking  
-**Spec Version:** 1.0.0  
-**Status:** Done  
+**Spec Version:** 2.0.0  
+**Status:** Done (canonical baseline)  
 **Constitution Hash:** v1.0.0  
+**Runtime:** Node.js 22 (ESM) — `modules/expense-tracker`
+
+> **Canonical baseline.** Single source-of-truth spec for the expense-tracker, matching the current **Node.js** code.
+> - Pipeline: 3-phase (Spec 021 rationale in `specs/021-three-phase-refactor/`).
+> - Module design: `modules/expense-tracker/docs/design.md`.
+> - Agent runtime guide: `modules/hermes/skills/expense-tracker/SKILL.md`.
+> - Audit trail: `specs/030-spec-drift/`.
 
 ---
 
 ## Overview
 
-An LLM-powered agent (OpenClaw) that monitors a dedicated Email burner inbox via IMAP IDLE. When a receipt or transaction alert email is forwarded to this inbox, the agent extracts structured transaction data and inserts it into the user's existing **Actual Budget** instance.
+An LLM-powered agent (Hermes) that monitors a dedicated Email burner inbox via IMAP IDLE. When a receipt or transaction alert email is forwarded to this inbox, the agent extracts structured transaction data and inserts it into the user's existing **Actual Budget** instance.
 
-The intelligence layer is a **DeepSeek LLM** (`deepseek-chat`). The Python host provides 16 deterministic tools that the LLM calls to fetch live context and execute actions. No business rules (category mapping, account matching, currency detection) are hardcoded in Python.
+The intelligence layer is a **DeepSeek LLM** (`deepseek-chat`). The Node.js host (`modules/expense-tracker`) provides deterministic tools — **26 REST `/tools/*` endpoints** and **22 MCP tools** — that the LLM/orchestrator calls to fetch live context and execute actions. No business rules (category mapping, account matching, currency detection) are hardcoded in the tool layer.
 
-Incoming emails are pre-classified by a lightweight LLM call into one of three categories before dispatch: `"transaction"` (alert pipeline), `"statement"` (reconciliation pipeline), or `"skip"` (silently ignored — for trade/portfolio emails handled by a separate module).
+Incoming emails are pre-classified by a lightweight LLM call into one of three categories before dispatch: `"transaction"` (alert pipeline, 3-phase orchestrator), `"statement"` (reconciliation pipeline), or `"skip"` (silently ignored — for trade/portfolio emails handled by a separate module).
 
 ---
 
@@ -43,7 +50,7 @@ Incoming emails are pre-classified by a lightweight LLM call into one of three c
 - [ ] Raw email content (HTML stripped to text; PDF attachments processed via OCR) is sent to DeepSeek
 - [ ] The LLM extracts: amount, currency (SGD/MYR/other), merchant name, transaction date, and source account hints
 - [ ] The LLM handles all common Singapore/Malaysia formats: DBS alerts, OCBC alerts, UOB alerts, Grab receipts, Shopee receipts, TNG eWallet alerts, Maybank alerts, generic forwarded receipts
-- [ ] No bank-specific parser code exists in the Python layer
+- [ ] No bank-specific parser code exists in the tool layer (all parsing is LLM-driven)
 - [ ] If the LLM cannot confidently extract required fields, it calls `notify_user` instead of guessing
 
 ---
@@ -148,11 +155,41 @@ Incoming emails are pre-classified by a lightweight LLM call into one of three c
 
 **Acceptance Criteria:**
 - [x] Every inbound email is classified by a lightweight LLM call (deepseek-chat, no tools) as one of: `"statement"`, `"transaction"`, or `"skip"`
-- [x] `"statement"` → routed to the Statement Reconciliation pipeline (StatementProcessor, deepseek-chat, max 20 tool iterations)
-- [x] `"transaction"` → routed to the Alert pipeline (AgentOrchestrator, deepseek-chat, max 5 tool iterations)
+- [x] `"statement"` → routed to the Statement Reconciliation pipeline (`src/statement/orchestrator.js`, deepseek-chat)
+- [x] `"transaction"` → routed to the Alert pipeline (`src/orchestrator.js`, 3-phase: LLM Analysis → code-driven Resolution → Execute)
 - [x] `"skip"` → email is silently marked as read with NO LLM processing and NO user notification. This covers: IBKR Activity Flex statements, trade confirmations, portfolio reports, investment summaries, securities transaction notices
 - [x] If the classification LLM fails (API error, timeout), the email defaults to `"transaction"` as a safe fallback
 - [x] Portfolio/trade emails are handled by the separate portfolio-tracker module which independently monitors the same inbox
+
+---
+
+## Merchant Resolution (`resolve_merchant`)
+
+> Folded from Spec 015 (merchant-resolver). The keyword heuristic step (FR-005) was removed by Spec 021; resolution is memory → web → fallback.
+
+**API:** `POST /tools/resolve-merchant` — `{ merchant: string, budget_id: string }` → `{ payee: string, source: "memory"|"web"|"fallback" }`.
+Exposed as MCP tool `resolve_merchant` (`src/mcp-server.js`). `budget_id` is required for payee-list validation.
+
+**Resolution chain** (`src/tools.js:_handle_resolve_merchant`), short-circuits on first match:
+1. `MemoryStore.search()` lookup in MEMORY.md → `source: "memory"`
+2. Web search (Brave, if `BRAVE_SEARCH_API_KEY` configured) + DeepSeek LLM classification (`temperature: 0.1`, reasoning `adaptive`) → `source: "web"`
+3. `"Misc"` fallback → `source: "fallback"`
+
+**Behaviors:**
+- After `"web"` resolution, `MemoryStore.add()` persists the mapping for future memory hits. `"memory"` and `"fallback"` resolutions do NOT trigger learning.
+- Resolved payee is validated against the live payee list (via actual-api). If the payee doesn't match any live payee, falls back to `"Misc"`.
+- Timeout: ≤500ms (memory path) or ≤20s (web search path). Timeout at any step falls through to the next step — no crash.
+- Concurrent calls for the same merchant run independently; the second `learn_fact` is a no-op (dedup in MemoryStore).
+
+## Transaction Update (`update_transaction`)
+
+> Also folded from Spec 015.
+
+**API:** `POST /tools/update-transaction` — `{ id: string, budget_id?: string, payee_name?, notes?, amount?, date?, category_id?, account_id? }`. At least one optional field required.
+
+- `payee_name` is validated against live payee list → unknown payees rejected (not defaulted to Misc).
+- `category_id` is validated against live category list → unknown categories rejected.
+- `insert_transaction` validation differs: unknown payee → `"Misc"`, unknown category → `"Fun Money"`.
 
 ---
 
@@ -160,7 +197,7 @@ Incoming emails are pre-classified by a lightweight LLM call into one of three c
 
 | Scenario | Expected Behavior |
 |---|---|
-| Email with PDF receipt attachment | PDF → OCR via Tesseract → text sent to LLM. If OCR fails, notify user |
+| Email with PDF receipt attachment | PDF → text via `pdftotext` (poppler), with `qpdf` decryption for encrypted PDFs (`src/extractors.js`) → text sent to LLM. If extraction fails, notify user |
 | Email with both SGD and MYR amounts | LLM detects ambiguity → notify user |
 | Email from unknown sender | LLM attempts generic extraction. If confident, proceeds. If not, notifies user |
 | Actual Budget API is down | Retry 3x with exponential backoff (1s, 2s, 4s). If all fail, leave email unread, notify user |
