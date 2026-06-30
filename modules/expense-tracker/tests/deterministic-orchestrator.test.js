@@ -535,6 +535,113 @@ describe("Phase 1: LLM Analysis (3-phase)", () => {
     expect(orch._llm.chat).toHaveBeenCalledTimes(1);
     expect(result.account_id).toBe("acc-yuu");
   });
+
+  // ── Memory account override edge cases ──
+
+  /**
+   * Helper: builds an orchestrator where Phase 1 picks acc-dbs (valid).
+   * Caller controls search_memory response via memoryResponse param.
+   * Returns { orch, tools } so caller can assert LLM call count.
+   */
+  async function buildMemoryEdgeCaseOrch(memoryResponse) {
+    const { AgentOrchestrator } = await import("../src/orchestrator.js");
+    const config = makeConfig();
+    const tools = makeTools({
+      getPhase1ToolSchemas: vi.fn(() => []),
+      executeTool: vi.fn(async (name) => {
+        if (name === "fetch_context")
+          return {
+            accounts: [
+              { id: "acc-dbs", name: "DBS Account", closed: false },
+              { id: "acc-yuu", name: "DBS Yuu Card", closed: false },
+              { id: "acc-closed", name: "Old Card", closed: true },
+            ],
+            categories: [],
+            payees: [],
+          };
+        if (name === "search_memory") return memoryResponse;
+        return true;
+      }),
+    });
+    const orch = new AgentOrchestrator(config, tools);
+    orch._llm.chat = vi.fn().mockResolvedValue(
+      mockChatResponse({
+        merchant: "BUS/MRT",
+        amount_cents: -460,
+        date: "2026-06-19",
+        currency: "SGD",
+        account_id: "acc-dbs",
+        account_name: "DBS Account",
+        raw_description: "SGD 4.60 at BUS/MRT",
+        notes: "",
+        skip: false,
+        reasoning: "DBS Account",
+        notify_message: "",
+      }),
+    );
+    return { orch, tools };
+  }
+
+  it("does NOT retry when memory results are below score threshold", async () => {
+    const { orch } = await buildMemoryEdgeCaseOrch({
+      results: [
+        { text: "DBS Yuu Card is a debit card account", score: 0.3 },
+      ],
+    });
+    const result = await orch._runPhase1("SGD 4.60 at BUS/MRT");
+    expect(orch._llm.chat).toHaveBeenCalledTimes(1);
+    expect(result.account_id).toBe("acc-dbs");
+  });
+
+  it("does NOT retry when memory mentions only a closed account", async () => {
+    const { orch } = await buildMemoryEdgeCaseOrch({
+      results: [
+        { text: "BUS/MRT transactions belong to Old Card account", score: 0.8 },
+      ],
+    });
+    const result = await orch._runPhase1("SGD 4.60 at BUS/MRT");
+    expect(orch._llm.chat).toHaveBeenCalledTimes(1);
+    expect(result.account_id).toBe("acc-dbs");
+  });
+
+  it("does NOT retry when search_memory throws", async () => {
+    const { AgentOrchestrator } = await import("../src/orchestrator.js");
+    const config = makeConfig();
+    const tools = makeTools({
+      getPhase1ToolSchemas: vi.fn(() => []),
+      executeTool: vi.fn(async (name) => {
+        if (name === "fetch_context")
+          return {
+            accounts: [
+              { id: "acc-dbs", name: "DBS Account", closed: false },
+            ],
+            categories: [],
+            payees: [],
+          };
+        if (name === "search_memory") throw new Error("memory unavailable");
+        return true;
+      }),
+    });
+    const orch = new AgentOrchestrator(config, tools);
+    orch._llm.chat = vi.fn().mockResolvedValue(
+      mockChatResponse({
+        merchant: "BUS/MRT",
+        amount_cents: -460,
+        date: "2026-06-19",
+        currency: "SGD",
+        account_id: "acc-dbs",
+        account_name: "DBS Account",
+        raw_description: "SGD 4.60 at BUS/MRT",
+        notes: "",
+        skip: false,
+        reasoning: "DBS Account",
+        notify_message: "",
+      }),
+    );
+    const result = await orch._runPhase1("SGD 4.60 at BUS/MRT");
+    expect(orch._llm.chat).toHaveBeenCalledTimes(1);
+    expect(result.account_id).toBe("acc-dbs");
+  });
 });
 
 // ═══════════════════════════════════════════════════════════════════
