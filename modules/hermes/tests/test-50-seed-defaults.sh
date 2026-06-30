@@ -202,6 +202,63 @@ for j in data.get('jobs', []):
 [ "$expr_val" = "0 12 * * *" ] && ok "cron expr is correct" || nope "cron expr" "got: $expr_val"
 
 echo ""
+echo "=== portfolio-daily-sync prompt content ==="
+
+# Verify the prompt in 50-seed-defaults contains key instructions
+# The prompt is a Python parenthesised string concat inside a heredoc.
+# We extract the PYEOF block and use balanced-paren matching to eval the prompt.
+prompt_content=$(python3 -c "
+import re
+with open('$SEED_SCRIPT') as f:
+    content = f.read()
+# Extract the heredoc Python block between <<'PYEOF' and PYEOF
+match = re.search(r\"<<'PYEOF'.*?\n(.*?)\nPYEOF\", content, re.DOTALL)
+if not match:
+    print('EXTRACT_FAILED')
+else:
+    pyblock = match.group(1)
+    # Find '\"prompt\": (' and then match balanced parens
+    idx = pyblock.find('\"prompt\":')
+    if idx < 0:
+        print('PROMPT_NOT_FOUND')
+    else:
+        rest = pyblock[idx:]
+        paren_start = rest.index('(')
+        depth = 0
+        for i, ch in enumerate(rest[paren_start:], paren_start):
+            if ch == '(': depth += 1
+            elif ch == ')': depth -= 1
+            if depth == 0:
+                expr = rest[paren_start:i+1]
+                break
+        prompt = eval(expr)
+        print(prompt)
+")
+
+# Test: prompt must instruct agent to omit "no errors" confirmation lines
+echo "$prompt_content" | grep -q 'Do NOT include a .*no errors' \
+    && ok "prompt suppresses 'no errors' confirmation" \
+    || nope "prompt suppresses 'no errors' confirmation" "missing 'Do NOT include' instruction"
+
+# Test: prompt must instruct to omit Actions section entirely when no issues
+echo "$prompt_content" | grep -q 'omit this section entirely if there are no issues' \
+    && ok "prompt omits Actions section when clean" \
+    || nope "prompt omits Actions section when clean" "missing 'omit this section entirely' instruction"
+
+# Test: prompt must contain the full analysis framework (synced from production)
+echo "$prompt_content" | grep -q 'taxonomy_data.taxonomies' \
+    && ok "prompt contains taxonomy analysis instructions" \
+    || nope "prompt contains taxonomy analysis instructions" "missing taxonomy_data reference"
+
+echo "$prompt_content" | grep -q 'Liquid assets' \
+    && ok "prompt contains liquid/illiquid breakdown" \
+    || nope "prompt contains liquid/illiquid breakdown" "missing Liquid assets section"
+
+echo "$prompt_content" | grep -q 'search for news impacting the portfolio' \
+    && ok "prompt contains news search instructions" \
+    || nope "prompt contains news search instructions" "missing news search section"
+
+echo ""
 echo "========================================="
 echo -e " Results: ${GREEN}$pass passed${NC}, ${RED}$fail failed${NC}"
 echo "========================================="
