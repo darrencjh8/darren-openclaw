@@ -23,7 +23,7 @@ IBKR flex import is folded into `portfolio_sync` — pulled from IBKR Flex Web S
 - `exchangeCodeForToken(redirectUri)` — exchanges auth code for refresh token, saves to disk
 
 **`src/mcp-server.js`** (NEW)
-- MCP Streamable HTTP server with 10 tools following expense-tracker pattern
+- MCP Streamable HTTP server with 12 tools following expense-tracker pattern
 - `POST/GET/DELETE /mcp` transport (StreamableHTTPServerTransport, per-session)
 
 **`src/index.js`**

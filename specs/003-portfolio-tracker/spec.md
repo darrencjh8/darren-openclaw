@@ -35,7 +35,7 @@ flowchart TB
 
     subgraph PT["Portfolio Tracker (Node.js)"]
         MCP_S["MCP Server<br/>POST/GET/DELETE /mcp<span style='color:green'> (NEW)</span>"]
-        REST["REST API<br/>20 /tools/*<br/>(unchanged)"]
+        REST["REST API<br/>22 /tools/*<br/>(unchanged)"]
         ORCH["LLM Orchestrator<br/>DeepSeek tool-call loop<br/>(unchanged — PDF only)"]
         TOOLS["Tool Registry<br/>(unchanged)"]
         IMAP_H["IMAP IDLE handler<br/>'Trades' folder<br/>(PDF only)"]
@@ -237,7 +237,7 @@ Useful for debugging or when the user only wants to sync the file without runnin
 **I want** all existing functionality to remain intact alongside MCP.
 
 **Acceptance Criteria:**
-- All 20 REST `/tools/*` endpoints still work
+- All 22 REST `/tools/*` endpoints still work
 - IMAP IDLE handler still monitors "Trades" folder (PDF trade confirmations only — IBKR flex is now pulled via web service)
 - AgentOrchestrator and DeepSeek LLM loop continue to work (PDF only)
 - Dedup journal and memory store unchanged
@@ -292,7 +292,14 @@ no LLM involvement. The orchestrator is preserved for:
 | `portfolio_query_security` | `search: string` | Security by ticker/ISIN/name incl. shares, price, market value, cost basis |
 | `portfolio_taxonomy` | `names?: string[]` (default `["Regions (Liquid)"]`) | Taxonomy breakdown with per-cell children (liquid/illiquid split) |
 
-> **Total: 10 MCP tools** registered in `mcp-server.js` (`portfolio_sync`, 3 OneDrive auth, 2 OneDrive IO, 4 portfolio data).
+### Memory (added for encrypted PDF pipeline — see `specs/004-statement-reconciliation/delta-portfolio-pdf-decryption.md`)
+
+| Tool | Params | Returns |
+|---|---|---|
+| `portfolio_search_memory` | `query: string` | Search facts in portfolio-tracker's `MEMORY.md` (passwords, broker mappings) |
+| `portfolio_learn_fact` | `fact: string` | Learn a new fact (e.g. broker PDF password). Deduped, last-write-wins for same-key facts |
+
+> **Total: 12 MCP tools** registered in `mcp-server.js` (`portfolio_sync`, 3 OneDrive auth, 2 OneDrive IO, 4 portfolio data, 2 memory).
 
 ---
 
@@ -401,7 +408,7 @@ The MCP server uses Streamable HTTP transport (NOT SSE). Why: SSE breaks on cont
 - Tools registered via `server.tool(name, description, zodSchema, handler)`
 - Results returned as `{ content: [{ type: "text", text: JSON.stringify(result) }] }`
 
-### REST Tools (20 — preserved for backward compatibility)
+### REST Tools (22 — preserved for backward compatibility)
 
 | # | Tool | Type | Description |
 |---|---|---|---|

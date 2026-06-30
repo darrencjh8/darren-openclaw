@@ -463,7 +463,7 @@ A Node.js agent that manages investment portfolio data. It syncs IBKR trades via
 
 ### 5B.3 Architecture
 
-Portfolio-tracker exposes 10 MCP tools to Hermes: `portfolio_sync` (full pipeline), three OneDrive auth tools (`onedrive_auth_url`, `onedrive_auth_complete`, `onedrive_status`), two OneDrive IO tools (`onedrive_pull`, `onedrive_push`), and four portfolio data tools (`insert_transaction`, `get_all`, `query_security`, `taxonomy`). The sync pipeline is deterministic — no LLM:
+Portfolio-tracker exposes 12 MCP tools to Hermes: `portfolio_sync` (full pipeline), three OneDrive auth tools (`onedrive_auth_url`, `onedrive_auth_complete`, `onedrive_status`), two OneDrive IO tools (`onedrive_pull`, `onedrive_push`), four portfolio data tools (`insert_transaction`, `get_all`, `query_security`, `taxonomy`), and two memory tools (`search_memory`, `learn_fact` — for encrypted PDF passwords and broker mappings). The sync pipeline is deterministic — no LLM:
 
 1. OneDrive pull → 2. IBKR flex fetch + Java CLI import → 3. AB balance sync (AB→PP) → 4. OneDrive push → 5. Taxonomy export → 6. SGD-converted portfolio status
 
@@ -480,12 +480,12 @@ IMAP IDLE monitors the "Trades" folder for PDF confirmations only. The LLM orche
 
 ### 5B.5 Implementation Status
 
-- ✅ MCP server (`src/mcp-server.js`) — 10 tools registered
+- ✅ MCP server (`src/mcp-server.js`) — 12 tools registered
 - ✅ IBKR Flex Web Service (`src/ibkr_flex.js`) — two-step protocol
 - ✅ `_computeSyncAll()` pipeline — deterministic, non-fatal on flex failure
 - ✅ Hermes config — `mcp_servers` lists portfolio-tracker
 - ✅ Telegram commands — `/sync`, `/onedrive` routed through Hermes
-- ✅ 20 REST `/tools/*` endpoints preserved for backward compatibility
+- ✅ 22 REST `/tools/*` endpoints preserved for backward compatibility
 
 ---
 
