@@ -2,9 +2,12 @@
 
 **Feature:** orchestrator-deterministic-finalize
 **Spec Version:** 2.0.0
-**Status:** Draft
+**Status:** SUPERSEDED by Spec 021 (three-phase-orchestrator-refactor)
 **Created:** 2026-06-16
 **Constitution Hash:** v4.0.0
+**Baseline:** `specs/002-expense-tracking/spec.md` (v2.0.0)
+
+> **⚠️ SUPERSEDED — historical only.** This spec's "memory → keyword → web" chain and finalization design were replaced by **Spec 021**. The current orchestrator is 3-phase (LLM Analysis → code-driven Resolution → Execute) with **no keyword step** (`src/orchestrator.js`). Do not implement against this spec. See `specs/021-three-phase-refactor/` and `specs/030-spec-drift/`.
 
 ---
 

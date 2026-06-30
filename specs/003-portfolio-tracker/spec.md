@@ -12,7 +12,7 @@
 
 Add an MCP server to the portfolio-tracker module so Hermes Agent can trigger portfolio operations directly via MCP tool calls. Phase 1 exposes tools in three groups: **sync** (includes IBKR flex pull), **OneDrive auth** (interactive OAuth setup), and **OneDrive IO** (pull/push).
 
-This follows the expense-tracker MCP pattern (spec 021): a thin SSE wrapper over existing tool logic. REST endpoints, IMAP IDLE, and the LLM orchestrator are all **preserved** — MCP is purely additive.
+This follows the expense-tracker MCP pattern (spec 021): a thin **Streamable HTTP** wrapper over existing tool logic. REST endpoints, IMAP IDLE, and the LLM orchestrator are all **preserved** — MCP is purely additive.
 
 **Key design change from v1.0.0:** IBKR flex import is no longer a standalone MCP tool. Instead, `portfolio_sync` pulls the latest flex query XML from IBKR Flex Web Service (deterministic REST endpoint), imports it via the Java CLI's native `IBFlexStatementExtractor`, and then proceeds with the existing sync pipeline. The IMAP handler no longer processes IBKR flex emails — it only handles PDF trade confirmations.
 
@@ -23,7 +23,7 @@ This follows the expense-tracker MCP pattern (spec 021): a thin SSE wrapper over
 ```mermaid
 flowchart TB
     subgraph Triggers["Inbound Events"]
-        CRON["Hermes Cron<br/>daily 3 AM SGT"]
+        CRON["Hermes Cron<br/>0 12 * * * (daily noon)"]
         TG_SYNC["Telegram /sync"]
         TG_ONEDRIVE["Telegram /onedrive<br/>setup or pull/push"]
         IMAP["IMAP IDLE<br/>'Trades' folder<br/>PDF trade confirmations only"]
@@ -35,7 +35,7 @@ flowchart TB
 
     subgraph PT["Portfolio Tracker (Node.js)"]
         MCP_S["MCP Server<br/>POST/GET/DELETE /mcp<span style='color:green'> (NEW)</span>"]
-        REST["REST API<br/>19 /tools/*<br/>(unchanged)"]
+        REST["REST API<br/>20 /tools/*<br/>(unchanged)"]
         ORCH["LLM Orchestrator<br/>DeepSeek tool-call loop<br/>(unchanged — PDF only)"]
         TOOLS["Tool Registry<br/>(unchanged)"]
         IMAP_H["IMAP IDLE handler<br/>'Trades' folder<br/>(PDF only)"]
@@ -84,7 +84,7 @@ flowchart TB
 ### Use Case 1: portfolio_sync (includes IBKR flex pull)
 
 ```
-Trigger: Hermes cron (daily 3 AM SGT) OR Telegram /sync command
+Trigger: Hermes cron `0 12 * * *` (daily noon, container time) OR Telegram /sync command
   → Hermes calls MCP tool portfolio_sync()
     → portfolio-tracker runs _computeSyncAll():
       1. OneDrive pull (latest Portfolio.portfolio)
@@ -211,7 +211,7 @@ Useful for debugging or when the user only wants to sync the file without runnin
 ### US-6: Cron via Hermes (Priority: P2)
 
 **As** the system operator,
-**I want** `portfolio_sync` triggered daily at 3 AM SGT via Hermes cron,
+**I want** `portfolio_sync` triggered daily at noon (`0 12 * * *`) via Hermes cron,
 **So that** the sync schedule is managed in one place.
 
 **Acceptance Criteria:**
@@ -237,7 +237,7 @@ Useful for debugging or when the user only wants to sync the file without runnin
 **I want** all existing functionality to remain intact alongside MCP.
 
 **Acceptance Criteria:**
-- All 19 REST `/tools/*` endpoints still work
+- All 20 REST `/tools/*` endpoints still work
 - IMAP IDLE handler still monitors "Trades" folder (PDF trade confirmations only — IBKR flex is now pulled via web service)
 - AgentOrchestrator and DeepSeek LLM loop continue to work (PDF only)
 - Dedup journal and memory store unchanged
@@ -266,7 +266,7 @@ no LLM involvement. The orchestrator is preserved for:
 
 | Tool | Params | Returns |
 |---|---|---|
-| `portfolio_sync` | none | `{pull, flex_import?, push, sync_targets, taxonomy_export, portfolio_status}` |
+| `portfolio_sync` | none | Full shape: `{sync_targets, summary, pull, flex_pull, flex_import, push, taxonomy_export, taxonomy_data, portfolio_status}` (`_computeSyncAll()` in `tools.js`). The MCP wrapper formats this into a text summary via `formatSyncResult()`. |
 
 ### OneDrive Auth
 
@@ -274,7 +274,7 @@ no LLM involvement. The orchestrator is preserved for:
 |---|---|---|
 | `portfolio_onedrive_auth_url` | none | `{url: string}` — Microsoft OAuth URL to visit |
 | `portfolio_onedrive_auth_complete` | `redirect_uri: string` | `{success, error?}` — exchanges code for refresh token |
-| `portfolio_onedrive_status` | none | `{authorized: boolean, token_path: string, client_id: string}` |
+| `portfolio_onedrive_status` | none | `{authorized: boolean, client_id: string, reason?: string, detail?: string, action?: string}` — validates the refresh token against Microsoft. (Token path is read from `ONEDRIVE_REFRESH_TOKEN_PATH` env, **not** a param/return field.) |
 
 ### OneDrive IO
 
@@ -282,6 +282,17 @@ no LLM involvement. The orchestrator is preserved for:
 |---|---|---|
 | `portfolio_onedrive_pull` | none | `{success, path?, error?}` — downloads from OneDrive |
 | `portfolio_onedrive_push` | none | `{success, path?, error?}` — uploads to OneDrive |
+
+### Portfolio Data (added after v1.0.0 — see `mcp-server.js`)
+
+| Tool | Params | Returns |
+|---|---|---|
+| `portfolio_insert_transaction` | `account_id, security_id?, type, date, shares, price, currency_code, fees?, taxes?, notes?` | Pull → insert via Java CLI → push. `{pull, insert, push}` |
+| `portfolio_get_all` | none | All PP accounts, securities, holdings (`fetch_pp_portfolio`) |
+| `portfolio_query_security` | `search: string` | Security by ticker/ISIN/name incl. shares, price, market value, cost basis |
+| `portfolio_taxonomy` | `names?: string[]` (default `["Regions (Liquid)"]`) | Taxonomy breakdown with per-cell children (liquid/illiquid split) |
+
+> **Total: 10 MCP tools** registered in `mcp-server.js` (`portfolio_sync`, 3 OneDrive auth, 2 OneDrive IO, 4 portfolio data).
 
 ---
 
@@ -342,7 +353,13 @@ Function:
 | Emergency Funds - MYR | `ACTUAL_SECONDARY_BUDGET_FILE` | MYR |
 | Warchest | `ACTUAL_PRIMARY_BUDGET_FILE` (investment_total) | SGD |
 
-Budget data is fetched from `http://actual-api:3000/budget-12m` with exponential backoff retry (max 3 attempts). Amounts are in cents from AB — divided by 100 before writing to PP. Account IDs are hardcoded UUIDs from PP's internal data model. Balance updates go through Java CLI via `PpJavaBridge.updateBalance()`. The Java CLI handles the `AccountSnapshot.create()` with `isDebit()`/`isCredit()` transaction type classification internally.
+Budget data is fetched from `http://actual-api:3000/budget-12m?budget_id=<budget_name>` (the `budget_id` query param is URL-encoded; `tools.js:719`) with exponential backoff retry (max 3 attempts).
+
+**AB response shape** (consumed by `tools.js:763,771,779`, with `|| 0` fallback):
+```
+{ "emergency_total": <cents>, "investment_total": <cents> }   // per budget file (SGD, MYR)
+```
+Amounts are in cents from AB — divided by 100 before writing to PP. PP account IDs come from `PP_EMERGENCY_PRIMARY_ACCOUNT` / `PP_EMERGENCY_SECONDARY_ACCOUNT` / `PP_WARCHEST_PRIMARY_ACCOUNT` env vars, each falling back to a hardcoded UUID when unset (`tools.js:757-781`). Balance updates go through Java CLI via `PpJavaBridge.updateBalance()`. The Java CLI handles the `AccountSnapshot.create()` with `isDebit()`/`isCredit()` transaction type classification internally.
 
 ## Taxonomy Export
 

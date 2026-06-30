@@ -82,7 +82,7 @@ darren-openclaw/                          # Umbrella repository root
 │       ├── tests/                        # Test suite (stubs only)
 │       ├── docker/                       # Dockerfile for expense-tracker container
 │       └── db.sqlite                     # Dedup journal (runtime artifact)
-│   └── portfolio-tracker/                # Node.js + Java 17 module
+│   └── portfolio-tracker/                # Node.js + Java 21 module
 │       ├── .speckit/                     # Spec-Kit artifacts (constitution, spec, plan, tasks, agent)
 │       ├── pp-cli/                       # Java CLI for PP XML read/write (Maven project)
 │       │   ├── pom.xml                   # Depends on name.abuchen.portfolio:0.84.1
@@ -310,7 +310,7 @@ graph TB
 
 ### 5.1 Purpose
 
-An LLM-powered agent that handles receipt emails, extracts structured transactions, and inserts them into Actual Budget. Exposes 16 tools via MCP to Hermes. The LLM orchestrator, IMAP handling, and memory are now owned by Hermes — expense-tracker is a tool server.
+An LLM-powered agent that handles receipt emails, extracts structured transactions, and inserts them into Actual Budget. Exposes 22 tools via MCP to Hermes (and 26 REST `/tools/*` endpoints). The LLM orchestrator, IMAP handling, and memory are now owned by Hermes — expense-tracker is a tool server.
 
 ### 5.2 Technology Stack
 
@@ -340,7 +340,7 @@ Expense-tracker exposes an MCP server at `:8080/mcp`. Hermes handles email inges
 
 ### 5.5 Implementation Status
 
-- ✅ 16 tools registered as MCP server
+- ✅ 22 tools registered as MCP server (26 REST `/tools/*` endpoints)
 - ✅ Dedup journal (dedup.db + statement.db)
 - ✅ PDF extraction (pdftotext)
 - ✅ WASM embeddings baked into Docker image
@@ -421,7 +421,7 @@ graph TB
 
 | Module | MCP URL | Tools |
 |---|---|---|
-| expense-tracker | `http://expense-tracker:8080/mcp` | 13 Actual Budget tools + dedup + extractors |
+| expense-tracker | `http://expense-tracker:8080/mcp` | 22 MCP tools — Actual Budget CRUD + dedup + extractors + memory + IMAP inbox |
 | portfolio-tracker | `http://portfolio-tracker:8081/mcp` | `portfolio_sync`, OneDrive IO, OneDrive auth |
 | ktmb-booking | `http://ktmb-booking:8082/mcp` | Train booking, schedule lookup |
 | image-gen | `http://image-gen:8083/mcp` | Image generation |
@@ -430,7 +430,7 @@ graph TB
 
 | Job | Schedule | Action |
 |---|---|---|
-| portfolio-daily-sync | Daily 10 AM KL | `portfolio_sync` via MCP |
+| portfolio-daily-sync | `0 12 * * *` (daily noon, container time) | `portfolio_sync` via MCP |
 | github-auth-refresh | Every 50 min | Refresh GitHub App token |
 | memory-backup | Every 360 min | Backup Hermes memories to private repo |
 
@@ -452,20 +452,20 @@ A Node.js agent that manages investment portfolio data. It syncs IBKR trades via
 
 | Layer | Choice |
 |---|---|
-| Runtime | Node.js 22 + Java 17 |
+| Runtime | Node.js 22 + Java 21 |
 | LLM | DeepSeek v4 (PDF trade confirmation matching) |
 | MCP | @modelcontextprotocol/sdk (Streamable HTTP) |
 | IMAP | node-imap (PDF trade confirmations only) |
 | OneDrive | Microsoft Graph API |
 | PP CLI | Java JAR (pp-cli.jar) — native IBFlexStatementExtractor |
 | Google Sheets | googleapis (service account) |
-| Scheduling | Hermes cron (daily 3 AM SGT) |
+| Scheduling | Hermes cron `0 12 * * *` (daily noon, container time; see `modules/hermes/50-seed-defaults`) |
 
 ### 5B.3 Architecture
 
-Portfolio-tracker exposes 6 MCP tools to Hermes: `portfolio_sync` (full pipeline), three OneDrive auth tools (`auth_url`, `auth_complete`, `status`), and two OneDrive IO tools (`pull`, `push`). The sync pipeline is deterministic — no LLM:
+Portfolio-tracker exposes 10 MCP tools to Hermes: `portfolio_sync` (full pipeline), three OneDrive auth tools (`onedrive_auth_url`, `onedrive_auth_complete`, `onedrive_status`), two OneDrive IO tools (`onedrive_pull`, `onedrive_push`), and four portfolio data tools (`insert_transaction`, `get_all`, `query_security`, `taxonomy`). The sync pipeline is deterministic — no LLM:
 
-1. OneDrive pull → 2. IBKR flex fetch → 3. Java CLI import → 4. AB balance sync → 5. OneDrive push → 6. Taxonomy export
+1. OneDrive pull → 2. IBKR flex fetch + Java CLI import → 3. AB balance sync (AB→PP) → 4. OneDrive push → 5. Taxonomy export → 6. SGD-converted portfolio status
 
 IMAP IDLE monitors the "Trades" folder for PDF confirmations only. The LLM orchestrator matches securities and inserts trades. REST endpoints are preserved for backward compatibility. Full architecture details are in [spec 003](./specs/003-portfolio-tracker/spec.md).
 
@@ -480,12 +480,12 @@ IMAP IDLE monitors the "Trades" folder for PDF confirmations only. The LLM orche
 
 ### 5B.5 Implementation Status
 
-- ✅ MCP server (`src/mcp-server.js`) — 6 tools registered
+- ✅ MCP server (`src/mcp-server.js`) — 10 tools registered
 - ✅ IBKR Flex Web Service (`src/ibkr_flex.js`) — two-step protocol
 - ✅ `_computeSyncAll()` pipeline — deterministic, non-fatal on flex failure
 - ✅ Hermes config — `mcp_servers` lists portfolio-tracker
 - ✅ Telegram commands — `/sync`, `/onedrive` routed through Hermes
-- ✅ 19 REST `/tools/*` endpoints preserved for backward compatibility
+- ✅ 20 REST `/tools/*` endpoints preserved for backward compatibility
 
 ---
 

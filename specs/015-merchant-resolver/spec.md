@@ -2,9 +2,14 @@
 
 **Feature:** merchant-resolver
 **Spec Version:** 1.1.0
-**Status:** Draft
+**Status:** Implemented (partially superseded)
 **Created:** 2026-06-15
 **Constitution Hash:** v4.0.0
+**Baseline:** `specs/002-expense-tracking/spec.md` (v2.0.0)
+
+> **⚠️ Spec-drift corrections (see `specs/030-spec-drift/`). The code is the source of truth:**
+> - **Keyword step REMOVED.** Spec 021 dropped the keyword heuristic from the resolution chain. The actual `resolve_merchant` chain is **memory → web search → `"Misc"` fallback** (`src/tools.js:_handle_resolve_merchant`). There is **no `src/keywords.js`** and **no `source: "keyword"`**. Therefore **FR-005 is void**, and the keyword references in FR-002, the Overview, Independent Tests, AC, and SC-002 no longer apply.
+> - **Gateway plugin → MCP tool.** The OpenClaw Gateway was replaced by Hermes. There is no `budget_resolve_merchant` Gateway plugin; the functionality is exposed as the MCP tool **`resolve_merchant`** (`src/mcp-server.js`). FR-009/FR-011 and US about the Gateway plugin are historical.
 
 ---
 

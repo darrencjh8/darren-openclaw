@@ -23,8 +23,8 @@ IBKR flex import is folded into `portfolio_sync` — pulled from IBKR Flex Web S
 - `exchangeCodeForToken(redirectUri)` — exchanges auth code for refresh token, saves to disk
 
 **`src/mcp-server.js`** (NEW)
-- MCP SSE server with 6 tools following expense-tracker pattern
-- `GET /sse` + `POST /messages` transport
+- MCP Streamable HTTP server with 10 tools following expense-tracker pattern
+- `POST/GET/DELETE /mcp` transport (StreamableHTTPServerTransport, per-session)
 
 **`src/index.js`**
 - Imported `createMcpServer`, called before `app.listen()`
@@ -74,7 +74,7 @@ java -jar target/pp-cli.jar import \
 3. **IBKR flex pull uses IBKR Flex Web Service** — New `src/ibkr_flex.js` module POSTs to IBKR's REST endpoint with token + query ID to fetch the latest flex XML. Deterministic, no LLM.
 4. **IBKR import uses PP native extractor** — `IBFlexStatementExtractor` (same as PP desktop UI). New `import` command in Java CLI. Zero LLM involvement for IBKR.
 5. **LLM orchestrator preserved** — stays for PDF trade confirmations only.
-6. **MCP transport**: SSE (same as expense-tracker pattern).
+6. **MCP transport**: Streamable HTTP (same as expense-tracker pattern). SSE was rejected because it breaks on container restart (session mismatch); see `mcp-server.js` header.
 7. **OneDrive OAuth via MCP** — New `src/onedrive_oauth.js` for interactive setup flow. No more SSH + `authorize.sh`.
 8. **Cron coexistence**: Hermes cron + internal apscheduler both run. Sync is idempotent.
 
