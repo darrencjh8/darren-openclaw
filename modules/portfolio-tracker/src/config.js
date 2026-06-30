@@ -85,6 +85,9 @@ export class Config {
         // Data paths
         this.dedupDbPath = env.DEDUP_DB_PATH || "data/dedup.db";
         this.mappingsPath = env.MAPPINGS_PATH || "data/mappings.json";
+        // Semantic facts/password store (separate from mappings.json)
+        this.portfolioMemoryPath =
+            env.PORTFOLIO_MEMORY_PATH || "data/MEMORY.md";
 
         // Logging
         this.logLevel = env.LOG_LEVEL || "INFO";

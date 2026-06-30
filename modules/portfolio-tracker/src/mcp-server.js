@@ -331,6 +331,20 @@ function createTools(server, registry) {
             );
         },
     );
+    server.tool(
+        "portfolio_search_memory",
+        "Search the PORTFOLIO tracker's learned facts (broker statement passwords, security/account notes) by semantic similarity. Distinct from the expense-tracker memory. Use a SINGLE keyword such as a broker name (\"IBKR\", \"POEMS\") or \"password\".",
+        { query: z.string().min(1) },
+        async (args) =>
+            tx(await registry.executeTool("search_memory", { query: args.query })),
+    );
+    server.tool(
+        "portfolio_learn_fact",
+        "Record a free-form fact in the PORTFOLIO tracker's memory (e.g. \"POEMS statement password is X\"). Distinct from the expense-tracker memory. Deduplicated automatically.",
+        { fact: z.string().min(1) },
+        async (args) =>
+            tx(await registry.executeTool("learn_fact", { fact: args.fact })),
+    );
 }
 
 export function createMcpServer(registry, app) {

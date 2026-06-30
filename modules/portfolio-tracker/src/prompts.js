@@ -140,6 +140,24 @@ TAXONOMY EXPORT WORKFLOW:
    aggregated values
 3. notify_user with confirmation
 
+PASSWORD-PROTECTED PDFs:
+  If extract_email_content() or extract_pdf_text() returns text containing
+  [PDF_ENCRYPTED] (a broker emailed an encrypted statement PDF):
+    1. Call search_memory() with a SINGLE keyword — the broker name
+       (e.g. "IBKR", "POEMS", "CDP") or "password". Multi-word phrases may
+       miss; keep the query to one keyword.
+    2. If memory returns a password → retry extract_email_content(password=...)
+       or extract_pdf_text(pdf_bytes_b64=..., password=...) to decrypt.
+    3. If no password in memory → scan the email body for patterns like
+       "password is X" or "Password: X" and use that.
+    4. If still none → notify_user asking: "This statement PDF is
+       password-protected. What's the password?"
+    5. After a successful decryption with a NEW password → call
+       learn_fact(fact="[broker] statement password is [password]") so it is
+       remembered for next time.
+  If the result contains [PDF_EXTRACTION_ERROR] or [PDF_OCR_*] (not encrypted,
+  just unreadable/garbled) → notify_user with the details and STOP.
+
 ${LEARNED}
 `;
 

@@ -93,7 +93,8 @@ if [ -n "${MEMORY_REPO_URL}" ] && [ ! -f "/opt/data/memories/MEMORY.md" ]; then
 fi
 
 # Seed portfolio-sync cron job (idempotent)
-python3 -c '
+# Uses heredoc (<<'PYEOF') to avoid shellcheck issues with apostrophes/escapes in the prompt.
+python3 <<'PYEOF' || true
 import os, json, uuid, datetime
 jobs_path = "/opt/data/cron/jobs.json"
 os.makedirs(os.path.dirname(jobs_path), exist_ok=True)
@@ -109,7 +110,48 @@ if not any(j.get("name") == "portfolio-daily-sync" for j in jobs if isinstance(j
         "name": "portfolio-daily-sync",
         "schedule": {"kind": "cron", "expr": "0 12 * * *", "display": "0 12 * * *"},
         "schedule_display": "0 12 * * *",
-        "prompt": "Run portfolio_sync to pull IBKR flex trades, sync AB balances, and export taxonomies. Then compose a Telegram summary following SOUL.md formatting rules: use markdown tables (| col | col |), bold key names with *asterisks*, one idea per line. Include sync status, portfolio totals (Total/Equity/Cash), top holdings table, and any errors. If any step fails (especially OneDrive auth), tell the user what went wrong and what action they need to take (e.g. /onedrive setup).",
+        "prompt": (
+            "Run portfolio_sync \u2014 it handles balances and taxonomies deterministically.\n\n"
+            "Then analyze the portfolio using taxonomy_data.taxonomies[0].values "
+            "(Regions (Liquid)) as the single source of truth.\n\n"
+            "**Liquid assets** = all cells EXCEPT \"Without Classification\":\n"
+            "- Investable Cash (B4), America (G2), Developed ex-US (G3), Emerging (G4), Crypto (G5)\n"
+            "- Each cell has children[] with ticker, name, valuation_native, currency, share_pct\n\n"
+            "**Illiquid** = \"Without Classification\" cell \u2014 retirement, unvested RSUs, locked. "
+            "Do NOT include.\n\n"
+            "**Analysis using children data:**\n"
+            "- Biggest liquid holding: scan all liquid children, find max valuation_native "
+            "(convert to SGD using fx_rates_used), compute % of liquid total\n"
+            "- Sector exposure: tag each child as Tech / Financial / Consumer / REIT / Cash / Other "
+            "by ticker/name\n"
+            "- Geographic exposure: US / SG / MY / Global / Other by ticker exchange\n"
+            "- Cash ratio: B4 / liquid total\n"
+            "- Concentration: flag any child >20% of liquid total\n"
+            "- Drawdown: note that cost basis is unavailable via API; flag if price action looks "
+            "concerning\n\n"
+            "**PP's security type is authoritative** \u2014 e.g. \"Cash\" type holdings in "
+            "Investable Cash ARE cash equivalents.\n\n"
+            "Only report CHANGES from your memory of the previous run. Skip totals that haven't "
+            "moved.\n\n"
+            "Then search for news impacting the portfolio \u2014 LAST 24 HOURS ONLY:\n"
+            "- Top 3-5 liquid holdings by weight: search ticker + company name\n"
+            "- Macro context relevant to exposure\n"
+            "- Trusted sources only: Reuters, Bloomberg, CNBC, FT, WSJ, MarketWatch\n"
+            "- If no fresh news, say \"No material news in the last 24h\" \u2014 do NOT include "
+            "stale headlines\n\n"
+            "Compose a Telegram summary following SOUL.md formatting rules: markdown tables "
+            "(| col | col |), bold key names with *asterisks*, one idea per line. Structure:\n"
+            "1. *Snapshot* \u2014 liquid/illiquid split, cash ratio (brief, 2-3 lines)\n"
+            "2. *Changes* \u2014 only what moved since last run (skip if nothing)\n"
+            "3. *Risk profile* \u2014 biggest holding %, sector/geo tables, concentration flags\n"
+            "4. *Relevant news* \u2014 headline + source link (skip if none)\n"
+            "5. *Actions needed* \u2014 only list items that genuinely require user action "
+            "(errors, auth failures, rebalancing flags). Do NOT include a \"no errors\" or "
+            "\"no sync failures\" confirmation line \u2014 omit this section entirely if there "
+            "are no issues.\n\n"
+            "If any step fails (especially OneDrive auth), tell the user what went wrong and "
+            "what action they need to take (e.g. /onedrive setup)."
+        ),
         "enabled": True,
         "deliver": "telegram",
         "deliver_extra": {"chat_id": os.environ.get("TELEGRAM_HOME_CHANNEL", "")},
@@ -119,7 +161,7 @@ if not any(j.get("name") == "portfolio-daily-sync" for j in jobs if isinstance(j
     with open(jobs_path, "w") as f:
         json.dump({"jobs": jobs, "updated_at": datetime.datetime.now(datetime.timezone.utc).isoformat()}, f, indent=2)
         print("cron: portfolio-daily-sync seeded")
-' || true
+PYEOF
 
 # Disable profile gateways (workers don't need their own gateways — they compete for Telegram token)
 for gw_dir in /run/service/gateway-*; do
