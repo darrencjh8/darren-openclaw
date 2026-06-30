@@ -11,6 +11,7 @@ import { Config } from "./config.js";
 import { ToolRegistry } from "./tools.js";
 import { DedupJournal } from "./dedup.js";
 import { MemoryStore } from "./memory.js";
+import { FactsMemory } from "./memory_facts.js";
 import { PpJavaBridge } from "./java_bridge.js";
 import { AgentOrchestrator } from "./orchestrator.js";
 import { ImapIdleHandler } from "./imap.js";
@@ -59,6 +60,8 @@ async function main() {
     // Initialize data stores
     const dedupJournal = new DedupJournal(cfg.dedupDbPath);
     const memoryStore = new MemoryStore(cfg.mappingsPath);
+    // Separate semantic facts/password store (MEMORY.md + embeddings)
+    const factsMemory = new FactsMemory(cfg.portfolioMemoryPath);
 
     // Initialize PP bridge if Java CLI is available
     let ppBridge = null;
@@ -109,7 +112,14 @@ async function main() {
     }
 
     // Create tool registry and orchestrator (needed for email processing)
-    const registry = new ToolRegistry(cfg, dedupJournal, memoryStore, ppBridge);
+    const registry = new ToolRegistry(
+        cfg,
+        dedupJournal,
+        memoryStore,
+        ppBridge,
+        null,
+        factsMemory,
+    );
     const orchestrator = new AgentOrchestrator(cfg, registry);
 
     // Build Express app
@@ -157,6 +167,8 @@ async function main() {
         ["/tools/notify-user", "notify_user"],
         ["/tools/check-duplicate", "check_duplicate"],
         ["/tools/learn-mapping", "learn_mapping"],
+        ["/tools/search-memory", "search_memory"],
+        ["/tools/learn-fact", "learn_fact"],
         ["/tools/log-decision", "log_decision"],
         ["/tools/ask-user-confirmation", "ask_user_confirmation"],
     ];

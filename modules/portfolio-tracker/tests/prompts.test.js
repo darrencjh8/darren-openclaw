@@ -102,6 +102,16 @@ describe("SYSTEM_PROMPT", () => {
         expect(mod.SYSTEM_PROMPT).toContain("forward the PDF via Telegram");
     });
 
+    it("contains PASSWORD-PROTECTED PDFs workflow (#88)", async () => {
+        const mod = await import("../src/prompts.js");
+        expect(mod.SYSTEM_PROMPT).toContain("PASSWORD-PROTECTED PDFs:");
+        expect(mod.SYSTEM_PROMPT).toContain("[PDF_ENCRYPTED]");
+        expect(mod.SYSTEM_PROMPT).toContain("search_memory");
+        expect(mod.SYSTEM_PROMPT).toContain("learn_fact");
+        // Substring memory ⇒ instruct single-keyword queries
+        expect(mod.SYSTEM_PROMPT.toLowerCase()).toContain("single keyword");
+    });
+
     it("explicitly avoids mark_email_read (not a PT tool)", async () => {
         const mod = await import("../src/prompts.js");
         // The rules section should NOT instruct the LLM to call mark_email_read
