@@ -408,6 +408,133 @@ describe("Phase 1: LLM Analysis (3-phase)", () => {
     expect(orch._llm.chat).toHaveBeenCalledTimes(2);
     expect(result).toBeNull();
   });
+
+  it("retries when memory suggests a different valid account (valid-but-wrong)", async () => {
+    const { AgentOrchestrator } = await import("../src/orchestrator.js");
+    const config = makeConfig();
+    const tools = makeTools({
+      getPhase1ToolSchemas: vi.fn(() => []),
+      executeTool: vi.fn(async (name, args) => {
+        if (name === "fetch_context")
+          return {
+            accounts: [
+              { id: "acc-dbs", name: "DBS Account", closed: false },
+              { id: "acc-yuu", name: "DBS Yuu Card", closed: false },
+            ],
+            categories: [],
+            payees: [],
+          };
+        if (name === "search_memory")
+          return {
+            results: [
+              {
+                text: "Public Transport transactions belong to DBS Yuu Card account (acc-yuu)",
+                score: 0.8,
+              },
+            ],
+          };
+        return true;
+      }),
+    });
+    const orch = new AgentOrchestrator(config, tools);
+
+    orch._llm.chat = vi
+      .fn()
+      // First attempt: LLM picks valid-but-wrong DBS Account
+      .mockResolvedValueOnce(
+        mockChatResponse({
+          merchant: "BUS/MRT",
+          amount_cents: -460,
+          date: "2026-06-19",
+          currency: "SGD",
+          account_id: "acc-dbs",
+          account_name: "DBS Account",
+          raw_description: "SGD 4.60 at BUS/MRT",
+          notes: "",
+          skip: false,
+          reasoning: "DBS Account in text",
+          notify_message: "",
+        }),
+      )
+      // Retry: LLM picks correct DBS Yuu Card after seeing memory hints
+      .mockResolvedValueOnce(
+        mockChatResponse({
+          merchant: "BUS/MRT",
+          amount_cents: -460,
+          date: "2026-06-19",
+          currency: "SGD",
+          account_id: "acc-yuu",
+          account_name: "DBS Yuu Card",
+          raw_description: "SGD 4.60 at BUS/MRT",
+          notes: "",
+          skip: false,
+          reasoning: "Memory says DBS Yuu Card",
+          notify_message: "",
+        }),
+      );
+
+    const result = await orch._runPhase1("Your DBS Account clocked SGD 4.60 at BUS/MRT");
+    // Should trigger retry: 1 initial + 1 retry = 2 LLM calls
+    expect(orch._llm.chat).toHaveBeenCalledTimes(2);
+    expect(result.account_id).toBe("acc-yuu");
+    // Retry message should include memory hints
+    const retryMsg = orch._llm.chat.mock.calls[1][0].find(
+      (m) => m.role === "user" && m.content.includes("Memory"),
+    );
+    expect(retryMsg).toBeDefined();
+    expect(retryMsg.content).toContain("DBS Yuu Card");
+  });
+
+  it("does NOT retry when memory confirms the same account", async () => {
+    const { AgentOrchestrator } = await import("../src/orchestrator.js");
+    const config = makeConfig();
+    const tools = makeTools({
+      getPhase1ToolSchemas: vi.fn(() => []),
+      executeTool: vi.fn(async (name) => {
+        if (name === "fetch_context")
+          return {
+            accounts: [
+              { id: "acc-yuu", name: "DBS Yuu Card", closed: false },
+              { id: "acc-dbs", name: "DBS Account", closed: false },
+            ],
+            categories: [],
+            payees: [],
+          };
+        if (name === "search_memory")
+          return {
+            results: [
+              {
+                text: "Public Transport transactions belong to DBS Yuu Card account (acc-yuu)",
+                score: 0.8,
+              },
+            ],
+          };
+        return true;
+      }),
+    });
+    const orch = new AgentOrchestrator(config, tools);
+
+    orch._llm.chat = vi.fn().mockResolvedValue(
+      mockChatResponse({
+        merchant: "BUS/MRT",
+        amount_cents: -460,
+        date: "2026-06-19",
+        currency: "SGD",
+        account_id: "acc-yuu",
+        account_name: "DBS Yuu Card",
+        raw_description: "SGD 4.60 at BUS/MRT",
+        notes: "",
+        skip: false,
+        reasoning: "Matched DBS Yuu Card",
+        notify_message: "",
+      }),
+    );
+
+    const result = await orch._runPhase1("SGD 4.60 at BUS/MRT via DBS Yuu Card");
+    // Memory confirms same account — no retry needed
+    expect(orch._llm.chat).toHaveBeenCalledTimes(1);
+    expect(result.account_id).toBe("acc-yuu");
+  });
 });
 
 // ═══════════════════════════════════════════════════════════════════
