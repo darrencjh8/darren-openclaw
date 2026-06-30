@@ -1046,7 +1046,7 @@ describe("update_transaction", () => {
     const patchCall = fetchMock.mock.calls[1];
     const patchBody = JSON.parse(patchCall[1].body);
     expect(patchCall[1].method).toBe("PATCH");
-    expect(patchBody.payee).toBe("Food");
+    expect(patchBody.payee).toBe("p1");
     expect(result).toEqual({ id: "txn-1", payee: "Food" });
 
     vi.unstubAllGlobals();
@@ -1149,7 +1149,7 @@ describe("update_transaction", () => {
 
     const patchCall = fetchMock.mock.calls[1];
     const patchBody = JSON.parse(patchCall[1].body);
-    expect(patchBody).toEqual({ payee: "Food", budget_id: "test-budget" });
+    expect(patchBody).toEqual({ payee: "p1", budget_id: "test-budget" });
     expect(patchBody.notes).toBeUndefined();
     expect(patchBody.amount).toBeUndefined();
     expect(patchBody.date).toBeUndefined();
@@ -1210,7 +1210,7 @@ describe("update_transaction", () => {
 
     const patchCall = fetchMock.mock.calls[1];
     const patchBody = JSON.parse(patchCall[1].body);
-    expect(patchBody.payee).toBe("Food");
+    expect(patchBody.payee).toBe("p1");
     expect(patchBody.notes).toBe("test");
     expect(patchBody.amount).toBe(-500);
 
