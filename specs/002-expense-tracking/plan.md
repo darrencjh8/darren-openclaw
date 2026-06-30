@@ -5,7 +5,7 @@
 **Status:** Implemented  
 **Constitution Hash:** v1.0.0  
 
-> **v2.0.0 consolidation (spec-drift audit, `specs/030-spec-drift/`).** The original plan targeted a **Python 3.12** toolchain; the module was fully ported to **Node.js**. Section 1 (Technology Stack) and the architecture file references below have been corrected to the actual JS implementation. The detailed behavioral pseudocode in later sections describes language-agnostic logic that still holds — the **authoritative implementation is the JS source under `modules/expense-tracker/src/`** (see `modules/expense-tracker/docs/design.md` for the current component map).
+> Sections 1 (Technology Stack), 2 (Architecture), 10 (Dockerfile), and 11 (Project Structure) reflect the current **Node.js** implementation. Behavioral pseudocode in other sections describes language-agnostic logic — the authoritative source is `modules/expense-tracker/src/` (see `modules/expense-tracker/docs/design.md` for the component map).
 
 ---
 

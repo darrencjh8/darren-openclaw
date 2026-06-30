@@ -5,7 +5,7 @@
 **Status:** Done (HISTORICAL — Python prototype)  
 **Constitution Hash:** v1.0.0  
 
-> **⚠️ Historical task ledger.** These tasks describe the original **Python 3.12** prototype (all completed). The module was subsequently **ported to Node.js** — file names (`*.py`), libraries (`aioimaplib`, `beautifulsoup4`, `pytesseract`, `pdf2image`, `pytest`) and commands (`pip`, `python -m src.main`) below are **no longer accurate**. This file is retained only as an implementation-history record. For the current baseline see `spec.md` (v2.0.0) and `plan.md` (v2.0.0); for the current code structure see `modules/expense-tracker/docs/design.md`. Drift details: `specs/030-spec-drift/`.
+> **Historical.** Python prototype task ledger (all completed). The module is now **Node.js** — file names and libraries below are outdated. For the current baseline see `spec.md` and `plan.md`; for the code layout see `modules/expense-tracker/docs/design.md`.
 
 ---
 

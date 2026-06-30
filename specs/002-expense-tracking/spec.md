@@ -6,13 +6,11 @@
 **Constitution Hash:** v1.0.0  
 **Runtime:** Node.js 22 (ESM) — `modules/expense-tracker`
 
-> **Canonical baseline.** This is the single source-of-truth baseline spec for the expense-tracker, consolidated to match the **current code** (Node.js). Delta specs:
-> - ~~Spec 015 (merchant-resolver)~~ — **folded** into this spec (see Merchant Resolution section below). Keyword table FR-005 was removed by Spec 021.
-> - ~~Spec 020 (deterministic finalize)~~ — **deleted** (SUPERSEDED by Spec 021 → then folded into this baseline).
-> - Spec 021 (three-phase refactor) — defines the current 3-phase orchestrator pipeline (rationale doc, still in repo).
-> Module design detail: `modules/expense-tracker/docs/design.md`. Agent runtime guide: `modules/hermes/skills/expense-tracker/SKILL.md`.
->
-> **v2.0.0 consolidation (spec-drift audit):** corrected Python→Node.js, tool counts (16 → **26 REST / 22 MCP**), 3-phase pipeline, MEMORY.md fact storage, no keyword table, folded 015 merchant-resolver + 015 transaction-update. See `specs/030-spec-drift/`.
+> **Canonical baseline.** Single source-of-truth spec for the expense-tracker, matching the current **Node.js** code.
+> - Pipeline: 3-phase (Spec 021 rationale in `specs/021-three-phase-refactor/`).
+> - Module design: `modules/expense-tracker/docs/design.md`.
+> - Agent runtime guide: `modules/hermes/skills/expense-tracker/SKILL.md`.
+> - Audit trail: `specs/030-spec-drift/`.
 
 ---
 
