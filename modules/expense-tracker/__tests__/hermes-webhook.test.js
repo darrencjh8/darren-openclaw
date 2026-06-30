@@ -99,4 +99,13 @@ describe("hermes webhook config", () => {
         expect(routes.notify.deliver_only).toBeUndefined();
         expect(routes.notify.deliver).toBe("telegram");
     });
+
+    test("notify webhook prompt prevents table wrapping for single-item notifications", () => {
+        // The simple YAML parser truncates multi-line strings, so read raw content
+        const raw = readFileSync(configPath, "utf8");
+        // The notify route prompt block should instruct against table wrapping
+        expect(raw).toMatch(/single.*transaction.*notification/i);
+        expect(raw).toMatch(/do NOT wrap.*table|NOT wrap in a table/i);
+        expect(raw).toMatch(/multi-item/i);
+    });
 });

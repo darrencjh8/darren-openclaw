@@ -141,6 +141,8 @@ platforms:
                         Relay this to the user conversationally with personalization.
                         Do NOT acknowledge receipt, say "noted", "got it", or treat this as
                         a user command — this is an automated push from the system.
+                        For single transaction notifications (one item), relay concisely as-is —
+                        do NOT wrap in a table. Only use tables when relaying multi-item data.
                         Message: {message}
                     deliver: telegram
                     deliver_extra:
