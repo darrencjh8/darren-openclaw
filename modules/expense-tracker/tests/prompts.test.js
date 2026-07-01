@@ -75,6 +75,31 @@ describe("getPhase1Prompt", () => {
     expect(prompt).toMatch(/@dbs\.com → ONLY DBS/);
     expect(prompt).toMatch(/@ocbc\.com → ONLY OCBC/);
   });
+
+  // Fix 1: bill payment / transfer sign words (#265)
+  it("includes bill payment sign words as negative", () => {
+    expect(prompt).toContain("bill payment");
+    expect(prompt).toContain("scheduled payment");
+    expect(prompt).toContain("transferred");
+  });
+
+  it("includes transferred-in sign words as positive", () => {
+    expect(prompt).toContain("transferred in");
+    expect(prompt).toContain("received payment");
+  });
+
+  // Fix 2: inter-account transfer guidance (#265)
+  it("includes rule 4b for bill payment / inter-account transfer mapping", () => {
+    expect(prompt).toContain("4b.");
+    expect(prompt).toContain("SOURCE account");
+    expect(prompt).toContain("destination name as the merchant");
+  });
+
+  it("provides transfer merchant examples in rule 4b", () => {
+    expect(prompt).toContain("Altitude");
+    expect(prompt).toContain("Yuu");
+    expect(prompt).toContain("UOB CREDIT CARDS");
+  });
 });
 
 describe("getCategoryPickerPrompt", () => {
