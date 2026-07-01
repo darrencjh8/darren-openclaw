@@ -90,15 +90,15 @@ export class DeepSeekClient {
  * to the LLM so it can only pick accounts belonging to the correct bank.
  */
 export const DOMAIN_BANK_MAP = {
-    "ocbc.com":       "OCBC",
-    "dbs.com":        "DBS",
-    "uobgroup.com":   "UOB",
-    "hsbc.com.hk":    "HSBC",
-    "trustbank.sg":   "Trust",
-    "sc.com":         "SC",
-    "maybank.com":    "Maybank",
-    "cimb.com":       "CIMB",
-    "rytbank.my":     "Ryt",
+    "ocbc.com": "OCBC",
+    "dbs.com": "DBS",
+    "uobgroup.com": "UOB",
+    "hsbc.com.hk": "HSBC",
+    "trustbank.sg": "Trust",
+    "sc.com": "SC",
+    "maybank.com": "Maybank",
+    "cimb.com": "CIMB",
+    "rytbank.my": "Ryt",
 };
 
 /**
@@ -341,14 +341,23 @@ export class AgentOrchestrator {
                         // Domain-based account pre-filter: restrict accounts
                         // to the sender's bank so the LLM cannot cross banks.
                         let filteredResult = result;
-                        if (name === "fetch_context" && senderBank && result?.accounts) {
+                        if (
+                            name === "fetch_context" &&
+                            senderBank &&
+                            result?.accounts
+                        ) {
                             const bankLower = senderBank.toLowerCase();
                             const filtered = result.accounts.filter(
-                                (a) => a.name && a.name.toLowerCase().includes(bankLower),
+                                (a) =>
+                                    a.name &&
+                                    a.name.toLowerCase().includes(bankLower),
                             );
                             // Only restrict if at least one account matched the bank
                             if (filtered.length > 0) {
-                                filteredResult = { ...result, accounts: filtered };
+                                filteredResult = {
+                                    ...result,
+                                    accounts: filtered,
+                                };
                                 logger.info({
                                     event: "domain_account_filter",
                                     senderBank,
@@ -411,30 +420,10 @@ export class AgentOrchestrator {
                     category_id: "",
                 };
 
-                // Validate amount and date
-                const invalidFields = [];
-                if (
-                    llmOutput.amount_cents !== undefined &&
-                    llmOutput.amount_cents !== null &&
-                    llmOutput.amount_cents !== ""
-                ) {
-                    if (isNaN(Number(llmOutput.amount_cents))) {
-                        invalidFields.push("amount_cents");
-                    }
-                }
-                if (llmOutput.date) {
-                    const txDate = new Date(llmOutput.date);
-                    const diffDays = Math.abs(
-                        (new Date() - txDate) / (1000 * 60 * 60 * 24),
-                    );
-                    if (isNaN(txDate.getTime()) || diffDays > 15) {
-                        invalidFields.push("date");
-                    }
-                }
-
                 // Date fallback: if the email body contains no recognisable
                 // date and the LLM returned a date that differs from today,
                 // override with today (the email receive timestamp).
+                // MUST run before validation so the corrected date is checked.
                 const today = new Date().toISOString().slice(0, 10);
                 if (
                     output.date &&
@@ -447,6 +436,27 @@ export class AgentOrchestrator {
                         overrideTo: today,
                     });
                     output.date = today;
+                }
+
+                // Validate amount and date
+                const invalidFields = [];
+                if (
+                    llmOutput.amount_cents !== undefined &&
+                    llmOutput.amount_cents !== null &&
+                    llmOutput.amount_cents !== ""
+                ) {
+                    if (isNaN(Number(llmOutput.amount_cents))) {
+                        invalidFields.push("amount_cents");
+                    }
+                }
+                if (output.date) {
+                    const txDate = new Date(output.date);
+                    const diffDays = Math.abs(
+                        (new Date() - txDate) / (1000 * 60 * 60 * 24),
+                    );
+                    if (isNaN(txDate.getTime()) || diffDays > 15) {
+                        invalidFields.push("date");
+                    }
                 }
 
                 // Validate account — reuse cached fetch_context result if available
@@ -556,8 +566,7 @@ export class AgentOrchestrator {
                                 const hints = await this._tools.executeTool(
                                     "search_memory",
                                     {
-                                        query:
-                                            output.merchant + " account",
+                                        query: output.merchant + " account",
                                     },
                                 );
                                 if (hints?.results?.length > 0) {
@@ -992,8 +1001,18 @@ export class AgentOrchestrator {
         // DD/MM/YYYY or DD-MM-YYYY
         if (/\b\d{1,2}[/-]\d{1,2}[/-]\d{4}\b/.test(body)) return true;
         // DD Mon YYYY or Mon DD, YYYY  (e.g., "18 Jun 2026", "Jun 18, 2026")
-        if (/\b\d{1,2}\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\w*\s+\d{4}\b/i.test(body)) return true;
-        if (/\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\w*\s+\d{1,2},?\s+\d{4}\b/i.test(body)) return true;
+        if (
+            /\b\d{1,2}\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\w*\s+\d{4}\b/i.test(
+                body,
+            )
+        )
+            return true;
+        if (
+            /\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\w*\s+\d{1,2},?\s+\d{4}\b/i.test(
+                body,
+            )
+        )
+            return true;
 
         return false;
     }
