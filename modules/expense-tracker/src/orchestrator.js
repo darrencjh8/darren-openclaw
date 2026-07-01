@@ -84,6 +84,36 @@ export class DeepSeekClient {
     }
 }
 
+/**
+ * Maps email sender domains to bank name prefixes used in Actual Budget
+ * account names.  Used to pre-filter the account list before sending it
+ * to the LLM so it can only pick accounts belonging to the correct bank.
+ */
+export const DOMAIN_BANK_MAP = {
+    "ocbc.com":       "OCBC",
+    "dbs.com":        "DBS",
+    "uobgroup.com":   "UOB",
+    "hsbc.com.hk":    "HSBC",
+    "trustbank.sg":   "Trust",
+    "sc.com":         "SC",
+    "maybank.com":    "Maybank",
+    "cimb.com":       "CIMB",
+    "rytbank.my":     "Ryt",
+};
+
+/**
+ * Extract a bank-name filter string from an email sender address/domain.
+ * Returns the matching bank name from DOMAIN_BANK_MAP, or null if unknown.
+ */
+export function bankFromSender(sender) {
+    if (!sender) return null;
+    const lower = sender.toLowerCase();
+    for (const [domain, bank] of Object.entries(DOMAIN_BANK_MAP)) {
+        if (lower.includes(domain)) return bank;
+    }
+    return null;
+}
+
 export class AgentOrchestrator {
     constructor(config, tools) {
         this._config = config;
@@ -200,7 +230,8 @@ export class AgentOrchestrator {
         }
 
         // Phase 1: LLM Analysis
-        const phase1 = await this._runPhase1(emailText);
+        const senderBank = bankFromSender(from);
+        const phase1 = await this._runPhase1(emailText, { senderBank });
         if (!phase1) {
             const notified = await this._tools.executeTool("notify_user", {
                 message: `Couldn't understand email from "${from || "unknown"}" re: "${subject || "unknown"}".`,
@@ -263,7 +294,7 @@ export class AgentOrchestrator {
     // Phase 1: LLM Analysis
     // ═══════════════════════════════════════════════════════════════
 
-    async _runPhase1(emailText) {
+    async _runPhase1(emailText, { senderBank } = {}) {
         const prompt = getPhase1Prompt();
         // let (not const) — validation retries (continue) push feedback and
         // must preserve messages; error retries (catch) reset to clean state.
@@ -307,10 +338,29 @@ export class AgentOrchestrator {
                             name,
                             args,
                         );
+                        // Domain-based account pre-filter: restrict accounts
+                        // to the sender's bank so the LLM cannot cross banks.
+                        let filteredResult = result;
+                        if (name === "fetch_context" && senderBank && result?.accounts) {
+                            const bankLower = senderBank.toLowerCase();
+                            const filtered = result.accounts.filter(
+                                (a) => a.name && a.name.toLowerCase().includes(bankLower),
+                            );
+                            // Only restrict if at least one account matched the bank
+                            if (filtered.length > 0) {
+                                filteredResult = { ...result, accounts: filtered };
+                                logger.info({
+                                    event: "domain_account_filter",
+                                    senderBank,
+                                    total: result.accounts.length,
+                                    filtered: filtered.length,
+                                });
+                            }
+                        }
                         messages.push({
                             role: "tool",
                             tool_call_id: tc.id || "",
-                            content: JSON.stringify(result),
+                            content: JSON.stringify(filteredResult),
                         });
                         if (name === "fetch_context") cachedLiveData = result;
                     }
@@ -380,6 +430,23 @@ export class AgentOrchestrator {
                     if (isNaN(txDate.getTime()) || diffDays > 15) {
                         invalidFields.push("date");
                     }
+                }
+
+                // Date fallback: if the email body contains no recognisable
+                // date and the LLM returned a date that differs from today,
+                // override with today (the email receive timestamp).
+                const today = new Date().toISOString().slice(0, 10);
+                if (
+                    output.date &&
+                    output.date !== today &&
+                    !this._emailBodyHasDate(emailText)
+                ) {
+                    logger.info({
+                        event: "date_fallback",
+                        llmDate: output.date,
+                        overrideTo: today,
+                    });
+                    output.date = today;
                 }
 
                 // Validate account — reuse cached fetch_context result if available
@@ -908,6 +975,28 @@ export class AgentOrchestrator {
     // ═══════════════════════════════════════════════════════════════
     // Helpers
     // ═══════════════════════════════════════════════════════════════
+
+    /**
+     * Returns true if the email body contains a recognisable date string.
+     * Matches YYYY-MM-DD, DD/MM/YYYY, DD-MM-YYYY, DD Mon YYYY, and
+     * "Month DD" / "DD Month" patterns.  Skips the prepended From/Subject
+     * header block (everything before the first blank line).
+     */
+    _emailBodyHasDate(emailText) {
+        // Strip the prepended From/Subject headers (before first blank line)
+        const bodyStart = emailText.indexOf("\n\n");
+        const body = bodyStart >= 0 ? emailText.slice(bodyStart) : emailText;
+
+        // YYYY-MM-DD
+        if (/\b\d{4}-\d{2}-\d{2}\b/.test(body)) return true;
+        // DD/MM/YYYY or DD-MM-YYYY
+        if (/\b\d{1,2}[/-]\d{1,2}[/-]\d{4}\b/.test(body)) return true;
+        // DD Mon YYYY or Mon DD, YYYY  (e.g., "18 Jun 2026", "Jun 18, 2026")
+        if (/\b\d{1,2}\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\w*\s+\d{4}\b/i.test(body)) return true;
+        if (/\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\w*\s+\d{1,2},?\s+\d{4}\b/i.test(body)) return true;
+
+        return false;
+    }
 
     _parseJsonFromContent(content) {
         let json = (content || "").trim();

@@ -2,7 +2,7 @@
  * Mock-based tests for AgentOrchestrator 3-phase pipeline.
  */
 import { describe, it, expect, vi } from "vitest";
-import { AgentOrchestrator, DeepSeekClient } from "../src/orchestrator.js";
+import { AgentOrchestrator, DeepSeekClient, DOMAIN_BANK_MAP, bankFromSender } from "../src/orchestrator.js";
 import { Config } from "../src/config.js";
 import { dispatchEmail } from "../src/classify.js";
 
@@ -769,6 +769,222 @@ describe("auto-learn contradiction resolution", () => {
         // Should not throw — learn_fact failure is caught
         const result = await orch.processEmail("test-al4", "raw email");
         expect(result.action).toBe("inserted");
+    });
+});
+
+// ── Fix 2: bankFromSender + DOMAIN_BANK_MAP (#263) ──────────────
+
+describe("bankFromSender", () => {
+    it("returns OCBC for Notifications@ocbc.com", () => {
+        expect(bankFromSender("Notifications@ocbc.com")).toBe("OCBC");
+    });
+
+    it("returns DBS for alerts@dbs.com", () => {
+        expect(bankFromSender("alerts@dbs.com")).toBe("DBS");
+    });
+
+    it("returns UOB for noreply@uobgroup.com", () => {
+        expect(bankFromSender("noreply@uobgroup.com")).toBe("UOB");
+    });
+
+    it("returns null for unknown domain", () => {
+        expect(bankFromSender("support@unknown.com")).toBeNull();
+    });
+
+    it("returns null for empty/null input", () => {
+        expect(bankFromSender(null)).toBeNull();
+        expect(bankFromSender("")).toBeNull();
+    });
+
+    it("is case-insensitive", () => {
+        expect(bankFromSender("ALERTS@DBS.COM")).toBe("DBS");
+    });
+});
+
+describe("DOMAIN_BANK_MAP", () => {
+    it("covers all banks listed in issue #263", () => {
+        const expectedBanks = ["OCBC", "DBS", "UOB", "HSBC", "Trust", "SC", "Maybank", "CIMB", "Ryt"];
+        const mappedBanks = Object.values(DOMAIN_BANK_MAP);
+        for (const bank of expectedBanks) {
+            expect(mappedBanks).toContain(bank);
+        }
+    });
+});
+
+// ── Fix 2: domain-based account pre-filter in Phase 1 (#263) ────
+
+describe("domain account pre-filter", () => {
+    it("filters fetch_context accounts to sender bank when senderBank is set", async () => {
+        const config = makeConfig();
+        const allAccounts = [
+            { id: "acc-ocbc", name: "OCBC 360", closed: false },
+            { id: "acc-dbs", name: "DBS Account", closed: false },
+            { id: "acc-uob", name: "UOB One", closed: false },
+        ];
+
+        const toolCallsToLlm = [];
+        const tools = makeTools({
+            getPhase1ToolSchemas: () => [
+                { type: "function", function: { name: "fetch_context", parameters: {} } },
+            ],
+            executeTool: vi.fn(async (name) => {
+                if (name === "fetch_context")
+                    return { accounts: allAccounts, categories: [], payees: [] };
+                if (name === "search_memory") return { results: [] };
+                return true;
+            }),
+        });
+
+        const orch = new AgentOrchestrator(config, tools);
+        // Mock LLM to make a fetch_context tool call, then return valid JSON
+        let callCount = 0;
+        orch._llm = {
+            chat: vi.fn(async (messages) => {
+                callCount++;
+                if (callCount === 1) {
+                    // First call: LLM requests fetch_context
+                    return {
+                        choices: [{
+                            message: {
+                                tool_calls: [{
+                                    id: "tc-1",
+                                    function: { name: "fetch_context", arguments: '{"budget_id":"test-budget"}' },
+                                }],
+                            },
+                        }],
+                    };
+                }
+                // Second call: capture what was sent to LLM as tool result
+                const toolMsg = messages.find((m) => m.role === "tool");
+                if (toolMsg) toolCallsToLlm.push(JSON.parse(toolMsg.content));
+                return {
+                    choices: [{
+                        message: {
+                            content: JSON.stringify({
+                                merchant: "Test",
+                                amount_cents: -100,
+                                date: new Date().toISOString().slice(0, 10),
+                                currency: "SGD",
+                                account_id: "acc-ocbc",
+                                account_name: "OCBC 360",
+                                skip: false,
+                            }),
+                        },
+                    }],
+                };
+            }),
+        };
+
+        await orch._runPhase1("From: Notifications@ocbc.com\nSubject: OCBC Alert\n\nDeposit", { senderBank: "OCBC" });
+
+        // The tool result sent to LLM should only contain OCBC accounts
+        expect(toolCallsToLlm.length).toBe(1);
+        expect(toolCallsToLlm[0].accounts).toHaveLength(1);
+        expect(toolCallsToLlm[0].accounts[0].name).toBe("OCBC 360");
+    });
+
+    it("passes all accounts when senderBank is null (unknown domain)", async () => {
+        const config = makeConfig();
+        const allAccounts = [
+            { id: "acc-ocbc", name: "OCBC 360", closed: false },
+            { id: "acc-dbs", name: "DBS Account", closed: false },
+        ];
+
+        const toolCallsToLlm = [];
+        const tools = makeTools({
+            getPhase1ToolSchemas: () => [
+                { type: "function", function: { name: "fetch_context", parameters: {} } },
+            ],
+            executeTool: vi.fn(async (name) => {
+                if (name === "fetch_context")
+                    return { accounts: allAccounts, categories: [], payees: [] };
+                if (name === "search_memory") return { results: [] };
+                return true;
+            }),
+        });
+
+        const orch = new AgentOrchestrator(config, tools);
+        let callCount = 0;
+        orch._llm = {
+            chat: vi.fn(async (messages) => {
+                callCount++;
+                if (callCount === 1) {
+                    return {
+                        choices: [{
+                            message: {
+                                tool_calls: [{
+                                    id: "tc-1",
+                                    function: { name: "fetch_context", arguments: '{"budget_id":"test-budget"}' },
+                                }],
+                            },
+                        }],
+                    };
+                }
+                const toolMsg = messages.find((m) => m.role === "tool");
+                if (toolMsg) toolCallsToLlm.push(JSON.parse(toolMsg.content));
+                return {
+                    choices: [{
+                        message: {
+                            content: JSON.stringify({
+                                merchant: "Test",
+                                amount_cents: -100,
+                                date: new Date().toISOString().slice(0, 10),
+                                currency: "SGD",
+                                account_id: "acc-ocbc",
+                                account_name: "OCBC 360",
+                                skip: false,
+                            }),
+                        },
+                    }],
+                };
+            }),
+        };
+
+        await orch._runPhase1("From: unknown@random.com\n\nSome email", { senderBank: null });
+
+        // All accounts should be passed through
+        expect(toolCallsToLlm.length).toBe(1);
+        expect(toolCallsToLlm[0].accounts).toHaveLength(2);
+    });
+});
+
+// ── Fix 3: date fallback when email body has no date (#263) ─────
+
+describe("_emailBodyHasDate", () => {
+    let orch;
+    beforeAll(() => {
+        const config = makeConfig();
+        const tools = makeTools();
+        orch = new AgentOrchestrator(config, tools);
+    });
+
+    it("returns true for YYYY-MM-DD in body", () => {
+        expect(orch._emailBodyHasDate("From: x\nSubject: y\n\nTransaction on 2026-07-01")).toBe(true);
+    });
+
+    it("returns true for DD/MM/YYYY in body", () => {
+        expect(orch._emailBodyHasDate("From: x\n\nDate: 01/07/2026")).toBe(true);
+    });
+
+    it("returns true for DD Mon YYYY in body", () => {
+        expect(orch._emailBodyHasDate("From: x\n\n18 Jun 2026 deposit")).toBe(true);
+    });
+
+    it("returns true for Mon DD, YYYY in body", () => {
+        expect(orch._emailBodyHasDate("From: x\n\nJune 18, 2026")).toBe(true);
+    });
+
+    it("returns false when body has only time, no date", () => {
+        expect(orch._emailBodyHasDate("From: Notifications@ocbc.com\nSubject: OCBC Alert\n\nTime of deposit: 11:13 AM\nAmount: SGD 16.00")).toBe(false);
+    });
+
+    it("returns false for empty body", () => {
+        expect(orch._emailBodyHasDate("")).toBe(false);
+    });
+
+    it("ignores dates in the From/Subject header block", () => {
+        // Date appears ONLY in headers, not in body
+        expect(orch._emailBodyHasDate("From: alert-2026-07-01@bank.com\nSubject: Alert 2026-07-01\n\nAmount: SGD 10.00")).toBe(false);
     });
 });
 

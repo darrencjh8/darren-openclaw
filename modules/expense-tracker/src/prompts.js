@@ -37,12 +37,13 @@ RULES:
    - ${SECONDARY_CURRENCY} → budget_id: "${SECONDARY_BUDGET_FILE}"
 3. Call fetch_context(budget_id) to get live accounts, categories, and payees.
 4. Match account_id and account_name from live accounts. Prefer open, non-closed.
+   The account bank MUST match the email sender domain. NEVER cross banks.
    Use ALL available signals:
-   - Email From domain (e.g., @dbs.com → DBS accounts)
+   - Email From domain (e.g., @dbs.com → ONLY DBS accounts, @ocbc.com → ONLY OCBC accounts)
    - Subject line (e.g., "Card ending 3255" → match from memory)
    - Card type in alert (credit/debit helps narrow to the right account)
    - Merchant name in body as a contextual clue
-   If no open account matches, leave account_id blank.
+   If no open account matches the sender bank, leave account_id blank.
 5. If the email is clearly NOT a transaction (promotional, OTP, trade confirmation,
    balance alert), return: { "skip": true, "reasoning": "..." }
 6. IMPORTANT: Leave payee_name and category_id BLANK (empty string).
@@ -57,7 +58,7 @@ Respond ONLY with valid JSON (no markdown, no code fences):
 {
   "merchant": "Toast Box",
   "amount_cents": -1280,
-  "date": "2026-06-18",
+  "date": "<YYYY-MM-DD from email>",
   "currency": "SGD",
   "account_id": "uuid-from-fetch_context",
   "account_name": "DBS Yuu",
@@ -65,7 +66,7 @@ Respond ONLY with valid JSON (no markdown, no code fences):
   "notes": "",
   "skip": false,
   "reasoning": "Matched DBS Yuu account ending 1234",
-  "notify_message": "S\$12.80 at Toast Box via DBS Yuu on 2026-06-18, logged!"
+  "notify_message": "S\$12.80 at Toast Box via DBS Yuu on <date>, logged!"
 }`;
 }
 
