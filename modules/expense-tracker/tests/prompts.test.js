@@ -56,6 +56,25 @@ describe("getPhase1Prompt", () => {
     expect(prompt).toContain("Card type");
     expect(prompt).toMatch(/credit.debit/);
   });
+
+  // Fix 1: no hardcoded date in example JSON (#263)
+  it("does not contain a hardcoded date in the example JSON", () => {
+    // Must not have a literal YYYY-MM-DD date in the example output block
+    const exampleBlock = prompt.slice(prompt.indexOf('"date":'));
+    expect(exampleBlock).not.toMatch(/"\d{4}-\d{2}-\d{2}"/);
+    expect(prompt).toContain("<YYYY-MM-DD from email>");
+  });
+
+  // Fix 4: hardened account-matching language (#263)
+  it("enforces bank-domain matching with MUST / NEVER cross banks", () => {
+    expect(prompt).toContain("MUST match the email sender domain");
+    expect(prompt).toContain("NEVER cross banks");
+  });
+
+  it("uses ONLY keyword for domain→bank mapping examples", () => {
+    expect(prompt).toMatch(/@dbs\.com → ONLY DBS/);
+    expect(prompt).toMatch(/@ocbc\.com → ONLY OCBC/);
+  });
 });
 
 describe("getCategoryPickerPrompt", () => {
