@@ -27,7 +27,9 @@ RULES:
 1. Extract: merchant name, amount (in integer CENTS).
    Infer sign from context:
      "charged" / "spent" / "paid" / "debited" → negative
+     "bill payment" / "scheduled payment" / "transferred" / "transferred out" → negative
      "received" / "deposited" / "credited" → positive
+     "transferred in" / "received payment" → positive
    If the alert shows an explicit sign (+RM50 or -RM50), extract it as-is.
    DO NOT apply credit-card logic — the system handles sign correction.
    Currency (${PRIMARY_CURRENCY} or ${SECONDARY_CURRENCY}), date (YYYY-MM-DD).
@@ -44,6 +46,11 @@ RULES:
    - Card type in alert (credit/debit helps narrow to the right account)
    - Merchant name in body as a contextual clue
    If no open account matches the sender bank, leave account_id blank.
+4b. For bill payment or inter-account transfer alerts with
+   "From: [source account]" and "To: [destination]" in the body:
+   - Match account_id to the SOURCE account (by account ending/suffix).
+   - Use the destination name as the merchant (e.g., "Altitude", "Yuu", "UOB CREDIT CARDS").
+   - Amount is always negative (outgoing from source).
 5. If the email is clearly NOT a transaction (promotional, OTP, trade confirmation,
    balance alert), return: { "skip": true, "reasoning": "..." }
 6. IMPORTANT: Leave payee_name and category_id BLANK (empty string).
