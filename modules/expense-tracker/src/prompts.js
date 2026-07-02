@@ -42,7 +42,7 @@ RULES:
    The account bank MUST match the email sender domain. NEVER cross banks.
    Use ALL available signals:
    - Email From domain (e.g., @dbs.com → ONLY DBS accounts, @ocbc.com → ONLY OCBC accounts)
-   - Subject line (e.g., "Card ending 3255" → match from memory)
+   - Subject line (e.g., "Card ending 3255" → use KNOWN CARD SUFFIXES if provided)
    - Card type in alert (credit/debit helps narrow to the right account)
    - Merchant name in body as a contextual clue
    If no open account matches the sender bank, leave account_id blank.

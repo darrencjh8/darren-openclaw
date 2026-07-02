@@ -988,6 +988,368 @@ describe("_emailBodyHasDate", () => {
     });
 });
 
+// ── Card suffix context injection (#269) ───────────────────────
+
+describe("card suffix context injection", () => {
+    const today = new Date().toISOString().slice(0, 10);
+
+    it("injects card suffix facts into Phase 1 system prompt when memory has matching facts", async () => {
+        const config = makeConfig();
+        const allAccounts = [
+            { id: "acc-yuu", name: "DBS Yuu Card", closed: false },
+            { id: "acc-alt", name: "DBS Altitude Card", closed: false },
+        ];
+
+        let systemPromptSent = null;
+        const tools = makeTools({
+            getPhase1ToolSchemas: () => [
+                { type: "function", function: { name: "fetch_context", parameters: {} } },
+            ],
+            executeTool: vi.fn(async (name, args) => {
+                if (name === "fetch_context")
+                    return { accounts: allAccounts, categories: [], payees: [] };
+                if (name === "search_memory") {
+                    // Return a card suffix fact matching the email content
+                    return {
+                        results: [
+                            { text: "Card ending 3255 belongs to DBS Yuu Card", score: 0.85 },
+                        ],
+                    };
+                }
+                return true;
+            }),
+        });
+
+        const orch = new AgentOrchestrator(config, tools);
+        let callCount = 0;
+        orch._llm = {
+            chat: vi.fn(async (messages) => {
+                callCount++;
+                if (callCount === 1) {
+                    // Capture the system prompt
+                    systemPromptSent = messages.find((m) => m.role === "system")?.content;
+                    return {
+                        choices: [{
+                            message: {
+                                tool_calls: [{
+                                    id: "tc-1",
+                                    function: { name: "fetch_context", arguments: '{"budget_id":"test-budget"}' },
+                                }],
+                            },
+                        }],
+                    };
+                }
+                return {
+                    choices: [{
+                        message: {
+                            content: JSON.stringify({
+                                merchant: "Toast Box",
+                                amount_cents: -1280,
+                                date: today,
+                                currency: "SGD",
+                                account_id: "acc-yuu",
+                                account_name: "DBS Yuu Card",
+                                skip: false,
+                            }),
+                        },
+                    }],
+                };
+            }),
+        };
+
+        await orch._runPhase1(
+            "From: alerts@dbs.com\nSubject: Card Transaction Alert for 3255\n\nS$12.80 charged",
+            { senderBank: "DBS" },
+        );
+
+        // search_memory should have been called to find card suffix facts
+        const searchCalls = tools.executeTool.mock.calls.filter(
+            (c) => c[0] === "search_memory",
+        );
+        expect(searchCalls.length).toBeGreaterThanOrEqual(1);
+
+        // System prompt should contain the injected suffix context
+        expect(systemPromptSent).toBeDefined();
+        expect(systemPromptSent).toContain("Card ending 3255 belongs to DBS Yuu Card");
+    });
+
+    it("does not inject suffix context when no card suffix facts exist in memory", async () => {
+        const config = makeConfig();
+        let systemPromptSent = null;
+        const tools = makeTools({
+            getPhase1ToolSchemas: () => [
+                { type: "function", function: { name: "fetch_context", parameters: {} } },
+            ],
+            executeTool: vi.fn(async (name) => {
+                if (name === "fetch_context")
+                    return { accounts: [{ id: "acc-1", name: "DBS Account", closed: false }], categories: [], payees: [] };
+                if (name === "search_memory") return { results: [] };
+                return true;
+            }),
+        });
+
+        const orch = new AgentOrchestrator(config, tools);
+        let callCount = 0;
+        orch._llm = {
+            chat: vi.fn(async (messages) => {
+                callCount++;
+                if (callCount === 1) {
+                    systemPromptSent = messages.find((m) => m.role === "system")?.content;
+                    return {
+                        choices: [{
+                            message: {
+                                tool_calls: [{
+                                    id: "tc-1",
+                                    function: { name: "fetch_context", arguments: '{"budget_id":"test-budget"}' },
+                                }],
+                            },
+                        }],
+                    };
+                }
+                return {
+                    choices: [{
+                        message: {
+                            content: JSON.stringify({
+                                merchant: "Test",
+                                amount_cents: -100,
+                                date: today,
+                                currency: "SGD",
+                                account_id: "acc-1",
+                                account_name: "DBS Account",
+                                skip: false,
+                            }),
+                        },
+                    }],
+                };
+            }),
+        };
+
+        await orch._runPhase1(
+            "From: alerts@dbs.com\nSubject: Transfer Alert\n\nTransfer completed",
+            { senderBank: "DBS" },
+        );
+
+        // System prompt should NOT contain the injected suffix mapping section
+        // (Note: the base prompt contains "KNOWN CARD SUFFIXES" as guidance text,
+        // but the actual mapping block starts with "KNOWN CARD SUFFIXES (from memory")
+        expect(systemPromptSent).toBeDefined();
+        expect(systemPromptSent).not.toContain("KNOWN CARD SUFFIXES (from memory");
+    });
+
+    it("filters injected suffix facts by senderBank (only DBS suffixes for DBS emails)", async () => {
+        const config = makeConfig();
+        let systemPromptSent = null;
+        const tools = makeTools({
+            getPhase1ToolSchemas: () => [
+                { type: "function", function: { name: "fetch_context", parameters: {} } },
+            ],
+            executeTool: vi.fn(async (name) => {
+                if (name === "fetch_context")
+                    return { accounts: [{ id: "acc-yuu", name: "DBS Yuu Card", closed: false }], categories: [], payees: [] };
+                if (name === "search_memory") {
+                    return {
+                        results: [
+                            { text: "Card ending 3255 belongs to DBS Yuu Card", score: 0.80 },
+                            { text: "Card ending 4605 belongs to UOB Ladies Card", score: 0.70 },
+                        ],
+                    };
+                }
+                return true;
+            }),
+        });
+
+        const orch = new AgentOrchestrator(config, tools);
+        let callCount = 0;
+        orch._llm = {
+            chat: vi.fn(async (messages) => {
+                callCount++;
+                if (callCount === 1) {
+                    systemPromptSent = messages.find((m) => m.role === "system")?.content;
+                    return {
+                        choices: [{
+                            message: {
+                                tool_calls: [{
+                                    id: "tc-1",
+                                    function: { name: "fetch_context", arguments: '{"budget_id":"test-budget"}' },
+                                }],
+                            },
+                        }],
+                    };
+                }
+                return {
+                    choices: [{
+                        message: {
+                            content: JSON.stringify({
+                                merchant: "Test",
+                                amount_cents: -100,
+                                date: today,
+                                currency: "SGD",
+                                account_id: "acc-yuu",
+                                account_name: "DBS Yuu Card",
+                                skip: false,
+                            }),
+                        },
+                    }],
+                };
+            }),
+        };
+
+        await orch._runPhase1(
+            "From: alerts@dbs.com\nSubject: Card Transaction Alert for 3255\n\nCharged",
+            { senderBank: "DBS" },
+        );
+
+        // Should include DBS suffix but not UOB suffix
+        expect(systemPromptSent).toContain("DBS Yuu Card");
+        expect(systemPromptSent).not.toContain("UOB Ladies Card");
+    });
+
+    it("overrides account when LLM picks wrong account despite suffix data (safety net)", async () => {
+        const config = makeConfig();
+        const allAccounts = [
+            { id: "acc-yuu", name: "DBS Yuu Card", closed: false },
+            { id: "acc-alt", name: "DBS Altitude Card", closed: false },
+        ];
+
+        const tools = makeTools({
+            getPhase1ToolSchemas: () => [
+                { type: "function", function: { name: "fetch_context", parameters: {} } },
+            ],
+            executeTool: vi.fn(async (name) => {
+                if (name === "fetch_context")
+                    return { accounts: allAccounts, categories: [], payees: [] };
+                if (name === "search_memory") {
+                    return {
+                        results: [
+                            { text: "Card ending 3255 belongs to DBS Yuu Card", score: 0.85 },
+                        ],
+                    };
+                }
+                return true;
+            }),
+        });
+
+        const orch = new AgentOrchestrator(config, tools);
+        let callCount = 0;
+        orch._llm = {
+            chat: vi.fn(async (messages) => {
+                callCount++;
+                if (callCount === 1) {
+                    return {
+                        choices: [{
+                            message: {
+                                tool_calls: [{
+                                    id: "tc-1",
+                                    function: { name: "fetch_context", arguments: '{"budget_id":"test-budget"}' },
+                                }],
+                            },
+                        }],
+                    };
+                }
+                // LLM picks the WRONG account (Altitude instead of Yuu)
+                return {
+                    choices: [{
+                        message: {
+                            content: JSON.stringify({
+                                merchant: "Toast Box",
+                                amount_cents: -1280,
+                                date: today,
+                                currency: "SGD",
+                                account_id: "acc-alt",
+                                account_name: "DBS Altitude Card",
+                                skip: false,
+                            }),
+                        },
+                    }],
+                };
+            }),
+        };
+
+        const result = await orch._runPhase1(
+            "From: alerts@dbs.com\nSubject: Card Transaction Alert for 3255\n\nS$12.80 charged",
+            { senderBank: "DBS" },
+        );
+
+        // Safety net should override to the correct account
+        expect(result).not.toBeNull();
+        expect(result.account_id).toBe("acc-yuu");
+        expect(result.account_name).toBe("DBS Yuu Card");
+    });
+
+    it("works via processText path (Telegram) without senderBank", async () => {
+        const config = makeConfig();
+        const tools = makeTools({
+            getPhase1ToolSchemas: () => [
+                { type: "function", function: { name: "fetch_context", parameters: {} } },
+            ],
+            executeTool: vi.fn(async (name) => {
+                if (name === "fetch_context")
+                    return { accounts: [{ id: "acc-yuu", name: "DBS Yuu Card", closed: false }], categories: [], payees: [] };
+                if (name === "search_memory") {
+                    return {
+                        results: [
+                            { text: "Card ending 3255 belongs to DBS Yuu Card", score: 0.80 },
+                        ],
+                    };
+                }
+                if (name === "check_duplicate") return false;
+                return true;
+            }),
+        });
+
+        const orch = new AgentOrchestrator(config, tools);
+        let systemPromptSent = null;
+        let callCount = 0;
+        orch._llm = {
+            chat: vi.fn(async (messages) => {
+                callCount++;
+                if (callCount === 1) {
+                    systemPromptSent = messages.find((m) => m.role === "system")?.content;
+                    return {
+                        choices: [{
+                            message: {
+                                tool_calls: [{
+                                    id: "tc-1",
+                                    function: { name: "fetch_context", arguments: '{"budget_id":"test-budget"}' },
+                                }],
+                            },
+                        }],
+                    };
+                }
+                return {
+                    choices: [{
+                        message: {
+                            content: JSON.stringify({
+                                merchant: "Toast Box",
+                                amount_cents: -1280,
+                                date: today,
+                                currency: "SGD",
+                                account_id: "acc-yuu",
+                                account_name: "DBS Yuu Card",
+                                skip: false,
+                            }),
+                        },
+                    }],
+                };
+            }),
+        };
+
+        await orch.processText(
+            "From: alerts@dbs.com\nSubject: Card Transaction Alert for 3255\n\nS$12.80 charged",
+        );
+
+        // search_memory should have been called even via processText
+        const searchCalls = tools.executeTool.mock.calls.filter(
+            (c) => c[0] === "search_memory",
+        );
+        expect(searchCalls.length).toBeGreaterThanOrEqual(1);
+
+        // Suffix context should be injected into system prompt
+        expect(systemPromptSent).toBeDefined();
+        expect(systemPromptSent).toContain("Card ending 3255 belongs to DBS Yuu Card");
+    });
+});
+
 describe("DeepSeekClient", () => {
     it("can be instantiated with config", () => {
         const config = makeConfig();
