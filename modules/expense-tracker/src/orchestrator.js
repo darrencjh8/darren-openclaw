@@ -295,7 +295,36 @@ export class AgentOrchestrator {
     // ═══════════════════════════════════════════════════════════════
 
     async _runPhase1(emailText, { senderBank } = {}) {
-        const prompt = getPhase1Prompt();
+        let prompt = getPhase1Prompt();
+
+        // ── Pre-Phase-1: inject card/account suffix context from memory ──
+        // AI trigger: semantic search surfaces relevant suffix facts.
+        // Filter by senderBank to avoid cross-bank confusion.
+        let suffixFacts = [];
+        try {
+            const memResult = await this._tools.executeTool("search_memory", {
+                query: emailText.slice(0, 300),
+            });
+            const SUFFIX_RE = /^(?:Card|Account)\s+ending\s+(\S+)\s+belongs\s+to\s+(.+)$/i;
+            for (const r of memResult?.results || []) {
+                if (r.score >= 0.3 && SUFFIX_RE.test(r.text)) {
+                    // Filter by sender bank: only include facts whose account
+                    // name contains the sender bank prefix
+                    if (senderBank) {
+                        const bankLower = senderBank.toLowerCase();
+                        if (!r.text.toLowerCase().includes(bankLower)) continue;
+                    }
+                    suffixFacts.push(r.text);
+                }
+            }
+        } catch {}
+
+        if (suffixFacts.length > 0) {
+            prompt +=
+                "\n\nKNOWN CARD SUFFIXES (from memory — use these for account matching):\n" +
+                suffixFacts.map((f) => `- ${f}`).join("\n");
+        }
+
         // let (not const) — validation retries (continue) push feedback and
         // must preserve messages; error retries (catch) reset to clean state.
         let messages = [
@@ -473,6 +502,45 @@ export class AgentOrchestrator {
                         }
                     } catch {
                         // fetch_context failed — skip account validation
+                    }
+                }
+
+                // ── Post-Phase-1 safety net: suffix-based account override ──
+                // If suffix facts were injected but the LLM still picked the
+                // wrong account, deterministically override before memory check.
+                if (
+                    !output.skip &&
+                    output.account_id &&
+                    !invalidFields.includes("account_id") &&
+                    suffixFacts.length > 0 &&
+                    liveAccounts.length > 0
+                ) {
+                    const SUFFIX_RE = /^(?:Card|Account)\s+ending\s+(\S+)\s+belongs\s+to\s+(.+)$/i;
+                    for (const fact of suffixFacts) {
+                        const m = fact.match(SUFFIX_RE);
+                        if (!m) continue;
+                        const suffix = m[1];
+                        const expectedAccount = m[2].trim();
+                        // Check if this suffix appears in the email text
+                        const suffixRe = new RegExp(`\\b${suffix}\\b`);
+                        if (!suffixRe.test(emailText)) continue;
+                        // Find the expected account in live data
+                        const match = liveAccounts.find(
+                            (a) =>
+                                a.name.toLowerCase() === expectedAccount.toLowerCase() &&
+                                !a.closed,
+                        );
+                        if (match && match.id !== output.account_id) {
+                            logger.info({
+                                event: "card_suffix_override",
+                                suffix,
+                                from: output.account_name,
+                                to: match.name,
+                            });
+                            output.account_id = match.id;
+                            output.account_name = match.name;
+                            break;
+                        }
                     }
                 }
 

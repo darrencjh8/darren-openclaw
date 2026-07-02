@@ -35,6 +35,10 @@ const STRUCTURED_PATTERNS = [
   { re: /^(.+?)\s+maps\s+to\s+(.+?)\s+payee$/i, rel: "->payee" },
   { re: /^(.+?)\s+maps\s+to\s+(.+?)\s+category$/i, rel: "->category" },
   { re: /^(.+?)\s+is\s+(?:a|an)\s+(.+?)\s+account$/i, rel: "is-account" },
+  {
+    re: /^(?:Card|Account)\s+ending\s+(\S+)\s+belongs\s+to\s+(.+?)$/i,
+    rel: "suffix->account",
+  },
 ];
 
 /** Semantic-dedup cosine-similarity threshold for free-form facts. */

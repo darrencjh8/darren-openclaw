@@ -666,6 +666,51 @@ describe("MemoryStore", () => {
       expect(store.listFacts().length).toBe(2);
     });
 
+    it("parses suffix->account pattern (Card ending)", () => {
+      const store = new MemoryStore(emptyMemoryPath);
+      const parsed = store._parseStructured(
+        "Card ending 3255 belongs to DBS Yuu Card",
+      );
+      expect(parsed).toEqual({
+        entity: "3255",
+        relation: "suffix->account",
+        value: "dbs yuu card",
+      });
+    });
+
+    it("parses suffix->account pattern (Account ending)", () => {
+      const store = new MemoryStore(emptyMemoryPath);
+      const parsed = store._parseStructured(
+        "Account ending 8901 belongs to DBS Account",
+      );
+      expect(parsed).toEqual({
+        entity: "8901",
+        relation: "suffix->account",
+        value: "dbs",
+      });
+    });
+
+    it("blocks suffix->account contradiction (same suffix, different account)", async () => {
+      const store = new MemoryStore(emptyMemoryPath);
+      await store.add("Card ending 3255 belongs to DBS Yuu Card");
+      const r = await store.add("Card ending 3255 belongs to DBS Altitude Card");
+      expect(r).toEqual({
+        added: false,
+        skipped: true,
+        reason: "contradiction",
+        existing: "Card ending 3255 belongs to DBS Yuu Card",
+      });
+    });
+
+    it("allows different suffixes for different accounts", async () => {
+      const store = new MemoryStore(emptyMemoryPath);
+      const r1 = await store.add("Card ending 3255 belongs to DBS Yuu Card");
+      expect(r1.added).toBe(true);
+      const r2 = await store.add("Card ending 4605 belongs to UOB Ladies Card");
+      expect(r2.added).toBe(true);
+      expect(store.listFacts().length).toBe(2);
+    });
+
     it("structured facts skip semantic dedup O1 path", async () => {
       const store = new MemoryStore(emptyMemoryPath);
       await store.add("KFC merchant maps to Fast Food payee");

@@ -52,6 +52,12 @@ describe("getPhase1Prompt", () => {
     expect(prompt).toMatch(/Card ending/);
   });
 
+  it("references KNOWN CARD SUFFIXES section for suffix matching (#269)", () => {
+    expect(prompt).toContain("KNOWN CARD SUFFIXES");
+    // Should NOT say "match from memory" since Phase 1 has no search_memory tool
+    expect(prompt).not.toMatch(/match from memory/i);
+  });
+
   it("instructs LLM to use card type for account matching", () => {
     expect(prompt).toContain("Card type");
     expect(prompt).toMatch(/credit.debit/);
