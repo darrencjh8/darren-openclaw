@@ -252,19 +252,6 @@ echo "$prompt_content" | grep -q 'Do NOT convert to tables' \
     && ok "prompt: forbid modification of message_body" \
     || nope "prompt: forbid modification" "missing 'Do NOT convert to tables' instruction"
 
-# Test: prompt must contain news source blocklist
-echo "$prompt_content" | grep -q 'bloomberg.com' \
-    && ok "prompt: block bloomberg.com from news search" \
-    || nope "prompt: block bloomberg.com" "missing bloomberg.com in blocklist"
-
-echo "$prompt_content" | grep -q 'wsj.com' \
-    && ok "prompt: block wsj.com from news search" \
-    || nope "prompt: block wsj.com" "missing wsj.com in blocklist"
-
-echo "$prompt_content" | grep -q 'ft.com' \
-    && ok "prompt: block ft.com from news search" \
-    || nope "prompt: block ft.com" "missing ft.com in blocklist"
-
 # Test: prompt must instruct LLM to NOT add commentary on news
 echo "$prompt_content" | grep -q 'Do NOT add commentary' \
     && ok "prompt: forbid news commentary" \

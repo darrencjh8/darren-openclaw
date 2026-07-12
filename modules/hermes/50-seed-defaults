@@ -105,7 +105,7 @@ except (FileNotFoundError, json.JSONDecodeError):
     jobs = []
 
 new_prompt = (
-    'Run portfolio_sync — it handles balances and taxonomies deterministically.\n\nRelay portfolio_status.analysis.message_body verbatim — do not change a single character, line, or word. Do NOT convert to tables. Do NOT merge lines. Do NOT add commentary. The report already includes sync status, portfolio data, and news headlines. in top_holdings (last 24h only). Block: bloomberg.com, wsj.com, ft.com. One headline+link per ticker. Report sync errors from sync_targets with action to take (e.g. /onedrive setup).'
+    'Run portfolio_sync \u2014 it handles balances and taxonomies deterministically.\n\nRelay portfolio_status.analysis.message_body verbatim \u2014 do not change a single character, line, or word. Do NOT convert to tables. Do NOT merge lines. Do NOT add commentary. The report already includes everything (sync status, portfolio data, news headlines).\n\nIf any sync step failed (check portfolio_status.sync_targets for errors), tell the user what went wrong and what action to take (e.g. /onedrive setup).'
 )
 
 
