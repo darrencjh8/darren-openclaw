@@ -157,14 +157,25 @@ public class PpClient {
             entry.setShares(Values.Share.factorize(shares));
             entry.setMonetaryAmount(Money.of(currencyCode, Math.round(price * Math.abs(shares) * 100)));
             entry.setAccount(account);
-            // Select portfolio: use offsetAccountId if provided, else default to first
+            // Select portfolio: match offsetAccountId against portfolio UUID first,
+            // then against reference account UUID. Falls back to first portfolio.
             Portfolio selected = null;
             if (offsetAccountId != null && !offsetAccountId.isEmpty()) {
+                // 1. Exact match: portfolio UUID
                 for (Portfolio p : client.getPortfolios()) {
-                    if (p.getReferenceAccount() != null
-                            && p.getReferenceAccount().getUUID().equals(offsetAccountId)) {
+                    if (p.getUUID().equals(offsetAccountId)) {
                         selected = p;
                         break;
+                    }
+                }
+                // 2. Match by reference account UUID
+                if (selected == null) {
+                    for (Portfolio p : client.getPortfolios()) {
+                        if (p.getReferenceAccount() != null
+                                && p.getReferenceAccount().getUUID().equals(offsetAccountId)) {
+                            selected = p;
+                            break;
+                        }
                     }
                 }
             }
