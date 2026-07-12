@@ -376,6 +376,7 @@ describe("ToolRegistry — PP bridge tools", () => {
                 fees: 1.0,
                 taxes: 0.5,
                 notes: "Test trade",
+                offsetAccountId: null,
             });
         });
 
@@ -390,6 +391,73 @@ describe("ToolRegistry — PP bridge tools", () => {
             });
             expect(mockBridge.insertTransaction).toHaveBeenCalledWith(
                 expect.objectContaining({ fees: 0, taxes: 0 }),
+            );
+        });
+
+        it("rejects duplicate via dedup check", async () => {
+            // Seed a dedup record that matches
+            const dedup2 = new DedupJournal(
+                ':memory:',
+            );
+            dedup2.record("2026-06-01", 1853000, "acct-1", "prev-txn-id", "sec-aapl", "Buy");
+            const reg2 = new ToolRegistry(cfg, dedup2, memory, mockBridge);
+
+            const result = await reg2.executeTool("insert_pp_transaction", {
+                account_id: "acct-1",
+                security_id: "sec-aapl",
+                type: "Buy",
+                date: "2026-06-01",
+                shares: 100,
+                price: 185.3,
+                currency_code: "USD",
+            });
+            expect(result.status).toBe("duplicate");
+            expect(result.reason).toContain("Duplicate");
+            // Bridge should NOT have been called
+            expect(mockBridge.insertTransaction).not.toHaveBeenCalled();
+        });
+
+        it("records dedup after successful insert", async () => {
+            const dedup2 = new DedupJournal(
+                ':memory:',
+            );
+            const reg2 = new ToolRegistry(cfg, dedup2, memory, mockBridge);
+
+            await reg2.executeTool("insert_pp_transaction", {
+                account_id: "acct-1",
+                security_id: "sec-aapl",
+                type: "Buy",
+                date: "2026-06-01",
+                shares: 100,
+                price: 185.3,
+                currency_code: "USD",
+            });
+            // Re-insert same should be blocked
+            const result = await reg2.executeTool("insert_pp_transaction", {
+                account_id: "acct-1",
+                security_id: "sec-aapl",
+                type: "Buy",
+                date: "2026-06-01",
+                shares: 100,
+                price: 185.3,
+                currency_code: "USD",
+            });
+            expect(result.status).toBe("duplicate");
+        });
+
+        it("passes offset_account_id to bridge", async () => {
+            await registry.executeTool("insert_pp_transaction", {
+                account_id: "acct-1",
+                security_id: "sec-aapl",
+                type: "Buy",
+                date: "2026-06-01",
+                shares: 100,
+                price: 185.3,
+                currency_code: "USD",
+                offset_account_id: "acct-offset-1",
+            });
+            expect(mockBridge.insertTransaction).toHaveBeenCalledWith(
+                expect.objectContaining({ offsetAccountId: "acct-offset-1" }),
             );
         });
     });

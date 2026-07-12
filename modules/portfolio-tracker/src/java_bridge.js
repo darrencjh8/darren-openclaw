@@ -213,6 +213,7 @@ export class PpJavaBridge {
         fees = 0,
         taxes = 0,
         notes = "",
+        offsetAccountId = null,
     }) {
         const release = await acquireWriteLock();
         try {
@@ -239,6 +240,9 @@ export class PpJavaBridge {
             ];
             if (securityId) {
                 args.push("--security-id", securityId);
+            }
+            if (offsetAccountId) {
+                args.push("--offset-account-id", offsetAccountId);
             }
             if (notes) {
                 args.push("--notes", notes);
@@ -268,6 +272,9 @@ export class PpJavaBridge {
                 "--date",
                 date,
             ];
+            if (offsetAccountId) {
+                args.push("--offset-account-id", offsetAccountId);
+            }
             if (notes) {
                 args.push("--notes", notes);
             }

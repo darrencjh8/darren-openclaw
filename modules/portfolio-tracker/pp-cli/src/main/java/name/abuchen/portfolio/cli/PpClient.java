@@ -135,7 +135,7 @@ public class PpClient {
 
     public Map<String, Object> insertTransaction(String accountId, String securityId, String type,
             String dateStr, double shares, double price, String currencyCode,
-            double fees, double taxes, String notes) throws IOException {
+            double fees, double taxes, String notes, String offsetAccountId) throws IOException {
 
         Client client = load();
         LocalDateTime dateTime = LocalDate.parse(dateStr).atStartOfDay();
@@ -157,8 +157,22 @@ public class PpClient {
             entry.setShares(Values.Share.factorize(shares));
             entry.setMonetaryAmount(Money.of(currencyCode, Math.round(price * Math.abs(shares) * 100)));
             entry.setAccount(account);
-            if (!client.getPortfolios().isEmpty()) {
-                entry.setPortfolio(client.getPortfolios().get(0));
+            // Select portfolio: use offsetAccountId if provided, else default to first
+            Portfolio selected = null;
+            if (offsetAccountId != null && !offsetAccountId.isEmpty()) {
+                for (Portfolio p : client.getPortfolios()) {
+                    if (p.getReferenceAccount() != null
+                            && p.getReferenceAccount().getUUID().equals(offsetAccountId)) {
+                        selected = p;
+                        break;
+                    }
+                }
+            }
+            if (selected == null && !client.getPortfolios().isEmpty()) {
+                selected = client.getPortfolios().get(0);
+            }
+            if (selected != null) {
+                entry.setPortfolio(selected);
             }
             if (notes != null && !notes.isEmpty()) {
                 entry.setNote(notes);

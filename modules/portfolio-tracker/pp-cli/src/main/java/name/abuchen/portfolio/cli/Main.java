@@ -46,7 +46,8 @@ public class Main {
                             require(params, "currency"),
                             parseFiniteNonNegative(params.getOrDefault("fees", "0"), "fees"),
                             parseFiniteNonNegative(params.getOrDefault("taxes", "0"), "taxes"),
-                            params.getOrDefault("notes", "")
+                            params.getOrDefault("notes", ""),
+                            params.get("offset-account-id")
                     );
                     break;
                 case "balance":
