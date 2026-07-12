@@ -92,8 +92,7 @@ if [ -n "${MEMORY_REPO_URL}" ] && [ ! -f "/opt/data/memories/MEMORY.md" ]; then
     rm -rf /tmp/friday-memory-clone || true
 fi
 
-# Seed portfolio-sync cron job (idempotent)
-# Uses heredoc (<<'PYEOF') to avoid shellcheck issues with apostrophes/escapes in the prompt.
+# Seed portfolio-sync cron job (idempotent, updates prompt on redeploy)
 python3 <<'PYEOF' || true
 import os, json, uuid, datetime
 jobs_path = "/opt/data/cron/jobs.json"
@@ -104,36 +103,54 @@ try:
     jobs = data.get("jobs", []) if isinstance(data, dict) else data
 except (FileNotFoundError, json.JSONDecodeError):
     jobs = []
-if not any(j.get("name") == "portfolio-daily-sync" for j in jobs if isinstance(j, dict)):
+
+new_prompt = (
+    "Run portfolio_sync \u2014 it handles balances and taxonomies deterministically.\n\n"
+    + "The result contains portfolio_status.analysis.message_body \u2014 this is a fully "
+    + "pre-formatted portfolio report. Relay it EXACTLY as-is to the user. Do NOT modify, "
+    + "reformat, add commentary, or recompute any numbers.\n\n"
+    + "After relaying the message_body, web_search for headlines (last 24 hours only) "
+    + "affecting the top 3 tickers listed in portfolio_status.analysis.top_holdings.\n\n"
+    + "BLOCK these sources: bloomberg.com, wsj.com, ft.com.\n\n"
+    + "Format each as: {ticker} \u2014 {headline} ({source_link})\n"
+    + "Do NOT add commentary, analysis, or interpretation. Just headline + link.\n"
+    + "If no fresh news: \"No material news in last 24h.\"\n"
+    + "If web_search fails: \"News unavailable (search error).\"\n\n"
+    + "If any sync step failed (check portfolio_status.sync_targets for errors), "
+    + "tell the user what went wrong and what action to take (e.g. /onedrive setup)."
+)
+
+found = False
+for j in jobs:
+    if not isinstance(j, dict):
+        continue
+    if j.get("name") == "portfolio-daily-sync":
+        found = True
+        old_prompt = j.get("prompt", "")
+        if old_prompt != new_prompt:
+            j["prompt"] = new_prompt
+            print("cron: portfolio-daily-sync prompt updated")
+        else:
+            print("cron: portfolio-daily-sync prompt unchanged")
+        break
+
+if not found:
     jobs.append({
         "id": uuid.uuid4().hex[:12],
         "name": "portfolio-daily-sync",
         "schedule": {"kind": "cron", "expr": "0 12 * * *", "display": "0 12 * * *"},
         "schedule_display": "0 12 * * *",
-        "prompt": (
-            "Run portfolio_sync \u2014 it handles balances and taxonomies deterministically.\n\n"
-            + "The result contains portfolio_status.analysis.message_body \u2014 this is a fully "
-            + "pre-formatted portfolio report. Relay it EXACTLY as-is to the user. Do NOT modify, "
-            + "reformat, add commentary, or recompute any numbers.\n\n"
-            + "After relaying the message_body, web_search for headlines (last 24 hours only) "
-            + "affecting the top 3 tickers listed in portfolio_status.analysis.top_holdings.\n\n"
-            + "BLOCK these sources: bloomberg.com, wsj.com, ft.com.\n\n"
-            + "Format each as: {ticker} \u2014 {headline} ({source_link})\n"
-            + "Do NOT add commentary, analysis, or interpretation. Just headline + link.\n"
-            + "If no fresh news: \"No material news in last 24h.\"\n"
-            + "If web_search fails: \"News unavailable (search error).\"\n\n"
-            + "If any sync step failed (check portfolio_status.sync_targets for errors), "
-            + "tell the user what went wrong and what action to take (e.g. /onedrive setup)."
-        ),
+        "prompt": new_prompt,
         "enabled": True,
         "deliver": "telegram",
         "deliver_extra": {"chat_id": os.environ.get("TELEGRAM_HOME_CHANNEL", "")},
         "next_run_at": None,
         "created_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
     })
-    with open(jobs_path, "w") as f:
-        json.dump({"jobs": jobs, "updated_at": datetime.datetime.now(datetime.timezone.utc).isoformat()}, f, indent=2)
-        print("cron: portfolio-daily-sync seeded")
+    print("cron: portfolio-daily-sync seeded")
+
+with open(jobs_path, "w") as f:
+    json.dump({"jobs": jobs, "updated_at": datetime.datetime.now(datetime.timezone.utc).isoformat()}, f, indent=2)
 PYEOF
 
 # Disable profile gateways (workers don't need their own gateways — they compete for Telegram token)

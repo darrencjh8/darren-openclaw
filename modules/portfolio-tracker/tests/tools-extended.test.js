@@ -900,7 +900,7 @@ describe("ToolRegistry — _buildAnalysis", () => {
         expect(bigFlags[0].severity).toBe("warn");
     });
 
-    it("does NOT flag diversified holdings (ETFs) >20%", () => {
+    it("does NOT flag diversified holdings (ETFs) >20% via security_type", () => {
         const data = {
             taxonomies: [
                 {
@@ -933,6 +933,212 @@ describe("ToolRegistry — _buildAnalysis", () => {
         const analysis = registry._buildAnalysis(data, { SGD: 1.0 });
         const cspxFlags = analysis.flags.filter((f) => f.ticker === "CSPX");
         expect(cspxFlags.length).toBe(0);
+    });
+
+    it("detects diversified holdings from Asset Classes taxonomy", () => {
+        // Simulate real production scenario: security_type is "" (PP doesn't expose it)
+        // but Asset Classes taxonomy classifies CSPX as "Broad Index ETFs"
+        const data = {
+            taxonomies: [
+                {
+                    name: "Regions (Liquid)",
+                    values: [
+                        {
+                            value: "America", valuation_native: 100000, currency: "SGD",
+                            share_pct: 50, children: [
+                                {
+                                    name: "iShares Core S&P 500 UCITS ETF", ticker: "CSPX",
+                                    currency: "USD", valuation_native: 100000,
+                                    security_uuid: "sec-cspx", security_type: "",
+                                },
+                                {
+                                    name: "DBS Group Holdings", ticker: "D05",
+                                    currency: "SGD", valuation_native: 50000,
+                                    security_uuid: "sec-d05", security_type: "",
+                                },
+                            ],
+                        },
+                    ],
+                },
+                {
+                    name: "Asset Classes",
+                    values: [
+                        {
+                            value: "Broad Index ETFs", valuation_native: 100000,
+                            currency: "USD", share_pct: 50, children: [
+                                {
+                                    name: "iShares Core S&P 500 UCITS ETF",
+                                    ticker: "CSPX", currency: "USD",
+                                    valuation_native: 100000,
+                                    security_uuid: "sec-cspx",
+                                    security_type: "",
+                                },
+                            ],
+                        },
+                        {
+                            value: "Dividend", valuation_native: 50000,
+                            currency: "SGD", share_pct: 25, children: [
+                                {
+                                    name: "DBS Group Holdings",
+                                    ticker: "D05", currency: "SGD",
+                                    valuation_native: 50000,
+                                    security_uuid: "sec-d05",
+                                    security_type: "",
+                                },
+                            ],
+                        },
+                    ],
+                },
+            ],
+        };
+        const fx = { USD: 1.35, SGD: 1.0 };
+        const analysis = registry._buildAnalysis(data, fx);
+        // CSPX (Broad Index ETFs) → diversified, no flag
+        const cspxFlags = analysis.flags.filter((f) => f.ticker === "CSPX");
+        expect(cspxFlags.length).toBe(0);
+        // D05 (Dividend, 50000/150000=33.3%) → single stock, should be flagged
+        const d05Flags = analysis.flags.filter((f) => f.ticker === "D05");
+        expect(d05Flags.length).toBe(1);
+        expect(d05Flags[0].severity).toBe("warn");
+    });
+
+    it("does NOT flag Cash-classified holdings as concentration risk", () => {
+        const data = {
+            taxonomies: [
+                {
+                    name: "Regions (Liquid)",
+                    values: [
+                        {
+                            value: "Investable Cash", valuation_native: 100000,
+                            currency: "SGD", share_pct: 66.7, children: [
+                                {
+                                    name: "Cash Account", ticker: "", currency: "SGD",
+                                    valuation_native: 100000, security_uuid: "cash-uuid",
+                                    security_type: "",
+                                },
+                            ],
+                        },
+                    ],
+                },
+                {
+                    name: "Asset Classes",
+                    values: [
+                        {
+                            value: "Cash", valuation_native: 100000,
+                            currency: "SGD", share_pct: 66.7, children: [
+                                {
+                                    name: "Cash Account", ticker: "",
+                                    currency: "SGD", valuation_native: 100000,
+                                    security_uuid: "cash-uuid",
+                                    security_type: "",
+                                },
+                            ],
+                        },
+                    ],
+                },
+            ],
+        };
+        const analysis = registry._buildAnalysis(data, { SGD: 1.0 });
+        // Cash is diversified — should not be flagged for concentration
+        const warnings = analysis.flags.filter((f) => f.severity === "warn");
+        expect(warnings.length).toBe(0);
+    });
+
+    it("handles missing Asset Classes taxonomy gracefully", () => {
+        // No Asset Classes taxonomy — should fall back to security_type check
+        const data = {
+            taxonomies: [
+                {
+                    name: "Regions (Liquid)",
+                    values: [
+                        {
+                            value: "America", valuation_native: 100000, currency: "SGD",
+                            share_pct: 100, children: [
+                                {
+                                    name: "BigCorp", ticker: "BIG", currency: "SGD",
+                                    valuation_native: 100000, security_uuid: "sec-big",
+                                    security_type: "Equity",
+                                },
+                            ],
+                        },
+                    ],
+                },
+            ],
+        };
+        const analysis = registry._buildAnalysis(data, { SGD: 1.0 });
+        expect(analysis.top_holdings.length).toBe(1);
+        // Falls back to security_type: "Equity" not in diversified types → flagged
+        const bigFlags = analysis.flags.filter((f) => f.ticker === "BIG");
+        expect(bigFlags.length).toBe(1);
+    });
+
+    it("uses Asset Class over empty security_type for Growth stocks", () => {
+        // Growth stocks are NOT diversified even if security_type is ""
+        const data = {
+            taxonomies: [
+                {
+                    name: "Regions (Liquid)",
+                    values: [
+                        {
+                            value: "America", valuation_native: 100000, currency: "SGD",
+                            share_pct: 100, children: [
+                                {
+                                    name: "GrowthCorp", ticker: "GRW", currency: "SGD",
+                                    valuation_native: 100000, security_uuid: "sec-grw",
+                                    security_type: "",
+                                },
+                            ],
+                        },
+                    ],
+                },
+                {
+                    name: "Asset Classes",
+                    values: [
+                        {
+                            value: "Growth", valuation_native: 100000,
+                            currency: "SGD", share_pct: 100, children: [
+                                {
+                                    name: "GrowthCorp", ticker: "GRW",
+                                    currency: "SGD", valuation_native: 100000,
+                                    security_uuid: "sec-grw",
+                                    security_type: "",
+                                },
+                            ],
+                        },
+                    ],
+                },
+            ],
+        };
+        const analysis = registry._buildAnalysis(data, { SGD: 1.0 });
+        // "Growth" does not match diversified keywords → flagged as concentration
+        const grwFlags = analysis.flags.filter((f) => f.ticker === "GRW");
+        expect(grwFlags.length).toBe(1);
+        expect(grwFlags[0].severity).toBe("warn");
+    });
+
+    it("includes sync status in message_body when syncMeta provided", () => {
+        const syncMeta = {
+            accounts_synced: 2,
+            accounts_total: 3,
+            accounts_errors: 1,
+            ibkr_trades: 1,
+            ibkr_dividends: 2,
+            ibkr_skipped: 0,
+            errors: [{ account: "Warchest", error: "timeout" }],
+        };
+        const analysis = registry._buildAnalysis(
+            sampleTaxonomyData, sampleFxRates, syncMeta,
+        );
+        expect(analysis.message_body).toContain("Synced 2/3");
+        expect(analysis.message_body).toContain("IBKR: 1 trades, 2 dividends");
+    });
+
+    it("omits sync section when syncMeta is empty", () => {
+        const analysis = registry._buildAnalysis(
+            sampleTaxonomyData, sampleFxRates, null,
+        );
+        expect(analysis.message_body).not.toContain("Synced");
+        expect(analysis.message_body).not.toContain("IBKR:");
     });
 
     it("computes top_movers by abs(price_change_pct)", () => {
