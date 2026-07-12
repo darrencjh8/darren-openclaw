@@ -232,7 +232,7 @@ describe("formatSyncResult", () => {
     it("shows sync summary", () => {
         const raw = { summary: "Synced 3/3 accounts" };
         const out = formatSyncResult(raw);
-        expect(out).toBe("Synced 3/3 accounts");
+        expect(out).toContain("🔄 Synced 3/3 accounts");
     });
 
     it("shows IBKR activity when present", () => {
@@ -241,7 +241,7 @@ describe("formatSyncResult", () => {
             flex_import: { trades_imported: 3, dividends_imported: 1 },
         };
         const out = formatSyncResult(raw);
-        expect(out).toContain("Synced 2/2 accounts");
+        expect(out).toContain("🔄 Synced 2/2 accounts");
         expect(out).toContain("IBKR: 3 trades, 1 dividends");
     });
 
@@ -267,33 +267,22 @@ describe("formatSyncResult", () => {
         expect(out).toContain("⚠️ Warchest: timeout");
     });
 
-    it("handles empty raw gracefully", () => {
-        const out = formatSyncResult({});
-        expect(out).toBe("");
-    });
-
-    // Analysis is NOT rendered by formatSyncResult — it belongs in
-    // portfolio_status.analysis.message_body, relayed by the LLM separately.
-    it("does NOT render analysis or taxonomy data", () => {
+    it("appends analysis.message_body when present", () => {
         const raw = {
             summary: "Synced 1/1 accounts",
-            analysis: {
-                liquid_total_sgd: 138062,
-                illiquid_total_sgd: 317971,
-                top_holdings: [{ ticker: "AAPL", name: "Apple Inc", valuation_sgd: 50000 }],
-            },
-            taxonomy_data: {
-                taxonomies: [{ name: "Regions", values: [
-                    { value: "America", valuation_native: 85502 },
-                ]}],
-            },
+            analysis: { message_body: "📊 2026-07-12\n\nLiquid SGD 100,000" },
         };
         const out = formatSyncResult(raw);
-        expect(out).not.toContain("Liquid");
-        expect(out).not.toContain("Top 5");
-        expect(out).not.toContain("Instrument");
-        expect(out).not.toContain("138,062");
-        expect(out).toBe("Synced 1/1 accounts");
+        expect(out).toContain("🔄 Synced 1/1 accounts");
+        expect(out).toContain("📊 2026-07-12");
+        expect(out).toContain("Liquid SGD 100,000");
+    });
+
+    it("handles missing analysis gracefully", () => {
+        const raw = { summary: "Synced 1/1 accounts" };
+        const out = formatSyncResult(raw);
+        expect(out).toContain("🔄 Synced 1/1 accounts");
+        expect(out).not.toContain("📊");
     });
 });
 

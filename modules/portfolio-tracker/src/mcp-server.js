@@ -15,15 +15,15 @@ import { getAuthUrl, exchangeCodeForToken } from "./onedrive_oauth.js";
 export function formatSyncResult(raw) {
     const lines = [];
 
-    // Sync status
-    if (raw.summary) lines.push(raw.summary);
-
-    // New IBKR activity
+    // Sync status header
+    const parts = [];
+    if (raw.summary) parts.push(raw.summary);
     const fi = raw.flex_import;
     if (fi && (fi.trades_imported > 0 || fi.dividends_imported > 0)) {
-        lines.push(
-            `IBKR: ${fi.trades_imported || 0} trades, ${fi.dividends_imported || 0} dividends`,
-        );
+        parts.push(`IBKR: ${fi.trades_imported || 0} trades, ${fi.dividends_imported || 0} dividends`);
+    }
+    if (parts.length > 0) {
+        lines.push(`🔄 ${parts.join(" · ")}`);
     }
 
     // Error details
@@ -32,13 +32,19 @@ export function formatSyncResult(raw) {
         lines.push(`⚠️ ${e.name || e.account_id}: ${e.error || e.result?.error || "unknown"}`);
     }
 
+    // Pre-computed analysis block (the authoritative portfolio display)
+    if (raw.analysis?.message_body) {
+        if (lines.length > 0) lines.push("");
+        lines.push(raw.analysis.message_body);
+    }
+
     return lines.join("\n");
 }
 
 function createTools(server, registry) {
     server.tool(
         "portfolio_sync",
-        "Full portfolio sync — OneDrive pull → IBKR flex → import → AB sync → push → taxonomy. Returns a concise structured summary. Relay this output directly without re-narrating or adding commentary.",
+        "Full portfolio sync — OneDrive pull → IBKR flex → import → AB sync → push → taxonomy. Returns the complete portfolio report (sync status + formatted holdings, sectors, news). Relay this output directly without re-narrating or adding commentary.",
         {},
         async () => {
             if (!registry._ppBridge) {
