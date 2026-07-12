@@ -1718,4 +1718,19 @@ describe("ToolRegistry — _buildAnalysis", () => {
         expect(headlines[0]).toContain("beats estimates");
         expect(headlines[0]).not.toContain("A M D");
     });
+
+    it("filters out concatenated anti-scraping headlines (no spaces, long)", async () => {
+        const rss = '<?xml version="1.0"?><rss><channel>'
+            + '<item><title>AMDSharesBoughtbyFifthThirdBancorpMarketBeatWallStreet</title>'
+            + '<link>https://example.com/concat</link>'
+            + '<pubDate>' + new Date().toUTCString() + '</pubDate></item>'
+            + '<item><title>AMD beats estimates</title>'
+            + '<link>https://example.com/normal</link>'
+            + '<pubDate>' + new Date().toUTCString() + '</pubDate></item>'
+            + '</channel></rss>';
+        fetch.mockResolvedValueOnce({ status: 200, text: () => Promise.resolve(rss) });
+        const headlines = await registry._fetchNews(["AMD"]);
+        expect(headlines.length).toBe(1);
+        expect(headlines[0]).toContain("beats estimates");
+    });
 });

@@ -273,7 +273,8 @@ describe("formatSyncResult", () => {
             analysis: { message_body: "📊 2026-07-12\n\nLiquid SGD 100,000" },
         };
         const out = formatSyncResult(raw);
-        expect(out).toContain("🔄 Synced 1/1 accounts");
+        // analysis.message_body is returned directly, no prepended sync header
+        expect(out).not.toContain("🔄");
         expect(out).toContain("📊 2026-07-12");
         expect(out).toContain("Liquid SGD 100,000");
     });
