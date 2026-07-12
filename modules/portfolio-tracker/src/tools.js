@@ -924,6 +924,7 @@ export class ToolRegistry {
 
         // Step 4b: Also query taxonomy data for MCP (liquid/illiquid split)
         let taxonomyData = null;
+        let assetClassData = null;
         if (this._ppBridge) {
             try {
                 taxonomyData = await this._ppBridge.queryTaxonomies(
@@ -932,6 +933,24 @@ export class ToolRegistry {
             } catch (e) {
                 console.warn(`Failed to query taxonomies: ${e.message}`);
             }
+            // Query Asset Classes taxonomy for ETF/Fund detection
+            try {
+                assetClassData = await this._ppBridge.queryTaxonomies(
+                    ["Asset Classes"],
+                );
+            } catch (e) {
+                console.warn(`Failed to query Asset Classes taxonomy: ${e.message}`);
+            }
+        }
+
+        // Merge Asset Classes into taxonomy data for analysis
+        if (taxonomyData && assetClassData) {
+            taxonomyData = {
+                taxonomies: [
+                    ...(taxonomyData.taxonomies || []),
+                    ...(assetClassData.taxonomies || []),
+                ],
+            };
         }
 
         // Step 5: Get status with SGD-converted totals
@@ -962,7 +981,19 @@ export class ToolRegistry {
                 }
             }
             fxRatesUsed = await this._fetchLiveRates([...currencies]);
-            analysis = this._buildAnalysis(taxonomyData, fxRatesUsed);
+            const syncMeta = {
+                accounts_synced: results.filter((r) => r.status === "updated").length,
+                accounts_total: results.length,
+                accounts_errors: results.filter((r) => r.status === "error").length,
+                ibkr_trades: flexImportResult?.trades_imported || 0,
+                ibkr_dividends: flexImportResult?.dividends_imported || 0,
+                ibkr_skipped: flexImportResult?.items_skipped || 0,
+                errors: results.filter((r) => r.status === "error").map((r) => ({
+                    account: r.name || r.account_id,
+                    error: r.error || r.result?.error || "unknown",
+                })),
+            };
+            analysis = this._buildAnalysis(taxonomyData, fxRatesUsed, syncMeta);
         }
 
         return {
@@ -1034,13 +1065,39 @@ export class ToolRegistry {
     // Build pre-computed analysis block from taxonomy data + fx rates
     // -----------------------------------------------------------------------
 
-    _buildAnalysis(taxonomyData, fxRates) {
+    _buildAnalysis(taxonomyData, fxRates, syncMeta) {
+        // ── Asset Class → diversified detection ──
+        // Reads the "Asset Classes" taxonomy to determine which holdings
+        // are diversified (ETFs, funds, cash) vs single-stock positions.
+        // Classification names matching these keywords are diversified.
+        const DIVERSIFIED_CLASS_KEYWORDS = /\b(ETF|Fund|Index|Bond|Cash)\b/i;
+        const assetClassMap = new Map(); // security_uuid → classification name
+        for (const tax of taxonomyData.taxonomies || []) {
+            if (tax.name && tax.name.toLowerCase().includes("asset")) {
+                for (const v of tax.values || []) {
+                    for (const c of v.children || []) {
+                        const uuid = c.security_uuid || c.ticker || c.name;
+                        if (!assetClassMap.has(uuid)) {
+                            assetClassMap.set(uuid, v.value);
+                        }
+                    }
+                }
+            }
+        }
+
         const diversifiedTypes = (process.env.PP_DIVERSIFIED_TYPES || "ETF,Fund,Mutual Fund,Index Fund")
             .split(",")
             .map((t) => t.trim().toLowerCase());
 
-        const isDiversified = (securityType) =>
-            diversifiedTypes.includes((securityType || "").toLowerCase());
+        const isDiversified = (securityType, uuid, name) => {
+            // 1. Check asset class taxonomy (authoritative)
+            const assetClass = assetClassMap.get(uuid);
+            if (assetClass) {
+                return DIVERSIFIED_CLASS_KEYWORDS.test(assetClass);
+            }
+            // 2. Check security_type (forward compat if PP ever provides it)
+            return diversifiedTypes.includes((securityType || "").toLowerCase());
+        };
 
         // Collect all children from liquid taxonomies (exclude "Without Classification")
         const allChildren = [];
@@ -1057,7 +1114,8 @@ export class ToolRegistry {
             const isRegions = tax.name && tax.name.toLowerCase().includes("region");
             const isSector = tax.name && tax.name.toLowerCase().includes("sector");
             const isGeo = tax.name && tax.name.toLowerCase().includes("geograph");
-            const sumTotals = isRegions || (isFirstTaxonomy && !isSector && !isGeo);
+            const isAssetClass = tax.name && tax.name.toLowerCase().includes("asset");
+            const sumTotals = isRegions || (isFirstTaxonomy && !isSector && !isGeo && !isAssetClass);
 
             for (const v of tax.values || []) {
                 const sgdRate = fxRates[v.currency] || 0;
@@ -1116,7 +1174,7 @@ export class ToolRegistry {
                             valuation_sgd: Math.round(childValueSgd),
                             security_uuid: uuid,
                             security_type: c.security_type || "",
-                            is_diversified: isDiversified(c.security_type),
+                            is_diversified: isDiversified(c.security_type, uuid, c.name),
                             price_prev_close: c.price_prev_close || null,
                             price_change_pct: c.price_change_pct || null,
                             stale_days: c.stale_days || 0,
@@ -1217,6 +1275,36 @@ export class ToolRegistry {
 
         const today = new Date().toISOString().slice(0, 10);
         const lines = [];
+
+        // ── Sync status (prepended before portfolio data) ──
+        if (syncMeta) {
+            const parts = [];
+            const accts = syncMeta.accounts_synced != null
+                ? `Synced ${syncMeta.accounts_synced}/${syncMeta.accounts_total} AB accounts`
+                : null;
+            if (syncMeta.accounts_errors > 0) {
+                parts.push(`${accts} (${syncMeta.accounts_errors} errors)`);
+            } else if (accts) {
+                parts.push(accts);
+            }
+            if (syncMeta.ibkr_trades != null || syncMeta.ibkr_dividends != null) {
+                const t = syncMeta.ibkr_trades || 0;
+                const d = syncMeta.ibkr_dividends || 0;
+                const s = syncMeta.ibkr_skipped || 0;
+                let ibkr = `IBKR: ${t} trades, ${d} dividends`;
+                if (s > 0) ibkr += ` (${s} skipped)`;
+                parts.push(ibkr);
+            }
+            if (syncMeta.errors && syncMeta.errors.length > 0) {
+                for (const e of syncMeta.errors) {
+                    parts.push(`⚠️ ${e.account}: ${e.error}`);
+                }
+            }
+            if (parts.length > 0) {
+                lines.push(`🔄 ${parts.join(" · ")}`);
+                lines.push("");
+            }
+        }
 
         // Check for bridge errors
         if (liquidTotalSgd === 0 && illiquidTotalSgd === 0) {

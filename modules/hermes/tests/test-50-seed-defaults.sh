@@ -208,7 +208,7 @@ echo "=== portfolio-daily-sync prompt content ==="
 # Verify the prompt in 50-seed-defaults contains key instructions.
 # The prompt is a Python parenthesised string concat inside a heredoc.
 # We extract the PYEOF block and use balanced-paren matching to eval the prompt.
-prompt_content=$(python3 -c "
+	prompt_content=$(python3 -c "
 import re
 with open('$SEED_SCRIPT') as f:
     content = f.read()
@@ -218,22 +218,28 @@ if not match:
     print('EXTRACT_FAILED')
 else:
     pyblock = match.group(1)
-    # Find '\"prompt\": (' and then match balanced parens
-    idx = pyblock.find('\"prompt\":')
-    if idx < 0:
-        print('PROMPT_NOT_FOUND')
-    else:
+    # Find new_prompt variable: new_prompt = (...)
+    idx = pyblock.find('new_prompt =')
+    if idx >= 0:
         rest = pyblock[idx:]
         paren_start = rest.index('(')
-        depth = 0
-        for i, ch in enumerate(rest[paren_start:], paren_start):
-            if ch == '(': depth += 1
-            elif ch == ')': depth -= 1
-            if depth == 0:
-                expr = rest[paren_start:i+1]
-                break
-        prompt = eval(expr)
-        print(prompt)
+    else:
+        # Fallback: inline \"prompt\": (...)
+        idx = pyblock.find('\"prompt\":')
+        if idx < 0:
+            print('PROMPT_NOT_FOUND')
+            exit()
+        rest = pyblock[idx:]
+        paren_start = rest.index('(')
+    depth = 0
+    for i, ch in enumerate(rest[paren_start:], paren_start):
+        if ch == '(': depth += 1
+        elif ch == ')': depth -= 1
+        if depth == 0:
+            expr = rest[paren_start:i+1]
+            break
+    prompt = eval(expr)
+    print(prompt)
 ")
 
 # Test: prompt must instruct agent to relay message_body verbatim
