@@ -1084,15 +1084,24 @@ export class ToolRegistry {
 
   async _check_ab_duplicate(date, amount_cents, account_id, budget_id = "") {
     try {
+      // Expand to ±1 day to handle bank posting lag;
+      // query all transactions regardless of cleared status
+      const d = new Date(date + "T00:00:00Z");
+      const before = new Date(d);
+      before.setUTCDate(before.getUTCDate() - 1);
+      const after = new Date(d);
+      after.setUTCDate(after.getUTCDate() + 1);
+      const since = before.toISOString().slice(0, 10);
+      const until = after.toISOString().slice(0, 10);
+
       const transactions = await this._get("/transactions", budget_id, {
-        since_date: date,
-        until_date: date,
+        since_date: since,
+        until_date: until,
         account_id: account_id,
-        cleared: "false",
       });
       if (!Array.isArray(transactions)) return false;
       return transactions.some(
-        (tx) => tx.date === date && tx.amount === amount_cents,
+        (tx) => tx.amount === amount_cents && tx.date >= since && tx.date <= until,
       );
     } catch {
       return false;

@@ -918,4 +918,194 @@ public class PpClientTest {
         }
         assertFalse("Without Classification should NOT appear when all classified", foundWc);
     }
+
+    // ---- Tests for new children fields (security_uuid, security_type, price_change, stale_days) ----
+
+    @Test
+    public void testQueryTaxonomiesChildrenIncludeSecurityUuid() throws Exception {
+        Client client = buildTestClient();
+        File tmpFile = File.createTempFile("pp-test-", ".xml");
+        tmpFile.deleteOnExit();
+        PpClient ppClient = new PpClient(tmpFile) {
+            @Override
+            public Client load() { return client; }
+        };
+
+        Map<String, Object> result = ppClient.queryTaxonomies(List.of("test-taxonomy"));
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> values = (List<Map<String, Object>>)
+                ((List<Map<String, Object>>) result.get("taxonomies")).get(0).get("values");
+
+        for (Map<String, Object> v : values) {
+            @SuppressWarnings("unchecked")
+            List<Map<String, Object>> children = (List<Map<String, Object>>) v.get("children");
+            if (children != null) {
+                for (Map<String, Object> child : children) {
+                    assertNotNull("security_uuid missing for " + child.get("ticker"), child.get("security_uuid"));
+                    String uuid = (String) child.get("security_uuid");
+                    assertFalse("security_uuid must not be empty", uuid.isEmpty());
+                }
+            }
+        }
+    }
+
+    @Test
+    public void testQueryTaxonomiesChildrenIncludeSecurityType() throws Exception {
+        Client client = buildTestClient();
+        File tmpFile = File.createTempFile("pp-test-", ".xml");
+        tmpFile.deleteOnExit();
+        PpClient ppClient = new PpClient(tmpFile) {
+            @Override
+            public Client load() { return client; }
+        };
+
+        Map<String, Object> result = ppClient.queryTaxonomies(List.of("test-taxonomy"));
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> values = (List<Map<String, Object>>)
+                ((List<Map<String, Object>>) result.get("taxonomies")).get(0).get("values");
+
+        for (Map<String, Object> v : values) {
+            @SuppressWarnings("unchecked")
+            List<Map<String, Object>> children = (List<Map<String, Object>>) v.get("children");
+            if (children != null) {
+                for (Map<String, Object> child : children) {
+                    assertNotNull("security_type missing for " + child.get("ticker"), child.get("security_type"));
+                }
+            }
+        }
+    }
+
+    @Test
+    public void testQueryTaxonomiesChildrenIncludePricePrevClose() throws Exception {
+        Client client = buildTestClient();
+        File tmpFile = File.createTempFile("pp-test-", ".xml");
+        tmpFile.deleteOnExit();
+        PpClient ppClient = new PpClient(tmpFile) {
+            @Override
+            public Client load() { return client; }
+        };
+
+        Map<String, Object> result = ppClient.queryTaxonomies(List.of("test-taxonomy"));
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> values = (List<Map<String, Object>>)
+                ((List<Map<String, Object>>) result.get("taxonomies")).get(0).get("values");
+
+        for (Map<String, Object> v : values) {
+            @SuppressWarnings("unchecked")
+            List<Map<String, Object>> children = (List<Map<String, Object>>) v.get("children");
+            if (children != null) {
+                for (Map<String, Object> child : children) {
+                    // Both fields should exist (may be null if only one price)
+                    assertTrue("price_prev_close missing for " + child.get("ticker"),
+                            child.containsKey("price_prev_close"));
+                    assertTrue("price_change_pct missing for " + child.get("ticker"),
+                            child.containsKey("price_change_pct"));
+                }
+            }
+        }
+    }
+
+    @Test
+    public void testQueryTaxonomiesChildrenIncludeStaleDays() throws Exception {
+        Client client = buildTestClient();
+        File tmpFile = File.createTempFile("pp-test-", ".xml");
+        tmpFile.deleteOnExit();
+        PpClient ppClient = new PpClient(tmpFile) {
+            @Override
+            public Client load() { return client; }
+        };
+
+        Map<String, Object> result = ppClient.queryTaxonomies(List.of("test-taxonomy"));
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> values = (List<Map<String, Object>>)
+                ((List<Map<String, Object>>) result.get("taxonomies")).get(0).get("values");
+
+        for (Map<String, Object> v : values) {
+            @SuppressWarnings("unchecked")
+            List<Map<String, Object>> children = (List<Map<String, Object>>) v.get("children");
+            if (children != null) {
+                for (Map<String, Object> child : children) {
+                    assertTrue("stale_days missing for " + child.get("ticker"),
+                            child.containsKey("stale_days"));
+                    // Should be a non-negative integer
+                    int staleDays = ((Number) child.get("stale_days")).intValue();
+                    assertTrue("stale_days must be >= 0", staleDays >= 0);
+                }
+            }
+        }
+    }
+
+    @Test
+    public void testQueryTaxonomiesPriceChangePctIsCorrectForSecurityWithTwoPrices() throws Exception {
+        Client client = new Client();
+        client.setBaseCurrency("SGD");
+
+        Security sec = new Security();
+        sec.setName("Test Stock");
+        sec.setTickerSymbol("TST");
+        sec.setCurrencyCode("USD");
+        // Price 2 days ago: $100
+        sec.addPrice(new SecurityPrice(LocalDate.now().minusDays(2), 100_00000000L));
+        // Latest price (yesterday): $110 — 10% gain
+        sec.addPrice(new SecurityPrice(LocalDate.now().minusDays(1), 110_00000000L));
+        client.addSecurity(sec);
+
+        Portfolio portfolio = new Portfolio();
+        portfolio.setName("Test");
+        client.addPortfolio(portfolio);
+        portfolio.addTransaction(new PortfolioTransaction(
+                LocalDateTime.of(2023, 1, 1, 0, 0), "USD", 0, sec,
+                100_000000L, PortfolioTransaction.Type.BUY, 0, 0));
+
+        Taxonomy taxonomy = new Taxonomy("test-taxonomy");
+        taxonomy.setRootNode(new Classification("root", "Root"));
+        Classification cls = new Classification(taxonomy.getRoot(), "Equity", "eq");
+        cls.addAssignment(new Classification.Assignment(sec, Classification.ONE_HUNDRED_PERCENT));
+        taxonomy.getRoot().addChild(cls);
+        client.addTaxonomy(taxonomy);
+
+        File tmpFile = File.createTempFile("pp-test-", ".xml");
+        tmpFile.deleteOnExit();
+        PpClient ppClient = new PpClient(tmpFile) {
+            @Override
+            public Client load() { return client; }
+        };
+
+        Map<String, Object> result = ppClient.queryTaxonomies(List.of("test-taxonomy"));
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> values = (List<Map<String, Object>>)
+                ((List<Map<String, Object>>) result.get("taxonomies")).get(0).get("values");
+
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> children = (List<Map<String, Object>>) values.get(0).get("children");
+        Map<String, Object> child = children.get(0);
+        assertEquals(100.0, ((Number) child.get("price_prev_close")).doubleValue(), 0.01);
+        assertEquals(10.0, ((Number) child.get("price_change_pct")).doubleValue(), 0.01);
+    }
+
+    @Test
+    public void testQueryTaxonomiesPricePrevCloseNullWhenOnlyOnePrice() throws Exception {
+        Client client = buildTestClient(); // BTC has only 1 price
+        File tmpFile = File.createTempFile("pp-test-", ".xml");
+        tmpFile.deleteOnExit();
+        PpClient ppClient = new PpClient(tmpFile) {
+            @Override
+            public Client load() { return client; }
+        };
+
+        Map<String, Object> result = ppClient.queryTaxonomies(List.of("test-taxonomy"));
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> values = (List<Map<String, Object>>)
+                ((List<Map<String, Object>>) result.get("taxonomies")).get(0).get("values");
+
+        for (Map<String, Object> v : values) {
+            if ("Crypto".equals(v.get("value"))) {
+                @SuppressWarnings("unchecked")
+                List<Map<String, Object>> children = (List<Map<String, Object>>) v.get("children");
+                Map<String, Object> child = children.get(0);
+                assertNull("price_prev_close should be null with only one price", child.get("price_prev_close"));
+                assertNull("price_change_pct should be null with only one price", child.get("price_change_pct"));
+            }
+        }
+    }
 }
