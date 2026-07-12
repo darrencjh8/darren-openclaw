@@ -53,9 +53,7 @@ function formatSyncResult(raw) {
         }
     } else {
         // Fallback to old taxonomy data
-        } else {
-            // Fallback to old taxonomy data
-            const taxonomyData = raw.taxonomy_data;
+        const taxonomyData = raw.taxonomy_data;
             if (taxonomyData?.taxonomies?.length) {
                 const tax = taxonomyData.taxonomies[0];
                 const values = tax.values || [];
