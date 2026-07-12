@@ -241,6 +241,9 @@ export class PpJavaBridge {
             if (securityId) {
                 args.push("--security-id", securityId);
             }
+            if (offsetAccountId) {
+                args.push("--offset-account-id", offsetAccountId);
+            }
             if (notes) {
                 args.push("--notes", notes);
             }
