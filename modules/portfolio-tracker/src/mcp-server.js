@@ -12,7 +12,7 @@ import { existsSync } from "fs";
 import { pullFromOneDrive, pushToOneDrive } from "./onedrive.js";
 import { getAuthUrl, exchangeCodeForToken } from "./onedrive_oauth.js";
 
-function formatSyncResult(raw) {
+export function formatSyncResult(raw) {
     const lines = [];
 
     // Sync status
@@ -53,9 +53,7 @@ function formatSyncResult(raw) {
         }
     } else {
         // Fallback to old taxonomy data
-        } else {
-            // Fallback to old taxonomy data
-            const taxonomyData = raw.taxonomy_data;
+        const taxonomyData = raw.taxonomy_data;
             if (taxonomyData?.taxonomies?.length) {
                 const tax = taxonomyData.taxonomies[0];
                 const values = tax.values || [];
