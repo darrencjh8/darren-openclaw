@@ -784,15 +784,59 @@ export class AgentOrchestrator {
             output.payee_source = "fallback";
         }
 
+        // Transfer detection: if payee matches an account, use the transfer
+        // payee (the one with transfer_acct set) so Actual Budget creates a
+        // transfer instead of a regular expense.
+        // Also caches fetch_context so category resolution below reuses it.
+        let cachedCtx = null;
+        if (output.payee_name && output.payee_name !== "Misc") {
+            try {
+                cachedCtx =
+                    (await this._tools.executeTool("fetch_context", {
+                        budget_id: output.budget_id || "",
+                    })) || {};
+                const liveAccounts = Array.isArray(cachedCtx.accounts)
+                    ? cachedCtx.accounts
+                    : [];
+                const accountMatch = liveAccounts.find(
+                    (a) =>
+                        a.name &&
+                        a.name.toLowerCase() ===
+                            output.payee_name.toLowerCase() &&
+                        !a.closed,
+                );
+                if (accountMatch) {
+                    const payees = Array.isArray(cachedCtx.payees)
+                        ? cachedCtx.payees
+                        : [];
+                    const transferPayee = payees.find(
+                        (p) => p.transfer_acct === accountMatch.id,
+                    );
+                    if (transferPayee) {
+                        output.payee_id = transferPayee.id;
+                        output._is_transfer = true;
+                    }
+                }
+            } catch {}
+        }
+
         // Step 2: Category resolution
         if (!output.category_id) {
             let liveCategories = [];
             try {
-                const { categories } =
-                    (await this._tools.executeTool("fetch_context", {
-                        budget_id: output.budget_id || "",
-                    })) || {};
-                liveCategories = Array.isArray(categories) ? categories : [];
+                if (cachedCtx) {
+                    liveCategories = Array.isArray(cachedCtx.categories)
+                        ? cachedCtx.categories
+                        : [];
+                } else {
+                    const { categories } =
+                        (await this._tools.executeTool("fetch_context", {
+                            budget_id: output.budget_id || "",
+                        })) || {};
+                    liveCategories = Array.isArray(categories)
+                        ? categories
+                        : [];
+                }
             } catch {}
 
             // Tier 1: Memory lookup (payee_name → category, matches auto-learn key)
@@ -819,8 +863,13 @@ export class AgentOrchestrator {
                 }
             } catch {}
 
-            // Tier 2: LLM picker (only if payee carries semantic signal)
-            if (!output.category_id && output.payee_name !== "Misc") {
+            // Tier 2: LLM picker (only if payee carries semantic signal
+            // AND this is not a transfer)
+            if (
+                !output.category_id &&
+                output.payee_name !== "Misc" &&
+                !output._is_transfer
+            ) {
                 try {
                     const pickerPrompt = getCategoryPickerPrompt(
                         output.payee_name,
@@ -949,6 +998,7 @@ export class AgentOrchestrator {
                     amount_cents: llmOutput.amount_cents || 0,
                     imported_description: payeeName,
                     category_id: llmOutput.category_id || undefined,
+                    payee_id: llmOutput.payee_id || undefined,
                     notes: llmOutput.notes || "",
                     budget_id: llmOutput.budget_id || "",
                 });

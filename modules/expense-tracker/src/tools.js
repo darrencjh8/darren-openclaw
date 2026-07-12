@@ -1034,6 +1034,21 @@ export class ToolRegistry {
         // Keep original category_id if validation fails
       }
     }
+    // Resolve payee ID so the actual budget API can match the payee.
+    // If a transfer payee_id was provided (from Phase 2), use it directly.
+    let payeeId = args.payee_id || null;
+    if (!payeeId && payee_name && payee_name !== "Misc") {
+      try {
+        const payees = await this._get("/payees", budget_id);
+        if (Array.isArray(payees)) {
+          const match = payees.find(
+            (p) => p.name && p.name.toLowerCase() === payee_name.toLowerCase(),
+          );
+          if (match) payeeId = match.id;
+        }
+      } catch {}
+    }
+
     const result = await this._post(
       "/transactions",
       {
@@ -1043,6 +1058,7 @@ export class ToolRegistry {
         payee_name: payee_name,
         notes: args.notes || "",
         cleared: false,
+        ...(payeeId ? { payee: payeeId } : {}),
         ...(categoryId ? { category: categoryId } : {}),
       },
       budget_id,

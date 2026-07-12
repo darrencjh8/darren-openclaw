@@ -909,7 +909,7 @@ describe("Category validation in insert_transaction", () => {
 
     const fetchMock = vi
       .fn()
-      // 1) _get("/payees") — exact match for "Coffee"
+      // 1) _get("/payees") — _validate_payee name match for "Coffee"
       .mockResolvedValueOnce({
         ok: true,
         json: async () => [
@@ -917,7 +917,15 @@ describe("Category validation in insert_transaction", () => {
           { id: "p2", name: "Groceries" },
         ],
       })
-      // 2) _post("/transactions") — no categories call (category_id is null)
+      // 2) _get("/payees") — payee ID lookup (same list)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => [
+          { id: "p1", name: "Coffee" },
+          { id: "p2", name: "Groceries" },
+        ],
+      })
+      // 3) _post("/transactions")
       .mockResolvedValueOnce({
         ok: true,
         json: async () => ({ id: "tx-5", payee_name: "Coffee" }),
@@ -932,10 +940,121 @@ describe("Category validation in insert_transaction", () => {
       imported_description: "Coffee",
     });
 
-    const postCall = fetchMock.mock.calls[1];
+    const postCall = fetchMock.mock.calls[2];
     const postBody = JSON.parse(postCall[1].body);
     // Payee should be "Coffee" (exact match from payees list)
     expect(postBody.payee_name).toBe("Coffee");
+
+    vi.unstubAllGlobals();
+  });
+
+  it("passes payee ID alongside payee_name in POST body", async () => {
+    const memory = mockMemoryStore();
+    const config = mockConfig();
+    const registry = new ToolRegistry(config, memory);
+
+    const fetchMock = vi
+      .fn()
+      // 1) _get("/payees") - _validate_payee
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => [{ id: "p1", name: "Coffee" }],
+      })
+      // 2) _get("/payees") - payee ID lookup
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => [{ id: "p1", name: "Coffee" }],
+      })
+      // 3) _post("/transactions")
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ id: "tx-6" }),
+      });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await registry._handle_insert_transaction({
+      date: "2026-06-16",
+      amount_cents: 500,
+      account_id: "acc-1",
+      budget_id: "bud-1",
+      imported_description: "Coffee",
+    });
+
+    const postCall = fetchMock.mock.calls[2];
+    const postBody = JSON.parse(postCall[1].body);
+    expect(postBody.payee_name).toBe("Coffee");
+    expect(postBody.payee).toBe("p1");
+
+    vi.unstubAllGlobals();
+  });
+
+  it("uses payee_id from args directly as transfer without extra lookup", async () => {
+    const memory = mockMemoryStore();
+    const config = mockConfig();
+    const registry = new ToolRegistry(config, memory);
+
+    const fetchMock = vi
+      .fn()
+      // 1) _get("/payees") - _validate_payee
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => [{ id: "p-transfer", name: "Touch N Go", transfer_acct: "acct-tng" }],
+      })
+      // 2) _post("/transactions") - no extra lookup because payee_id given
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ id: "tx-transfer" }),
+      });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await registry._handle_insert_transaction({
+      date: "2026-06-16",
+      amount_cents: -3000,
+      account_id: "acc-1",
+      budget_id: "bud-1",
+      imported_description: "Touch N Go",
+      payee_id: "p-transfer",
+    });
+
+    const postCall = fetchMock.mock.calls[1];
+    const postBody = JSON.parse(postCall[1].body);
+    expect(postBody.payee_name).toBe("Touch N Go");
+    expect(postBody.payee).toBe("p-transfer");
+
+    vi.unstubAllGlobals();
+  });
+
+  it("skips payee ID lookup when payee resolves to Misc", async () => {
+    const memory = mockMemoryStore();
+    const config = mockConfig();
+    const registry = new ToolRegistry(config, memory);
+
+    const fetchMock = vi
+      .fn()
+      // 1) _get("/payees") - empty, _validate_payee returns "Misc"
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => [],
+      })
+      // 2) _post("/transactions") - no extra payee lookup
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ id: "tx-7" }),
+      });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await registry._handle_insert_transaction({
+      date: "2026-06-16",
+      amount_cents: 999,
+      account_id: "acc-1",
+      budget_id: "bud-1",
+      imported_description: "SomeUnknownShop",
+    });
+
+    const postCall = fetchMock.mock.calls[1];
+    const postBody = JSON.parse(postCall[1].body);
+    expect(postBody.payee_name).toBe("Misc");
+    expect(postBody.payee).toBeUndefined();
 
     vi.unstubAllGlobals();
   });
