@@ -74,6 +74,7 @@ services:
             - TAXONOMY_SHEET_MAPPING=${TAXONOMY_SHEET_MAPPING}
             - TAXONOMY_NAMES=${TAXONOMY_NAMES:-Sector,Geography,Asset Class}
             - PP_XML_PATH=/data/onedrive/Portfolio/Portfolio.portfolio
+            - PP_OFFSET_MAP=${PP_OFFSET_MAP:-}
         mem_limit: 512m
         restart: unless-stopped
         healthcheck:
