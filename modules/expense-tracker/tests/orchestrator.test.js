@@ -1460,3 +1460,215 @@ describe("dispatchEmail statement routing", () => {
         expect(mockOrchestrator.processEmail).not.toHaveBeenCalled();
     });
 });
+
+// ==========================================================================
+// Transfer detection in _resolvePhase2
+// ==========================================================================
+
+describe("_resolvePhase2 transfer detection", () => {
+    it("detects transfer when payee matches an account name", async () => {
+        const config = makeConfig();
+        const tools = makeTools();
+        const orch = new AgentOrchestrator(config, tools);
+
+        const phase1 = fakePhase1Output({
+            merchant: "Touch N Go",
+            payee_name: "",
+            category_id: "",
+            budget_id: "Darren MYR",
+        });
+
+        // Mock fetch_context to return accounts + payees with transfer_acct
+        tools.executeTool.mockImplementation(async (name, args) => {
+            if (name === "search_memory") return { results: [] };
+            if (name === "resolve_merchant")
+                return { payee: "Touch N Go", source: "web" };
+            if (name === "fetch_context") {
+                return {
+                    accounts: [
+                        {
+                            id: "acct-tng",
+                            name: "Touch N Go",
+                            closed: false,
+                        },
+                        {
+                            id: "acct-ryt",
+                            name: "Ryt Bank",
+                            closed: false,
+                        },
+                    ],
+                    categories: [],
+                    payees: [
+                        {
+                            id: "p-transfer",
+                            name: "Touch N Go",
+                            transfer_acct: "acct-tng",
+                        },
+                        {
+                            id: "p-regular",
+                            name: "Touch N Go",
+                            transfer_acct: null,
+                        },
+                    ],
+                };
+            }
+            if (name === "search_memory" && args.query.includes("category"))
+                return { results: [] };
+            return { results: [] };
+        });
+
+        const phase2 = await orch._resolvePhase2(phase1);
+
+        expect(phase2._is_transfer).toBe(true);
+        expect(phase2.payee_id).toBe("p-transfer");
+        expect(phase2.payee_name).toBe("Touch N Go");
+    });
+
+    it("does not flag as transfer when payee does not match any account", async () => {
+        const config = makeConfig();
+        const tools = makeTools();
+        const orch = new AgentOrchestrator(config, tools);
+
+        const phase1 = fakePhase1Output({
+            merchant: "Toast Box",
+            payee_name: "",
+            category_id: "",
+        });
+
+        tools.executeTool.mockImplementation(async (name, args) => {
+            if (name === "search_memory") return { results: [] };
+            if (name === "resolve_merchant")
+                return { payee: "Toast Box", source: "web" };
+            if (name === "fetch_context") {
+                return {
+                    accounts: [
+                        {
+                            id: "acct-1",
+                            name: "DBS Yuu",
+                            closed: false,
+                        },
+                    ],
+                    categories: [
+                        { id: "cat-food", name: "Food" },
+                    ],
+                    payees: [],
+                };
+            }
+            return { results: [] };
+        });
+
+        // Mock LLM chat for the category picker
+        orch._llm = {
+            chat: vi.fn().mockResolvedValue({
+                choices: [{
+                    message: {
+                        content: JSON.stringify({ category_id: "cat-food" }),
+                    },
+                }],
+            }),
+        };
+
+        const phase2 = await orch._resolvePhase2(phase1);
+
+        expect(phase2._is_transfer).toBeUndefined();
+        expect(phase2.payee_id).toBeUndefined();
+        expect(phase2.payee_name).toBe("Toast Box");
+        // Category picker should have run for non-transfer
+        expect(phase2.category_id).toBe("cat-food");
+    });
+
+    it("skips category LLM picker for transfers", async () => {
+        const config = makeConfig();
+        const tools = makeTools();
+        const orch = new AgentOrchestrator(config, tools);
+
+        const phase1 = fakePhase1Output({
+            merchant: "Touch N Go",
+            payee_name: "",
+            category_id: "",
+            budget_id: "Darren MYR",
+        });
+
+        tools.executeTool.mockImplementation(async (name, args) => {
+            if (name === "search_memory") return { results: [] };
+            if (name === "resolve_merchant")
+                return { payee: "Touch N Go", source: "web" };
+            if (name === "fetch_context") {
+                return {
+                    accounts: [
+                        {
+                            id: "acct-tng",
+                            name: "Touch N Go",
+                            closed: false,
+                        },
+                    ],
+                    categories: [
+                        { id: "cat-food", name: "Food" },
+                    ],
+                    payees: [
+                        {
+                            id: "p-transfer",
+                            name: "Touch N Go",
+                            transfer_acct: "acct-tng",
+                        },
+                    ],
+                };
+            }
+            return { results: [] };
+        });
+
+        // Mock LLM — should NOT be called for transfers
+        orch._llm = {
+            chat: vi.fn(),
+        };
+
+        const phase2 = await orch._resolvePhase2(phase1);
+
+        expect(phase2._is_transfer).toBe(true);
+        // LLM should not have been called (no category picker for transfers)
+        expect(orch._llm.chat).not.toHaveBeenCalled();
+        // Category should remain empty for transfers
+        expect(phase2.category_id).toBeFalsy();
+    });
+
+    it("passes payee_id to insert_transaction via Phase 3", async () => {
+        const config = makeConfig();
+        // check_duplicate must return false so insert proceeds
+        const tools = makeTools({
+            executeTool: vi.fn(async (name) => {
+                if (name === "check_duplicate") return false;
+                if (name === "log_decision") return true;
+                if (name === "learn_fact") return { added: true };
+                return true;
+            }),
+        });
+        const orch = new AgentOrchestrator(config, tools);
+
+        orch._runPhase1 = vi.fn().mockResolvedValue(
+            fakePhase1Output({
+                merchant: "Touch N Go",
+                budget_id: "Darren MYR",
+            }),
+        );
+        orch._resolvePhase2 = vi.fn().mockResolvedValue(
+            fakePhase2Output(
+                fakePhase1Output({ merchant: "Touch N Go" }),
+                {
+                    payee_name: "Touch N Go",
+                    payee_id: "p-transfer",
+                    _is_transfer: true,
+                    category_id: null,
+                },
+            ),
+        );
+
+        await orch.processEmail("test-transfer", "Transfer RM30 to Touch N Go");
+
+        // Verify insert_transaction received payee_id
+        const insertCall = tools.executeTool.mock.calls.find(
+            (c) => c[0] === "insert_transaction",
+        );
+        expect(insertCall).toBeDefined();
+        expect(insertCall[1].payee_id).toBe("p-transfer");
+    });
+});

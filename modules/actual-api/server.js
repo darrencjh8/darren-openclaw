@@ -163,6 +163,7 @@ function buildTransaction(body) {
         account_id,
         date,
         amount,
+        payee,
         payee_name,
         imported_payee,
         notes,
@@ -177,6 +178,8 @@ function buildTransaction(body) {
         notes: notes || "",
         cleared: false,
     };
+    // Pass payee ID through to addTransactions (needed for transfers)
+    if (payee) txn.payee = payee;
     if (category) txn.category = category;
     return txn;
 }
