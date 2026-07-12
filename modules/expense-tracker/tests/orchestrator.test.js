@@ -1630,6 +1630,138 @@ describe("_resolvePhase2 transfer detection", () => {
         // Category should remain empty for transfers
         expect(phase2.category_id).toBeFalsy();
     });
+    it("does not match closed accounts for transfer detection", async () => {
+        const config = makeConfig();
+        const tools = makeTools();
+        const orch = new AgentOrchestrator(config, tools);
+
+        const phase1 = fakePhase1Output({
+            merchant: "Closed Account",
+            payee_name: "",
+            category_id: "",
+            budget_id: "test-budget",
+        });
+
+        tools.executeTool.mockImplementation(async (name) => {
+            if (name === "search_memory") return { results: [] };
+            if (name === "resolve_merchant")
+                return { payee: "Closed Account", source: "web" };
+            if (name === "fetch_context") {
+                return {
+                    accounts: [
+                        {
+                            id: "acct-closed",
+                            name: "Closed Account",
+                            closed: true,
+                        },
+                    ],
+                    categories: [],
+                    payees: [
+                        {
+                            id: "p-transfer",
+                            name: "Closed Account",
+                            transfer_acct: "acct-closed",
+                        },
+                    ],
+                };
+            }
+            return { results: [] };
+        });
+
+        orch._llm = { chat: vi.fn() };
+
+        const phase2 = await orch._resolvePhase2(phase1);
+
+        // Should NOT detect as transfer because account is closed
+        expect(phase2._is_transfer).toBeUndefined();
+        expect(phase2.payee_id).toBeUndefined();
+    });
+
+    it("matches account names case-insensitively", async () => {
+        const config = makeConfig();
+        const tools = makeTools();
+        const orch = new AgentOrchestrator(config, tools);
+
+        const phase1 = fakePhase1Output({
+            merchant: "Touch n go",
+            payee_name: "",
+            category_id: "",
+            budget_id: "test-budget",
+        });
+
+        tools.executeTool.mockImplementation(async (name) => {
+            if (name === "search_memory") return { results: [] };
+            if (name === "resolve_merchant")
+                return { payee: "touch n go", source: "web" };
+            if (name === "fetch_context") {
+                return {
+                    accounts: [
+                        {
+                            id: "acct-tng",
+                            name: "Touch N Go",
+                            closed: false,
+                        },
+                    ],
+                    categories: [],
+                    payees: [
+                        {
+                            id: "p-transfer",
+                            name: "Touch N Go",
+                            transfer_acct: "acct-tng",
+                        },
+                    ],
+                };
+            }
+            return { results: [] };
+        });
+
+        orch._llm = { chat: vi.fn() };
+
+        const phase2 = await orch._resolvePhase2(phase1);
+
+        // Case-insensitive match: "touch n go" matches "Touch N Go"
+        expect(phase2._is_transfer).toBe(true);
+        expect(phase2.payee_id).toBe("p-transfer");
+    });
+
+    it("survives fetch_context failure without crashing", async () => {
+        const config = makeConfig();
+        const tools = makeTools();
+        const orch = new AgentOrchestrator(config, tools);
+
+        const phase1 = fakePhase1Output({
+            merchant: "Touch N Go",
+            payee_name: "",
+            category_id: "",
+            budget_id: "test-budget",
+        });
+
+        tools.executeTool.mockImplementation(async (name) => {
+            if (name === "search_memory") return { results: [] };
+            if (name === "resolve_merchant")
+                return { payee: "Touch N Go", source: "web" };
+            if (name === "fetch_context")
+                throw new Error("Network error");
+            return { results: [] };
+        });
+
+        orch._llm = {
+            chat: vi.fn().mockResolvedValue({
+                choices: [{
+                    message: {
+                        content: JSON.stringify({ category_id: "cat-food" }),
+                    },
+                }],
+            }),
+        };
+
+        const phase2 = await orch._resolvePhase2(phase1);
+
+        // fetch_context failure should not crash; falls through to category resolution
+        expect(phase2._is_transfer).toBeUndefined();
+        expect(phase2.payee_id).toBeUndefined();
+        expect(phase2.payee_name).toBe("Touch N Go");
+    });
 
     it("passes payee_id to insert_transaction via Phase 3", async () => {
         const config = makeConfig();

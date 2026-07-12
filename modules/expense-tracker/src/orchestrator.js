@@ -787,14 +787,16 @@ export class AgentOrchestrator {
         // Transfer detection: if payee matches an account, use the transfer
         // payee (the one with transfer_acct set) so Actual Budget creates a
         // transfer instead of a regular expense.
+        // Also caches fetch_context so category resolution below reuses it.
+        let cachedCtx = null;
         if (output.payee_name && output.payee_name !== "Misc") {
             try {
-                const ctx =
+                cachedCtx =
                     (await this._tools.executeTool("fetch_context", {
                         budget_id: output.budget_id || "",
                     })) || {};
-                const liveAccounts = Array.isArray(ctx.accounts)
-                    ? ctx.accounts
+                const liveAccounts = Array.isArray(cachedCtx.accounts)
+                    ? cachedCtx.accounts
                     : [];
                 const accountMatch = liveAccounts.find(
                     (a) =>
@@ -804,8 +806,8 @@ export class AgentOrchestrator {
                         !a.closed,
                 );
                 if (accountMatch) {
-                    const payees = Array.isArray(ctx.payees)
-                        ? ctx.payees
+                    const payees = Array.isArray(cachedCtx.payees)
+                        ? cachedCtx.payees
                         : [];
                     const transferPayee = payees.find(
                         (p) => p.transfer_acct === accountMatch.id,
@@ -822,11 +824,19 @@ export class AgentOrchestrator {
         if (!output.category_id) {
             let liveCategories = [];
             try {
-                const { categories } =
-                    (await this._tools.executeTool("fetch_context", {
-                        budget_id: output.budget_id || "",
-                    })) || {};
-                liveCategories = Array.isArray(categories) ? categories : [];
+                if (cachedCtx) {
+                    liveCategories = Array.isArray(cachedCtx.categories)
+                        ? cachedCtx.categories
+                        : [];
+                } else {
+                    const { categories } =
+                        (await this._tools.executeTool("fetch_context", {
+                            budget_id: output.budget_id || "",
+                        })) || {};
+                    liveCategories = Array.isArray(categories)
+                        ? categories
+                        : [];
+                }
             } catch {}
 
             // Tier 1: Memory lookup (payee_name → category, matches auto-learn key)
