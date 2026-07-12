@@ -207,6 +207,10 @@ const TOOL_SCHEMAS = [
                     fees: { type: "number" },
                     taxes: { type: "number" },
                     notes: { type: "string" },
+                    offset_account_id: {
+                        type: "string",
+                        description: "Optional: PP account UUID for offset/cash leg (defaults to reference account of first portfolio)",
+                    },
                 },
                 required: [
                     "account_id",
@@ -235,6 +239,10 @@ const TOOL_SCHEMAS = [
                     currency_code: { type: "string" },
                     date: { type: "string", description: "YYYY-MM-DD" },
                     notes: { type: "string" },
+                    offset_account_id: {
+                        type: "string",
+                        description: "Optional: PP account UUID for offset/cash leg (defaults to reference account of first portfolio)",
+                    },
                 },
                 required: ["account_id", "amount", "currency_code", "date"],
             },
@@ -422,6 +430,10 @@ const TOOL_SCHEMAS = [
                         type: "string",
                         description: "Ticker symbol, ISIN, or security name",
                     },
+                    account_id: {
+                        type: "string",
+                        description: "Optional: filter to a specific portfolio account UUID",
+                    },
                 },
                 required: ["search"],
             },
@@ -585,7 +597,32 @@ export class ToolRegistry {
             case "insert_pp_transaction":
                 if (!this._ppBridge)
                     return { error: "PP bridge not configured" };
-                return this._ppBridge.insertTransaction({
+                // Dedup check: compute monetary amount matching Java''s per-type logic
+                let amountCents;
+                switch (args.type) {
+                    case "Buy":
+                    case "Sell":
+                        amountCents = Math.round((args.price || 0) * Math.abs(args.shares || 0) * 100);
+                        break;
+                    case "Fee":
+                        amountCents = Math.round((args.fees || 0) * 100);
+                        break;
+                    case "Tax":
+                        amountCents = Math.round((args.taxes || 0) * 100);
+                        break;
+                    default: // Dividend, Deposit, Withdrawal, Interest
+                        amountCents = Math.round((args.price || 0) * 100);
+                }
+                if (this._dedup && this._dedup.check(
+                    args.date, amountCents, args.account_id,
+                    args.security_id || "", args.type,
+                )) {
+                    return {
+                        status: "duplicate",
+                        reason: "Duplicate transaction already recorded",
+                    };
+                }
+                const result = await this._ppBridge.insertTransaction({
                     accountId: args.account_id,
                     securityId: args.security_id || "",
                     txnType: args.type,
@@ -596,7 +633,17 @@ export class ToolRegistry {
                     fees: args.fees ?? 0,
                     taxes: args.taxes ?? 0,
                     notes: args.notes || "",
+                    offsetAccountId: args.offset_account_id || null,
                 });
+                // Record dedup after successful insert
+                if (result.status !== "error" && this._dedup) {
+                    this._dedup.record(
+                        args.date, amountCents, args.account_id,
+                        result.transaction_id || "",
+                        args.security_id || "", args.type,
+                    );
+                }
+                return result;
 
             case "update_pp_balance":
                 if (!this._ppBridge)
@@ -703,7 +750,7 @@ export class ToolRegistry {
             case "query_pp_security":
                 if (!this._ppBridge)
                     return { error: "PP bridge not configured" };
-                return this._ppBridge.querySecurity(args.search || "");
+                return this._ppBridge.querySecurity(args.search || "", args.account_id || null);
 
             default:
                 throw new Error(`Unknown tool: ${name}`);

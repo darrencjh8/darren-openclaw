@@ -135,7 +135,7 @@ public class PpClient {
 
     public Map<String, Object> insertTransaction(String accountId, String securityId, String type,
             String dateStr, double shares, double price, String currencyCode,
-            double fees, double taxes, String notes) throws IOException {
+            double fees, double taxes, String notes, String offsetAccountId) throws IOException {
 
         Client client = load();
         LocalDateTime dateTime = LocalDate.parse(dateStr).atStartOfDay();
@@ -157,8 +157,22 @@ public class PpClient {
             entry.setShares(Values.Share.factorize(shares));
             entry.setMonetaryAmount(Money.of(currencyCode, Math.round(price * Math.abs(shares) * 100)));
             entry.setAccount(account);
-            if (!client.getPortfolios().isEmpty()) {
-                entry.setPortfolio(client.getPortfolios().get(0));
+            // Select portfolio: use offsetAccountId if provided, else default to first
+            Portfolio selected = null;
+            if (offsetAccountId != null && !offsetAccountId.isEmpty()) {
+                for (Portfolio p : client.getPortfolios()) {
+                    if (p.getReferenceAccount() != null
+                            && p.getReferenceAccount().getUUID().equals(offsetAccountId)) {
+                        selected = p;
+                        break;
+                    }
+                }
+            }
+            if (selected == null && !client.getPortfolios().isEmpty()) {
+                selected = client.getPortfolios().get(0);
+            }
+            if (selected != null) {
+                entry.setPortfolio(selected);
             }
             if (notes != null && !notes.isEmpty()) {
                 entry.setNote(notes);
@@ -729,6 +743,10 @@ public class PpClient {
     }
 
     public Map<String, Object> querySecurity(String query) throws IOException {
+        return querySecurity(query, null);
+    }
+
+    public Map<String, Object> querySecurity(String query, String accountId) throws IOException {
         Client client = load();
         String q = query.toLowerCase().trim();
 
@@ -756,31 +774,58 @@ public class PpClient {
         result.put("isin", found.getIsin());
         result.put("currency", found.getCurrencyCode());
 
-        long shares = 0;
+        // Per-account breakdown
+        List<Map<String, Object>> accountBreakdown = new ArrayList<>();
+        long totalShares = 0;
+        long totalCostCents = 0;
+        long totalBoughtShares = 0;
+
         for (Portfolio portfolio : client.getPortfolios()) {
+            if (accountId != null && !accountId.isEmpty() && !portfolio.getUUID().equals(accountId)) {
+                continue;
+            }
+
+            long acctShares = 0;
+            long acctCostCents = 0;
+            long acctBoughtShares = 0;
             for (PortfolioTransaction t : portfolio.getTransactions()) {
-                if (found.equals(t.getSecurity())) {
-                    switch (t.getType()) {
-                        case BUY:
-                        case TRANSFER_IN:
-                        case DELIVERY_INBOUND:
-                            shares += t.getShares();
-                            break;
-                        case SELL:
-                        case TRANSFER_OUT:
-                        case DELIVERY_OUTBOUND:
-                            shares -= t.getShares();
-                            break;
-                        default:
-                            break;
-                    }
+                if (!found.equals(t.getSecurity())) continue;
+                switch (t.getType()) {
+                    case BUY:
+                    case TRANSFER_IN:
+                    case DELIVERY_INBOUND:
+                        acctShares += t.getShares();
+                        break;
+                    case SELL:
+                    case TRANSFER_OUT:
+                    case DELIVERY_OUTBOUND:
+                        acctShares -= t.getShares();
+                        break;
+                    default:
+                        break;
+                }
+                if (t.getType() == PortfolioTransaction.Type.BUY) {
+                    acctCostCents += t.getMonetaryAmount().getAmount();
+                    acctBoughtShares += t.getShares();
                 }
             }
+            totalShares += acctShares;
+            totalCostCents += acctCostCents;
+            totalBoughtShares += acctBoughtShares;
+
+            Map<String, Object> entry = new HashMap<>();
+            entry.put("account_id", portfolio.getUUID());
+            entry.put("account_name", portfolio.getName());
+            entry.put("shares_held", acctShares);
+            entry.put("shares_held_display", Math.abs(acctShares) / Values.Share.divider());
+            accountBreakdown.add(entry);
         }
 
-        result.put("shares_held", shares);
-        result.put("shares_held_display", Math.abs(shares) / Values.Share.divider());
+        result.put("shares_held", totalShares);
+        result.put("shares_held_display", Math.abs(totalShares) / Values.Share.divider());
+        result.put("accounts", accountBreakdown);
 
+        // Price info
         LatestSecurityPrice latest = null;
         LocalDate today = LocalDate.now();
         List<SecurityPrice> prices = found.getPricesIncludingLatest();
@@ -797,17 +842,7 @@ public class PpClient {
                 }
             }
         }
-        // Compute cost basis: sum of all BUY transactions only
-        long totalCostCents = 0;
-        long totalBoughtShares = 0;
-        for (Portfolio portfolio : client.getPortfolios()) {
-            for (PortfolioTransaction t : portfolio.getTransactions()) {
-                if (found.equals(t.getSecurity()) && t.getType() == PortfolioTransaction.Type.BUY) {
-                    totalCostCents += t.getMonetaryAmount().getAmount();
-                    totalBoughtShares += t.getShares();
-                }
-            }
-        }
+
         double costBasis = totalCostCents / 100.0;
         result.put("total_cost_basis", Math.round(costBasis * 100.0) / 100.0);
         if (totalBoughtShares > 0) {
@@ -820,7 +855,7 @@ public class PpClient {
         if (latest != null) {
             long quote = latest.getValue();
             double price = quote / Values.Quote.divider();
-            double shareCount = Math.abs(shares) / Values.Share.divider();
+            double shareCount = Math.abs(totalShares) / Values.Share.divider();
             double marketValue = price * shareCount;
             result.put("latest_price", String.format("%.2f", price));
             result.put("market_value", String.format("%.2f", marketValue));

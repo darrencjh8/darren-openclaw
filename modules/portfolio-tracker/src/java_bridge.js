@@ -213,6 +213,7 @@ export class PpJavaBridge {
         fees = 0,
         taxes = 0,
         notes = "",
+        offsetAccountId = null,
     }) {
         const release = await acquireWriteLock();
         try {
@@ -240,6 +241,9 @@ export class PpJavaBridge {
             if (securityId) {
                 args.push("--security-id", securityId);
             }
+            if (offsetAccountId) {
+                args.push("--offset-account-id", offsetAccountId);
+            }
             if (notes) {
                 args.push("--notes", notes);
             }
@@ -252,7 +256,7 @@ export class PpJavaBridge {
     /**
      * Update an account balance to a specific amount.
      */
-    async updateBalance({ accountId, amount, currencyCode, date, notes = "" }) {
+    async updateBalance({ accountId, amount, currencyCode, date, notes = "", offsetAccountId = null }) {
         const release = await acquireWriteLock();
         try {
             const args = [
@@ -268,6 +272,9 @@ export class PpJavaBridge {
                 "--date",
                 date,
             ];
+            if (offsetAccountId) {
+                args.push("--offset-account-id", offsetAccountId);
+            }
             if (notes) {
                 args.push("--notes", notes);
             }
@@ -314,14 +321,18 @@ export class PpJavaBridge {
      * Query a security by ticker, ISIN, or name.
      * Returns shares held, avg entry price, latest price, market value.
      */
-    async querySecurity(search) {
-        return this._runCommand(
+    async querySecurity(search, accountId) {
+        const args = [
             "query",
             "--file",
             this._xmlPath,
             "--search",
             search,
-        );
+        ];
+        if (accountId) {
+            args.push("--account-id", accountId);
+        }
+        return this._runCommand(...args);
     }
 
     /**

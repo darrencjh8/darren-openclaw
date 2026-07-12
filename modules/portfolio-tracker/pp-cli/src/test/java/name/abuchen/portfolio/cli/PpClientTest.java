@@ -269,7 +269,102 @@ public class PpClientTest {
         Main.main(new String[]{"--help"});
     }
 
-    // ---- Unit tests for queryTaxonomies logic ----
+    // ---- Unit tests for querySecurity per-account filtering ----
+
+    /** Builds a test client with two portfolios holding the SAME security. */
+    private Client buildMultiPortfolioClient() {
+        Client client = new Client();
+        client.setBaseCurrency("SGD");
+
+        Security sec = new Security();
+        sec.setName("Test Stock");
+        sec.setTickerSymbol("TST");
+        sec.setCurrencyCode("USD");
+        sec.addPrice(new SecurityPrice(LocalDate.now().minusDays(1), 50_00000000L));
+        client.addSecurity(sec);
+
+        Portfolio p1 = new Portfolio();
+        p1.setName("Portfolio A");
+        client.addPortfolio(p1);
+        PortfolioTransaction t1 = new PortfolioTransaction(
+                LocalDateTime.of(2023, 1, 1, 0, 0), "USD", 0, sec,
+                10000_000000L, PortfolioTransaction.Type.BUY, 0, 0);
+        p1.addTransaction(t1);
+
+        Portfolio p2 = new Portfolio();
+        p2.setName("Portfolio B");
+        client.addPortfolio(p2);
+        PortfolioTransaction t2 = new PortfolioTransaction(
+                LocalDateTime.of(2023, 1, 1, 0, 0), "USD", 0, sec,
+                20000_000000L, PortfolioTransaction.Type.BUY, 0, 0);
+        p2.addTransaction(t2);
+
+        return client;
+    }
+
+    @Test
+    public void testQuerySecurityAggregatesAllAccounts() throws Exception {
+        Client client = buildMultiPortfolioClient();
+        File tmpFile = File.createTempFile("pp-test-", ".xml");
+        tmpFile.deleteOnExit();
+        PpClient ppClient = new PpClient(tmpFile) {
+            @Override public Client load() { return client; }
+        };
+
+        Map<String, Object> result = ppClient.querySecurity("TST");
+        assertEquals(300.0, (Double) result.get("shares_held_display"), 0.01);
+    }
+
+    @Test
+    public void testQuerySecurityFiltersByAccount() throws Exception {
+        Client client = buildMultiPortfolioClient();
+        String p1Id = client.getPortfolios().get(0).getUUID();
+        File tmpFile = File.createTempFile("pp-test-", ".xml");
+        tmpFile.deleteOnExit();
+        PpClient ppClient = new PpClient(tmpFile) {
+            @Override public Client load() { return client; }
+        };
+
+        Map<String, Object> result = ppClient.querySecurity("TST", p1Id);
+        assertEquals(100.0, (Double) result.get("shares_held_display"), 0.01);
+    }
+
+    @Test
+    public void testQuerySecurityIncludesPerAccountBreakdown() throws Exception {
+        Client client = buildMultiPortfolioClient();
+        File tmpFile = File.createTempFile("pp-test-", ".xml");
+        tmpFile.deleteOnExit();
+        PpClient ppClient = new PpClient(tmpFile) {
+            @Override public Client load() { return client; }
+        };
+
+        Map<String, Object> result = ppClient.querySecurity("TST");
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> accounts = (List<Map<String, Object>>) result.get("accounts");
+        assertNotNull("accounts field should be present", accounts);
+        assertEquals(2, accounts.size());
+        Map<String, Object> a1 = accounts.get(0);
+        assertEquals("Portfolio A", a1.get("account_name"));
+        assertEquals(100.0, (Double) a1.get("shares_held_display"), 0.01);
+        Map<String, Object> a2 = accounts.get(1);
+        assertEquals("Portfolio B", a2.get("account_name"));
+        assertEquals(200.0, (Double) a2.get("shares_held_display"), 0.01);
+    }
+
+    @Test
+    public void testQuerySecurityNonExistentAccountReturnsZero() throws Exception {
+        Client client = buildMultiPortfolioClient();
+        File tmpFile = File.createTempFile("pp-test-", ".xml");
+        tmpFile.deleteOnExit();
+        PpClient ppClient = new PpClient(tmpFile) {
+            @Override public Client load() { return client; }
+        };
+
+        Map<String, Object> result = ppClient.querySecurity("TST", "nonexistent-uuid");
+        assertEquals(0.0, (Double) result.get("shares_held_display"), 0.01);
+    }
+
+        // ---- Unit tests for queryTaxonomies logic ----
 
     private Client buildTestClient() {
         Client client = new Client();

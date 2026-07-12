@@ -318,7 +318,7 @@ describe("ToolRegistry — PP bridge tools", () => {
             const result = await registry.executeTool("query_pp_security", {
                 search: "AAPL",
             });
-            expect(mockBridge.querySecurity).toHaveBeenCalledWith("AAPL");
+            expect(mockBridge.querySecurity).toHaveBeenCalledWith("AAPL", null);
             expect(result).toEqual({
                 ticker: "AAPL",
                 shares: 100,
@@ -336,7 +336,18 @@ describe("ToolRegistry — PP bridge tools", () => {
 
         it("defaults search to empty string", async () => {
             await registry.executeTool("query_pp_security", {});
-            expect(mockBridge.querySecurity).toHaveBeenCalledWith("");
+            expect(mockBridge.querySecurity).toHaveBeenCalledWith("", null);
+        });
+
+        it("passes account_id to bridge", async () => {
+            await registry.executeTool("query_pp_security", {
+                search: "AAPL",
+                account_id: "uuid-abc",
+            });
+            expect(mockBridge.querySecurity).toHaveBeenCalledWith(
+                "AAPL",
+                "uuid-abc",
+            );
         });
     });
 
@@ -376,6 +387,7 @@ describe("ToolRegistry — PP bridge tools", () => {
                 fees: 1.0,
                 taxes: 0.5,
                 notes: "Test trade",
+                offsetAccountId: null,
             });
         });
 
@@ -390,6 +402,108 @@ describe("ToolRegistry — PP bridge tools", () => {
             });
             expect(mockBridge.insertTransaction).toHaveBeenCalledWith(
                 expect.objectContaining({ fees: 0, taxes: 0 }),
+            );
+        });
+
+        it("rejects duplicate via dedup check", async () => {
+            // Seed a dedup record that matches
+            const dedup2 = new DedupJournal(
+                ':memory:',
+            );
+            dedup2.record("2026-06-01", 1853000, "acct-1", "prev-txn-id", "sec-aapl", "Buy");
+            const reg2 = new ToolRegistry(cfg, dedup2, memory, mockBridge);
+
+            const result = await reg2.executeTool("insert_pp_transaction", {
+                account_id: "acct-1",
+                security_id: "sec-aapl",
+                type: "Buy",
+                date: "2026-06-01",
+                shares: 100,
+                price: 185.3,
+                currency_code: "USD",
+            });
+            expect(result.status).toBe("duplicate");
+            expect(result.reason).toContain("Duplicate");
+            // Bridge should NOT have been called
+            expect(mockBridge.insertTransaction).not.toHaveBeenCalled();
+        });
+
+        it("records dedup after successful insert", async () => {
+            const dedup2 = new DedupJournal(
+                ':memory:',
+            );
+            const reg2 = new ToolRegistry(cfg, dedup2, memory, mockBridge);
+
+            await reg2.executeTool("insert_pp_transaction", {
+                account_id: "acct-1",
+                security_id: "sec-aapl",
+                type: "Buy",
+                date: "2026-06-01",
+                shares: 100,
+                price: 185.3,
+                currency_code: "USD",
+            });
+            // Re-insert same should be blocked
+            const result = await reg2.executeTool("insert_pp_transaction", {
+                account_id: "acct-1",
+                security_id: "sec-aapl",
+                type: "Buy",
+                date: "2026-06-01",
+                shares: 100,
+                price: 185.3,
+                currency_code: "USD",
+            });
+            expect(result.status).toBe("duplicate");
+        });
+
+        it("dedup hash correct for Dividend (price*100, not price*shares*100)", async () => {
+            const dedup2 = new DedupJournal(":memory:");
+            // Dividend: amount = price * 100, not price * shares * 100
+            dedup2.record("2026-06-01", 5000, "acct-1", "div-1", "sec-aapl", "Dividend");
+            const reg2 = new ToolRegistry(cfg, dedup2, memory, mockBridge);
+
+            const result = await reg2.executeTool("insert_pp_transaction", {
+                account_id: "acct-1",
+                security_id: "sec-aapl",
+                type: "Dividend",
+                date: "2026-06-01",
+                shares: 0,
+                price: 50,
+                currency_code: "USD",
+            });
+            // amount = 50 * 100 = 5000, should match recorded hash
+            expect(result.status).toBe("duplicate");
+        });
+
+        it("dedup hash correct for Deposit (ignores shares)", async () => {
+            const dedup2 = new DedupJournal(":memory:");
+            dedup2.record("2026-06-01", 100000, "acct-1", "dep-1", "", "Deposit");
+            const reg2 = new ToolRegistry(cfg, dedup2, memory, mockBridge);
+
+            const result = await reg2.executeTool("insert_pp_transaction", {
+                account_id: "acct-1",
+                type: "Deposit",
+                date: "2026-06-01",
+                shares: 10,  // irrelevant for Deposit, should be ignored
+                price: 1000,
+                currency_code: "USD",
+            });
+            expect(result.status).toBe("duplicate");
+        });
+
+                it("passes offset_account_id to bridge", async () => {
+            await registry.executeTool("insert_pp_transaction", {
+                account_id: "acct-1",
+                security_id: "sec-aapl",
+                type: "Buy",
+                date: "2026-06-01",
+                shares: 100,
+                price: 185.3,
+                currency_code: "USD",
+                offset_account_id: "acct-offset-1",
+            });
+            expect(mockBridge.insertTransaction).toHaveBeenCalledWith(
+                expect.objectContaining({ offsetAccountId: "acct-offset-1" }),
             );
         });
     });
