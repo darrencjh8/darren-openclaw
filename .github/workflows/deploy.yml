@@ -62,6 +62,9 @@ jobs:
 
             - name: Detect changed modules
               id: changes
+              env:
+                  FORCE_ALL: ${{ inputs.force_all || 'false' }}
+                  DEPLOY_COMPONENTS_OVERRIDE: ${{ inputs.components || '' }}
               run: |
                   # Workflow dispatch with explicit components: use them directly
                   if [ -n "${DEPLOY_COMPONENTS_OVERRIDE:-}" ]; then
