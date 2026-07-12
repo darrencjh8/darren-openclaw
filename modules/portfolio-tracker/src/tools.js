@@ -239,10 +239,6 @@ const TOOL_SCHEMAS = [
                     currency_code: { type: "string" },
                     date: { type: "string", description: "YYYY-MM-DD" },
                     notes: { type: "string" },
-                    offset_account_id: {
-                        type: "string",
-                        description: "Optional: PP account UUID for offset/cash leg (defaults to reference account of first portfolio)",
-                    },
                 },
                 required: ["account_id", "amount", "currency_code", "date"],
             },

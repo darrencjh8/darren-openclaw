@@ -241,9 +241,6 @@ export class PpJavaBridge {
             if (securityId) {
                 args.push("--security-id", securityId);
             }
-            if (offsetAccountId) {
-                args.push("--offset-account-id", offsetAccountId);
-            }
             if (notes) {
                 args.push("--notes", notes);
             }
@@ -256,7 +253,7 @@ export class PpJavaBridge {
     /**
      * Update an account balance to a specific amount.
      */
-    async updateBalance({ accountId, amount, currencyCode, date, notes = "", offsetAccountId = null }) {
+    async updateBalance({ accountId, amount, currencyCode, date, notes = "" }) {
         const release = await acquireWriteLock();
         try {
             const args = [
@@ -272,9 +269,6 @@ export class PpJavaBridge {
                 "--date",
                 date,
             ];
-            if (offsetAccountId) {
-                args.push("--offset-account-id", offsetAccountId);
-            }
             if (notes) {
                 args.push("--notes", notes);
             }
