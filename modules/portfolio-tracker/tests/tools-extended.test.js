@@ -1471,6 +1471,35 @@ describe("ToolRegistry — _buildAnalysis", () => {
         expect(analysis.message_body).not.toContain("**Illiquid Holdings**");
     });
 
+    it("filters zero and negative valuations from illiquid holdings", () => {
+        const data = {
+            taxonomies: [{
+                name: "Regions (Liquid)",
+                values: [
+                    {
+                        value: "Without Classification", valuation_native: 98725,
+                        currency: "SGD", share_pct: 100, children: [
+                            {
+                                name: "CPF OA", ticker: "", currency: "SGD",
+                                valuation_native: 100000, security_uuid: "cpf-oa",
+                                security_type: "Account", stale_days: 0,
+                            },
+                            {
+                                name: "POEMS", ticker: "", currency: "SGD",
+                                valuation_native: -1275, security_uuid: "poems",
+                                security_type: "Account", stale_days: 0,
+                            },
+                        ],
+                    },
+                ],
+            }],
+        };
+        const analysis = registry._buildAnalysis(data, { SGD: 1.0 });
+        expect(analysis.illiquid_holdings.length).toBe(1);
+        expect(analysis.illiquid_holdings[0].name).toBe("CPF OA");
+        expect(analysis.message_body).not.toContain("POEMS");
+    });
+
     it("uses displayLabel for illiquid holdings with ISIN-like tickers", () => {
         const data = {
             taxonomies: [{
@@ -1530,6 +1559,45 @@ describe("ToolRegistry — _buildAnalysis", () => {
         const analysis = registry._buildAnalysis(data, { SGD: 1.0 });
         const warchestFlags = analysis.flags.filter((f) => f.reason && f.reason.includes("Warchest"));
         expect(warchestFlags.length).toBe(0);
+    });
+
+    it("excludes cash holdings from topHoldings table", () => {
+        const data = {
+            taxonomies: [
+                {
+                    name: "Regions (Liquid)",
+                    values: [
+                        {
+                            value: "Investable Cash", valuation_native: 50000,
+                            currency: "SGD", share_pct: 33.3, children: [
+                                {
+                                    name: "Warchest", ticker: "", currency: "SGD",
+                                    valuation_native: 50000, security_uuid: "warchest-uuid",
+                                    security_type: "",
+                                },
+                            ],
+                        },
+                        {
+                            value: "America", valuation_native: 100000, currency: "SGD",
+                            share_pct: 66.7, children: [
+                                {
+                                    name: "TestCo", ticker: "TST", currency: "SGD",
+                                    valuation_native: 100000, security_uuid: "sec-tst",
+                                    security_type: "Equity",
+                                },
+                            ],
+                        },
+                    ],
+                },
+            ],
+        };
+        const analysis = registry._buildAnalysis(data, { SGD: 1.0 });
+        // Warchest (cash) should NOT be in topHoldings
+        const cashInHoldings = analysis.top_holdings.filter((h) => h.is_cash);
+        expect(cashInHoldings.length).toBe(0);
+        // TestCo should be the only top holding
+        expect(analysis.top_holdings.length).toBe(1);
+        expect(analysis.top_holdings[0].ticker).toBe("TST");
     });
 
     it("respects PP_CONCENTRATION_EXEMPT_NAMES for custom exemptions", () => {
@@ -1631,5 +1699,23 @@ describe("ToolRegistry — _buildAnalysis", () => {
         expect(headlines[0]).toContain("AMD");
         expect(headlines[0]).toContain("raises guidance");
         expect(headlines[0]).not.toContain("http");
+    });
+
+    it("filters out mangled anti-scraping headlines", async () => {
+        // Simulate Google News spaced-out characters anti-scraping
+        const rss = '<?xml version="1.0"?><rss><channel>'
+            + '<item><title>A M D S h a r e s B o u g h t</title>'
+            + '<link>https://example.com/mangled</link>'
+            + '<pubDate>' + new Date().toUTCString() + '</pubDate></item>'
+            + '<item><title>AMD beats estimates</title>'
+            + '<link>https://example.com/normal</link>'
+            + '<pubDate>' + new Date().toUTCString() + '</pubDate></item>'
+            + '</channel></rss>';
+        fetch.mockResolvedValueOnce({ status: 200, text: () => Promise.resolve(rss) });
+        const headlines = await registry._fetchNews(["AMD"]);
+        // Only the normal headline should survive
+        expect(headlines.length).toBe(1);
+        expect(headlines[0]).toContain("beats estimates");
+        expect(headlines[0]).not.toContain("A M D");
     });
 });

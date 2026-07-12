@@ -1257,6 +1257,7 @@ export class ToolRegistry {
                     const uuid = c.security_uuid || c.ticker || c.name;
 
                     if (!deduped.has(uuid)) {
+                        const isCash = v.value === "Investable Cash";
                         deduped.set(uuid, {
                             ticker: c.ticker || "",
                             name: c.name || "",
@@ -1264,8 +1265,9 @@ export class ToolRegistry {
                             valuation_native: c.valuation_native || 0,
                             valuation_sgd: Math.round(childValueSgd),
                             security_uuid: uuid,
-                            security_type: c.security_type || "",
-                            is_diversified: isDiversified(c.security_type, uuid, c.name),
+                            security_type: isCash ? "Cash" : (c.security_type || ""),
+                            is_diversified: isCash ? true : isDiversified(c.security_type, uuid, c.name),
+                            is_cash: isCash,
                             price_prev_close: c.price_prev_close || null,
                             price_change_pct: c.price_change_pct || null,
                             stale_days: c.stale_days || 0,
@@ -1275,8 +1277,9 @@ export class ToolRegistry {
             }
         }
 
-        // Top holdings: top 10 by valuation_sgd
+        // Top holdings: top 10 by valuation_sgd (exclude cash)
         const topHoldings = [...deduped.values()]
+            .filter((h) => !h.is_cash)
             .sort((a, b) => b.valuation_sgd - a.valuation_sgd)
             .slice(0, 10)
             .map((h) => ({
@@ -1287,8 +1290,9 @@ export class ToolRegistry {
                         : 0,
             }));
 
-        // Illiquid holdings: top 10 by valuation_sgd
+        // Illiquid holdings: top 10 by valuation_sgd (exclude zero/negative)
         const illiquidHoldings = [...illiquidDeduped.values()]
+            .filter((h) => h.valuation_sgd > 0)
             .sort((a, b) => b.valuation_sgd - a.valuation_sgd)
             .slice(0, 10)
             .map((h) => ({
@@ -1703,6 +1707,10 @@ export class ToolRegistry {
                     const key = title.slice(0, 60);
                     if (seen.has(key)) continue;
                     seen.add(key);
+                    // Skip anti-scraping titles (characters spaced out individually)
+                    const tokens = title.split(/\s+/).filter(Boolean);
+                    const singleCharTokens = tokens.filter((t) => t.length === 1).length;
+                    if (tokens.length > 5 && singleCharTokens / tokens.length > 0.3) continue;
                     // Decode HTML entities and strip URLs for clean summary
                     const decoded = title
                         .replace(/&amp;/g, "&")
