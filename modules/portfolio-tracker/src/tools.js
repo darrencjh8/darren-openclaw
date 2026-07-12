@@ -1277,6 +1277,13 @@ export class ToolRegistry {
             }
         }
 
+        // Correct illiquidTotalSgd: subtract holdings that also appear in liquid
+        for (const [uid, h] of illiquidDeduped) {
+            if (deduped.has(uid)) {
+                illiquidTotalSgd -= h.valuation_sgd;
+            }
+        }
+
         // Top holdings: top 10 by valuation_sgd (exclude cash)
         const topHoldings = [...deduped.values()]
             .filter((h) => !h.is_cash)
@@ -1290,9 +1297,10 @@ export class ToolRegistry {
                         : 0,
             }));
 
-        // Illiquid holdings: top 10 by valuation_sgd (exclude zero/negative)
+        // Illiquid holdings: top 10 by valuation_sgd (exclude zero/negative,
+        // and exclude any that also appear in liquid — avoids double-counting)
         const illiquidHoldings = [...illiquidDeduped.values()]
-            .filter((h) => h.valuation_sgd > 0)
+            .filter((h) => h.valuation_sgd > 0 && !deduped.has(h.security_uuid))
             .sort((a, b) => b.valuation_sgd - a.valuation_sgd)
             .slice(0, 10)
             .map((h) => ({
@@ -1730,6 +1738,8 @@ export class ToolRegistry {
                         .replace(/&hellip;/g, "\u2026")
                         .replace(/&#(\d+);/g, (_, d) => String.fromCodePoint(parseInt(d, 10)))
                         .replace(/&#x([0-9a-fA-F]+);/g, (_, h) => String.fromCodePoint(parseInt(h, 16)));
+                    // Skip concatenated anti-scraping titles (no spaces, very long)
+                    if (!decoded.includes(" ") && decoded.length > 40) continue;
                     headlines.push(`• ${ticker} — ${decoded}`);
                     if (headlines.length >= 5) break;
                 }

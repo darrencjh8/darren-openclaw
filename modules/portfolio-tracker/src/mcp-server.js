@@ -33,11 +33,12 @@ export function formatSyncResult(raw) {
     }
 
     // Pre-computed analysis block (the authoritative portfolio display)
+    // Return it directly — analysis.message_body already includes its own sync header.
     if (raw.analysis?.message_body) {
-        if (lines.length > 0) lines.push("");
-        lines.push(raw.analysis.message_body);
+        return raw.analysis.message_body;
     }
 
+    // Fallback: no analysis available, show bare sync status
     return lines.join("\n");
 }
 
