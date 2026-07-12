@@ -279,12 +279,6 @@ echo "$prompt_content" | grep -q 'portfolio_status.analysis' \
 echo "$prompt_content" | grep -q 'portfolio_sync' \
     && ok "prompt: references portfolio_sync entry point" \
     || nope "prompt: references portfolio_sync" "missing portfolio_sync reference"
-
-# Test: prompt handles web_search failure gracefully
-echo "$prompt_content" | grep -q 'News unavailable' \
-    && ok "prompt: handles web_search failure" \
-    || nope "prompt: handles web_search failure" "missing 'News unavailable' fallback"
-
 # Test: prompt handles sync failures with user guidance
 echo "$prompt_content" | grep -q 'onedrive setup' \
     && ok "prompt: guides user on sync failure" \

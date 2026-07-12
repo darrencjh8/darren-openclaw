@@ -1275,7 +1275,7 @@ describe("ToolRegistry — _buildAnalysis", () => {
         expect(analysis.message_body.length).toBeGreaterThan(100);
         // Should contain key sections
         expect(analysis.message_body).toContain("Liquid");
-        expect(analysis.message_body).toContain("Top Holdings");
+        expect(analysis.message_body).toContain("| Holding | % | SGD |");
         expect(analysis.message_body).toContain("MSFT");
     });
 
@@ -1289,5 +1289,37 @@ describe("ToolRegistry — _buildAnalysis", () => {
         expect(analysis.top_holdings).toEqual([]);
         expect(analysis.flags).toEqual([]);
         expect(analysis.message_body).toContain("No portfolio data");
+    });
+
+    it("fetches news from Google News RSS and filters by 24h", async () => {
+        const mockRss = new URLSearchParams();
+        const rss = '<?xml version="1.0"?><rss><channel>'
+            + '<item><title>NVDA beats estimates</title>'
+            + '<link>https://example.com/nvda1</link>'
+            + '<pubDate>' + new Date().toUTCString() + '</pubDate></item>'
+            + '<item><title>Old NVDA news</title>'
+            + '<link>https://example.com/nvda2</link>'
+            + '<pubDate>' + new Date(Date.now() - 48 * 3600000).toUTCString() + '</pubDate></item>'
+            + '</channel></rss>';
+        fetch.mockResolvedValueOnce({ status: 200, text: () => Promise.resolve(rss) });
+        const headlines = await registry._fetchNews(["NVDA"]);
+        expect(headlines.length).toBe(1);
+        expect(headlines[0]).toContain("NVDA");
+        expect(headlines[0]).toContain("beats estimates");
+    });
+
+    it("returns empty on network failure", async () => {
+        fetch.mockRejectedValueOnce(new Error("Network error"));
+        const headlines = await registry._fetchNews(["NVDA"]);
+        expect(headlines).toEqual([]);
+    });
+
+    it("includes news section in message_body when provided", () => {
+        const newsBlock = [" NVDA \u2014 beats estimates (https://example.com)"];
+        const analysis = registry._buildAnalysis(
+            sampleTaxonomyData, sampleFxRates, null, newsBlock,
+        );
+        expect(analysis.message_body).toContain("*News (last 24h)*");
+        expect(analysis.message_body).toContain("beats estimates");
     });
 });
