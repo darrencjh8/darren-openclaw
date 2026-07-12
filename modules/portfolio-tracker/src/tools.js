@@ -1147,10 +1147,18 @@ export class ToolRegistry {
             .split(",")
             .map((t) => t.trim().toLowerCase());
 
+        // Name-based concentration exemptions (e.g. Warchest, Emergency Fund)
+        const exemptNamesRaw = process.env.PP_CONCENTRATION_EXEMPT_NAMES || "Warchest";
+        const exemptNames = new Set(
+            exemptNamesRaw.split(",").map((n) => n.trim().toLowerCase()),
+        );
+
         const isDiversified = (securityType, uuid, name) => {
             // 0. Accounts and cash are always diversified (not single-stock risk)
             const type = (securityType || "").toLowerCase();
             if (type === "account" || type === "cash") return true;
+            // 0b. Name-based exemption (Warchest + configurable)
+            if (name && exemptNames.has(name.toLowerCase())) return true;
             // 1. Check asset class taxonomy (authoritative)
             const assetClass = assetClassMap.get(uuid);
             if (assetClass) {
@@ -1169,7 +1177,8 @@ export class ToolRegistry {
 
         const sectors = [];
         const geo = [];
-        const deduped = new Map(); // security_uuid → merged child
+        const deduped = new Map(); // security_uuid → merged child (liquid)
+        const illiquidDeduped = new Map(); // security_uuid → merged child (illiquid)
 
         for (const tax of taxonomyData.taxonomies || []) {
             const isRegions = tax.name && tax.name.toLowerCase().includes("region");
@@ -1184,6 +1193,27 @@ export class ToolRegistry {
 
                 if (v.value === "Without Classification") {
                     if (sumTotals) illiquidTotalSgd += valueSgd;
+                    // Collect illiquid children
+                    for (const c of v.children || []) {
+                        const cr = fxRates[c.currency] || 0;
+                        const cv = (c.valuation_native || 0) * cr;
+                        const uid = c.security_uuid || c.ticker || c.name;
+                        if (!illiquidDeduped.has(uid)) {
+                            illiquidDeduped.set(uid, {
+                                ticker: c.ticker || "",
+                                name: c.name || "",
+                                currency: c.currency || "",
+                                valuation_native: c.valuation_native || 0,
+                                valuation_sgd: Math.round(cv),
+                                security_uuid: uid,
+                                security_type: c.security_type || "",
+                                is_diversified: true, // illiquid = not concentration-relevant
+                                price_prev_close: null,
+                                price_change_pct: null,
+                                stale_days: c.stale_days || 0,
+                            });
+                        }
+                    }
                     continue;
                 }
 
@@ -1254,6 +1284,18 @@ export class ToolRegistry {
                 share_pct:
                     liquidTotalSgd > 0
                         ? Math.round((h.valuation_sgd / liquidTotalSgd) * 1000) / 10
+                        : 0,
+            }));
+
+        // Illiquid holdings: top 10 by valuation_sgd
+        const illiquidHoldings = [...illiquidDeduped.values()]
+            .sort((a, b) => b.valuation_sgd - a.valuation_sgd)
+            .slice(0, 10)
+            .map((h) => ({
+                ...h,
+                share_pct:
+                    illiquidTotalSgd > 0
+                        ? Math.round((h.valuation_sgd / illiquidTotalSgd) * 1000) / 10
                         : 0,
             }));
 
@@ -1390,9 +1432,25 @@ export class ToolRegistry {
 
             if (topHoldings.length > 0) {
                 lines.push("");
+                lines.push("**Liquid Holdings**");
+                lines.push("");
                 lines.push("| Holding | % | SGD |");
                 lines.push("|---|---|---|");
                 for (const h of topHoldings) {
+                    const label = displayLabel(h);
+                    lines.push(
+                        `| ${label} | ${h.share_pct} | ${toSgdStr(h.valuation_sgd)} |`,
+                    );
+                }
+            }
+
+            if (illiquidHoldings.length > 0) {
+                lines.push("");
+                lines.push("**Illiquid Holdings**");
+                lines.push("");
+                lines.push("| Holding | % | SGD |");
+                lines.push("|---|---|---|");
+                for (const h of illiquidHoldings) {
                     const label = displayLabel(h);
                     lines.push(
                         `| ${label} | ${h.share_pct} | ${toSgdStr(h.valuation_sgd)} |`,
@@ -1466,6 +1524,7 @@ export class ToolRegistry {
             cash_ratio_pct: cashRatio,
             cash_value_sgd: Math.round(cashValueSgd),
             top_holdings: topHoldings,
+            illiquid_holdings: illiquidHoldings,
             top_movers: topMovers,
             sectors,
             geo,
@@ -1644,7 +1703,26 @@ export class ToolRegistry {
                     const key = title.slice(0, 60);
                     if (seen.has(key)) continue;
                     seen.add(key);
-                    headlines.push(` ${ticker} — ${title} (${link})`);
+                    // Decode HTML entities and strip URLs for clean summary
+                    const decoded = title
+                        .replace(/&amp;/g, "&")
+                        .replace(/&lt;/g, "<")
+                        .replace(/&gt;/g, ">")
+                        .replace(/&quot;/g, '"')
+                        .replace(/&#39;/g, "'")
+                        .replace(/&#x27;/g, "'")
+                        .replace(/&apos;/g, "'")
+                        .replace(/&nbsp;/g, " ")
+                        .replace(/&mdash;/g, "\u2014")
+                        .replace(/&ndash;/g, "\u2013")
+                        .replace(/&ldquo;/g, "\u201C")
+                        .replace(/&rdquo;/g, "\u201D")
+                        .replace(/&lsquo;/g, "\u2018")
+                        .replace(/&rsquo;/g, "\u2019")
+                        .replace(/&hellip;/g, "\u2026")
+                        .replace(/&#(\d+);/g, (_, d) => String.fromCodePoint(parseInt(d, 10)))
+                        .replace(/&#x([0-9a-fA-F]+);/g, (_, h) => String.fromCodePoint(parseInt(h, 16)));
+                    headlines.push(`• ${ticker} — ${decoded}`);
                     if (headlines.length >= 5) break;
                 }
             } catch (e) {
