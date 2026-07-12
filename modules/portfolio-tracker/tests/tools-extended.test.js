@@ -456,7 +456,42 @@ describe("ToolRegistry — PP bridge tools", () => {
             expect(result.status).toBe("duplicate");
         });
 
-        it("passes offset_account_id to bridge", async () => {
+        it("dedup hash correct for Dividend (price*100, not price*shares*100)", async () => {
+            const dedup2 = new DedupJournal(":memory:");
+            // Dividend: amount = price * 100, not price * shares * 100
+            dedup2.record("2026-06-01", 5000, "acct-1", "div-1", "sec-aapl", "Dividend");
+            const reg2 = new ToolRegistry(cfg, dedup2, memory, mockBridge);
+
+            const result = await reg2.executeTool("insert_pp_transaction", {
+                account_id: "acct-1",
+                security_id: "sec-aapl",
+                type: "Dividend",
+                date: "2026-06-01",
+                shares: 0,
+                price: 50,
+                currency_code: "USD",
+            });
+            // amount = 50 * 100 = 5000, should match recorded hash
+            expect(result.status).toBe("duplicate");
+        });
+
+        it("dedup hash correct for Deposit (ignores shares)", async () => {
+            const dedup2 = new DedupJournal(":memory:");
+            dedup2.record("2026-06-01", 100000, "acct-1", "dep-1", "", "Deposit");
+            const reg2 = new ToolRegistry(cfg, dedup2, memory, mockBridge);
+
+            const result = await reg2.executeTool("insert_pp_transaction", {
+                account_id: "acct-1",
+                type: "Deposit",
+                date: "2026-06-01",
+                shares: 10,  // irrelevant for Deposit, should be ignored
+                price: 1000,
+                currency_code: "USD",
+            });
+            expect(result.status).toBe("duplicate");
+        });
+
+                it("passes offset_account_id to bridge", async () => {
             await registry.executeTool("insert_pp_transaction", {
                 account_id: "acct-1",
                 security_id: "sec-aapl",

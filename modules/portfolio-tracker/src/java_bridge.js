@@ -256,7 +256,7 @@ export class PpJavaBridge {
     /**
      * Update an account balance to a specific amount.
      */
-    async updateBalance({ accountId, amount, currencyCode, date, notes = "" }) {
+    async updateBalance({ accountId, amount, currencyCode, date, notes = "", offsetAccountId = null }) {
         const release = await acquireWriteLock();
         try {
             const args = [

@@ -597,8 +597,22 @@ export class ToolRegistry {
             case "insert_pp_transaction":
                 if (!this._ppBridge)
                     return { error: "PP bridge not configured" };
-                // Dedup check: skip if already inserted
-                const amountCents = Math.round((args.price || 0) * (args.shares || 0) * 100);
+                // Dedup check: compute monetary amount matching Java''s per-type logic
+                let amountCents;
+                switch (args.type) {
+                    case "Buy":
+                    case "Sell":
+                        amountCents = Math.round((args.price || 0) * Math.abs(args.shares || 0) * 100);
+                        break;
+                    case "Fee":
+                        amountCents = Math.round((args.fees || 0) * 100);
+                        break;
+                    case "Tax":
+                        amountCents = Math.round((args.taxes || 0) * 100);
+                        break;
+                    default: // Dividend, Deposit, Withdrawal, Interest
+                        amountCents = Math.round((args.price || 0) * 100);
+                }
                 if (this._dedup && this._dedup.check(
                     args.date, amountCents, args.account_id,
                     args.security_id || "", args.type,
