@@ -73,7 +73,10 @@ public class Main {
                     result = ppc.getStatus();
                     break;
                 case "query":
-                    result = ppc.querySecurity(require(params, "search"));
+                    result = ppc.querySecurity(
+                        require(params, "search"),
+                        params.get("account-id")
+                    );
                     break;
                 case "import":
                     result = ppc.importIbkr(

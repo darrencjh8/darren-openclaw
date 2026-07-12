@@ -314,14 +314,18 @@ export class PpJavaBridge {
      * Query a security by ticker, ISIN, or name.
      * Returns shares held, avg entry price, latest price, market value.
      */
-    async querySecurity(search) {
-        return this._runCommand(
+    async querySecurity(search, accountId) {
+        const args = [
             "query",
             "--file",
             this._xmlPath,
             "--search",
             search,
-        );
+        ];
+        if (accountId) {
+            args.push("--account-id", accountId);
+        }
+        return this._runCommand(...args);
     }
 
     /**

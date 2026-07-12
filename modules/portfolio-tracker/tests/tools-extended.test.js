@@ -318,7 +318,7 @@ describe("ToolRegistry — PP bridge tools", () => {
             const result = await registry.executeTool("query_pp_security", {
                 search: "AAPL",
             });
-            expect(mockBridge.querySecurity).toHaveBeenCalledWith("AAPL");
+            expect(mockBridge.querySecurity).toHaveBeenCalledWith("AAPL", null);
             expect(result).toEqual({
                 ticker: "AAPL",
                 shares: 100,
@@ -336,7 +336,7 @@ describe("ToolRegistry — PP bridge tools", () => {
 
         it("defaults search to empty string", async () => {
             await registry.executeTool("query_pp_security", {});
-            expect(mockBridge.querySecurity).toHaveBeenCalledWith("");
+            expect(mockBridge.querySecurity).toHaveBeenCalledWith("", null);
         });
     });
 

@@ -422,6 +422,10 @@ const TOOL_SCHEMAS = [
                         type: "string",
                         description: "Ticker symbol, ISIN, or security name",
                     },
+                    account_id: {
+                        type: "string",
+                        description: "Optional: filter to a specific portfolio account UUID",
+                    },
                 },
                 required: ["search"],
             },
@@ -703,7 +707,7 @@ export class ToolRegistry {
             case "query_pp_security":
                 if (!this._ppBridge)
                     return { error: "PP bridge not configured" };
-                return this._ppBridge.querySecurity(args.search || "");
+                return this._ppBridge.querySecurity(args.search || "", args.account_id || null);
 
             default:
                 throw new Error(`Unknown tool: ${name}`);
