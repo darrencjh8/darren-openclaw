@@ -155,6 +155,7 @@ jobs:
                   GOOGLE_SHEET_ID: ${{ vars.GOOGLE_SHEET_ID }}
                   TAXONOMY_SHEET_MAPPING: ${{ vars.TAXONOMY_SHEET_MAPPING }}
                   TAXONOMY_NAMES: ${{ vars.TAXONOMY_NAMES }}
+                  PP_OFFSET_MAP: ${{ vars.PP_OFFSET_MAP }}
                   KTMB_ACCOUNT_NAME: ${{ vars.KTMB_ACCOUNT_NAME }}
                   KTMB_MAX_RETRIES: ${{ vars.KTMB_MAX_RETRIES }}
                   KTMB_POLL_INTERVAL: ${{ vars.KTMB_POLL_INTERVAL }}
