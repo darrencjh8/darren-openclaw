@@ -89,6 +89,8 @@ jobs:
                   echo "components=$COMPONENTS" >> "$GITHUB_OUTPUT"
 
             - name: Build images
+              env:
+                  DEPLOY_COMPONENTS: ${{ steps.changes.outputs.components || 'all' }}
               run: |
                   mkdir -p /home/runner/data/{expense-tracker/data,portfolio-tracker/data,hermes/{data,workspace},ktmb/data}
                   if [ "${DEPLOY_COMPONENTS}" = "all" ]; then
