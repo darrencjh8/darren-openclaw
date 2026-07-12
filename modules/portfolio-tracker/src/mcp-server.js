@@ -280,6 +280,14 @@ function createTools(server, registry) {
         async (args) => {
             const result = {};
 
+            // Auto-fill offset_account_id from PP_OFFSET_MAP env var (JSON: {"account_uuid":"offset_uuid"})
+            if (!args.offset_account_id && process.env.PP_OFFSET_MAP) {
+                try {
+                    const map = JSON.parse(process.env.PP_OFFSET_MAP);
+                    args.offset_account_id = map[args.account_id] || null;
+                } catch (e) { /* malformed JSON — ignore */ }
+            }
+
             // 1. Pull from OneDrive
             try {
                 result.pull = await pullFromOneDrive();
