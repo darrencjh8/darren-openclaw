@@ -226,68 +226,9 @@ function tx(result) {
     return { content: [{ type: "text", text: JSON.stringify(result) }] };
 }
 
-// ── formatSyncResult unit tests ──
+import { formatSyncResult } from "../src/mcp-server.js";
 
-describe("formatSyncResult — taxonomy liquid/illiquid split", () => {
-    // Replicate the formatSyncResult logic inline for testing
-    function formatSyncResult(raw) {
-        const lines = [];
-        if (raw.summary) lines.push(raw.summary);
-
-        const fi = raw.flex_import;
-        if (fi && (fi.trades_imported > 0 || fi.dividends_imported > 0)) {
-            lines.push(
-                `IBKR: ${fi.trades_imported || 0} trades, ${fi.dividends_imported || 0} dividends`,
-            );
-        }
-
-        // Taxonomy: liquid / illiquid split
-        const taxonomyData = raw.taxonomy_data;
-        if (taxonomyData?.taxonomies?.length) {
-            const tax = taxonomyData.taxonomies[0];
-            const values = tax.values || [];
-            let liquidTotal = 0;
-            let illiquidTotal = 0;
-            let illiquidCount = 0;
-            for (const v of values) {
-                if (v.value === "Without Classification") {
-                    illiquidTotal = v.valuation_native || 0;
-                    illiquidCount = v.count || 0;
-                } else {
-                    liquidTotal += v.valuation_native || 0;
-                }
-            }
-            const grandTotal = liquidTotal + illiquidTotal;
-            lines.push("");
-            lines.push(
-                `Liquid    SGD ${liquidTotal.toLocaleString("en-SG", { minimumFractionDigits: 0, maximumFractionDigits: 0 })} (${grandTotal > 0 ? Math.round((liquidTotal / grandTotal) * 100) : 0}%)`,
-            );
-            if (illiquidCount > 0) {
-                lines.push(
-                    `Illiquid  SGD ${illiquidTotal.toLocaleString("en-SG", { minimumFractionDigits: 0, maximumFractionDigits: 0 })} (${grandTotal > 0 ? Math.round((illiquidTotal / grandTotal) * 100) : 0}%) — ${illiquidCount} holdings`,
-                );
-            }
-        }
-
-        const s = raw.portfolio_status?.summary;
-        if (s) {
-            const total = Number(s.total_value_sgd || 0);
-            const equity = Number(s.equity_value_sgd || 0);
-            const cash = total - equity;
-            lines.push("");
-            lines.push(
-                `Total  SGD ${total.toLocaleString("en-SG", { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`,
-            );
-            lines.push(
-                `Equity SGD ${equity.toLocaleString("en-SG", { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`,
-            );
-            lines.push(
-                `Cash   SGD ${cash.toLocaleString("en-SG", { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`,
-            );
-        }
-        return lines.join("\n");
-    }
-
+describe("formatSyncResult", () => {
     it("shows liquid/illiquid split when taxonomy_data present", () => {
         const raw = {
             summary: "Synced 0/0 accounts",
@@ -371,6 +312,60 @@ describe("formatSyncResult — taxonomy liquid/illiquid split", () => {
         const out = formatSyncResult(raw);
         expect(out).not.toContain("Liquid");
         expect(out).not.toContain("Illiquid");
+    });
+    // ── raw.analysis block (pre-computed analysis) ──
+
+    it("uses raw.analysis when available", () => {
+        const raw = {
+            analysis: {
+                liquid_total_sgd: 138062,
+                illiquid_total_sgd: 317971,
+                top_holdings: [
+                    { ticker: "AAPL", name: "Apple Inc", valuation_sgd: 50000, share_pct: "5.2%" },
+                ],
+            },
+        };
+        const out = formatSyncResult(raw);
+        expect(out).toContain("Liquid");
+        expect(out).toContain("Illiquid");
+        expect(out).toContain("138,062");
+        expect(out).toContain("317,971");
+        expect(out).toContain("Top 5 Holdings");
+        expect(out).toContain("AAPL");
+    });
+
+    it("falls back to taxonomy_data when analysis is missing", () => {
+        const raw = {
+            summary: "Synced 0/0 accounts",
+            taxonomy_data: {
+                taxonomies: [{
+                    name: "Regions",
+                    values: [
+                        { value: "Investable Cash", valuation_native: 50000, count: 5 },
+                        { value: "Without Classification", valuation_native: 100000, count: 3 },
+                    ],
+                }],
+            },
+        };
+        const out = formatSyncResult(raw);
+        expect(out).toContain("Liquid");
+        expect(out).toContain("Illiquid");
+        expect(out).toContain("50,000");
+        expect(out).toContain("100,000");
+        expect(out).not.toContain("Top 5 Holdings");
+    });
+
+    it("handles analysis without top_holdings", () => {
+        const raw = {
+            analysis: {
+                liquid_total_sgd: 100000,
+                illiquid_total_sgd: 50000,
+            },
+        };
+        const out = formatSyncResult(raw);
+        expect(out).toContain("Liquid");
+        expect(out).toContain("100,000");
+        expect(out).not.toContain("Top 5 Holdings");
     });
 });
 

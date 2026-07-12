@@ -12,7 +12,7 @@ import { existsSync } from "fs";
 import { pullFromOneDrive, pushToOneDrive } from "./onedrive.js";
 import { getAuthUrl, exchangeCodeForToken } from "./onedrive_oauth.js";
 
-function formatSyncResult(raw) {
+export function formatSyncResult(raw) {
     const lines = [];
 
     // Sync status
