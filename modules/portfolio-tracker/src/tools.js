@@ -946,6 +946,25 @@ export class ToolRegistry {
             }
         }
 
+        // Step 6: Build analysis block with SGD conversion
+        let analysis = null;
+        let fxRatesUsed = {};
+        if (taxonomyData) {
+            // Collect all unique currencies from taxonomy children
+            const currencies = new Set();
+            for (const tax of taxonomyData.taxonomies || []) {
+                for (const v of tax.values || []) {
+                    for (const c of v.children || []) {
+                        if (c.currency && c.currency !== "SGD") {
+                            currencies.add(c.currency);
+                        }
+                    }
+                }
+            }
+            fxRatesUsed = await this._fetchLiveRates([...currencies]);
+            analysis = this._buildAnalysis(taxonomyData, fxRatesUsed);
+        }
+
         return {
             sync_targets: results,
             summary: `Synced ${results.filter((r) => r.status === "updated").length}/${results.length} accounts`,
@@ -956,6 +975,8 @@ export class ToolRegistry {
             taxonomy_export: taxonomyResult,
             taxonomy_data: taxonomyData,
             portfolio_status: statusSgd,
+            analysis,
+            fx_rates_used: fxRatesUsed,
         };
     }
 
@@ -1007,6 +1028,277 @@ export class ToolRegistry {
             fx_rates_used: rates,
         };
         return result;
+    }
+
+    // -----------------------------------------------------------------------
+    // Build pre-computed analysis block from taxonomy data + fx rates
+    // -----------------------------------------------------------------------
+
+    _buildAnalysis(taxonomyData, fxRates) {
+        const diversifiedTypes = (process.env.PP_DIVERSIFIED_TYPES || "ETF,Fund,Mutual Fund,Index Fund")
+            .split(",")
+            .map((t) => t.trim().toLowerCase());
+
+        const isDiversified = (securityType) =>
+            diversifiedTypes.includes((securityType || "").toLowerCase());
+
+        // Collect all children from liquid taxonomies (exclude "Without Classification")
+        const allChildren = [];
+        let liquidTotalSgd = 0;
+        let illiquidTotalSgd = 0;
+        let cashValueSgd = 0;
+        let isFirstTaxonomy = true; // Only sum totals from the first (Regions) taxonomy
+
+        const sectors = [];
+        const geo = [];
+        const deduped = new Map(); // security_uuid → merged child
+
+        for (const tax of taxonomyData.taxonomies || []) {
+            const isRegions = tax.name && tax.name.toLowerCase().includes("region");
+            const isSector = tax.name && tax.name.toLowerCase().includes("sector");
+            const isGeo = tax.name && tax.name.toLowerCase().includes("geograph");
+            const sumTotals = isRegions || (isFirstTaxonomy && !isSector && !isGeo);
+
+            for (const v of tax.values || []) {
+                const sgdRate = fxRates[v.currency] || 0;
+                const valueSgd = (v.valuation_native || 0) * sgdRate;
+
+                if (v.value === "Without Classification") {
+                    if (sumTotals) illiquidTotalSgd += valueSgd;
+                    continue;
+                }
+
+                if (sumTotals) {
+                    liquidTotalSgd += valueSgd;
+
+                    // Track cash value
+                    if (
+                        v.value === "Investable Cash" ||
+                        (v.children || []).every(
+                            (c) => (c.security_type || "") === "Cash" || (c.security_type || "") === "Account",
+                        )
+                    ) {
+                        cashValueSgd += valueSgd;
+                    }
+                }
+
+                // Sector taxonomy
+                if (isSector) {
+                    sectors.push({
+                        name: v.value,
+                        share_pct: v.share_pct || 0,
+                        valuation_sgd: Math.round(valueSgd),
+                    });
+                }
+
+                // Geography taxonomy
+                if (isGeo) {
+                    geo.push({
+                        name: v.value,
+                        share_pct: v.share_pct || 0,
+                        valuation_sgd: Math.round(valueSgd),
+                    });
+                }
+
+                // Collect children with SGD values
+                for (const c of v.children || []) {
+                    const childRate = fxRates[c.currency] || 0;
+                    const childValueSgd =
+                        (c.valuation_native || 0) * childRate;
+                    const uuid = c.security_uuid || c.ticker || c.name;
+
+                    if (!deduped.has(uuid)) {
+                        deduped.set(uuid, {
+                            ticker: c.ticker || "",
+                            name: c.name || "",
+                            currency: c.currency || "",
+                            valuation_native: c.valuation_native || 0,
+                            valuation_sgd: Math.round(childValueSgd),
+                            security_uuid: uuid,
+                            security_type: c.security_type || "",
+                            is_diversified: isDiversified(c.security_type),
+                            price_prev_close: c.price_prev_close || null,
+                            price_change_pct: c.price_change_pct || null,
+                            stale_days: c.stale_days || 0,
+                        });
+                    }
+                }
+            }
+        }
+
+        // Top holdings: top 10 by valuation_sgd
+        const topHoldings = [...deduped.values()]
+            .sort((a, b) => b.valuation_sgd - a.valuation_sgd)
+            .slice(0, 10)
+            .map((h) => ({
+                ...h,
+                share_pct:
+                    liquidTotalSgd > 0
+                        ? Math.round((h.valuation_sgd / liquidTotalSgd) * 1000) / 10
+                        : 0,
+            }));
+
+        // Top movers: top 10 by abs(price_change_pct), only non-null
+        const moverMap = new Map();
+        for (const tax of taxonomyData.taxonomies || []) {
+            for (const v of tax.values || []) {
+                if (v.value === "Without Classification") continue;
+                for (const c of v.children || []) {
+                    if (c.price_change_pct != null && c.price_prev_close != null) {
+                        const uuid = c.security_uuid || c.ticker || c.name;
+                        if (!moverMap.has(uuid)) {
+                            const priceNow = c.price_prev_close * (1 + c.price_change_pct / 100);
+                            moverMap.set(uuid, {
+                                ticker: c.ticker,
+                                name: c.name,
+                                price_prev_close: Math.round(c.price_prev_close * 100) / 100,
+                                price_now: Math.round(priceNow * 100) / 100,
+                                price_change_pct: Math.round(c.price_change_pct * 10) / 10,
+                            });
+                        }
+                    }
+                }
+            }
+        }
+        const topMovers = [...moverMap.values()]
+            .sort(
+                (a, b) =>
+                    Math.abs(b.price_change_pct) - Math.abs(a.price_change_pct),
+            )
+            .slice(0, 10);
+
+        // Flags: concentration >20% for non-diversified, stale data >3 days
+        const flags = [];
+        for (const h of topHoldings) {
+            if (!h.is_diversified && h.share_pct > 20) {
+                flags.push({
+                    severity: "warn",
+                    ticker: h.ticker,
+                    reason: `${h.ticker} at ${h.share_pct}% of liquid — above 20% single-stock threshold`,
+                    pct: h.share_pct,
+                });
+            }
+            if (!h.is_diversified && h.share_pct > 10 && h.share_pct <= 20) {
+                flags.push({
+                    severity: "info",
+                    ticker: h.ticker,
+                    reason: `${h.ticker} at ${h.share_pct}% of liquid — approaching 20% threshold`,
+                    pct: h.share_pct,
+                });
+            }
+        }
+        const maxStaleDays = topHoldings.reduce(
+            (max, h) => Math.max(max, h.stale_days),
+            0,
+        );
+        if (maxStaleDays > 3) {
+            flags.push({
+                severity: "warn",
+                ticker: "",
+                reason: `Prices stale — last update ${maxStaleDays} days ago`,
+                pct: 0,
+            });
+        }
+
+        // Build message body
+        const grandTotal = liquidTotalSgd + illiquidTotalSgd;
+        const cashRatio =
+            liquidTotalSgd > 0
+                ? Math.round((cashValueSgd / liquidTotalSgd) * 1000) / 10
+                : 0;
+
+        const toSgdStr = (n) =>
+            n != null
+                ? Number(n).toLocaleString("en-SG", {
+                      minimumFractionDigits: 0,
+                      maximumFractionDigits: 0,
+                  })
+                : "?";
+
+        const today = new Date().toISOString().slice(0, 10);
+        const lines = [];
+
+        // Check for bridge errors
+        if (liquidTotalSgd === 0 && illiquidTotalSgd === 0) {
+            lines.push(`📊 ${today}`);
+            lines.push("");
+            lines.push("No portfolio data available. Check OneDrive sync.");
+        } else {
+            lines.push(`📊 ${today}`);
+            lines.push("");
+            lines.push(
+                `Liquid SGD ${toSgdStr(liquidTotalSgd)} · Illiquid SGD ${toSgdStr(illiquidTotalSgd)} · Total SGD ${toSgdStr(grandTotal)}`,
+            );
+            lines.push(`Cash ${cashRatio}%`);
+
+            if (topHoldings.length > 0) {
+                lines.push("");
+                lines.push("*Top Holdings*");
+                for (const h of topHoldings) {
+                    const label = h.ticker || h.name;
+                    lines.push(
+                        `${label} — ${h.share_pct}%  SGD ${toSgdStr(h.valuation_sgd)}`,
+                    );
+                }
+            }
+
+            if (sectors.length > 0) {
+                lines.push("");
+                lines.push("*Sectors*");
+                for (const s of sectors) {
+                    lines.push(`${s.name} — ${s.share_pct}%`);
+                }
+            }
+
+            if (geo.length > 0) {
+                lines.push("");
+                lines.push("*Geography*");
+                for (const g of geo) {
+                    lines.push(`${g.name} — ${g.share_pct}%`);
+                }
+            }
+
+            if (topMovers.length > 0) {
+                lines.push("");
+                lines.push("*Top Movers (% chg)*");
+                for (const m of topMovers) {
+                    const sign = m.price_change_pct > 0 ? "+" : "";
+                    lines.push(
+                        `${m.ticker}  ${m.price_prev_close}→${m.price_now}  ${sign}${m.price_change_pct}%`,
+                    );
+                }
+            }
+
+            const warnFlags = flags.filter((f) => f.severity === "warn");
+            const infoFlags = flags.filter((f) => f.severity === "info");
+            if (warnFlags.length > 0 || infoFlags.length > 0) {
+                lines.push("");
+                for (const f of warnFlags) {
+                    lines.push(`⚠️ ${f.reason}`);
+                }
+                for (const f of infoFlags) {
+                    lines.push(`ℹ️ ${f.reason}`);
+                }
+            }
+        }
+
+        const messageBody = lines.join("\n");
+
+        return {
+            date: today,
+            liquid_total_sgd: Math.round(liquidTotalSgd),
+            illiquid_total_sgd: Math.round(illiquidTotalSgd),
+            grand_total_sgd: Math.round(grandTotal),
+            cash_ratio_pct: cashRatio,
+            cash_value_sgd: Math.round(cashValueSgd),
+            top_holdings: topHoldings,
+            top_movers: topMovers,
+            sectors,
+            geo,
+            flags,
+            stale_days: maxStaleDays,
+            message_body: messageBody,
+        };
     }
 
     // -----------------------------------------------------------------------
@@ -1115,7 +1407,7 @@ export class ToolRegistry {
     // Live FX rates from open.er-api.com (free, no key)
     // -----------------------------------------------------------------------
 
-    async _fetchLiveRates() {
+    async _fetchLiveRates(extraCurrencies) {
         const rates = {};
         try {
             const resp = await fetch("https://open.er-api.com/v6/latest/USD", {
@@ -1123,22 +1415,25 @@ export class ToolRegistry {
             });
             if (resp.status === 200) {
                 const data = await resp.json();
-                const usdToSgd = data.rates?.SGD || 0;
-                if (usdToSgd) {
-                    rates["USD"] = usdToSgd;
+                const apiRates = data.rates || {};
+                const usdToSgd = apiRates.SGD || 0;
+                if (!usdToSgd) return rates;
+
+                // USD is the API base — handle specially
+                rates["USD"] = usdToSgd;
+
+                // Always fetch base currencies
+                const baseCurrencies = ["MYR", "GBP", "EUR"];
+                // Add any extra currencies seen in portfolio
+                const allCurrencies = new Set([...baseCurrencies, ...(extraCurrencies || [])]);
+
+                for (const cc of allCurrencies) {
+                    const usdToCc = apiRates[cc];
+                    if (usdToCc) {
+                        rates[cc] = Math.round(usdToSgd / usdToCc * 10000) / 10000;
+                    }
                 }
-                const usdToMyr = data.rates?.MYR || 0;
-                if (usdToMyr && usdToSgd) {
-                    rates["MYR"] = usdToSgd / usdToMyr;
-                }
-                const usdToGbp = data.rates?.GBP || 0;
-                if (usdToGbp && usdToSgd) {
-                    rates["GBP"] = usdToSgd / usdToGbp;
-                }
-                const usdToEur = data.rates?.EUR || 0;
-                if (usdToEur && usdToSgd) {
-                    rates["EUR"] = usdToSgd / usdToEur;
-                }
+                rates["SGD"] = 1.0;
                 console.log(JSON.stringify({ event: "fx_rates", rates }));
             }
         } catch (e) {

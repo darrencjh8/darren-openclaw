@@ -178,6 +178,18 @@ async function main() {
             imapHandler.idleLoop(onNewEmail).catch((err) => {
                 logger.error({ event: "imap_idle_error", error: err.message });
             });
+
+            // Periodic dedup cleanup (every 6 hours)
+            const CLEANUP_INTERVAL_MS = 6 * 60 * 60 * 1000;
+            setInterval(() => {
+                try {
+                    dedupJournal.cleanup();
+                    logger.debug({ event: "dedup_cleanup_completed" });
+                } catch (e) {
+                    logger.warn({ event: "dedup_cleanup_failed", error: e.message });
+                }
+            }, CLEANUP_INTERVAL_MS);
+
             resolve(server);
         });
         server.on("error", reject);

@@ -351,6 +351,25 @@ public class PpClient {
             double shareCount = Math.abs(shares) / Values.Share.divider();
             double marketValueNative = price * shareCount;
 
+            // Find previous close price (strictly before latest date)
+            Double pricePrevClose = null;
+            Double priceChangePct = null;
+            LocalDate latestDate = latest.getDate();
+            for (int i = prices.size() - 1; i >= 0; i--) {
+                SecurityPrice p = prices.get(i);
+                if (p.getDate().isBefore(latestDate)) {
+                    double prevPrice = p.getValue() / Values.Quote.divider();
+                    if (prevPrice > 0) {
+                        pricePrevClose = prevPrice;
+                        priceChangePct = ((price - prevPrice) / prevPrice) * 100.0;
+                    }
+                    break;
+                }
+            }
+
+            // Compute stale days
+            long staleDays = java.time.temporal.ChronoUnit.DAYS.between(latestDate, today);
+
             Map<String, Object> h = new HashMap<>();
             h.put("currency", sec.getCurrencyCode());
             h.put("market_value_native", marketValueNative);
@@ -358,6 +377,10 @@ public class PpClient {
             h.put("ticker", sec.getTickerSymbol());
             h.put("shares_held", shares);
             h.put("latest_price_raw", latest.getValue());
+            h.put("security_type", ""); // Not accessible via public API; use PP_DIVERSIFIED_TYPES env var
+            h.put("price_prev_close", pricePrevClose);
+            h.put("price_change_pct", priceChangePct != null ? Math.round(priceChangePct * 100.0) / 100.0 : null);
+            h.put("stale_days", (int) staleDays);
             securityHoldings.put(sec.getUUID(), h);
 
         } // close for (Security sec : client.getSecurities())
@@ -419,6 +442,11 @@ public class PpClient {
                     child.put("ticker", h.getOrDefault("ticker", ""));
                     child.put("currency", h.get("currency"));
                     child.put("valuation_native", Math.round(val * 100.0) / 100.0);
+                    child.put("security_uuid", e.getKey());
+                    child.put("security_type", h.getOrDefault("security_type", ""));
+                    child.put("price_prev_close", h.getOrDefault("price_prev_close", null));
+                    child.put("price_change_pct", h.getOrDefault("price_change_pct", null));
+                    child.put("stale_days", h.getOrDefault("stale_days", 0));
                     unclassifiedChildren.add(child);
                 }
             }
@@ -434,6 +462,11 @@ public class PpClient {
                     child.put("ticker", "");
                     child.put("currency", h.get("currency"));
                     child.put("valuation_native", Math.round(val * 100.0) / 100.0);
+                    child.put("security_uuid", e.getKey());
+                    child.put("security_type", "Account");
+                    child.put("price_prev_close", null);
+                    child.put("price_change_pct", null);
+                    child.put("stale_days", 0);
                     unclassifiedChildren.add(child);
                 }
             }
@@ -556,6 +589,11 @@ public class PpClient {
         child.put("ticker", holding.getOrDefault("ticker", ""));
         child.put("currency", currency);
         child.put("valuation_native", Math.round(prorated * 100.0) / 100.0);
+        child.put("security_uuid", vehicleId);
+        child.put("security_type", holding.getOrDefault("security_type", ""));
+        child.put("price_prev_close", holding.getOrDefault("price_prev_close", null));
+        child.put("price_change_pct", holding.getOrDefault("price_change_pct", null));
+        child.put("stale_days", holding.getOrDefault("stale_days", 0));
         children.add(child);
     }
 

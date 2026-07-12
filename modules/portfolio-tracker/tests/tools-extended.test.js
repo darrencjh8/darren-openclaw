@@ -654,3 +654,317 @@ describe("ToolRegistry — _computeSyncAll with flex pull", () => {
         }
     });
 });
+
+describe("ToolRegistry — _fetchLiveRates", () => {
+    let registry;
+
+    beforeEach(() => {
+        vi.clearAllMocks();
+        const cfg = new Config(REQUIRED_ENV);
+        const dbPath = join(
+            tmpdir(),
+            `test-fxrates-dedup-${crypto.randomUUID()}.db`,
+        );
+        const dedup = new DedupJournal(dbPath);
+        const memory = new MemoryStore(":memory:");
+        registry = new ToolRegistry(cfg, memory, dedup);
+    });
+
+    afterEach(() => {
+        vi.restoreAllMocks();
+    });
+
+    it("fetches rates for USD, MYR, GBP, EUR from open-er-api", async () => {
+        const origFetch = global.fetch;
+        global.fetch = vi.fn().mockResolvedValue({
+            status: 200,
+            json: async () => ({
+                rates: {
+                    SGD: 1.35,
+                    MYR: 4.50,
+                    GBP: 0.78,
+                    EUR: 0.92,
+                },
+            }),
+        });
+
+        try {
+            const rates = await registry._fetchLiveRates();
+            expect(rates["USD"]).toBeCloseTo(1.35, 2);
+            expect(rates["MYR"]).toBeCloseTo(1.35 / 4.50, 2);
+            expect(rates["GBP"]).toBeCloseTo(1.35 / 0.78, 2);
+            expect(rates["EUR"]).toBeCloseTo(1.35 / 0.92, 2);
+        } finally {
+            global.fetch = origFetch;
+        }
+    });
+
+    it("fetches additional currencies from portfolio data", async () => {
+        const origFetch = global.fetch;
+        global.fetch = vi.fn().mockResolvedValue({
+            status: 200,
+            json: async () => ({
+                rates: {
+                    SGD: 1.35,
+                    HKD: 7.80,
+                    JPY: 150.0,
+                },
+            }),
+        });
+
+        try {
+            // Pass currencies seen in portfolio
+            const rates = await registry._fetchLiveRates(["USD", "HKD", "JPY"]);
+            expect(rates["USD"]).toBeCloseTo(1.35, 2);
+            expect(rates["HKD"]).toBeCloseTo(1.35 / 7.80, 2);
+            expect(rates["JPY"]).toBeCloseTo(1.35 / 150.0, 2);
+        } finally {
+            global.fetch = origFetch;
+        }
+    });
+
+    it("returns empty object on API failure", async () => {
+        const origFetch = global.fetch;
+        global.fetch = vi.fn().mockRejectedValue(new Error("Network error"));
+
+        try {
+            const rates = await registry._fetchLiveRates();
+            expect(rates).toEqual({});
+        } finally {
+            global.fetch = origFetch;
+        }
+    });
+});
+
+describe("ToolRegistry — _buildAnalysis", () => {
+    let registry;
+
+    beforeEach(() => {
+        vi.clearAllMocks();
+        const cfg = new Config(REQUIRED_ENV);
+        const dbPath = join(
+            tmpdir(),
+            `test-analysis-dedup-${crypto.randomUUID()}.db`,
+        );
+        const dedup = new DedupJournal(dbPath);
+        const memory = new MemoryStore(":memory:");
+        registry = new ToolRegistry(cfg, memory, dedup);
+    });
+
+    const sampleTaxonomyData = {
+        taxonomies: [
+            {
+                name: "Regions (Liquid)",
+                values: [
+                    {
+                        value: "Investable Cash",
+                        valuation_native: 63700,
+                        currency: "SGD",
+                        share_pct: 21.8,
+                        children: [
+                            {
+                                name: "B4 Cash", ticker: "", currency: "SGD",
+                                valuation_native: 63700, security_uuid: "cash-1",
+                                security_type: "Cash", price_prev_close: null,
+                                price_change_pct: null, stale_days: 0,
+                            },
+                        ],
+                    },
+                    {
+                        value: "America",
+                        valuation_native: 64123.45,
+                        currency: "USD",
+                        share_pct: 21.9,
+                        children: [
+                            {
+                                name: "Microsoft Corp", ticker: "MSFT", currency: "USD",
+                                valuation_native: 50241.23, security_uuid: "sec-msft",
+                                security_type: "Equity", price_prev_close: 367.34,
+                                price_change_pct: 4.8, stale_days: 1,
+                            },
+                            {
+                                name: "NVIDIA Corp", ticker: "NVDA", currency: "USD",
+                                valuation_native: 13882.22, security_uuid: "sec-nvda",
+                                security_type: "Equity", price_prev_close: 208.65,
+                                price_change_pct: 1.1, stale_days: 1,
+                            },
+                        ],
+                    },
+                    {
+                        value: "Without Classification",
+                        valuation_native: 331922,
+                        currency: "SGD",
+                        share_pct: 53.2,
+                        children: [
+                            {
+                                name: "CPF OA", ticker: "", currency: "SGD",
+                                valuation_native: 200000, security_uuid: "cpf-oa",
+                                security_type: "Account", price_prev_close: null,
+                                price_change_pct: null, stale_days: 0,
+                            },
+                        ],
+                    },
+                ],
+            },
+            {
+                name: "Sector",
+                values: [
+                    {
+                        value: "Technology", valuation_native: 64123.45, currency: "USD",
+                        share_pct: 21.9,
+                        children: [
+                            {
+                                name: "Microsoft Corp", ticker: "MSFT", currency: "USD",
+                                valuation_native: 50241.23, security_uuid: "sec-msft",
+                                security_type: "Equity",
+                            },
+                            {
+                                name: "NVIDIA Corp", ticker: "NVDA", currency: "USD",
+                                valuation_native: 13882.22, security_uuid: "sec-nvda",
+                                security_type: "Equity",
+                            },
+                        ],
+                    },
+                ],
+            },
+        ],
+    };
+
+    const sampleFxRates = { USD: 1.35, SGD: 1.0, MYR: 0.30 };
+
+    it("computes liquid_total_sgd from all non-WC taxonomies", () => {
+        const analysis = registry._buildAnalysis(sampleTaxonomyData, sampleFxRates);
+        // Investable Cash: 63700 × 1.0 = 63700
+        // America: 64123.45 × 1.35 = 86566.66
+        // Total liquid = 63700 + 86566.66 = 150266.66
+        expect(analysis.liquid_total_sgd).toBeCloseTo(150266.66, 0);
+    });
+
+    it("computes illiquid_total_sgd from Without Classification", () => {
+        const analysis = registry._buildAnalysis(sampleTaxonomyData, sampleFxRates);
+        // Without Classification: 331922 × 1.0 = 331922
+        expect(analysis.illiquid_total_sgd).toBeCloseTo(331922, 0);
+    });
+
+    it("computes cash_ratio_pct from Investable Cash / liquid", () => {
+        const analysis = registry._buildAnalysis(sampleTaxonomyData, sampleFxRates);
+        // 63700 / 150266.66 = 42.4%
+        expect(analysis.cash_ratio_pct).toBeCloseTo(42.4, 0);
+    });
+
+    it("deduplicates top_holdings by security_uuid", () => {
+        const analysis = registry._buildAnalysis(sampleTaxonomyData, sampleFxRates);
+        // MSFT appears in both Regions and Sector — should be deduplicated
+        expect(analysis.top_holdings.length).toBeLessThanOrEqual(5);
+        const msftCount = analysis.top_holdings.filter(
+            (h) => h.security_uuid === "sec-msft",
+        ).length;
+        expect(msftCount).toBe(1);
+    });
+
+    it("flags non-diversified holdings >20% of liquid", () => {
+        // Create data where a single stock dominates
+        const data = {
+            taxonomies: [
+                {
+                    name: "Regions (Liquid)",
+                    values: [
+                        {
+                            value: "America", valuation_native: 100000, currency: "SGD",
+                            share_pct: 50, children: [
+                                {
+                                    name: "BigCorp", ticker: "BIG", currency: "SGD",
+                                    valuation_native: 100000, security_uuid: "sec-big",
+                                    security_type: "Equity", peak_days: 1,
+                                },
+                            ],
+                        },
+                        {
+                            value: "Investable Cash", valuation_native: 50000, currency: "SGD",
+                            share_pct: 25, children: [
+                                {
+                                    name: "Cash", ticker: "", currency: "SGD",
+                                    valuation_native: 50000, security_uuid: "cash-1",
+                                    security_type: "Cash", peak_days: 0,
+                                },
+                            ],
+                        },
+                    ],
+                },
+            ],
+        };
+        const analysis = registry._buildAnalysis(data, { SGD: 1.0 });
+        // BIG is 100000 / 150000 = 66.7%, non-diversified — should be flagged
+        const bigFlags = analysis.flags.filter((f) => f.ticker === "BIG");
+        expect(bigFlags.length).toBe(1);
+        expect(bigFlags[0].severity).toBe("warn");
+    });
+
+    it("does NOT flag diversified holdings (ETFs) >20%", () => {
+        const data = {
+            taxonomies: [
+                {
+                    name: "Regions (Liquid)",
+                    values: [
+                        {
+                            value: "America", valuation_native: 100000, currency: "SGD",
+                            share_pct: 50, children: [
+                                {
+                                    name: "S&P 500 ETF", ticker: "CSPX", currency: "SGD",
+                                    valuation_native: 100000, security_uuid: "sec-cspx",
+                                    security_type: "ETF", peak_days: 1,
+                                },
+                            ],
+                        },
+                        {
+                            value: "Investable Cash", valuation_native: 50000, currency: "SGD",
+                            share_pct: 25, children: [
+                                {
+                                    name: "Cash", ticker: "", currency: "SGD",
+                                    valuation_native: 50000, security_uuid: "cash-1",
+                                    security_type: "Cash", peak_days: 0,
+                                },
+                            ],
+                        },
+                    ],
+                },
+            ],
+        };
+        const analysis = registry._buildAnalysis(data, { SGD: 1.0 });
+        const cspxFlags = analysis.flags.filter((f) => f.ticker === "CSPX");
+        expect(cspxFlags.length).toBe(0);
+    });
+
+    it("computes top_movers by abs(price_change_pct)", () => {
+        const analysis = registry._buildAnalysis(sampleTaxonomyData, sampleFxRates);
+        // MSFT (+4.8%) should be the biggest mover
+        // NVDA (+1.1%) second
+        // Cash/CPF have null price_change_pct — excluded
+        expect(analysis.top_movers.length).toBe(2);
+        expect(analysis.top_movers[0].ticker).toBe("MSFT");
+        expect(analysis.top_movers[1].ticker).toBe("NVDA");
+    });
+
+    it("generates message_body with all sections", () => {
+        const analysis = registry._buildAnalysis(sampleTaxonomyData, sampleFxRates);
+        expect(analysis.message_body).toBeDefined();
+        expect(typeof analysis.message_body).toBe("string");
+        expect(analysis.message_body.length).toBeGreaterThan(100);
+        // Should contain key sections
+        expect(analysis.message_body).toContain("Liquid");
+        expect(analysis.message_body).toContain("Top Holdings");
+        expect(analysis.message_body).toContain("MSFT");
+    });
+
+    it("handles empty taxonomy data gracefully", () => {
+        const analysis = registry._buildAnalysis(
+            { taxonomies: [] },
+            sampleFxRates,
+        );
+        expect(analysis.liquid_total_sgd).toBe(0);
+        expect(analysis.illiquid_total_sgd).toBe(0);
+        expect(analysis.top_holdings).toEqual([]);
+        expect(analysis.flags).toEqual([]);
+        expect(analysis.message_body).toContain("No portfolio data");
+    });
+});
