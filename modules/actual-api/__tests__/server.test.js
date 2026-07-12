@@ -26,6 +26,7 @@ jest.mock("@actual-app/api", () => ({
     addTransactions: jest.fn(),
     deleteTransaction: jest.fn(),
     updateTransaction: jest.fn(),
+    getAccountBalance: jest.fn(),
 }));
 
 const { getBudgetId, buildTransaction } = require("../server");
@@ -612,5 +613,110 @@ describe("POST /transactions enriched response", () => {
         );
 
         expect(res.json.mock.calls[0][0].category).toBeNull();
+    });
+});
+
+describe("GET /accounts/balance/:id", () => {
+    const actual = require("@actual-app/api");
+
+    function findHandler(method, path) {
+        const call = mockApp[method].mock.calls.find(([p]) => p === path);
+        return call ? call[1] : null;
+    }
+
+    function mockReq(overrides = {}) {
+        return { query: {}, body: null, params: {}, ...overrides };
+    }
+
+    function mockRes() {
+        return {
+            json: jest.fn().mockReturnThis(),
+            status: jest.fn().mockReturnThis(),
+        };
+    }
+
+    beforeEach(() => {
+        actual.init.mockReset();
+        actual.getAccountBalance.mockReset();
+        actual.init.mockResolvedValue(undefined);
+    });
+
+    test("returns account balance by id", async () => {
+        actual.getAccountBalance.mockResolvedValue(50000);
+        const handler = findHandler("get", "/accounts/balance/:id");
+        const res = mockRes();
+
+        await handler(mockReq({ params: { id: "acc-1" } }), res);
+
+        expect(actual.getAccountBalance).toHaveBeenCalledWith(
+            "acc-1",
+            undefined,
+        );
+        expect(res.json).toHaveBeenCalledWith({ id: "acc-1", balance: 50000 });
+    });
+
+    test("passes cutoff date to getAccountBalance when provided", async () => {
+        actual.getAccountBalance.mockResolvedValue(42000);
+        const handler = findHandler("get", "/accounts/balance/:id");
+        const res = mockRes();
+
+        await handler(
+            mockReq({
+                params: { id: "acc-2" },
+                query: { cutoff: "2026-06-01" },
+            }),
+            res,
+        );
+
+        expect(actual.getAccountBalance).toHaveBeenCalledWith(
+            "acc-2",
+            expect.any(Date),
+        );
+        const cutoffArg = actual.getAccountBalance.mock.calls[0][1];
+        expect(cutoffArg.toISOString()).toBe(
+            "2026-06-01T00:00:00.000Z",
+        );
+        expect(res.json).toHaveBeenCalledWith({ id: "acc-2", balance: 42000 });
+    });
+
+    test("returns 400 when account id is empty", async () => {
+        const handler = findHandler("get", "/accounts/balance/:id");
+        const res = mockRes();
+
+        await handler(mockReq({ params: { id: "" } }), res);
+
+        expect(res.status).toHaveBeenCalledWith(400);
+        expect(res.json).toHaveBeenCalledWith({
+            error: "Account id is required",
+        });
+    });
+
+    test("returns 400 when cutoff date is invalid", async () => {
+        const handler = findHandler("get", "/accounts/balance/:id");
+        const res = mockRes();
+
+        await handler(
+            mockReq({
+                params: { id: "acc-1" },
+                query: { cutoff: "not-a-date" },
+            }),
+            res,
+        );
+
+        expect(res.status).toHaveBeenCalledWith(400);
+        expect(res.json).toHaveBeenCalledWith({
+            error: "Invalid cutoff date (use YYYY-MM-DD)",
+        });
+    });
+
+    test("returns 500 on API error", async () => {
+        actual.getAccountBalance.mockRejectedValue(new Error("Not found"));
+        const handler = findHandler("get", "/accounts/balance/:id");
+        const res = mockRes();
+
+        await handler(mockReq({ params: { id: "acc-99" } }), res);
+
+        expect(res.status).toHaveBeenCalledWith(500);
+        expect(res.json).toHaveBeenCalledWith({ error: "Not found" });
     });
 });

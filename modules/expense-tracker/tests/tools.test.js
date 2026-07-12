@@ -301,7 +301,7 @@ describe("ToolRegistry", () => {
         expect(body.budget_id).toBeUndefined();
     });
 
-    it("fetch_context returns accounts, categories, and payees in parallel", async () => {
+    it("fetch_context returns accounts, categories, and payees in parallel with balances", async () => {
         const { vi } = await import("vitest");
         const cfg = new Config(testEnv);
         const registry = new ToolRegistry(cfg);
@@ -312,11 +312,17 @@ describe("ToolRegistry", () => {
         ];
         const categories = [{ id: "c1", name: "Food" }];
         const payees = [{ id: "p1", name: "Coffee" }];
+        const balanceA1 = 50000;
 
         const origFetch = global.fetch;
         let callCount = 0;
         global.fetch = vi.fn(async (url) => {
             callCount++;
+            if (url.includes("/accounts/balance"))
+                return {
+                    ok: true,
+                    json: async () => ({ id: "a1", balance: balanceA1 }),
+                };
             if (url.includes("/accounts"))
                 return { ok: true, json: async () => accounts };
             if (url.includes("/categories"))
@@ -331,11 +337,83 @@ describe("ToolRegistry", () => {
                 budget_id: "test-budget",
             });
             expect(result.accounts).toEqual([
-                { id: "a1", name: "DBS Yuu", closed: false },
+                { id: "a1", name: "DBS Yuu", closed: false, balance: 50000 },
             ]);
             expect(result.categories).toEqual(categories);
             expect(result.payees).toEqual(payees);
-            expect(callCount).toBe(3);
+            // 3 context calls + 1 balance call for the active account
+            expect(callCount).toBe(4);
+        } finally {
+            global.fetch = origFetch;
+        }
+    });
+
+    it("fetch_context sets balance to null when balance fetch fails, but preserves categories + payees", async () => {
+        const { vi } = await import("vitest");
+        const cfg = new Config(testEnv);
+        const registry = new ToolRegistry(cfg);
+
+        const accounts = [
+            { id: "a1", name: "DBS Yuu", closed: false },
+        ];
+        const categories = [{ id: "c1", name: "Food" }];
+        const payees = [{ id: "p1", name: "Coffee" }];
+
+        const origFetch = global.fetch;
+        global.fetch = vi.fn(async (url) => {
+            if (url.includes("/accounts/balance"))
+                return { ok: false, json: async () => ({ error: "fail" }) };
+            if (url.includes("/accounts"))
+                return { ok: true, json: async () => accounts };
+            if (url.includes("/categories"))
+                return { ok: true, json: async () => categories };
+            if (url.includes("/payees"))
+                return { ok: true, json: async () => payees };
+            return { ok: false, json: async () => ({}) };
+        });
+
+        try {
+            const result = await registry.executeTool("fetch_context", {
+                budget_id: "test-budget",
+            });
+            expect(result.accounts[0].balance).toBeNull();
+            expect(result.categories).toEqual(categories);
+            expect(result.payees).toEqual(payees);
+        } finally {
+            global.fetch = origFetch;
+        }
+    });
+
+    it("fetch_accounts includes balances for active accounts", async () => {
+        const { vi } = await import("vitest");
+        const cfg = new Config(testEnv);
+        const registry = new ToolRegistry(cfg);
+
+        const accounts = [
+            { id: "a1", name: "DBS Yuu", closed: false },
+            { id: "a2", name: "OCBC Closed", closed: true },
+        ];
+
+        const origFetch = global.fetch;
+        global.fetch = vi.fn(async (url) => {
+            if (url.includes("/accounts/balance"))
+                return {
+                    ok: true,
+                    json: async () => ({ id: "a1", balance: 0 }),
+                };
+            if (url.includes("/accounts"))
+                return { ok: true, json: async () => accounts };
+            return { ok: false, json: async () => ({}) };
+        });
+
+        try {
+            const result = await registry.executeTool("fetch_accounts", {
+                budget_id: "test-budget",
+            });
+            // Only active accounts, closed filtered out
+            expect(result).toHaveLength(1);
+            expect(result[0].id).toBe("a1");
+            expect(result[0].balance).toBe(0); // zero balance preserved (not coerced to null)
         } finally {
             global.fetch = origFetch;
         }

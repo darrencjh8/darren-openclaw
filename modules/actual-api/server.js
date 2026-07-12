@@ -281,6 +281,29 @@ app.get("/budget-12m", async (req, res) => {
     }
 });
 
+app.get("/accounts/balance/:id", async (req, res) => {
+    try {
+        if (!req.params.id || req.params.id.trim() === "") {
+            return res.status(400).json({ error: "Account id is required" });
+        }
+        await ensureBudget(getBudgetId(req));
+        let cutoff = undefined;
+        if (req.query.cutoff) {
+            const d = new Date(req.query.cutoff);
+            if (isNaN(d.getTime())) {
+                return res
+                    .status(400)
+                    .json({ error: "Invalid cutoff date (use YYYY-MM-DD)" });
+            }
+            cutoff = d;
+        }
+        const balance = await actual.getAccountBalance(req.params.id, cutoff);
+        res.json({ id: req.params.id, balance: balance ?? null });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
 app.get("/payees", async (req, res) => {
     try {
         await ensureBudget(getBudgetId(req));

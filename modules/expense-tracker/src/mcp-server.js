@@ -18,7 +18,7 @@ function createTools(server, registry) {
   );
   server.tool(
     "fetch_context",
-    "Get accounts, categories, and payees in one call.",
+    "Get accounts (with current balances), categories, and payees in one call.",
     { budget_id: z.string().min(1) },
     async (a) => {
       const [accounts, categories, payees] = await Promise.all([

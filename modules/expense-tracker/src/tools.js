@@ -259,7 +259,7 @@ const TOOLS = [
   },
   {
     name: "fetch_accounts",
-    description: "Fetch all active accounts from Actual Budget.",
+    description: "Fetch all active accounts from Actual Budget with current balances.",
     schema: {
       type: "object",
       properties: { budget_id: { type: "string" } },
@@ -287,7 +287,7 @@ const TOOLS = [
   {
     name: "fetch_context",
     description:
-      "Fetch all accounts, categories, and payees in a single call. Use this for Phase 2 audit.",
+      "Get accounts, categories, and payees in one call. Accounts include current balances. Use this instead of calling fetch_accounts + fetch_categories + fetch_payees separately.",
     schema: {
       type: "object",
       properties: { budget_id: { type: "string" } },
@@ -921,7 +921,8 @@ export class ToolRegistry {
     const accounts = await this._get("/accounts", budget_id);
     if (!Array.isArray(accounts)) return accounts;
     // Filter out closed accounts — LLM should only see active ones
-    return accounts.filter((a) => !a.closed);
+    const active = accounts.filter((a) => !a.closed);
+    return this._enrichWithBalances(active, budget_id);
   }
 
   async _handle_fetch_categories({ budget_id }) {
@@ -941,10 +942,15 @@ export class ToolRegistry {
       this._get("/categories", budget_id),
       this._get("/payees", budget_id),
     ]);
-    const activeAccounts = Array.isArray(accounts)
-      ? accounts.filter((a) => !a.closed)
-      : accounts;
-    return { accounts: activeAccounts, categories, payees };
+    if (!Array.isArray(accounts))
+      return { accounts, categories, payees };
+
+    const activeAccounts = accounts.filter((a) => !a.closed);
+    const enriched = await this._enrichWithBalances(
+      activeAccounts,
+      budget_id,
+    );
+    return { accounts: enriched, categories, payees };
   }
 
   async _handle_fetch_recent_transactions({
@@ -1477,6 +1483,27 @@ export class ToolRegistry {
 
   get _apiUrl() {
     return this._config.actualBudgetUrl || "http://localhost:3000";
+  }
+
+  async _enrichWithBalances(accounts, budgetId) {
+    const balanceResults = await Promise.allSettled(
+      accounts.map((a) =>
+        this._get(`/accounts/balance/${a.id}`, budgetId),
+      ),
+    );
+    return accounts.map((a, i) => {
+      const result = balanceResults[i];
+      if (result.status === "fulfilled") {
+        return { ...a, balance: result.value.balance ?? null };
+      }
+      logger.warn({
+        event: "account_balance_fetch_failed",
+        accountId: a.id,
+        accountName: a.name,
+        reason: result.reason?.message || "unknown",
+      });
+      return { ...a, balance: null };
+    });
   }
 
   async _get(path, budgetId, extraParams = {}) {
