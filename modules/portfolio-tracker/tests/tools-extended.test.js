@@ -1436,4 +1436,200 @@ describe("ToolRegistry — _buildAnalysis", () => {
         expect(analysis.message_body).toContain("*News (last 24h)*");
         expect(analysis.message_body).toContain("beats estimates");
     });
+
+    // ── Fix 1: Illiquid holdings labeled separately ──
+    it("labels holdings table as Liquid Holdings", () => {
+        const analysis = registry._buildAnalysis(sampleTaxonomyData, sampleFxRates);
+        expect(analysis.message_body).toContain("**Liquid Holdings**");
+        // Illiquid section should exist with CPF OA
+        expect(analysis.message_body).toContain("**Illiquid Holdings**");
+        expect(analysis.message_body).toContain("CPF OA");
+    });
+
+    it("shows illiquid holdings with percentage of illiquid total", () => {
+        const analysis = registry._buildAnalysis(sampleTaxonomyData, sampleFxRates);
+        // CPF OA: 200000 / 331922 = 60.3%
+        expect(analysis.message_body).toContain("60.3");
+    });
+
+    it("omits Illiquid Holdings section when no illiquid holdings", () => {
+        const data = {
+            taxonomies: [{
+                name: "Regions (Liquid)",
+                values: [{
+                    value: "America", valuation_native: 100000, currency: "SGD",
+                    share_pct: 100, children: [{
+                        name: "Test Stock", ticker: "TST", currency: "SGD",
+                        valuation_native: 100000, security_uuid: "sec-tst",
+                        security_type: "Equity",
+                    }],
+                }],
+            }],
+        };
+        const analysis = registry._buildAnalysis(data, { SGD: 1.0 });
+        expect(analysis.message_body).toContain("**Liquid Holdings**");
+        expect(analysis.message_body).not.toContain("**Illiquid Holdings**");
+    });
+
+    it("uses displayLabel for illiquid holdings with ISIN-like tickers", () => {
+        const data = {
+            taxonomies: [{
+                name: "Regions (Liquid)",
+                values: [
+                    {
+                        value: "Without Classification", valuation_native: 100000,
+                        currency: "SGD", share_pct: 100, children: [
+                            {
+                                name: "Amundi Index Fund",
+                                ticker: "LU2420245917.EUFUND",
+                                currency: "SGD", valuation_native: 100000,
+                                security_uuid: "sec-illiquid-fund",
+                                security_type: "", stale_days: 0,
+                            },
+                        ],
+                    },
+                ],
+            }],
+        };
+        const analysis = registry._buildAnalysis(data, { SGD: 1.0 });
+        expect(analysis.message_body).toContain("Amundi Index Fund");
+        expect(analysis.message_body).not.toContain("LU2420245917.EUFUND");
+    });
+
+    // ── Fix 2: Warchest and exempt names skip concentration warnings ──
+    it("does NOT flag Warchest as concentration risk regardless of security_type", () => {
+        const data = {
+            taxonomies: [
+                {
+                    name: "Regions (Liquid)",
+                    values: [
+                        {
+                            value: "Investable Cash", valuation_native: 50000,
+                            currency: "SGD", share_pct: 50, children: [
+                                {
+                                    name: "Warchest", ticker: "", currency: "SGD",
+                                    valuation_native: 50000, security_uuid: "warchest-uuid",
+                                    security_type: "",  // No type set — name-based exemption
+                                },
+                            ],
+                        },
+                        {
+                            value: "America", valuation_native: 50000, currency: "SGD",
+                            share_pct: 50, children: [
+                                {
+                                    name: "TestCo", ticker: "TST", currency: "SGD",
+                                    valuation_native: 50000, security_uuid: "sec-tst",
+                                    security_type: "Equity",
+                                },
+                            ],
+                        },
+                    ],
+                },
+            ],
+        };
+        const analysis = registry._buildAnalysis(data, { SGD: 1.0 });
+        const warchestFlags = analysis.flags.filter((f) => f.reason && f.reason.includes("Warchest"));
+        expect(warchestFlags.length).toBe(0);
+    });
+
+    it("respects PP_CONCENTRATION_EXEMPT_NAMES for custom exemptions", () => {
+        process.env.PP_CONCENTRATION_EXEMPT_NAMES = "MyEmergencyFund";
+        // Read exemption names from the registry's config (already constructed)
+        // We test by building analysis with a holding matching the exempt name
+        const data = {
+            taxonomies: [
+                {
+                    name: "Regions (Liquid)",
+                    values: [
+                        {
+                            value: "Investable Cash", valuation_native: 50000,
+                            currency: "SGD", share_pct: 50, children: [
+                                {
+                                    name: "MyEmergencyFund", ticker: "", currency: "SGD",
+                                    valuation_native: 50000, security_uuid: "emfund",
+                                    security_type: "",
+                                },
+                            ],
+                        },
+                        {
+                            value: "America", valuation_native: 50000, currency: "SGD",
+                            share_pct: 50, children: [
+                                {
+                                    name: "TestCo", ticker: "TST", currency: "SGD",
+                                    valuation_native: 50000, security_uuid: "sec-tst",
+                                    security_type: "Equity",
+                                },
+                            ],
+                        },
+                    ],
+                },
+            ],
+        };
+        const analysis = registry._buildAnalysis(data, { SGD: 1.0 });
+        const exemptFlags = analysis.flags.filter((f) => f.reason && f.reason.includes("MyEmergencyFund"));
+        expect(exemptFlags.length).toBe(0);
+        delete process.env.PP_CONCENTRATION_EXEMPT_NAMES;
+    });
+
+    // ── Fix 3: News formatting — clean summary, no raw URLs ──
+    it("decodes HTML entities in news titles", async () => {
+        const rss = '<?xml version="1.0"?><rss><channel>'
+            + '<item><title>AMD &amp; NVDA: analysts&#39; top picks</title>'
+            + '<link>https://news.google.com/rss/articles/CBMi1234567890?oc=5</link>'
+            + '<pubDate>' + new Date().toUTCString() + '</pubDate></item>'
+            + '</channel></rss>';
+        fetch.mockResolvedValueOnce({ status: 200, text: () => Promise.resolve(rss) });
+        const headlines = await registry._fetchNews(["AMD"]);
+        expect(headlines.length).toBe(1);
+        expect(headlines[0]).toContain("&");
+        expect(headlines[0]).toContain("'");
+        expect(headlines[0]).not.toContain("&amp;");
+        expect(headlines[0]).not.toContain("&#39;");
+    });
+
+    it("decodes extended HTML entities (mdash, nbsp, hellip)", async () => {
+        const rss = '<?xml version="1.0"?><rss><channel>'
+            + '<item><title>Market&mdash;update&nbsp;2026&hellip;</title>'
+            + '<link>https://example.com/news</link>'
+            + '<pubDate>' + new Date().toUTCString() + '</pubDate></item>'
+            + '</channel></rss>';
+        fetch.mockResolvedValueOnce({ status: 200, text: () => Promise.resolve(rss) });
+        const headlines = await registry._fetchNews(["MKT"]);
+        expect(headlines.length).toBe(1);
+        expect(headlines[0]).toContain("\u2014"); // em dash
+        expect(headlines[0]).toContain("\u2026"); // hellip
+        expect(headlines[0]).not.toContain("&mdash;");
+        expect(headlines[0]).not.toContain("&nbsp;");
+        expect(headlines[0]).not.toContain("&hellip;");
+    });
+
+    it("strips Google News redirect URLs from news output", async () => {
+        const rss = '<?xml version="1.0"?><rss><channel>'
+            + '<item><title>NVDA beats estimates</title>'
+            + '<link>https://news.google.com/rss/articles/CBMi1234567890?oc=5</link>'
+            + '<pubDate>' + new Date().toUTCString() + '</pubDate></item>'
+            + '</channel></rss>';
+        fetch.mockResolvedValueOnce({ status: 200, text: () => Promise.resolve(rss) });
+        const headlines = await registry._fetchNews(["NVDA"]);
+        expect(headlines.length).toBe(1);
+        expect(headlines[0]).toContain("NVDA");
+        expect(headlines[0]).toContain("beats estimates");
+        expect(headlines[0]).not.toContain("news.google.com");
+        expect(headlines[0]).not.toContain("http");
+    });
+
+    it("formats news as bullet-point summary lines", async () => {
+        const rss = '<?xml version="1.0"?><rss><channel>'
+            + '<item><title>AMD raises guidance</title>'
+            + '<link>https://example.com/amd</link>'
+            + '<pubDate>' + new Date().toUTCString() + '</pubDate></item>'
+            + '</channel></rss>';
+        fetch.mockResolvedValueOnce({ status: 200, text: () => Promise.resolve(rss) });
+        const headlines = await registry._fetchNews(["AMD"]);
+        expect(headlines.length).toBe(1);
+        expect(headlines[0]).toMatch(/^[•-]\s/);
+        expect(headlines[0]).toContain("AMD");
+        expect(headlines[0]).toContain("raises guidance");
+        expect(headlines[0]).not.toContain("http");
+    });
 });
