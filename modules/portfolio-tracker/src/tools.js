@@ -1090,13 +1090,16 @@ export class ToolRegistry {
             .map((t) => t.trim().toLowerCase());
 
         const isDiversified = (securityType, uuid, name) => {
+            // 0. Accounts and cash are always diversified (not single-stock risk)
+            const type = (securityType || "").toLowerCase();
+            if (type === "account" || type === "cash") return true;
             // 1. Check asset class taxonomy (authoritative)
             const assetClass = assetClassMap.get(uuid);
             if (assetClass) {
                 return DIVERSIFIED_CLASS_KEYWORDS.test(assetClass);
             }
             // 2. Check security_type (forward compat if PP ever provides it)
-            return diversifiedTypes.includes((securityType || "").toLowerCase());
+            return diversifiedTypes.includes(type);
         };
 
         // Collect all children from liquid taxonomies (exclude "Without Classification")
@@ -1227,12 +1230,20 @@ export class ToolRegistry {
 
         // Flags: concentration >20% for non-diversified, stale data >3 days
         const flags = [];
+        const displayLabel = (h) => {
+            const t = h.ticker || "";
+            const looksLikeIsin = /^[A-Z]{2}[0-9A-Z]{8,}\b/.test(t)
+                || t.includes(".EUFUND")
+                || /^0P0001/.test(t);
+            return (t && !looksLikeIsin) ? t : (h.name || t || "?");
+        };
         for (const h of topHoldings) {
+            const label = displayLabel(h);
             if (!h.is_diversified && h.share_pct > 20) {
                 flags.push({
                     severity: "warn",
                     ticker: h.ticker,
-                    reason: `${h.ticker} at ${h.share_pct}% of liquid — above 20% single-stock threshold`,
+                    reason: `${label} at ${h.share_pct}% of liquid — above 20% single-stock threshold`,
                     pct: h.share_pct,
                 });
             }
@@ -1240,7 +1251,7 @@ export class ToolRegistry {
                 flags.push({
                     severity: "info",
                     ticker: h.ticker,
-                    reason: `${h.ticker} at ${h.share_pct}% of liquid — approaching 20% threshold`,
+                    reason: `${label} at ${h.share_pct}% of liquid — approaching 20% threshold`,
                     pct: h.share_pct,
                 });
             }
@@ -1321,9 +1332,9 @@ export class ToolRegistry {
 
             if (topHoldings.length > 0) {
                 lines.push("");
-                lines.push("*Top Holdings*");
+                lines.push("Top Holdings");
                 for (const h of topHoldings) {
-                    const label = h.ticker || h.name;
+                    const label = displayLabel(h);
                     lines.push(
                         `${label} — ${h.share_pct}%  SGD ${toSgdStr(h.valuation_sgd)}`,
                     );
@@ -1332,7 +1343,7 @@ export class ToolRegistry {
 
             if (sectors.length > 0) {
                 lines.push("");
-                lines.push("*Sectors*");
+                lines.push("Sectors");
                 for (const s of sectors) {
                     lines.push(`${s.name} — ${s.share_pct}%`);
                 }
@@ -1340,7 +1351,7 @@ export class ToolRegistry {
 
             if (geo.length > 0) {
                 lines.push("");
-                lines.push("*Geography*");
+                lines.push("Geography");
                 for (const g of geo) {
                     lines.push(`${g.name} — ${g.share_pct}%`);
                 }
@@ -1348,7 +1359,7 @@ export class ToolRegistry {
 
             if (topMovers.length > 0) {
                 lines.push("");
-                lines.push("*Top Movers (% chg)*");
+                lines.push("Top Movers (% chg)");
                 for (const m of topMovers) {
                     const sign = m.price_change_pct > 0 ? "+" : "";
                     lines.push(

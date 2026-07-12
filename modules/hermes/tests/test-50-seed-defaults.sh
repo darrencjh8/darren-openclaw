@@ -243,14 +243,14 @@ else:
 ")
 
 # Test: prompt must instruct agent to relay message_body verbatim
-echo "$prompt_content" | grep -q 'pre-formatted portfolio report' \
+echo "$prompt_content" | grep -q 'verbatim' \
     && ok "prompt: relay message_body verbatim" \
-    || nope "prompt: relay message_body verbatim" "missing 'pre-formatted portfolio report' instruction"
+    || nope "prompt: relay message_body verbatim" "missing 'verbatim' instruction"
 
 # Test: prompt must instruct agent NOT to modify/reformat/compute
-echo "$prompt_content" | grep -q 'Do NOT modify' \
+echo "$prompt_content" | grep -q 'Do NOT convert to tables' \
     && ok "prompt: forbid modification of message_body" \
-    || nope "prompt: forbid modification" "missing 'Do NOT modify' instruction"
+    || nope "prompt: forbid modification" "missing 'Do NOT convert to tables' instruction"
 
 # Test: prompt must contain news source blocklist
 echo "$prompt_content" | grep -q 'bloomberg.com' \
@@ -281,9 +281,9 @@ echo "$prompt_content" | grep -q 'portfolio_sync' \
     || nope "prompt: references portfolio_sync" "missing portfolio_sync reference"
 
 # Test: prompt handles web_search failure gracefully
-echo "$prompt_content" | grep -q 'search error' \
+echo "$prompt_content" | grep -q 'News unavailable' \
     && ok "prompt: handles web_search failure" \
-    || nope "prompt: handles web_search failure" "missing 'search error' fallback"
+    || nope "prompt: handles web_search failure" "missing 'News unavailable' fallback"
 
 # Test: prompt handles sync failures with user guidance
 echo "$prompt_content" | grep -q 'onedrive setup' \

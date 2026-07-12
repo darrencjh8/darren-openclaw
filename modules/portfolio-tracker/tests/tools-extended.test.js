@@ -1141,6 +1141,123 @@ describe("ToolRegistry — _buildAnalysis", () => {
         expect(analysis.message_body).not.toContain("IBKR:");
     });
 
+    it("does NOT flag Account-type holdings (cash equivalents) as concentration risk", () => {
+        const data = {
+            taxonomies: [
+                {
+                    name: "Regions (Liquid)",
+                    values: [
+                        {
+                            value: "Investable Cash", valuation_native: 50000,
+                            currency: "SGD", share_pct: 33.3, children: [
+                                {
+                                    name: "Warchest", ticker: "", currency: "SGD",
+                                    valuation_native: 50000, security_uuid: "warchest",
+                                    security_type: "Account",
+                                },
+                            ],
+                        },
+                        {
+                            value: "America", valuation_native: 100000, currency: "SGD",
+                            share_pct: 66.7, children: [
+                                {
+                                    name: "GrowthCorp", ticker: "GRW", currency: "SGD",
+                                    valuation_native: 100000, security_uuid: "sec-grw",
+                                    security_type: "",
+                                },
+                            ],
+                        },
+                    ],
+                },
+            ],
+        };
+        const analysis = registry._buildAnalysis(data, { SGD: 1.0 });
+        const warchestFlags = analysis.flags.filter((f) => f.ticker === "");
+        expect(warchestFlags.length).toBe(0);
+        const grwFlags = analysis.flags.filter((f) => f.ticker === "GRW");
+        expect(grwFlags.length).toBe(1);
+    });
+
+    it("uses name instead of ISIN-like tickers in flags and holdings", () => {
+        const data = {
+            taxonomies: [
+                {
+                    name: "Regions (Liquid)",
+                    values: [
+                        {
+                            value: "Europe", valuation_native: 100000, currency: "SGD",
+                            share_pct: 100, children: [
+                                {
+                                    name: "Amundi Index MSCI World",
+                                    ticker: "LU2420245917.EUFUND",
+                                    currency: "SGD", valuation_native: 100000,
+                                    security_uuid: "sec-amundi",
+                                    security_type: "",
+                                },
+                            ],
+                        },
+                    ],
+                },
+                {
+                    name: "Asset Classes",
+                    values: [
+                        {
+                            value: "Broad Index ETFs", valuation_native: 100000,
+                            currency: "SGD", share_pct: 100, children: [
+                                {
+                                    name: "Amundi Index MSCI World",
+                                    ticker: "LU2420245917.EUFUND",
+                                    currency: "SGD", valuation_native: 100000,
+                                    security_uuid: "sec-amundi",
+                                    security_type: "",
+                                },
+                            ],
+                        },
+                    ],
+                },
+            ],
+        };
+        const analysis = registry._buildAnalysis(data, { SGD: 1.0 });
+        expect(analysis.message_body).toContain("Amundi Index MSCI World");
+        expect(analysis.message_body).not.toContain("LU2420245917.EUFUND");
+        expect(analysis.flags.length).toBe(0);
+    });
+
+    it("uses ticker for normal stocks, name for ISIN-like tickers", () => {
+        const data = {
+            taxonomies: [
+                {
+                    name: "Regions (Liquid)",
+                    values: [
+                        {
+                            value: "America", valuation_native: 200000, currency: "SGD",
+                            share_pct: 100, children: [
+                                {
+                                    name: "Microsoft Corp", ticker: "MSFT",
+                                    currency: "USD", valuation_native: 100000,
+                                    security_uuid: "sec-msft",
+                                    security_type: "Equity",
+                                },
+                                {
+                                    name: "Fullerton SGD Cash Fund",
+                                    ticker: "0P0001TB9O.SI",
+                                    currency: "SGD", valuation_native: 100000,
+                                    security_uuid: "sec-fullerton",
+                                    security_type: "",
+                                },
+                            ],
+                        },
+                    ],
+                },
+            ],
+        };
+        const analysis = registry._buildAnalysis(data, { USD: 1.35, SGD: 1.0 });
+        expect(analysis.message_body).toContain("MSFT");
+        expect(analysis.message_body).toContain("Fullerton SGD Cash Fund");
+        expect(analysis.message_body).not.toContain("0P0001TB9O.SI");
+    });
+
+
     it("computes top_movers by abs(price_change_pct)", () => {
         const analysis = registry._buildAnalysis(sampleTaxonomyData, sampleFxRates);
         // MSFT (+4.8%) should be the biggest mover

@@ -105,20 +105,9 @@ except (FileNotFoundError, json.JSONDecodeError):
     jobs = []
 
 new_prompt = (
-    "Run portfolio_sync \u2014 it handles balances and taxonomies deterministically.\n\n"
-    + "The result contains portfolio_status.analysis.message_body \u2014 this is a fully "
-    + "pre-formatted portfolio report. Relay it EXACTLY as-is to the user. Do NOT modify, "
-    + "reformat, add commentary, or recompute any numbers.\n\n"
-    + "After relaying the message_body, web_search for headlines (last 24 hours only) "
-    + "affecting the top 3 tickers listed in portfolio_status.analysis.top_holdings.\n\n"
-    + "BLOCK these sources: bloomberg.com, wsj.com, ft.com.\n\n"
-    + "Format each as: {ticker} \u2014 {headline} ({source_link})\n"
-    + "Do NOT add commentary, analysis, or interpretation. Just headline + link.\n"
-    + "If no fresh news: \"No material news in last 24h.\"\n"
-    + "If web_search fails: \"News unavailable (search error).\"\n\n"
-    + "If any sync step failed (check portfolio_status.sync_targets for errors), "
-    + "tell the user what went wrong and what action to take (e.g. /onedrive setup)."
+    'Run portfolio_sync — it handles balances and taxonomies deterministically.\n\nRelay portfolio_status.analysis.message_body verbatim — do not change a single character, line, or word. Do NOT convert to tables. Do NOT merge lines. Do NOT add commentary.\n\nThen search news for top 3 tickers in top_holdings (last 24h only). Block: bloomberg.com, wsj.com, ft.com. One headline+link per ticker. If no news: "No material news in last 24h." If search fails: "News unavailable."\n\nReport sync errors from sync_targets with action to take (e.g. /onedrive setup).'
 )
+
 
 found = False
 for j in jobs:
