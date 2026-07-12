@@ -257,10 +257,10 @@ echo "$prompt_content" | grep -q 'Do NOT add commentary' \
     && ok "prompt: forbid news commentary" \
     || nope "prompt: forbid news commentary" "missing 'Do NOT add commentary' instruction"
 
-# Test: prompt must reference portfolio_status.analysis (new data path)
-echo "$prompt_content" | grep -q 'portfolio_status.analysis' \
-    && ok "prompt: references portfolio_status.analysis" \
-    || nope "prompt: references portfolio_status.analysis" "missing analysis path reference"
+# Test: prompt tells LLM to relay portfolio_sync output directly
+echo "$prompt_content" | grep -q 'Relay the portfolio_sync output' \
+    && ok "prompt: relays portfolio_sync output" \
+    || nope "prompt: relays portfolio_sync output" "missing relay instruction"
 
 # Test: prompt must reference portfolio_sync (entry point unchanged)
 echo "$prompt_content" | grep -q 'portfolio_sync' \
