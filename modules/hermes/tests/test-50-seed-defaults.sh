@@ -38,7 +38,7 @@ for j in jobs:
 "
 }
 
-# Extract the github-auth-refresh seeding snippet (lines 39-63)
+# Extract the github-auth-refresh seeding snippet
 github_auth_snippet='
 import os, json, uuid, datetime
 jobs_path = "/'"$TMPDIR"'/cron/jobs.json"
@@ -177,6 +177,7 @@ if not any(j.get("name") == "portfolio-daily-sync" for j in jobs if isinstance(j
         "prompt": "Run portfolio_sync",
         "enabled": True,
         "deliver": "telegram",
+        "deliver_extra": {"chat_id": "test-channel"},
         "next_run_at": None,
         "created_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
     })
@@ -204,7 +205,7 @@ for j in data.get('jobs', []):
 echo ""
 echo "=== portfolio-daily-sync prompt content ==="
 
-# Verify the prompt in 50-seed-defaults contains key instructions
+# Verify the prompt in 50-seed-defaults contains key instructions.
 # The prompt is a Python parenthesised string concat inside a heredoc.
 # We extract the PYEOF block and use balanced-paren matching to eval the prompt.
 prompt_content=$(python3 -c "
@@ -235,28 +236,142 @@ else:
         print(prompt)
 ")
 
-# Test: prompt must instruct agent to omit "no errors" confirmation lines
-echo "$prompt_content" | grep -q 'Do NOT include a .*no errors' \
-    && ok "prompt suppresses 'no errors' confirmation" \
-    || nope "prompt suppresses 'no errors' confirmation" "missing 'Do NOT include' instruction"
+# Test: prompt must instruct agent to relay message_body verbatim
+echo "$prompt_content" | grep -q 'pre-formatted portfolio report' \
+    && ok "prompt: relay message_body verbatim" \
+    || nope "prompt: relay message_body verbatim" "missing 'pre-formatted portfolio report' instruction"
 
-# Test: prompt must instruct to omit Actions section entirely when no issues
-echo "$prompt_content" | grep -q 'omit this section entirely if there are no issues' \
-    && ok "prompt omits Actions section when clean" \
-    || nope "prompt omits Actions section when clean" "missing 'omit this section entirely' instruction"
+# Test: prompt must instruct agent NOT to modify/reformat/compute
+echo "$prompt_content" | grep -q 'Do NOT modify' \
+    && ok "prompt: forbid modification of message_body" \
+    || nope "prompt: forbid modification" "missing 'Do NOT modify' instruction"
 
-# Test: prompt must contain the full analysis framework (synced from production)
-echo "$prompt_content" | grep -q 'taxonomy_data.taxonomies' \
-    && ok "prompt contains taxonomy analysis instructions" \
-    || nope "prompt contains taxonomy analysis instructions" "missing taxonomy_data reference"
+# Test: prompt must contain news source blocklist
+echo "$prompt_content" | grep -q 'bloomberg.com' \
+    && ok "prompt: block bloomberg.com from news search" \
+    || nope "prompt: block bloomberg.com" "missing bloomberg.com in blocklist"
 
-echo "$prompt_content" | grep -q 'Liquid assets' \
-    && ok "prompt contains liquid/illiquid breakdown" \
-    || nope "prompt contains liquid/illiquid breakdown" "missing Liquid assets section"
+echo "$prompt_content" | grep -q 'wsj.com' \
+    && ok "prompt: block wsj.com from news search" \
+    || nope "prompt: block wsj.com" "missing wsj.com in blocklist"
 
-echo "$prompt_content" | grep -q 'search for news impacting the portfolio' \
-    && ok "prompt contains news search instructions" \
-    || nope "prompt contains news search instructions" "missing news search section"
+echo "$prompt_content" | grep -q 'ft.com' \
+    && ok "prompt: block ft.com from news search" \
+    || nope "prompt: block ft.com" "missing ft.com in blocklist"
+
+# Test: prompt must instruct LLM to NOT add commentary on news
+echo "$prompt_content" | grep -q 'Do NOT add commentary' \
+    && ok "prompt: forbid news commentary" \
+    || nope "prompt: forbid news commentary" "missing 'Do NOT add commentary' instruction"
+
+# Test: prompt must reference portfolio_status.analysis (new data path)
+echo "$prompt_content" | grep -q 'portfolio_status.analysis' \
+    && ok "prompt: references portfolio_status.analysis" \
+    || nope "prompt: references portfolio_status.analysis" "missing analysis path reference"
+
+# Test: prompt must reference portfolio_sync (entry point unchanged)
+echo "$prompt_content" | grep -q 'portfolio_sync' \
+    && ok "prompt: references portfolio_sync entry point" \
+    || nope "prompt: references portfolio_sync" "missing portfolio_sync reference"
+
+# Test: prompt handles web_search failure gracefully
+echo "$prompt_content" | grep -q 'search error' \
+    && ok "prompt: handles web_search failure" \
+    || nope "prompt: handles web_search failure" "missing 'search error' fallback"
+
+# Test: prompt handles sync failures with user guidance
+echo "$prompt_content" | grep -q 'onedrive setup' \
+    && ok "prompt: guides user on sync failure" \
+    || nope "prompt: guides user on sync failure" "missing 'onedrive setup' guidance"
+
+# Test: prompt must NOT contain old LLM-computed analysis instructions
+if echo "$prompt_content" | grep -q 'tag each child as Tech'; then
+    nope "prompt: no hardcoded sector tagging (removed)" "old instruction still present"
+else
+    ok "prompt: no hardcoded sector tagging (removed)"
+fi
+
+if echo "$prompt_content" | grep -q 'Only report CHANGES from your memory'; then
+    nope "prompt: no manual change tracking (removed)" "old instruction still present"
+else
+    ok "prompt: no manual change tracking (removed)"
+fi
+
+if echo "$prompt_content" | grep -q 'omit this section entirely'; then
+    nope "prompt: no manual actions section (removed)" "old instruction still present"
+else
+    ok "prompt: no manual actions section (removed)"
+fi
+
+echo ""
+echo "=== portfolio-daily-sync deliver config ==="
+
+# Verify deliver_extra.chat_id is set in the actual seed script
+deliver_extra=$(python3 -c "
+import re
+with open('$SEED_SCRIPT') as f:
+    content = f.read()
+match = re.search(r\"<<'PYEOF'.*?\n(.*?)\nPYEOF\", content, re.DOTALL)
+if match:
+    pyblock = match.group(1)
+    idx = pyblock.find('\"deliver_extra\":')
+    if idx >= 0:
+        # Extract the dict after deliver_extra
+        rest = pyblock[idx:]
+        brace_start = rest.index('{')
+        depth = 0
+        for i, ch in enumerate(rest[brace_start:], brace_start):
+            if ch == '{': depth += 1
+            elif ch == '}': depth -= 1
+            if depth == 0:
+                expr = rest[brace_start:i+1]
+                break
+        obj = eval(expr, {'os': __import__('os')})
+        if 'chat_id' in obj:
+            print('chat_id_present')
+        else:
+            print('chat_id_missing')
+    else:
+        print('deliver_extra_not_found')
+else:
+    print('PYEOF_NOT_FOUND')
+")
+[ "$deliver_extra" = "chat_id_present" ] \
+    && ok "deliver_extra.chat_id is set" \
+    || nope "deliver_extra.chat_id is set" "got: $deliver_extra"
+
+echo ""
+echo "=== portfolio-daily-sync schedule integrity ==="
+
+# Verify schedule is still cron with correct expr
+rm -rf "$TMPDIR/cron"
+output_ps=$(run_seed_python "$portfolio_snippet")
+name_ps=$(echo "$output_ps" | cut -d'|' -f1)
+kind_ps=$(echo "$output_ps" | cut -d'|' -f2)
+display_ps=$(echo "$output_ps" | cut -d'|' -f3)
+
+[ "$name_ps" = "portfolio-daily-sync" ] && ok "schedule: job name correct" || nope "schedule: job name" "got: $name_ps"
+[ "$kind_ps" = "cron" ] && ok "schedule: kind is cron" || nope "schedule: kind" "got: $kind_ps"
+[ "$display_ps" = "0 12 * * *" ] && ok "schedule: display correct" || nope "schedule: display" "got: $display_ps"
+
+expr_ps=$(python3 -c "
+import json
+with open('$TMPDIR/cron/jobs.json') as f:
+    data = json.load(f)
+for j in data.get('jobs', []):
+    print(j.get('schedule', {}).get('expr', 'missing'))
+")
+[ "$expr_ps" = "0 12 * * *" ] && ok "schedule: cron expr is 0 12 * * *" || nope "schedule: cron expr" "got: $expr_ps"
+
+# Verify job is enabled
+enabled_ps=$(python3 -c "
+import json
+with open('$TMPDIR/cron/jobs.json') as f:
+    data = json.load(f)
+for j in data.get('jobs', []):
+    print(j.get('enabled', 'missing'))
+")
+[ "$enabled_ps" = "True" ] && ok "job is enabled" || nope "job enabled" "got: $enabled_ps"
 
 echo ""
 echo "========================================="
