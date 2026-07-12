@@ -993,7 +993,22 @@ export class ToolRegistry {
                     error: r.error || r.result?.error || "unknown",
                 })),
             };
-            analysis = this._buildAnalysis(taxonomyData, fxRatesUsed, syncMeta);
+            // Fetch news for top tickers before analysis
+            let newsBlock = [];
+            try {
+                const tickers = [...new Set(
+                    (taxonomyData.taxonomies || [])
+                        .flatMap((t) => (t.values || []).filter((v) => v.value !== "Without Classification"))
+                        .flatMap((v) => (v.children || []).map((c) => c.ticker).filter(Boolean))
+                        .slice(0, 10),
+                )].slice(0, 3);
+                if (tickers.length > 0) {
+                    newsBlock = await this._fetchNews(tickers);
+                }
+            } catch (e) {
+                console.warn(`News fetch failed: ${e.message}`);
+            }
+            analysis = this._buildAnalysis(taxonomyData, fxRatesUsed, syncMeta, newsBlock);
         }
 
         return {
@@ -1065,7 +1080,7 @@ export class ToolRegistry {
     // Build pre-computed analysis block from taxonomy data + fx rates
     // -----------------------------------------------------------------------
 
-    _buildAnalysis(taxonomyData, fxRates, syncMeta) {
+    _buildAnalysis(taxonomyData, fxRates, syncMeta, newsBlock) {
         // ── Asset Class → diversified detection ──
         // Reads the "Asset Classes" taxonomy to determine which holdings
         // are diversified (ETFs, funds, cash) vs single-stock positions.
@@ -1090,13 +1105,16 @@ export class ToolRegistry {
             .map((t) => t.trim().toLowerCase());
 
         const isDiversified = (securityType, uuid, name) => {
+            // 0. Accounts and cash are always diversified (not single-stock risk)
+            const type = (securityType || "").toLowerCase();
+            if (type === "account" || type === "cash") return true;
             // 1. Check asset class taxonomy (authoritative)
             const assetClass = assetClassMap.get(uuid);
             if (assetClass) {
                 return DIVERSIFIED_CLASS_KEYWORDS.test(assetClass);
             }
             // 2. Check security_type (forward compat if PP ever provides it)
-            return diversifiedTypes.includes((securityType || "").toLowerCase());
+            return diversifiedTypes.includes(type);
         };
 
         // Collect all children from liquid taxonomies (exclude "Without Classification")
@@ -1227,12 +1245,20 @@ export class ToolRegistry {
 
         // Flags: concentration >20% for non-diversified, stale data >3 days
         const flags = [];
+        const displayLabel = (h) => {
+            const t = h.ticker || "";
+            const looksLikeIsin = /^[A-Z]{2}[0-9A-Z]{8,}\b/.test(t)
+                || t.includes(".EUFUND")
+                || /^0P0001/.test(t);
+            return (t && !looksLikeIsin) ? t : (h.name || t || "?");
+        };
         for (const h of topHoldings) {
+            const label = displayLabel(h);
             if (!h.is_diversified && h.share_pct > 20) {
                 flags.push({
                     severity: "warn",
                     ticker: h.ticker,
-                    reason: `${h.ticker} at ${h.share_pct}% of liquid — above 20% single-stock threshold`,
+                    reason: `${label} at ${h.share_pct}% of liquid — above 20% single-stock threshold`,
                     pct: h.share_pct,
                 });
             }
@@ -1240,7 +1266,7 @@ export class ToolRegistry {
                 flags.push({
                     severity: "info",
                     ticker: h.ticker,
-                    reason: `${h.ticker} at ${h.share_pct}% of liquid — approaching 20% threshold`,
+                    reason: `${label} at ${h.share_pct}% of liquid — approaching 20% threshold`,
                     pct: h.share_pct,
                 });
             }
@@ -1321,38 +1347,46 @@ export class ToolRegistry {
 
             if (topHoldings.length > 0) {
                 lines.push("");
-                lines.push("*Top Holdings*");
+                lines.push("| Holding | % | SGD |");
+                lines.push("|---|---|---|");
                 for (const h of topHoldings) {
-                    const label = h.ticker || h.name;
+                    const label = displayLabel(h);
                     lines.push(
-                        `${label} — ${h.share_pct}%  SGD ${toSgdStr(h.valuation_sgd)}`,
+                        `| ${label} | ${h.share_pct} | ${toSgdStr(h.valuation_sgd)} |`,
                     );
                 }
             }
 
             if (sectors.length > 0) {
                 lines.push("");
-                lines.push("*Sectors*");
+                lines.push("| Sector | % | SGD |");
+                lines.push("|---|---|---|");
                 for (const s of sectors) {
-                    lines.push(`${s.name} — ${s.share_pct}%`);
+                    lines.push(
+                        `| ${s.name} | ${s.share_pct} | ${toSgdStr(s.valuation_sgd)} |`,
+                    );
                 }
             }
 
             if (geo.length > 0) {
                 lines.push("");
-                lines.push("*Geography*");
+                lines.push("| Region | % | SGD |");
+                lines.push("|---|---|---|");
                 for (const g of geo) {
-                    lines.push(`${g.name} — ${g.share_pct}%`);
+                    lines.push(
+                        `| ${g.name} | ${g.share_pct} | ${toSgdStr(g.valuation_sgd)} |`,
+                    );
                 }
             }
 
             if (topMovers.length > 0) {
                 lines.push("");
-                lines.push("*Top Movers (% chg)*");
+                lines.push("| Ticker | Prev | Now | Chg |");
+                lines.push("|---|---|---|---|");
                 for (const m of topMovers) {
                     const sign = m.price_change_pct > 0 ? "+" : "";
                     lines.push(
-                        `${m.ticker}  ${m.price_prev_close}→${m.price_now}  ${sign}${m.price_change_pct}%`,
+                        `| ${m.ticker} | ${m.price_prev_close} | ${m.price_now} | ${sign}${m.price_change_pct}% |`,
                     );
                 }
             }
@@ -1367,6 +1401,15 @@ export class ToolRegistry {
                 for (const f of infoFlags) {
                     lines.push(`ℹ️ ${f.reason}`);
                 }
+            }
+        }
+
+        // ── News section (pre-fetched from Google News RSS) ──
+        if (newsBlock && newsBlock.length > 0) {
+            lines.push("");
+            lines.push("*News (last 24h)*");
+            for (const h of newsBlock) {
+                lines.push(h);
             }
         }
 
@@ -1528,6 +1571,45 @@ export class ToolRegistry {
             console.warn(`Failed to fetch live exchange rates: ${e.message}`);
         }
         return rates;
+    }
+    // -----------------------------------------------------------------------
+    // News headlines from Google News RSS (free, no key)
+    // -----------------------------------------------------------------------
+
+    async _fetchNews(tickers) {
+        const headlines = [];
+        const now = Date.now();
+        const seen = new Set();
+        for (const ticker of (tickers || [])) {
+            try {
+                const q = encodeURIComponent(`${ticker} stock`);
+                const url = `https://news.google.com/rss/search?q=${q}&hl=en-SG&gl=SG&ceid=SG:en`;
+                const resp = await fetch(url, {
+                    signal: AbortSignal.timeout(10000),
+                });
+                if (resp.status !== 200) continue;
+                const xml = await resp.text();
+                // Parse RSS items with regex
+                const items = xml.split("<item>").slice(1);
+                for (const item of items) {
+                    const title = (item.match(/<title>(.+?)<\/title>/s) || [])[1] || "";
+                    const link = (item.match(/<link>(.+?)<\/link>/s) || [])[1] || "";
+                    const pubDate = (item.match(/<pubDate>(.+?)<\/pubDate>/s) || [])[1] || "";
+                    const ageMs = now - new Date(pubDate).getTime();
+                    if (ageMs > 24 * 3600000) continue;
+                    if (!title || !link) continue;
+                    const key = title.slice(0, 60);
+                    if (seen.has(key)) continue;
+                    seen.add(key);
+                    headlines.push(` ${ticker} — ${title} (${link})`);
+                    if (headlines.length >= 5) break;
+                }
+            } catch (e) {
+                console.warn(`News fetch failed for ${ticker}: ${e.message}`);
+            }
+            if (headlines.length >= 5) break;
+        }
+        return headlines;
     }
 
     // -----------------------------------------------------------------------
