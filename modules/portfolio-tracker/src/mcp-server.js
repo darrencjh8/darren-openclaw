@@ -65,7 +65,8 @@ function createTools(server, registry) {
                 });
             }
             const raw = await registry._computeSyncAll();
-            return tx({ text: formatSyncResult(raw), _raw: raw });
+            const output = formatSyncResult(raw);
+            return { content: [{ type: "text", text: output }] };
         },
     );
     server.tool(
