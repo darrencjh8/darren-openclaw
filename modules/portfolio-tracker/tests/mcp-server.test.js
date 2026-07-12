@@ -229,143 +229,71 @@ function tx(result) {
 import { formatSyncResult } from "../src/mcp-server.js";
 
 describe("formatSyncResult", () => {
-    it("shows liquid/illiquid split when taxonomy_data present", () => {
+    it("shows sync summary", () => {
+        const raw = { summary: "Synced 3/3 accounts" };
+        const out = formatSyncResult(raw);
+        expect(out).toBe("Synced 3/3 accounts");
+    });
+
+    it("shows IBKR activity when present", () => {
         const raw = {
-            summary: "Synced 0/0 accounts",
-            taxonomy_data: {
-                taxonomies: [
-                    {
-                        name: "Regions (Liquid)",
-                        values: [
-                            {
-                                value: "Investable Cash",
-                                valuation_native: 52560,
-                                count: 10,
-                            },
-                            {
-                                value: "America",
-                                valuation_native: 85502,
-                                count: 10,
-                            },
-                            {
-                                value: "Without Classification",
-                                valuation_native: 317971,
-                                count: 8,
-                            },
-                        ],
-                    },
-                ],
-            },
+            summary: "Synced 2/2 accounts",
+            flex_import: { trades_imported: 3, dividends_imported: 1 },
         };
         const out = formatSyncResult(raw);
-        expect(out).toContain("Liquid");
-        expect(out).toContain("Illiquid");
-        expect(out).toContain("138,062"); // 52560 + 85502 = 138,062
-        expect(out).toContain("317,971");
-        expect(out).toContain("8 holdings");
-        // Percentages
-        expect(out).toContain("30%"); // 138062/456033 = 30% (liquid)
-        expect(out).toContain("70%"); // 317971/456033 = 70% (illiquid)
+        expect(out).toContain("Synced 2/2 accounts");
+        expect(out).toContain("IBKR: 3 trades, 1 dividends");
     });
 
-    it("omits Illiquid line when Without Classification has 0 count", () => {
+    it("omits IBKR line when no activity", () => {
         const raw = {
-            summary: "Synced 0/0 accounts",
-            taxonomy_data: {
-                taxonomies: [
-                    {
-                        name: "Regions (Liquid)",
-                        values: [
-                            {
-                                value: "Investable Cash",
-                                valuation_native: 52560,
-                                count: 10,
-                            },
-                            {
-                                value: "America",
-                                valuation_native: 85502,
-                                count: 10,
-                            },
-                        ],
-                    },
-                ],
-            },
+            summary: "Synced 1/1 accounts",
+            flex_import: { trades_imported: 0, dividends_imported: 0 },
         };
         const out = formatSyncResult(raw);
-        expect(out).toContain("Liquid");
-        expect(out).not.toContain("Illiquid");
+        expect(out).not.toContain("IBKR");
     });
 
-    it("handles missing taxonomy_data gracefully", () => {
-        const raw = { summary: "Synced 0/0 accounts" };
-        const out = formatSyncResult(raw);
-        expect(out).not.toContain("Liquid");
-        expect(out).not.toContain("Illiquid");
-        expect(out).toBe("Synced 0/0 accounts");
-    });
-
-    it("handles empty taxonomies array", () => {
+    it("shows sync errors when present", () => {
         const raw = {
-            summary: "Synced 0/0 accounts",
-            taxonomy_data: { taxonomies: [] },
+            summary: "Synced 0/2 accounts",
+            sync_targets: [
+                { name: "Warchest", status: "error", error: "timeout" },
+                { name: "Emergency SGD", status: "updated" },
+            ],
         };
         const out = formatSyncResult(raw);
-        expect(out).not.toContain("Liquid");
-        expect(out).not.toContain("Illiquid");
+        expect(out).toContain("Synced 0/2 accounts");
+        expect(out).toContain("⚠️ Warchest: timeout");
     });
-    // ── raw.analysis block (pre-computed analysis) ──
 
-    it("uses raw.analysis when available", () => {
+    it("handles empty raw gracefully", () => {
+        const out = formatSyncResult({});
+        expect(out).toBe("");
+    });
+
+    // Analysis is NOT rendered by formatSyncResult — it belongs in
+    // portfolio_status.analysis.message_body, relayed by the LLM separately.
+    it("does NOT render analysis or taxonomy data", () => {
         const raw = {
+            summary: "Synced 1/1 accounts",
             analysis: {
                 liquid_total_sgd: 138062,
                 illiquid_total_sgd: 317971,
-                top_holdings: [
-                    { ticker: "AAPL", name: "Apple Inc", valuation_sgd: 50000, share_pct: "5.2%" },
-                ],
+                top_holdings: [{ ticker: "AAPL", name: "Apple Inc", valuation_sgd: 50000 }],
             },
-        };
-        const out = formatSyncResult(raw);
-        expect(out).toContain("Liquid");
-        expect(out).toContain("Illiquid");
-        expect(out).toContain("138,062");
-        expect(out).toContain("317,971");
-        expect(out).toContain("Top 5 Holdings");
-        expect(out).toContain("AAPL");
-    });
-
-    it("falls back to taxonomy_data when analysis is missing", () => {
-        const raw = {
-            summary: "Synced 0/0 accounts",
             taxonomy_data: {
-                taxonomies: [{
-                    name: "Regions",
-                    values: [
-                        { value: "Investable Cash", valuation_native: 50000, count: 5 },
-                        { value: "Without Classification", valuation_native: 100000, count: 3 },
-                    ],
-                }],
+                taxonomies: [{ name: "Regions", values: [
+                    { value: "America", valuation_native: 85502 },
+                ]}],
             },
         };
         const out = formatSyncResult(raw);
-        expect(out).toContain("Liquid");
-        expect(out).toContain("Illiquid");
-        expect(out).toContain("50,000");
-        expect(out).toContain("100,000");
-        expect(out).not.toContain("Top 5 Holdings");
-    });
-
-    it("handles analysis without top_holdings", () => {
-        const raw = {
-            analysis: {
-                liquid_total_sgd: 100000,
-                illiquid_total_sgd: 50000,
-            },
-        };
-        const out = formatSyncResult(raw);
-        expect(out).toContain("Liquid");
-        expect(out).toContain("100,000");
-        expect(out).not.toContain("Top 5 Holdings");
+        expect(out).not.toContain("Liquid");
+        expect(out).not.toContain("Top 5");
+        expect(out).not.toContain("Instrument");
+        expect(out).not.toContain("138,062");
+        expect(out).toBe("Synced 1/1 accounts");
     });
 });
 

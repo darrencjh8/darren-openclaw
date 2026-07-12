@@ -26,104 +26,10 @@ export function formatSyncResult(raw) {
         );
     }
 
-    // Use pre-computed analysis block for SGD values
-    const a = raw.analysis;
-    if (a) {
-        const toSgdStr = (n) =>
-            n != null
-                ? Number(n).toLocaleString("en-SG", {
-                      minimumFractionDigits: 0,
-                      maximumFractionDigits: 0,
-                  })
-                : "?";
-        lines.push("");
-        lines.push(
-            `Liquid    SGD ${toSgdStr(a.liquid_total_sgd)} (${a.illiquid_total_sgd + a.liquid_total_sgd > 0 ? Math.round((a.liquid_total_sgd / (a.liquid_total_sgd + a.illiquid_total_sgd)) * 100) : 0}%)`,
-        );
-        lines.push(
-            `Illiquid  SGD ${toSgdStr(a.illiquid_total_sgd)}`,
-        );
-        if (a.top_holdings && a.top_holdings.length) {
-            lines.push("");
-            lines.push("Top 5 Holdings:");
-            for (const h of a.top_holdings.slice(0, 5)) {
-                const name = (h.ticker || h.name || "?").padEnd(20).slice(0, 20);
-                lines.push(`${name} SGD ${toSgdStr(h.valuation_sgd)} (${h.share_pct}%)`);
-            }
-        }
-    } else {
-        // Fallback to old taxonomy data
-        const taxonomyData = raw.taxonomy_data;
-            if (taxonomyData?.taxonomies?.length) {
-                const tax = taxonomyData.taxonomies[0];
-                const values = tax.values || [];
-                let liquidTotal = 0;
-                let illiquidTotal = 0;
-                let illiquidCount = 0;
-                for (const v of values) {
-                    if (v.value === "Without Classification") {
-                        illiquidTotal = v.valuation_native || 0;
-                        illiquidCount = v.count || 0;
-                    } else {
-                        liquidTotal += v.valuation_native || 0;
-                    }
-                }
-                const grandTotal = liquidTotal + illiquidTotal;
-                lines.push("");
-                lines.push(
-                    `Liquid    SGD ${liquidTotal.toLocaleString("en-SG", { minimumFractionDigits: 0, maximumFractionDigits: 0 })} (${grandTotal > 0 ? Math.round((liquidTotal / grandTotal) * 100) : 0}%)`,
-                );
-                if (illiquidCount > 0) {
-                    lines.push(
-                        `Illiquid  SGD ${illiquidTotal.toLocaleString("en-SG", { minimumFractionDigits: 0, maximumFractionDigits: 0 })} (${grandTotal > 0 ? Math.round((illiquidTotal / grandTotal) * 100) : 0}%) — ${illiquidCount} holdings`,
-                    );
-                }
-            }
-        }
-
-    // Portfolio totals
-    const s = raw.portfolio_status?.summary;
-    if (s) {
-        const total = Number(s.total_value_sgd || 0);
-        const equity = Number(s.equity_value_sgd || 0);
-        const cash = total - equity;
-        lines.push("");
-        lines.push(
-            `Total  SGD ${total.toLocaleString("en-SG", { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`,
-        );
-        lines.push(
-            `Equity SGD ${equity.toLocaleString("en-SG", { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`,
-        );
-        lines.push(
-            `Cash   SGD ${cash.toLocaleString("en-SG", { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`,
-        );
-
-        // Top holdings
-        const top = s.top_holdings || raw.portfolio_status?.holdings;
-        if (top && top.length) {
-            const sorted = [...top]
-                .filter((h) => (h.market_value || 0) > 0)
-                .sort((a, b) => (b.market_value || 0) - (a.market_value || 0))
-                .slice(0, 5);
-            lines.push("");
-            const header = "Instrument           Value";
-            lines.push(header);
-            lines.push("─".repeat(header.length));
-            for (const h of sorted) {
-                const name = (h.name || h.ticker || "?")
-                    .padEnd(20)
-                    .slice(0, 20);
-                const val =
-                    h.market_value != null
-                        ? Number(h.market_value).toLocaleString("en-SG", {
-                              minimumFractionDigits: 0,
-                              maximumFractionDigits: 0,
-                          })
-                        : "?";
-                const currency = h.currency || "";
-                lines.push(`${name} ${val} ${currency}`);
-            }
-        }
+    // Error details
+    const errs = raw.sync_targets?.filter((r) => r.status === "error") || [];
+    for (const e of errs) {
+        lines.push(`⚠️ ${e.name || e.account_id}: ${e.error || e.result?.error || "unknown"}`);
     }
 
     return lines.join("\n");
