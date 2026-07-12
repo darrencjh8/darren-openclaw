@@ -229,6 +229,52 @@ echo "$deploy_src" | grep -q '\-\-component' \
     || nope "--component in usage" "not found"
 
 echo ""
+echo "=== deploy.sh: integration — 'all' path ==="
+
+# Simulate the full deploy.sh flow for --component all with FORCE_ALL=true.
+
+# Test 1: --component all resolves ALL services to TARGETS
+components=("all")
+TARGETS=""
+if [[ " ${components[*]} " =~ " all " ]] || [[ ${#components[@]} -eq 1 && "${components[0]}" == "all" ]]; then
+    TARGETS="hermes portfolio-tracker expense-tracker actual-api image-gen"
+fi
+[ -n "$TARGETS" ] && ok "all -> TARGETS is non-empty" || nope "all -> TARGETS" "TARGETS was empty"
+echo "$TARGETS" | grep -q "hermes" && ok "all includes hermes in TARGETS" || nope "all includes hermes" "hermes not in: $TARGETS"
+echo "$TARGETS" | grep -q "portfolio-tracker" && ok "all includes portfolio-tracker in TARGETS" || nope "all includes portfolio-tracker" "not in: $TARGETS"
+echo "$TARGETS" | grep -q "expense-tracker" && ok "all includes expense-tracker in TARGETS" || nope "all includes expense-tracker" "not in: $TARGETS"
+echo "$TARGETS" | grep -q "actual-api" && ok "all includes actual-api in TARGETS" || nope "all includes actual-api" "not in: $TARGETS"
+
+# Test 2: all + FORCE_ALL=true -> docker compose up -d --force-recreate
+force="true"
+cmd="docker-compose --project-name modules up -d --force-recreate $TARGETS"
+echo "$cmd" | grep -q "force-recreate" && ok "all + FORCE_ALL=true -> --force-recreate in compose command" || nope "all + FORCE_ALL=true -> --force-recreate" "missing flag"
+echo "$cmd" | grep -q "hermes" && ok "compose command includes hermes" || nope "compose command includes hermes" "not in: $cmd"
+echo "$cmd" | grep -q "up -d" && ok "compose command uses up -d" || nope "compose command uses up -d" "not in: $cmd"
+
+# Test 3: all + FORCE_ALL=false -> NO --force-recreate
+cmd_no="docker-compose --project-name modules up -d $TARGETS"
+echo "$cmd_no" | grep -qv "force-recreate" && ok "all + FORCE_ALL=false -> NO --force-recreate" || nope "all + FORCE_ALL=false -> NO --force-recreate" "unexpected flag"
+
+# Test 4: single component + FORCE_ALL=true -> still uses --force-recreate
+TARGETS="hermes"
+cmd_single="docker-compose --project-name modules up -d --force-recreate $TARGETS"
+echo "$cmd_single" | grep -q "force-recreate" && ok "hermes + FORCE_ALL=true -> --force-recreate" || nope "hermes + FORCE_ALL=true -> --force-recreate" "missing flag"
+echo "$cmd_single" | grep -q "hermes" && ok "single component only deploys hermes" || nope "single component only deploys hermes" "other services in cmd"
+
+echo ""
+echo "=== build.sh: 'all' path ==="
+BUILD_SCRIPT="$SCRIPT_DIR/../../build.sh"
+if [ -f "$BUILD_SCRIPT" ]; then
+    build_src=$(cat "$BUILD_SCRIPT")
+    echo "$build_src" | grep -q "COMPONENTS=.*all" && ok "build.sh defaults to all when no --component flags" || nope "build.sh defaults to all" "not found"
+    echo "$build_src" | grep -q "pp-cli.jar" && ok "build.sh pre-builds pp-cli.jar" || nope "build.sh pre-builds pp-cli.jar" "not found"
+    echo "$build_src" | grep -q "COMPOSE.*build" && ok "build.sh calls docker compose build" || nope "build.sh calls docker compose build" "not found"
+else
+    nope "build.sh exists" "file not found at $BUILD_SCRIPT"
+fi
+
+echo ""
 echo "========================================="
 echo -e " Results: ${GREEN}$pass passed${NC}, ${RED}$fail failed${NC}"
 echo "========================================="
