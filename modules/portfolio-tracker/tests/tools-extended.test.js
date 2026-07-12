@@ -338,6 +338,17 @@ describe("ToolRegistry — PP bridge tools", () => {
             await registry.executeTool("query_pp_security", {});
             expect(mockBridge.querySecurity).toHaveBeenCalledWith("", null);
         });
+
+        it("passes account_id to bridge", async () => {
+            await registry.executeTool("query_pp_security", {
+                search: "AAPL",
+                account_id: "uuid-abc",
+            });
+            expect(mockBridge.querySecurity).toHaveBeenCalledWith(
+                "AAPL",
+                "uuid-abc",
+            );
+        });
     });
 
     describe("fetch_pp_accounts", () => {
