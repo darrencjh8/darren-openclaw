@@ -1042,7 +1042,6 @@ export class ToolRegistry {
             try {
                 const tickers = (analysis.top_holdings || [])
                     .filter((h) => h.ticker && !/^[A-Z]{2}[0-9A-Z]{8,}/.test(h.ticker) && !h.ticker.includes(".EUFUND"))
-                    .slice(0, 3)
                     .map((h) => h.ticker);
                 if (tickers.length > 0) {
                     newsBlock = await this._fetchNews(tickers);
@@ -1743,12 +1742,12 @@ export class ToolRegistry {
                     // Skip concatenated anti-scraping titles (no spaces, very long)
                     if (!decoded.includes(" ") && decoded.length > 40) continue;
                     headlines.push(`• ${ticker} — ${decoded}`);
-                    if (headlines.length >= 5) break;
+                    if (headlines.length >= 10) break;
                 }
             } catch (e) {
                 console.warn(`News fetch failed for ${ticker}: ${e.message}`);
             }
-            if (headlines.length >= 5) break;
+            if (headlines.length >= 10) break;
         }
         return headlines;
     }
