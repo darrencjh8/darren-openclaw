@@ -1039,11 +1039,19 @@ export class ToolRegistry {
             // Fetch news for top tickers before analysis
             let newsBlock = [];
             try {
+                // Pick tickers from largest holdings by estimated SGD value
+                const rates = fxRatesUsed;
                 const tickers = [...new Set(
                     (taxonomyData.taxonomies || [])
                         .flatMap((t) => (t.values || []).filter((v) => v.value !== "Without Classification"))
-                        .flatMap((v) => (v.children || []).map((c) => c.ticker).filter(Boolean))
-                        .slice(0, 10),
+                        .flatMap((v) => (v.children || []).filter((c) => c.ticker))
+                        .sort((a, b) => {
+                            const va = (a.valuation_native || 0) * (rates[a.currency] || 0);
+                            const vb = (b.valuation_native || 0) * (rates[b.currency] || 0);
+                            return vb - va;
+                        })
+                        .slice(0, 5)
+                        .map((c) => c.ticker),
                 )].slice(0, 3);
                 if (tickers.length > 0) {
                     newsBlock = await this._fetchNews(tickers);
