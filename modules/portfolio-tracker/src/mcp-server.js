@@ -194,12 +194,14 @@ function createTools(server, registry) {
         async (args) => {
             const result = {};
 
-            // Auto-fill offset_account_id from PP_OFFSET_MAP env var (JSON: {"account_uuid":"offset_uuid"})
-            if (!args.offset_account_id && process.env.PP_OFFSET_MAP) {
+            // PP_OFFSET_MAP: account UUID → portfolio UUID for share routing
+            // (always resolved independently of offset_account_id for cash)
+            args._portfolio_id = null;
+            if (process.env.PP_OFFSET_MAP) {
                 try {
                     const map = JSON.parse(process.env.PP_OFFSET_MAP);
-                    args.offset_account_id = map[args.account_id] || null;
-                } catch (e) { /* malformed JSON — ignore */ }
+                    args._portfolio_id = map[args.account_id] || null;
+                } catch (e) { /* ignore */ }
             }
 
             // 1. Pull from OneDrive

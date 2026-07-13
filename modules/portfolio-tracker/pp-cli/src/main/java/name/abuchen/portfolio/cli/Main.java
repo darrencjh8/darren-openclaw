@@ -47,7 +47,8 @@ public class Main {
                             parseFiniteNonNegative(params.getOrDefault("fees", "0"), "fees"),
                             parseFiniteNonNegative(params.getOrDefault("taxes", "0"), "taxes"),
                             params.getOrDefault("notes", ""),
-                            params.get("offset-account-id")
+                            params.get("offset-account-id"),
+                            params.get("portfolio-id")
                     );
                     break;
                 case "balance":
