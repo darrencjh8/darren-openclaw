@@ -993,9 +993,9 @@ describe("ToolRegistry — _buildAnalysis", () => {
         expect(analysis.cash_ratio_pct).toBeCloseTo(42.4, 0);
     });
 
-    it("computes share_pct against non-cash liquid (excludes cash from denominator)", () => {
+    it("computes share_pct against total liquid (incl cash)", () => {
         // 50k cash + 100k equity = 150k total liquid
-        // non-cash = 100k, so equity should be 100/100 = 100%
+        // equity should be 100/150 = 66.7% of total liquid
         const data = {
             taxonomies: [{
                 name: "Regions (Liquid)",
@@ -1017,8 +1017,8 @@ describe("ToolRegistry — _buildAnalysis", () => {
         };
         const analysis = registry._buildAnalysis(data, { SGD: 1.0 });
         expect(analysis.liquid_total_sgd).toBe(150000);
-        // STK is 100% of non-cash liquid (100k/100k), not 66.7% of total liquid (100k/150k)
-        expect(analysis.top_holdings[0].share_pct).toBe(100);
+        // STK is 66.7% of total liquid (100k/150k), cash takes the other 33.3%
+        expect(analysis.top_holdings[0].share_pct).toBe(66.7);
     });
 
     it("deduplicates top_holdings by security_uuid", () => {
