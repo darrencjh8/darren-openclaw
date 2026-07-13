@@ -630,6 +630,7 @@ export class ToolRegistry {
                     taxes: args.taxes ?? 0,
                     notes: args.notes || "",
                     offsetAccountId: args.offset_account_id || null,
+                    portfolioId: args._portfolio_id || null,
                 });
                 // Record dedup after successful insert
                 if (result.status !== "error" && this._dedup) {

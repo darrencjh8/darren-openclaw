@@ -1244,7 +1244,7 @@ public class PpClientTest {
             poemsAccount.getUUID(),
             sec.getUUID(), "Buy", "2026-07-13",
             100, 50, "SGD", 0, 0, "",
-            warchest.getUUID()  // offset = Warchest → cash from Warchest
+            warchest.getUUID(), null  // offset = Warchest, no portfolio override
         );
 
         // Verify cash went FROM Warchest (debit), not POEMS
@@ -1303,7 +1303,7 @@ public class PpClientTest {
         ppClient.insertTransaction(
             poemsAccount.getUUID(),
             sec.getUUID(), "Buy", "2026-07-13",
-            100, 50, "SGD", 0, 0, "", null
+            100, 50, "SGD", 0, 0, "", null, null
         );
 
         // Shares should go to POEMS portfolio (refAccount matches)

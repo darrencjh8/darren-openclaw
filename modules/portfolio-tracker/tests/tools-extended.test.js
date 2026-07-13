@@ -388,6 +388,7 @@ describe("ToolRegistry — PP bridge tools", () => {
                 taxes: 0.5,
                 notes: "Test trade",
                 offsetAccountId: null,
+                portfolioId: null,
             });
         });
 
@@ -401,7 +402,7 @@ describe("ToolRegistry — PP bridge tools", () => {
                 currency_code: "USD",
             });
             expect(mockBridge.insertTransaction).toHaveBeenCalledWith(
-                expect.objectContaining({ fees: 0, taxes: 0 }),
+                expect.objectContaining({ fees: 0, taxes: 0, portfolioId: null }),
             );
         });
 

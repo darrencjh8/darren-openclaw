@@ -135,7 +135,7 @@ public class PpClient {
 
     public Map<String, Object> insertTransaction(String accountId, String securityId, String type,
             String dateStr, double shares, double price, String currencyCode,
-            double fees, double taxes, String notes, String offsetAccountId) throws IOException {
+            double fees, double taxes, String notes, String offsetAccountId, String portfolioId) throws IOException {
 
         Client client = load();
         LocalDateTime dateTime = LocalDate.parse(dateStr).atStartOfDay();
@@ -156,25 +156,35 @@ public class PpClient {
             entry.setSecurity(security);
             entry.setShares(Values.Share.factorize(shares));
             entry.setMonetaryAmount(Money.of(currencyCode, Math.round(price * Math.abs(shares) * 100)));
-            // offset_account_id overrides the cash (deposit) account
+            // Cash account: use offsetAccountId if it is an account UUID (findAccount succeeds)
+            Account cashAccount = account;
             if (offsetAccountId != null && !offsetAccountId.isEmpty()
                     && !offsetAccountId.equals(accountId)) {
-                Account cashAcct = findAccount(client, offsetAccountId);
-                if (cashAcct != null) {
-                    entry.setAccount(cashAcct);
-                } else {
-                    entry.setAccount(account);
+                try {
+                    cashAccount = findAccount(client, offsetAccountId);
+                } catch (IOException e) {
+                    // offsetAccountId is not an account UUID (e.g., portfolio UUID from PP_OFFSET_MAP)
+                    cashAccount = account;
                 }
-            } else {
-                entry.setAccount(account);
             }
-            // Select portfolio by matching accountId against refAccount
+            entry.setAccount(cashAccount);
+            // Portfolio selection: portfolioId first, then accountId as refAccount
             Portfolio selected = null;
-            for (Portfolio p : client.getPortfolios()) {
-                if (p.getReferenceAccount() != null
-                        && p.getReferenceAccount().getUUID().equals(accountId)) {
-                    selected = p;
-                    break;
+            if (portfolioId != null && !portfolioId.isEmpty()) {
+                for (Portfolio p : client.getPortfolios()) {
+                    if (p.getUUID().equals(portfolioId)) {
+                        selected = p;
+                        break;
+                    }
+                }
+            }
+            if (selected == null) {
+                for (Portfolio p : client.getPortfolios()) {
+                    if (p.getReferenceAccount() != null
+                            && p.getReferenceAccount().getUUID().equals(accountId)) {
+                        selected = p;
+                        break;
+                    }
                 }
             }
             if (selected == null && !client.getPortfolios().isEmpty()) {
