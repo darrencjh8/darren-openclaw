@@ -1311,4 +1311,33 @@ public class PpClientTest {
         assertEquals(0, otherPortfolio.getTransactions().size());
     }
 
+
+    @Test
+    public void testInsertTransactionUsesPortfolioIdForPortfolioSelection() throws Exception {
+        Client client = new Client();
+        client.setBaseCurrency("SGD");
+        Account acct = new Account();
+        acct.setName("Test"); acct.setCurrencyCode("SGD");
+        client.addAccount(acct);
+        Security sec = new Security();
+        sec.setName("Test"); sec.setCurrencyCode("SGD");
+        sec.addPrice(new SecurityPrice(LocalDate.now().minusDays(1), 100_00000000L));
+        client.addSecurity(sec);
+        Portfolio target = new Portfolio();
+        target.setName("Target"); target.setReferenceAccount(acct);
+        client.addPortfolio(target);
+        Portfolio other = new Portfolio();
+        other.setName("Other"); client.addPortfolio(other);
+        File tmpFile = File.createTempFile("pp-portfolio-id-", ".xml");
+        tmpFile.deleteOnExit();
+        PpClient ppClient = new PpClient(tmpFile) {
+            @Override public Client load() { return client; }
+            @Override public void save(Client c) {}
+        };
+        ppClient.insertTransaction(acct.getUUID(), sec.getUUID(), "Buy",
+            "2026-07-13", 100, 50, "SGD", 0, 0, "", null, target.getUUID());
+        assertEquals(1, target.getTransactions().size());
+        assertEquals(0, other.getTransactions().size());
+    }
+
 }

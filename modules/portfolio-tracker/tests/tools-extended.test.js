@@ -509,7 +509,35 @@ describe("ToolRegistry — PP bridge tools", () => {
         });
     });
 
-    describe("notify_user", () => {
+
+    it("resolves _portfolio_id from PP_OFFSET_MAP and passes to bridge", async () => {
+        process.env.PP_OFFSET_MAP = JSON.stringify({"acct-1": "portfolio-uuid-123"});
+        await registry.executeTool("insert_pp_transaction", {
+            account_id: "acct-1", type: "Buy", date: "2026-06-01",
+            shares: 10, price: 100, currency_code: "USD",
+            offset_account_id: "warchest-uuid",
+        });
+        delete process.env.PP_OFFSET_MAP;
+        const call = mockBridge.insertTransaction.mock.calls[0][0];
+        expect(call.portfolioId).toBe("portfolio-uuid-123");
+        expect(call.offsetAccountId).toBe("warchest-uuid");
+    });
+
+    it("preserves explicit offset_account_id alongside PP_OFFSET_MAP portfolio", async () => {
+        process.env.PP_OFFSET_MAP = JSON.stringify({"acct-1": "portfolio-uuid-123"});
+        await registry.executeTool("insert_pp_transaction", {
+            account_id: "acct-1", type: "Buy", date: "2026-06-01",
+            shares: 10, price: 100, currency_code: "USD",
+            offset_account_id: "explicit-offset",
+        });
+        delete process.env.PP_OFFSET_MAP;
+        const call = mockBridge.insertTransaction.mock.calls[0][0];
+        expect(call.portfolioId).toBe("portfolio-uuid-123");
+        expect(call.offsetAccountId).toBe("explicit-offset");
+    });
+
+
+        describe("notify_user", () => {
         it("returns status: sent on success", async () => {
             global.fetch = vi.fn().mockResolvedValueOnce({
                 ok: true,

@@ -593,7 +593,14 @@ export class ToolRegistry {
             case "insert_pp_transaction":
                 if (!this._ppBridge)
                     return { error: "PP bridge not configured" };
-                // Dedup check: compute monetary amount matching Java''s per-type logic
+
+                // Resolve PP_OFFSET_MAP for portfolio routing (also done in mcp-server for MCP calls)
+                if (!args._portfolio_id && process.env.PP_OFFSET_MAP) {
+                    try {
+                        const map = JSON.parse(process.env.PP_OFFSET_MAP);
+                        args._portfolio_id = map[args.account_id] || null;
+                    } catch (e) { /* ignore */ }
+                }                // Dedup check: compute monetary amount matching Java''s per-type logic
                 let amountCents;
                 switch (args.type) {
                     case "Buy":
