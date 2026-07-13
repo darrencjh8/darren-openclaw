@@ -1285,6 +1285,13 @@ export class ToolRegistry {
             }
         }
 
+        // ── Recompute totals from distinct holdings (avoids taxonomy double-count) ──
+        liquidTotalSgd = [...deduped.values()].reduce((s, h) => s + h.valuation_sgd, 0);
+        illiquidTotalSgd = [...illiquidDeduped.values()].reduce((s, h) => s + h.valuation_sgd, 0);
+        cashValueSgd = [...deduped.values()]
+            .filter((h) => h.is_cash)
+            .reduce((s, h) => s + h.valuation_sgd, 0);
+
         // Top holdings: top 10 by valuation_sgd (exclude cash)
         const topHoldings = [...deduped.values()]
             .filter((h) => !h.is_cash)
