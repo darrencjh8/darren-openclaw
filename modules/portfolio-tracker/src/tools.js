@@ -1039,11 +1039,19 @@ export class ToolRegistry {
             // Fetch news for top tickers before analysis
             let newsBlock = [];
             try {
+                // Pick tickers from largest holdings by estimated SGD value
+                const rates = fxRatesUsed;
                 const tickers = [...new Set(
                     (taxonomyData.taxonomies || [])
                         .flatMap((t) => (t.values || []).filter((v) => v.value !== "Without Classification"))
-                        .flatMap((v) => (v.children || []).map((c) => c.ticker).filter(Boolean))
-                        .slice(0, 10),
+                        .flatMap((v) => (v.children || []).filter((c) => c.ticker))
+                        .sort((a, b) => {
+                            const va = (a.valuation_native || 0) * (rates[a.currency] || 0);
+                            const vb = (b.valuation_native || 0) * (rates[b.currency] || 0);
+                            return vb - va;
+                        })
+                        .slice(0, 5)
+                        .map((c) => c.ticker),
                 )].slice(0, 3);
                 if (tickers.length > 0) {
                     newsBlock = await this._fetchNews(tickers);
@@ -1256,7 +1264,7 @@ export class ToolRegistry {
                         (c.valuation_native || 0) * childRate;
                     const uuid = c.security_uuid || c.ticker || c.name;
 
-                    if (!deduped.has(uuid)) {
+                    if (!deduped.has(uuid) && !illiquidDeduped.has(uuid)) {
                         const isCash = v.value === "Investable Cash";
                         deduped.set(uuid, {
                             ticker: c.ticker || "",
@@ -1277,13 +1285,6 @@ export class ToolRegistry {
             }
         }
 
-        // Correct illiquidTotalSgd: subtract holdings that also appear in liquid
-        for (const [uid, h] of illiquidDeduped) {
-            if (deduped.has(uid)) {
-                illiquidTotalSgd -= h.valuation_sgd;
-            }
-        }
-
         // Top holdings: top 10 by valuation_sgd (exclude cash)
         const topHoldings = [...deduped.values()]
             .filter((h) => !h.is_cash)
@@ -1297,10 +1298,9 @@ export class ToolRegistry {
                         : 0,
             }));
 
-        // Illiquid holdings: top 10 by valuation_sgd (exclude zero/negative,
-        // and exclude any that also appear in liquid — avoids double-counting)
+        // Illiquid holdings: top 10 by valuation_sgd (exclude zero/negative)
         const illiquidHoldings = [...illiquidDeduped.values()]
-            .filter((h) => h.valuation_sgd > 0 && !deduped.has(h.security_uuid))
+            .filter((h) => h.valuation_sgd > 0)
             .sort((a, b) => b.valuation_sgd - a.valuation_sgd)
             .slice(0, 10)
             .map((h) => ({
