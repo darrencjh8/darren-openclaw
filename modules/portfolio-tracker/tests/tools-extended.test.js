@@ -1759,4 +1759,48 @@ describe("ToolRegistry — _buildAnalysis", () => {
         expect(headlines.length).toBe(1);
         expect(headlines[0]).toContain("beats estimates");
     });
+
+    it("top_holdings excludes cash, displayLabel hides ISIN-like tickers", () => {
+        const data = {
+            taxonomies: [{
+                name: "Regions (Liquid)",
+                values: [
+                    {
+                        value: "Investable Cash", valuation_native: 50000,
+                        currency: "SGD", share_pct: 25, children: [
+                            { name: "Warchest", ticker: "", currency: "SGD", valuation_native: 50000, security_uuid: "wc", security_type: "" },
+                        ],
+                    },
+                    {
+                        value: "America", valuation_native: 150000, currency: "SGD",
+                        share_pct: 75, children: [
+                            { name: "Amundi Index MSCI World", ticker: "LU2420245917.EUFUND", currency: "SGD", valuation_native: 100000, security_uuid: "am", security_type: "" },
+                            { name: "DBS Group", ticker: "D05.SI", currency: "SGD", valuation_native: 50000, security_uuid: "dbs", security_type: "Equity" },
+                        ],
+                    },
+                ],
+            }],
+        };
+        const analysis = registry._buildAnalysis(data, { SGD: 1.0 });
+        // Cash excluded from holdings
+        expect(analysis.top_holdings.find(h => h.name === "Warchest")).toBeUndefined();
+        expect(analysis.top_holdings.length).toBe(2);
+        // ISIN hidden by displayLabel in message_body
+        expect(analysis.message_body).toContain("Amundi Index MSCI World");
+        expect(analysis.message_body).not.toContain("LU2420245917.EUFUND");
+        // Normal ticker stays
+        expect(analysis.message_body).toContain("D05.SI");
+    });
+
+    it("filters ISIN-like tickers at news selection stage", () => {
+        // Same regex used in _computeSyncAll for news ticker selection
+        const isIsinLike = (t) => /^[A-Z]{2}[0-9A-Z]{8,}/.test(t) || t.includes(".EUFUND") || /^0P0001/.test(t);
+        expect(isIsinLike("LU2420245917.EUFUND")).toBe(true);
+        expect(isIsinLike("IE00B4L5Y983")).toBe(true);
+        expect(isIsinLike("0P0001TB9O.SI")).toBe(true);
+        expect(isIsinLike("CSPX.L")).toBe(false);
+        expect(isIsinLike("D05.SI")).toBe(false);
+        expect(isIsinLike("MSFT")).toBe(false);
+        expect(isIsinLike("NVDA")).toBe(false);
+    });
 });
