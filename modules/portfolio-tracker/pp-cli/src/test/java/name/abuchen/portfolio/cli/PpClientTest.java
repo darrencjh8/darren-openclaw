@@ -1204,98 +1204,22 @@ public class PpClientTest {
         }
     }
 
-    // ---- insertTransaction offsetAccountId matches portfolio UUID ----
+    // ---- insertTransaction offset_account_id overrides cash account ----
 
     @Test
-    public void testInsertTransactionOffsetMatchesPortfolioUUID() throws Exception {
+    public void testInsertTransactionOffsetOverridesCashAccount() throws Exception {
         Client client = new Client();
         client.setBaseCurrency("SGD");
 
-        // Two accounts
-        Account srsAccount = new Account();
-        srsAccount.setName("POEMS/SRS");
-        srsAccount.setCurrencyCode("SGD");
-        client.addAccount(srsAccount);
+        Account poemsAccount = new Account();
+        poemsAccount.setName("POEMS");
+        poemsAccount.setCurrencyCode("SGD");
+        client.addAccount(poemsAccount);
 
         Account warchest = new Account();
         warchest.setName("Warchest");
         warchest.setCurrencyCode("SGD");
         client.addAccount(warchest);
-
-        // Security
-        Security sec = new Security();
-        sec.setName("Test Stock");
-        sec.setTickerSymbol("TST");
-        sec.setCurrencyCode("SGD");
-        sec.addPrice(new SecurityPrice(LocalDate.now().minusDays(1), 100_00000000L));
-        client.addSecurity(sec);
-
-        // Two portfolios, both with Warchest as reference account
-        Portfolio poemsPortfolio = new Portfolio();
-        poemsPortfolio.setName("POEMS Portfolio");
-        poemsPortfolio.setReferenceAccount(warchest);
-        client.addPortfolio(poemsPortfolio);
-
-        Portfolio sgxPortfolio = new Portfolio();
-        sgxPortfolio.setName("SGX Portfolio");
-        sgxPortfolio.setReferenceAccount(warchest);  // same reference account!
-        client.addPortfolio(sgxPortfolio);
-
-        File tmpFile = File.createTempFile("pp-offset-", ".xml");
-        tmpFile.deleteOnExit();
-        PpClient ppClient = new PpClient(tmpFile) {
-            @Override public Client load() { return client; }
-            @Override public void save(Client c) { /* no-op */ }
-        };
-
-        // Insert with offsetAccountId = POEMS portfolio UUID
-        ppClient.insertTransaction(
-            srsAccount.getUUID(),     // accountId
-            sec.getUUID(),            // securityId
-            "Buy",                    // type
-            "2026-07-13",            // date
-            100,                      // shares
-            50,                       // price
-            "SGD",                    // currency
-            0,                        // fees
-            0,                        // taxes
-            "",                       // notes
-            poemsPortfolio.getUUID()  // offsetAccountId = POEMS portfolio UUID
-        );
-
-        // Verify shares went to POEMS portfolio, not SGX
-        long poemsShares = 0;
-        for (PortfolioTransaction t : poemsPortfolio.getTransactions()) {
-            if (sec.equals(t.getSecurity())) {
-                switch (t.getType()) {
-                    case BUY: poemsShares += t.getShares(); break;
-                    case SELL: poemsShares -= t.getShares(); break;
-                }
-            }
-        }
-        assertTrue("POEMS portfolio should have shares", poemsShares > 0);
-
-        long sgxShares = 0;
-        for (PortfolioTransaction t : sgxPortfolio.getTransactions()) {
-            if (sec.equals(t.getSecurity())) {
-                switch (t.getType()) {
-                    case BUY: sgxShares += t.getShares(); break;
-                    case SELL: sgxShares -= t.getShares(); break;
-                }
-            }
-        }
-        assertEquals("SGX portfolio should have 0 shares", 0, sgxShares);
-    }
-
-    @Test
-    public void testInsertTransactionFallsBackToFirstPortfolioWhenOffsetNotMatched() throws Exception {
-        Client client = new Client();
-        client.setBaseCurrency("SGD");
-
-        Account acct = new Account();
-        acct.setName("Test");
-        acct.setCurrencyCode("SGD");
-        client.addAccount(acct);
 
         Security sec = new Security();
         sec.setName("Test");
@@ -1303,25 +1227,88 @@ public class PpClientTest {
         sec.addPrice(new SecurityPrice(LocalDate.now().minusDays(1), 100_00000000L));
         client.addSecurity(sec);
 
-        Portfolio p1 = new Portfolio();
-        p1.setName("P1");
-        client.addPortfolio(p1);
+        Portfolio poemsPortfolio = new Portfolio();
+        poemsPortfolio.setName("POEMS Portfolio");
+        poemsPortfolio.setReferenceAccount(poemsAccount);
+        client.addPortfolio(poemsPortfolio);
 
-        File tmpFile = File.createTempFile("pp-offset2-", ".xml");
+        File tmpFile = File.createTempFile("pp-offset-cash-", ".xml");
         tmpFile.deleteOnExit();
         PpClient ppClient = new PpClient(tmpFile) {
             @Override public Client load() { return client; }
             @Override public void save(Client c) { /* no-op */ }
         };
 
-        // Non-matching offset UUID → falls back to first portfolio
+        // offset_account_id = Warchest → cash from Warchest, not POEMS
         ppClient.insertTransaction(
-            acct.getUUID(),
+            poemsAccount.getUUID(),
             sec.getUUID(), "Buy", "2026-07-13",
-            100, 50, "SGD", 0, 0, "", "nonexistent-portfolio-uuid"
+            100, 50, "SGD", 0, 0, "",
+            warchest.getUUID()  // offset = Warchest → cash from Warchest
         );
 
-        assertEquals(1, p1.getTransactions().size());
+        // Verify cash went FROM Warchest (debit), not POEMS
+        long warchestDebit = 0;
+        for (AccountTransaction t : warchest.getTransactions()) {
+            if (t.getType().isDebit()) warchestDebit += t.getMonetaryAmount().getAmount();
+        }
+        assertTrue("Warchest should have debit", warchestDebit > 0);
+
+        long poemsDebit = 0;
+        for (AccountTransaction t : poemsAccount.getTransactions()) {
+            if (t.getType().isDebit()) poemsDebit += t.getMonetaryAmount().getAmount();
+        }
+        assertEquals("POEMS should have no debit", 0, poemsDebit);
+    }
+
+    @Test
+    public void testInsertTransactionSharesGoToRefAccountPortfolio() throws Exception {
+        Client client = new Client();
+        client.setBaseCurrency("SGD");
+
+        Account poemsAccount = new Account();
+        poemsAccount.setName("POEMS");
+        poemsAccount.setCurrencyCode("SGD");
+        client.addAccount(poemsAccount);
+
+        Account warchest = new Account();
+        warchest.setName("Warchest");
+        warchest.setCurrencyCode("SGD");
+        client.addAccount(warchest);
+
+        Security sec = new Security();
+        sec.setName("Test");
+        sec.setCurrencyCode("SGD");
+        sec.addPrice(new SecurityPrice(LocalDate.now().minusDays(1), 100_00000000L));
+        client.addSecurity(sec);
+
+        Portfolio poemsPortfolio = new Portfolio();
+        poemsPortfolio.setName("POEMS Portfolio");
+        poemsPortfolio.setReferenceAccount(poemsAccount);
+        client.addPortfolio(poemsPortfolio);
+
+        Portfolio otherPortfolio = new Portfolio();
+        otherPortfolio.setName("Other");
+        otherPortfolio.setReferenceAccount(warchest);
+        client.addPortfolio(otherPortfolio);
+
+        File tmpFile = File.createTempFile("pp-refacct-", ".xml");
+        tmpFile.deleteOnExit();
+        PpClient ppClient = new PpClient(tmpFile) {
+            @Override public Client load() { return client; }
+            @Override public void save(Client c) { /* no-op */ }
+        };
+
+        // accountId = POEMS → should find portfolio with refAccount = POEMS
+        ppClient.insertTransaction(
+            poemsAccount.getUUID(),
+            sec.getUUID(), "Buy", "2026-07-13",
+            100, 50, "SGD", 0, 0, "", null
+        );
+
+        // Shares should go to POEMS portfolio (refAccount matches)
+        assertEquals(1, poemsPortfolio.getTransactions().size());
+        assertEquals(0, otherPortfolio.getTransactions().size());
     }
 
 }

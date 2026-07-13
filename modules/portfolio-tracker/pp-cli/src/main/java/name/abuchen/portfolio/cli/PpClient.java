@@ -156,27 +156,25 @@ public class PpClient {
             entry.setSecurity(security);
             entry.setShares(Values.Share.factorize(shares));
             entry.setMonetaryAmount(Money.of(currencyCode, Math.round(price * Math.abs(shares) * 100)));
-            entry.setAccount(account);
-            // Select portfolio: match offsetAccountId against portfolio UUID first,
-            // then against reference account UUID. Falls back to first portfolio.
-            Portfolio selected = null;
-            if (offsetAccountId != null && !offsetAccountId.isEmpty()) {
-                // 1. Exact match: portfolio UUID
-                for (Portfolio p : client.getPortfolios()) {
-                    if (p.getUUID().equals(offsetAccountId)) {
-                        selected = p;
-                        break;
-                    }
+            // offset_account_id overrides the cash (deposit) account
+            if (offsetAccountId != null && !offsetAccountId.isEmpty()
+                    && !offsetAccountId.equals(accountId)) {
+                Account cashAcct = findAccount(client, offsetAccountId);
+                if (cashAcct != null) {
+                    entry.setAccount(cashAcct);
+                } else {
+                    entry.setAccount(account);
                 }
-                // 2. Match by reference account UUID
-                if (selected == null) {
-                    for (Portfolio p : client.getPortfolios()) {
-                        if (p.getReferenceAccount() != null
-                                && p.getReferenceAccount().getUUID().equals(offsetAccountId)) {
-                            selected = p;
-                            break;
-                        }
-                    }
+            } else {
+                entry.setAccount(account);
+            }
+            // Select portfolio by matching accountId against refAccount
+            Portfolio selected = null;
+            for (Portfolio p : client.getPortfolios()) {
+                if (p.getReferenceAccount() != null
+                        && p.getReferenceAccount().getUUID().equals(accountId)) {
+                    selected = p;
+                    break;
                 }
             }
             if (selected == null && !client.getPortfolios().isEmpty()) {
