@@ -1036,30 +1036,23 @@ export class ToolRegistry {
                     error: r.error || r.result?.error || "unknown",
                 })),
             };
-            // Fetch news for top tickers before analysis
+            // Build analysis first (without news), then fetch news from top holdings
+            analysis = this._buildAnalysis(taxonomyData, fxRatesUsed, syncMeta, null);
             let newsBlock = [];
             try {
-                // Pick tickers from largest holdings by estimated SGD value
-                const rates = fxRatesUsed;
-                const tickers = [...new Set(
-                    (taxonomyData.taxonomies || [])
-                        .flatMap((t) => (t.values || []).filter((v) => v.value !== "Without Classification"))
-                        .flatMap((v) => (v.children || []).filter((c) => c.ticker))
-                        .sort((a, b) => {
-                            const va = (a.valuation_native || 0) * (rates[a.currency] || 0);
-                            const vb = (b.valuation_native || 0) * (rates[b.currency] || 0);
-                            return vb - va;
-                        })
-                        .slice(0, 5)
-                        .map((c) => c.ticker),
-                )].slice(0, 3);
+                const tickers = (analysis.top_holdings || [])
+                    .filter((h) => h.ticker && !/^[A-Z]{2}[0-9A-Z]{8,}/.test(h.ticker) && !h.ticker.includes(".EUFUND"))
+                    .map((h) => h.ticker);
                 if (tickers.length > 0) {
                     newsBlock = await this._fetchNews(tickers);
                 }
             } catch (e) {
                 console.warn(`News fetch failed: ${e.message}`);
             }
-            analysis = this._buildAnalysis(taxonomyData, fxRatesUsed, syncMeta, newsBlock);
+            // Rebuild with news if we got any
+            if (newsBlock.length > 0) {
+                analysis = this._buildAnalysis(taxonomyData, fxRatesUsed, syncMeta, newsBlock);
+            }
         }
 
         return {
@@ -1285,7 +1278,15 @@ export class ToolRegistry {
             }
         }
 
-        // Top holdings: top 10 by valuation_sgd (exclude cash)
+        // ── Recompute totals from distinct holdings (avoids taxonomy double-count) ──
+        liquidTotalSgd = [...deduped.values()].reduce((s, h) => s + h.valuation_sgd, 0);
+        illiquidTotalSgd = [...illiquidDeduped.values()].reduce((s, h) => s + h.valuation_sgd, 0);
+        cashValueSgd = [...deduped.values()]
+            .filter((h) => h.is_cash)
+            .reduce((s, h) => s + h.valuation_sgd, 0);
+        const nonCashLiquidSgd = liquidTotalSgd - cashValueSgd;
+
+        // Top holdings: top 10 non-cash liquid, sorted by value
         const topHoldings = [...deduped.values()]
             .filter((h) => !h.is_cash)
             .sort((a, b) => b.valuation_sgd - a.valuation_sgd)
@@ -1293,8 +1294,8 @@ export class ToolRegistry {
             .map((h) => ({
                 ...h,
                 share_pct:
-                    liquidTotalSgd > 0
-                        ? Math.round((h.valuation_sgd / liquidTotalSgd) * 1000) / 10
+                    nonCashLiquidSgd > 0
+                        ? Math.round((h.valuation_sgd / nonCashLiquidSgd) * 1000) / 10
                         : 0,
             }));
 
@@ -1741,12 +1742,12 @@ export class ToolRegistry {
                     // Skip concatenated anti-scraping titles (no spaces, very long)
                     if (!decoded.includes(" ") && decoded.length > 40) continue;
                     headlines.push(`• ${ticker} — ${decoded}`);
-                    if (headlines.length >= 5) break;
+                    if (headlines.length >= 10) break;
                 }
             } catch (e) {
                 console.warn(`News fetch failed for ${ticker}: ${e.message}`);
             }
-            if (headlines.length >= 5) break;
+            if (headlines.length >= 10) break;
         }
         return headlines;
     }

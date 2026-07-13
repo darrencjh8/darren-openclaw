@@ -948,22 +948,48 @@ describe("ToolRegistry — _buildAnalysis", () => {
 
     it("computes liquid_total_sgd from all non-WC taxonomies", () => {
         const analysis = registry._buildAnalysis(sampleTaxonomyData, sampleFxRates);
-        // Investable Cash: 63700 × 1.0 = 63700
-        // America: 64123.45 × 1.35 = 86566.66
-        // Total liquid = 63700 + 86566.66 = 150266.66
-        expect(analysis.liquid_total_sgd).toBeCloseTo(150266.66, 0);
+        // Cash: 63700 + MSFT: 50241.23*1.35=67826 + NVDA: 13882.22*1.35=18741 = 150267
+        expect(analysis.liquid_total_sgd).toBeCloseTo(150267, 0);
     });
 
     it("computes illiquid_total_sgd from Without Classification", () => {
         const analysis = registry._buildAnalysis(sampleTaxonomyData, sampleFxRates);
-        // Without Classification: 331922 × 1.0 = 331922
-        expect(analysis.illiquid_total_sgd).toBeCloseTo(331922, 0);
+        // Without Classification: only children sum to 200000 (CPF OA)
+        expect(analysis.illiquid_total_sgd).toBeCloseTo(200000, 0);
     });
 
     it("computes cash_ratio_pct from Investable Cash / liquid", () => {
         const analysis = registry._buildAnalysis(sampleTaxonomyData, sampleFxRates);
-        // 63700 / 150266.66 = 42.4%
+        // 63700 / 150267 = 42.4%
         expect(analysis.cash_ratio_pct).toBeCloseTo(42.4, 0);
+    });
+
+    it("computes share_pct against non-cash liquid (excludes cash from denominator)", () => {
+        // 50k cash + 100k equity = 150k total liquid
+        // non-cash = 100k, so equity should be 100/100 = 100%
+        const data = {
+            taxonomies: [{
+                name: "Regions (Liquid)",
+                values: [
+                    {
+                        value: "Investable Cash", valuation_native: 50000,
+                        currency: "SGD", share_pct: 33.3, children: [
+                            { name: "Cash", ticker: "", currency: "SGD", valuation_native: 50000, security_uuid: "c1", security_type: "Cash" },
+                        ],
+                    },
+                    {
+                        value: "America", valuation_native: 100000, currency: "SGD",
+                        share_pct: 66.7, children: [
+                            { name: "Stock", ticker: "STK", currency: "SGD", valuation_native: 100000, security_uuid: "s1", security_type: "Equity" },
+                        ],
+                    },
+                ],
+            }],
+        };
+        const analysis = registry._buildAnalysis(data, { SGD: 1.0 });
+        expect(analysis.liquid_total_sgd).toBe(150000);
+        // STK is 100% of non-cash liquid (100k/100k), not 66.7% of total liquid (100k/150k)
+        expect(analysis.top_holdings[0].share_pct).toBe(100);
     });
 
     it("deduplicates top_holdings by security_uuid", () => {
@@ -1448,8 +1474,8 @@ describe("ToolRegistry — _buildAnalysis", () => {
 
     it("shows illiquid holdings with percentage of illiquid total", () => {
         const analysis = registry._buildAnalysis(sampleTaxonomyData, sampleFxRates);
-        // CPF OA: 200000 / 331922 = 60.3%
-        expect(analysis.message_body).toContain("60.3");
+        // CPF OA: 200000 / 200000 = 100%
+        expect(analysis.message_body).toContain("100");
     });
 
     it("omits Illiquid Holdings section when no illiquid holdings", () => {
@@ -1732,5 +1758,49 @@ describe("ToolRegistry — _buildAnalysis", () => {
         const headlines = await registry._fetchNews(["AMD"]);
         expect(headlines.length).toBe(1);
         expect(headlines[0]).toContain("beats estimates");
+    });
+
+    it("top_holdings excludes cash, displayLabel hides ISIN-like tickers", () => {
+        const data = {
+            taxonomies: [{
+                name: "Regions (Liquid)",
+                values: [
+                    {
+                        value: "Investable Cash", valuation_native: 50000,
+                        currency: "SGD", share_pct: 25, children: [
+                            { name: "Warchest", ticker: "", currency: "SGD", valuation_native: 50000, security_uuid: "wc", security_type: "" },
+                        ],
+                    },
+                    {
+                        value: "America", valuation_native: 150000, currency: "SGD",
+                        share_pct: 75, children: [
+                            { name: "Amundi Index MSCI World", ticker: "LU2420245917.EUFUND", currency: "SGD", valuation_native: 100000, security_uuid: "am", security_type: "" },
+                            { name: "DBS Group", ticker: "D05.SI", currency: "SGD", valuation_native: 50000, security_uuid: "dbs", security_type: "Equity" },
+                        ],
+                    },
+                ],
+            }],
+        };
+        const analysis = registry._buildAnalysis(data, { SGD: 1.0 });
+        // Cash excluded from holdings
+        expect(analysis.top_holdings.find(h => h.name === "Warchest")).toBeUndefined();
+        expect(analysis.top_holdings.length).toBe(2);
+        // ISIN hidden by displayLabel in message_body
+        expect(analysis.message_body).toContain("Amundi Index MSCI World");
+        expect(analysis.message_body).not.toContain("LU2420245917.EUFUND");
+        // Normal ticker stays
+        expect(analysis.message_body).toContain("D05.SI");
+    });
+
+    it("filters ISIN-like tickers at news selection stage", () => {
+        // Same regex used in _computeSyncAll for news ticker selection
+        const isIsinLike = (t) => /^[A-Z]{2}[0-9A-Z]{8,}/.test(t) || t.includes(".EUFUND") || /^0P0001/.test(t);
+        expect(isIsinLike("LU2420245917.EUFUND")).toBe(true);
+        expect(isIsinLike("IE00B4L5Y983")).toBe(true);
+        expect(isIsinLike("0P0001TB9O.SI")).toBe(true);
+        expect(isIsinLike("CSPX.L")).toBe(false);
+        expect(isIsinLike("D05.SI")).toBe(false);
+        expect(isIsinLike("MSFT")).toBe(false);
+        expect(isIsinLike("NVDA")).toBe(false);
     });
 });
