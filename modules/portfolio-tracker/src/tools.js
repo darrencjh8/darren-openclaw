@@ -1291,17 +1291,17 @@ export class ToolRegistry {
         cashValueSgd = [...deduped.values()]
             .filter((h) => h.is_cash)
             .reduce((s, h) => s + h.valuation_sgd, 0);
+        const nonCashLiquidSgd = liquidTotalSgd - cashValueSgd;
 
-        // Top holdings: top 10 by valuation_sgd (exclude cash)
+        // Top holdings: all non-cash liquid, sorted by value
         const topHoldings = [...deduped.values()]
             .filter((h) => !h.is_cash)
             .sort((a, b) => b.valuation_sgd - a.valuation_sgd)
-            .slice(0, 10)
             .map((h) => ({
                 ...h,
                 share_pct:
-                    liquidTotalSgd > 0
-                        ? Math.round((h.valuation_sgd / liquidTotalSgd) * 1000) / 10
+                    nonCashLiquidSgd > 0
+                        ? Math.round((h.valuation_sgd / nonCashLiquidSgd) * 1000) / 10
                         : 0,
             }));
 

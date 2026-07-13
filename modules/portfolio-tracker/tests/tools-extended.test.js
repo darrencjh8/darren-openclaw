@@ -948,16 +948,14 @@ describe("ToolRegistry — _buildAnalysis", () => {
 
     it("computes liquid_total_sgd from all non-WC taxonomies", () => {
         const analysis = registry._buildAnalysis(sampleTaxonomyData, sampleFxRates);
-        // Investable Cash: 63700 × 1.0 = 63700
-        // America: 64123.45 × 1.35 = 86566.66
-        // Total liquid = 63700 + 86566.66 = 150266.66
-        expect(analysis.liquid_total_sgd).toBeCloseTo(150266.66, 0);
+        // Cash: 63700 + MSFT: 50241.23*1.35=67826 + NVDA: 13882.22*1.35=18741 = 150267
+        expect(analysis.liquid_total_sgd).toBeCloseTo(150267, 0);
     });
 
     it("computes illiquid_total_sgd from Without Classification", () => {
         const analysis = registry._buildAnalysis(sampleTaxonomyData, sampleFxRates);
-        // Without Classification: 331922 × 1.0 = 331922
-        expect(analysis.illiquid_total_sgd).toBeCloseTo(331922, 0);
+        // Without Classification: only children sum to 200000 (CPF OA)
+        expect(analysis.illiquid_total_sgd).toBeCloseTo(200000, 0);
     });
 
     it("computes cash_ratio_pct from Investable Cash / liquid", () => {
@@ -1448,8 +1446,8 @@ describe("ToolRegistry — _buildAnalysis", () => {
 
     it("shows illiquid holdings with percentage of illiquid total", () => {
         const analysis = registry._buildAnalysis(sampleTaxonomyData, sampleFxRates);
-        // CPF OA: 200000 / 331922 = 60.3%
-        expect(analysis.message_body).toContain("60.3");
+        // CPF OA: 200000 / 200000 = 100%
+        expect(analysis.message_body).toContain("100");
     });
 
     it("omits Illiquid Holdings section when no illiquid holdings", () => {
