@@ -222,7 +222,7 @@ export class PpJavaBridge {
                 "--file",
                 this._xmlPath,
                 "--account-id",
-                accountId,
+                offsetAccountId || accountId,
                 "--type",
                 txnType,
                 "--date",
@@ -242,7 +242,9 @@ export class PpJavaBridge {
                 args.push("--security-id", securityId);
             }
             if (offsetAccountId) {
-                args.push("--offset-account-id", offsetAccountId);
+                if (offsetAccountId) {
+                args.push("--offset-account-id", accountId);
+            }
             }
             if (notes) {
                 args.push("--notes", notes);
@@ -264,7 +266,7 @@ export class PpJavaBridge {
                 "--file",
                 this._xmlPath,
                 "--account-id",
-                accountId,
+                offsetAccountId || accountId,
                 "--amount",
                 String(amount),
                 "--currency",
