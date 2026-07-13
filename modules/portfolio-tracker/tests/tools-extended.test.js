@@ -1741,7 +1741,7 @@ describe("ToolRegistry — _buildAnalysis", () => {
         expect(headlines[0]).not.toContain("http");
     });
 
-    it("formats news as bullet-point summary lines", async () => {
+    it("formats news as dash-list summary lines", async () => {
         const rss = '<?xml version="1.0"?><rss><channel>'
             + '<item><title>AMD raises guidance</title>'
             + '<link>https://example.com/amd</link>'
@@ -1750,7 +1750,7 @@ describe("ToolRegistry — _buildAnalysis", () => {
         fetch.mockResolvedValueOnce({ status: 200, text: () => Promise.resolve(rss) });
         const headlines = await registry._fetchNews(["AMD"]);
         expect(headlines.length).toBe(1);
-        expect(headlines[0]).toMatch(/^[•-]\s/);
+        expect(headlines[0]).toMatch(/^- /);
         expect(headlines[0]).toContain("AMD");
         expect(headlines[0]).toContain("raises guidance");
         expect(headlines[0]).not.toContain("http");

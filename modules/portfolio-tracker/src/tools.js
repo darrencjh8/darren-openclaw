@@ -1748,7 +1748,7 @@ export class ToolRegistry {
                         .replace(/&#x([0-9a-fA-F]+);/g, (_, h) => String.fromCodePoint(parseInt(h, 16)));
                     // Skip concatenated anti-scraping titles (no spaces, very long)
                     if (!decoded.includes(" ") && decoded.length > 40) continue;
-                    headlines.push(`• ${ticker} — ${decoded}`);
+                    headlines.push(`- ${ticker} — ${decoded}`);
                     if (headlines.length >= 10) break;
                 }
             } catch (e) {
