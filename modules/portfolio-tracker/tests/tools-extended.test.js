@@ -960,8 +960,36 @@ describe("ToolRegistry — _buildAnalysis", () => {
 
     it("computes cash_ratio_pct from Investable Cash / liquid", () => {
         const analysis = registry._buildAnalysis(sampleTaxonomyData, sampleFxRates);
-        // 63700 / 150266.66 = 42.4%
+        // 63700 / 150267 = 42.4%
         expect(analysis.cash_ratio_pct).toBeCloseTo(42.4, 0);
+    });
+
+    it("computes share_pct against non-cash liquid (excludes cash from denominator)", () => {
+        // 50k cash + 100k equity = 150k total liquid
+        // non-cash = 100k, so equity should be 100/100 = 100%
+        const data = {
+            taxonomies: [{
+                name: "Regions (Liquid)",
+                values: [
+                    {
+                        value: "Investable Cash", valuation_native: 50000,
+                        currency: "SGD", share_pct: 33.3, children: [
+                            { name: "Cash", ticker: "", currency: "SGD", valuation_native: 50000, security_uuid: "c1", security_type: "Cash" },
+                        ],
+                    },
+                    {
+                        value: "America", valuation_native: 100000, currency: "SGD",
+                        share_pct: 66.7, children: [
+                            { name: "Stock", ticker: "STK", currency: "SGD", valuation_native: 100000, security_uuid: "s1", security_type: "Equity" },
+                        ],
+                    },
+                ],
+            }],
+        };
+        const analysis = registry._buildAnalysis(data, { SGD: 1.0 });
+        expect(analysis.liquid_total_sgd).toBe(150000);
+        // STK is 100% of non-cash liquid (100k/100k), not 66.7% of total liquid (100k/150k)
+        expect(analysis.top_holdings[0].share_pct).toBe(100);
     });
 
     it("deduplicates top_holdings by security_uuid", () => {
