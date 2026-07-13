@@ -190,6 +190,7 @@ function createTools(server, registry) {
             fees: z.number().default(0),
             taxes: z.number().default(0),
             notes: z.string().optional().default(""),
+            offset_account_id: z.string().optional(),
         },
         async (args) => {
             const result = {};
