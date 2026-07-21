@@ -1465,9 +1465,11 @@ describe("ToolRegistry — _buildAnalysis", () => {
         const rss = '<?xml version="1.0"?><rss><channel>'
             + '<item><title>NVDA beats estimates</title>'
             + '<link>https://example.com/nvda1</link>'
+            + '<source url="https://www.reuters.com">Reuters</source>'
             + '<pubDate>' + new Date().toUTCString() + '</pubDate></item>'
             + '<item><title>Old NVDA news</title>'
             + '<link>https://example.com/nvda2</link>'
+            + '<source url="https://www.bloomberg.com">Bloomberg</source>'
             + '<pubDate>' + new Date(Date.now() - 48 * 3600000).toUTCString() + '</pubDate></item>'
             + '</channel></rss>';
         fetch.mockResolvedValueOnce({ status: 200, text: () => Promise.resolve(rss) });
@@ -1475,6 +1477,7 @@ describe("ToolRegistry — _buildAnalysis", () => {
         expect(headlines.length).toBe(1);
         expect(headlines[0]).toContain("NVDA");
         expect(headlines[0]).toContain("beats estimates");
+        expect(headlines[0]).toContain("Reuters");
     });
 
     it("returns empty on network failure", async () => {
@@ -1699,6 +1702,7 @@ describe("ToolRegistry — _buildAnalysis", () => {
         const rss = '<?xml version="1.0"?><rss><channel>'
             + '<item><title>AMD &amp; NVDA: analysts&#39; top picks</title>'
             + '<link>https://news.google.com/rss/articles/CBMi1234567890?oc=5</link>'
+            + '<source url="https://www.cnbc.com">CNBC</source>'
             + '<pubDate>' + new Date().toUTCString() + '</pubDate></item>'
             + '</channel></rss>';
         fetch.mockResolvedValueOnce({ status: 200, text: () => Promise.resolve(rss) });
@@ -1714,6 +1718,7 @@ describe("ToolRegistry — _buildAnalysis", () => {
         const rss = '<?xml version="1.0"?><rss><channel>'
             + '<item><title>Market&mdash;update&nbsp;2026&hellip;</title>'
             + '<link>https://example.com/news</link>'
+            + '<source url="https://www.ft.com">Financial Times</source>'
             + '<pubDate>' + new Date().toUTCString() + '</pubDate></item>'
             + '</channel></rss>';
         fetch.mockResolvedValueOnce({ status: 200, text: () => Promise.resolve(rss) });
@@ -1730,6 +1735,7 @@ describe("ToolRegistry — _buildAnalysis", () => {
         const rss = '<?xml version="1.0"?><rss><channel>'
             + '<item><title>NVDA beats estimates</title>'
             + '<link>https://news.google.com/rss/articles/CBMi1234567890?oc=5</link>'
+            + '<source url="https://www.wsj.com">Wall Street Journal</source>'
             + '<pubDate>' + new Date().toUTCString() + '</pubDate></item>'
             + '</channel></rss>';
         fetch.mockResolvedValueOnce({ status: 200, text: () => Promise.resolve(rss) });
@@ -1745,6 +1751,7 @@ describe("ToolRegistry — _buildAnalysis", () => {
         const rss = '<?xml version="1.0"?><rss><channel>'
             + '<item><title>AMD raises guidance</title>'
             + '<link>https://example.com/amd</link>'
+            + '<source url="https://www.reuters.com">Reuters</source>'
             + '<pubDate>' + new Date().toUTCString() + '</pubDate></item>'
             + '</channel></rss>';
         fetch.mockResolvedValueOnce({ status: 200, text: () => Promise.resolve(rss) });
@@ -1761,9 +1768,11 @@ describe("ToolRegistry — _buildAnalysis", () => {
         const rss = '<?xml version="1.0"?><rss><channel>'
             + '<item><title>A M D S h a r e s B o u g h t</title>'
             + '<link>https://example.com/mangled</link>'
+            + '<source url="https://www.reuters.com">Reuters</source>'
             + '<pubDate>' + new Date().toUTCString() + '</pubDate></item>'
             + '<item><title>AMD beats estimates</title>'
             + '<link>https://example.com/normal</link>'
+            + '<source url="https://www.bloomberg.com">Bloomberg</source>'
             + '<pubDate>' + new Date().toUTCString() + '</pubDate></item>'
             + '</channel></rss>';
         fetch.mockResolvedValueOnce({ status: 200, text: () => Promise.resolve(rss) });
@@ -1778,15 +1787,83 @@ describe("ToolRegistry — _buildAnalysis", () => {
         const rss = '<?xml version="1.0"?><rss><channel>'
             + '<item><title>AMDSharesBoughtbyFifthThirdBancorpMarketBeatWallStreet</title>'
             + '<link>https://example.com/concat</link>'
+            + '<source url="https://www.cnbc.com">CNBC</source>'
             + '<pubDate>' + new Date().toUTCString() + '</pubDate></item>'
             + '<item><title>AMD beats estimates</title>'
             + '<link>https://example.com/normal</link>'
+            + '<source url="https://www.marketwatch.com">MarketWatch</source>'
             + '<pubDate>' + new Date().toUTCString() + '</pubDate></item>'
             + '</channel></rss>';
         fetch.mockResolvedValueOnce({ status: 200, text: () => Promise.resolve(rss) });
         const headlines = await registry._fetchNews(["AMD"]);
         expect(headlines.length).toBe(1);
         expect(headlines[0]).toContain("beats estimates");
+    });
+
+    it("filters out untrusted news sources", async () => {
+        const rss = '<?xml version="1.0"?><rss><channel>'
+            + '<item><title>AMD analysis from a blog</title>'
+            + '<link>https://example.com/blog</link>'
+            + '<source url="https://www.tradingkey.com">TradingKey</source>'
+            + '<pubDate>' + new Date().toUTCString() + '</pubDate></item>'
+            + '<item><title>AMD raises guidance</title>'
+            + '<link>https://example.com/amd</link>'
+            + '<source url="https://www.reuters.com">Reuters</source>'
+            + '<pubDate>' + new Date().toUTCString() + '</pubDate></item>'
+            + '</channel></rss>';
+        fetch.mockResolvedValueOnce({ status: 200, text: () => Promise.resolve(rss) });
+        const headlines = await registry._fetchNews(["AMD"]);
+        expect(headlines.length).toBe(1);
+        expect(headlines[0]).toContain("Reuters");
+        expect(headlines[0]).toContain("raises guidance");
+        expect(headlines[0]).not.toContain("TradingKey");
+    });
+
+    it("caps per-ticker news at 2 and total at 5", async () => {
+        const nvdaItems = [];
+        for (let i = 1; i <= 4; i++) {
+            nvdaItems.push(
+                '<item><title>NVDA news item ' + i + '</title>'
+                + '<link>https://example.com/nvda' + i + '</link>'
+                + '<source url="https://www.reuters.com">Reuters</source>'
+                + '<pubDate>' + new Date().toUTCString() + '</pubDate></item>',
+            );
+        }
+        const msftItems = [];
+        for (let i = 1; i <= 4; i++) {
+            msftItems.push(
+                '<item><title>MSFT news item ' + i + '</title>'
+                + '<link>https://example.com/msft' + i + '</link>'
+                + '<source url="https://www.bloomberg.com">Bloomberg</source>'
+                + '<pubDate>' + new Date().toUTCString() + '</pubDate></item>',
+            );
+        }
+        const nvdaRss = '<?xml version="1.0"?><rss><channel>' + nvdaItems.join("") + '</channel></rss>';
+        const msftRss = '<?xml version="1.0"?><rss><channel>' + msftItems.join("") + '</channel></rss>';
+        fetch.mockResolvedValueOnce({ status: 200, text: () => Promise.resolve(nvdaRss) });
+        fetch.mockResolvedValueOnce({ status: 200, text: () => Promise.resolve(msftRss) });
+        const headlines = await registry._fetchNews(["NVDA", "MSFT"]);
+        // Max 2 per ticker, max 5 total
+        expect(headlines.length).toBeLessThanOrEqual(5);
+        const nvdaCount = headlines.filter(h => h.includes("NVDA")).length;
+        const msftCount = headlines.filter(h => h.includes("MSFT")).length;
+        expect(nvdaCount).toBeLessThanOrEqual(2);
+        expect(msftCount).toBeLessThanOrEqual(2);
+    });
+
+    it("includes source name in news output format", async () => {
+        const rss = '<?xml version="1.0"?><rss><channel>'
+            + '<item><title>AMD beats expectations</title>'
+            + '<link>https://example.com/amd</link>'
+            + '<source url="https://www.reuters.com">Reuters</source>'
+            + '<pubDate>' + new Date().toUTCString() + '</pubDate></item>'
+            + '</channel></rss>';
+        fetch.mockResolvedValueOnce({ status: 200, text: () => Promise.resolve(rss) });
+        const headlines = await registry._fetchNews(["AMD"]);
+        expect(headlines.length).toBe(1);
+        expect(headlines[0]).toContain("(Reuters)");
+        expect(headlines[0]).toContain("AMD");
+        expect(headlines[0]).toContain("beats expectations");
     });
 
     it("top_holdings excludes cash, displayLabel hides ISIN-like tickers", () => {

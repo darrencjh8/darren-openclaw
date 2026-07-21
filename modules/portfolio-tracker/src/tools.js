@@ -1699,11 +1699,31 @@ export class ToolRegistry {
     // News headlines from Google News RSS (free, no key)
     // -----------------------------------------------------------------------
 
+    // Trusted financial news sources (domain or source tag match)
+    _TRUSTED_NEWS_SOURCES = [
+        "Reuters", "Bloomberg", "CNBC", "Financial Times", "FT",
+        "Wall Street Journal", "WSJ", "MarketWatch", "BBC",
+    ];
+
+    _isTrustedSource(sourceName) {
+        if (!sourceName) return false;
+        const lower = sourceName.toLowerCase();
+        for (const trusted of this._TRUSTED_NEWS_SOURCES) {
+            if (lower.includes(trusted.toLowerCase())) return true;
+        }
+        return false;
+    }
+
     async _fetchNews(tickers) {
         const headlines = [];
         const now = Date.now();
         const seen = new Set();
+        const perTicker = {}; // track count per ticker
+        const MAX_PER_TICKER = 2;
+        const MAX_TOTAL = 5;
+
         for (const ticker of (tickers || [])) {
+            if (headlines.length >= MAX_TOTAL) break;
             try {
                 const q = encodeURIComponent(`${ticker} stock`);
                 const url = `https://news.google.com/rss/search?q=${q}&hl=en-SG&gl=SG&ceid=SG:en`;
@@ -1715,12 +1735,19 @@ export class ToolRegistry {
                 // Parse RSS items with regex
                 const items = xml.split("<item>").slice(1);
                 for (const item of items) {
+                    if (headlines.length >= MAX_TOTAL) break;
+                    // Per-ticker cap to prevent one stock from flooding
+                    if ((perTicker[ticker] || 0) >= MAX_PER_TICKER) break;
                     const title = (item.match(/<title>(.+?)<\/title>/s) || [])[1] || "";
                     const link = (item.match(/<link>(.+?)<\/link>/s) || [])[1] || "";
                     const pubDate = (item.match(/<pubDate>(.+?)<\/pubDate>/s) || [])[1] || "";
+                    const sourceMatch = item.match(/<source[^>]*>([^<]+)<\/source>/s);
+                    const sourceName = sourceMatch ? sourceMatch[1].trim() : "";
                     const ageMs = now - new Date(pubDate).getTime();
                     if (ageMs > 24 * 3600000) continue;
                     if (!title || !link) continue;
+                    // Filter to trusted sources only
+                    if (!this._isTrustedSource(sourceName)) continue;
                     const key = title.slice(0, 60);
                     if (seen.has(key)) continue;
                     seen.add(key);
@@ -1749,13 +1776,12 @@ export class ToolRegistry {
                         .replace(/&#x([0-9a-fA-F]+);/g, (_, h) => String.fromCodePoint(parseInt(h, 16)));
                     // Skip concatenated anti-scraping titles (no spaces, very long)
                     if (!decoded.includes(" ") && decoded.length > 40) continue;
-                    headlines.push(`• ${ticker} — ${decoded}`);
-                    if (headlines.length >= 10) break;
+                    perTicker[ticker] = (perTicker[ticker] || 0) + 1;
+                    headlines.push(`• ${ticker} — ${decoded} (${sourceName})`);
                 }
             } catch (e) {
                 console.warn(`News fetch failed for ${ticker}: ${e.message}`);
             }
-            if (headlines.length >= 10) break;
         }
         return headlines;
     }
