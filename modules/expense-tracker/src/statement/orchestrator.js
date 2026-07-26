@@ -18,9 +18,9 @@ export class DeepSeekClient {
   /**
    * Thin wrapper around OpenAI-compatible DeepSeek API.
    * @param {object} config - Config instance with .deepseekApiKey
-   * @param {string} [model="deepseek-chat"]
+   * @param {string} [model="deepseek-v4-pro"]
    */
-  constructor(config, model = "deepseek-chat") {
+  constructor(config, model = "deepseek-v4-pro") {
     this._client = new OpenAI({
       apiKey: config.deepseekApiKey,
       baseURL: "https://api.deepseek.com/v1",
@@ -89,7 +89,7 @@ export class StatementProcessor {
    */
   constructor(config, tools) {
     this._config = config;
-    this._llm = new DeepSeekClient(config, "deepseek-chat");
+    this._llm = new DeepSeekClient(config, "deepseek-v4-pro");
     this._tools = tools;
   }
 

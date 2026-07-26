@@ -56,7 +56,7 @@ export async function classifyEmail(rawEmail, subject, sender, apiKey) {
 
         const response = await Promise.race([
             client.chat.completions.create({
-                model: "deepseek-chat",
+                model: "deepseek-v4-pro",
                 messages: [
                     { role: "system", content: CLASSIFICATION_PROMPT },
                     { role: "user", content: text },

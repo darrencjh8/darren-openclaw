@@ -2,7 +2,7 @@
 
 **Module:** `modules/expense-tracker`  
 **Last Updated:** 2026-06-10
-**Runtime:** Node.js 22 (ESM) | **LLM:** DeepSeek `deepseek-chat` | **Budget:** Actual Budget REST API
+**Runtime:** Node.js 22 (ESM) | **LLM:** DeepSeek `deepseek-v4-pro` | **Budget:** Actual Budget REST API
 
 For workflow, tool schemas, and deployment, see `.speckit/features/expense-tracking/plan.md` and `.speckit/agent.md`.
 
@@ -196,7 +196,7 @@ Memory tools: `search_memory`, `learn_fact`, `list_facts`, `update_fact`, `delet
 
 | Pipeline | Model | Input Tokens | Output Tokens | Cost/Email |
 |---|---|---|---|---|
-| Pre-classification | deepseek-chat | ~500 | ~5 | ~$0.00007 |
-| Alert (single txn) | deepseek-chat | ~2,000 | ~500 | ~$0.00035 |
-| Statement (15 txns) | deepseek-chat | ~6,000 | ~2,500 | ~$0.002 |
+| Pre-classification | deepseek-v4-pro | ~500 | ~5 | ~$0.00007 |
+| Alert (single txn) | deepseek-v4-pro | ~2,000 | ~500 | ~$0.00035 |
+| Statement (15 txns) | deepseek-v4-pro | ~6,000 | ~2,500 | ~$0.002 |
 | **Monthly (4 stmts + 100 alerts)** | | | | **~$0.11/month** |

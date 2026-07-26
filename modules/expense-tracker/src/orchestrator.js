@@ -18,7 +18,7 @@ export class DeepSeekClient {
             apiKey: config.deepseekApiKey,
             baseURL: "https://api.deepseek.com/v1",
         });
-        this._model = "deepseek-chat";
+        this._model = "deepseek-v4-pro";
     }
 
     _mergeReasoning(data) {
