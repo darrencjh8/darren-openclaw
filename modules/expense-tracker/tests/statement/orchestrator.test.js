@@ -544,7 +544,7 @@ describe("DeepSeekClient API format", () => {
     expect(kwargs.messages).toBeDefined();
     expect(kwargs.messages[0].content).toBe("hello");
     expect(kwargs.thinking).toEqual({ type: "adaptive" });
-    expect(kwargs.model).toBe("deepseek-chat");
+    expect(kwargs.model).toBe("deepseek-v4-pro");
   });
 
   it("includes tools in kwargs with tool_choice auto", async () => {

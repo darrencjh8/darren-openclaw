@@ -61,7 +61,7 @@ describe("classifyEmail", () => {
     });
     expect(mockCreate).toHaveBeenCalledOnce();
     const callArgs = mockCreate.mock.calls[0][0];
-    expect(callArgs.model).toBe("deepseek-chat");
+    expect(callArgs.model).toBe("deepseek-v4-pro");
     expect(callArgs.temperature).toBe(0);
     expect(callArgs.max_tokens).toBe(5);
     expect(callArgs.messages[0].content).toBe(CLASSIFICATION_PROMPT);
