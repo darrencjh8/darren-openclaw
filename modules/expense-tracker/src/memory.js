@@ -208,6 +208,7 @@ export class MemoryStore {
           this._embeddingCache.delete(key);
         }
       }
+      this._rewriteFile();
     }
     return { deleted: removed > 0, count: removed };
   }
