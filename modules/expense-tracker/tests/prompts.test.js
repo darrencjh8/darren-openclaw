@@ -106,6 +106,13 @@ describe("getPhase1Prompt", () => {
     expect(prompt).toContain("Yuu");
     expect(prompt).toContain("UOB CREDIT CARDS");
   });
+
+  it("makes keyword inference take precedence over explicit + sign", () => {
+    expect(prompt).toContain("keyword inference takes");
+    expect(prompt).toContain("precedence");
+    expect(prompt).toContain("charging +SGD 120.45");
+    expect(prompt).toContain("= negative");
+  });
 });
 
 describe("getCategoryPickerPrompt", () => {

@@ -567,7 +567,7 @@ export class AgentOrchestrator {
                     try {
                         const hints = await this._tools.executeTool(
                             "search_memory",
-                            { query: output.merchant + " account" },
+                            { query: output.merchant },
                         );
                         const relevant = (hints?.results || []).filter(
                             (r) => r.score >= 0.5,
@@ -693,10 +693,10 @@ export class AgentOrchestrator {
         if (!accountName) return "bank";
         try {
             const mem = await this._tools.executeTool("search_memory", {
-                query: accountName + " account",
+                query: accountName,
             });
             for (const r of mem?.results || []) {
-                const m = (r.text || "").match(/is an?\s+(.+?)\s+account/i);
+                const m = (r.text || "").match(/is an?\s+(.+?)(?:\s+account)?\s*$/i);
                 if (m) return m[1].toLowerCase(); // "credit card", "debit card", "bank"
             }
         } catch {}
@@ -730,13 +730,21 @@ export class AgentOrchestrator {
         }
 
         // Step 1: Payee resolution
-        if (!output.payee_name && output.merchant) {
+        // Derive search term: prefer merchant, fall back to raw_description
+        // (which the LLM populates even when merchant is omitted), then notes.
+        const searchTerm = (
+            output.merchant ||
+            output.raw_description ||
+            output.notes ||
+            ""
+        ).trim();
+        if (!output.payee_name && searchTerm) {
             let memResults = [];
             try {
                 const memResult = await this._tools.executeTool(
                     "search_memory",
                     {
-                        query: output.merchant,
+                        query: searchTerm,
                     },
                 );
                 memResults = memResult?.results || [];
@@ -759,7 +767,7 @@ export class AgentOrchestrator {
                     const resolved = await this._tools.executeTool(
                         "resolve_merchant",
                         {
-                            merchant: output.merchant,
+                            merchant: searchTerm,
                             budget_id: output.budget_id || "",
                         },
                     );
@@ -771,7 +779,7 @@ export class AgentOrchestrator {
                     // resolve_merchant failed — leave payee blank, fall through to Misc
                     logger.warn({
                         event: "resolve_merchant_failed",
-                        merchant: output.merchant,
+                        merchant: searchTerm,
                         error: e.message,
                     });
                 }

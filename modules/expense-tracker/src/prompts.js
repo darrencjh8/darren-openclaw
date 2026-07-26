@@ -30,7 +30,10 @@ RULES:
      "bill payment" / "scheduled payment" / "transferred" / "transferred out" → negative
      "received" / "deposited" / "credited" → positive
      "transferred in" / "received payment" → positive
-   If the alert shows an explicit sign (+RM50 or -RM50), extract it as-is.
+	   The explicit sign (+/-) is a hint only — keyword inference takes
+	   precedence when they conflict. Many banks display "+SGD" as
+	   formatting even for spending (e.g., "charging +SGD 120.45" = negative).
+	   When no keyword is present, fall back to the explicit sign.
    DO NOT apply credit-card logic — the system handles sign correction.
    Currency (${PRIMARY_CURRENCY} or ${SECONDARY_CURRENCY}), date (YYYY-MM-DD).
 2. Currency: S\$ / SGD → "${PRIMARY_CURRENCY}", RM / MYR → "${SECONDARY_CURRENCY}".

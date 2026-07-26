@@ -735,6 +735,81 @@ describe("Phase 2: Resolution (3-phase)", () => {
     expect(result.payee_name).toBe("Misc");
   });
 
+  it("Step 1: falls back to raw_description when merchant is empty", async () => {
+    const { AgentOrchestrator } = await import("../src/orchestrator.js");
+    const config = makeConfig();
+    const tools = makeTools({
+      executeTool: vi.fn(async (name, args) => {
+        if (name === "search_memory") {
+          // Memory search should receive raw_description as query
+          if (
+            args?.query?.includes("AMAZE") ||
+            args?.query?.includes("raw desc")
+          )
+            return {
+              results: [
+                {
+                  text: "AMAZE* GREATEASTERN maps to Insurance payee",
+                  score: 1.0,
+                },
+              ],
+            };
+          return { results: [] };
+        }
+        if (name === "resolve_merchant") return { payee: "Misc", source: "fallback" };
+        return true;
+      }),
+    });
+    const orch = new AgentOrchestrator(config, tools);
+
+    // Simulate Phase 1 LLM omitting merchant but populating raw_description
+    const phase1Output = {
+      merchant: "",
+      raw_description: "S\u0024120.45 at AMAZE* GREATEASTERN raw desc",
+      amount_cents: -12045,
+      date: "2026-07-23",
+      currency: "SGD",
+      account_id: "acc-sc",
+      budget_id: "primary-budget-id",
+      action: "insert",
+    };
+
+    const result = await orch._resolvePhase2(phase1Output);
+    // Should resolve payee from memory via raw_description fallback
+    expect(result.payee_name).toBe("Insurance");
+  });
+
+  it("Step 1: skips resolution when merchant and raw_description are both empty", async () => {
+    const { AgentOrchestrator } = await import("../src/orchestrator.js");
+    const config = makeConfig();
+    const tools = makeTools({
+      executeTool: vi.fn(async (name) => {
+        if (name === "resolve_merchant") return { payee: "Misc", source: "fallback" };
+        return true;
+      }),
+    });
+    const orch = new AgentOrchestrator(config, tools);
+
+    const phase1Output = {
+      merchant: "",
+      raw_description: "",
+      amount_cents: -500,
+      date: "2026-07-23",
+      currency: "SGD",
+      account_id: "acc-1",
+      budget_id: "primary-budget-id",
+      action: "insert",
+    };
+
+    const result = await orch._resolvePhase2(phase1Output);
+    // Should fall straight to Misc — no resolve_merchant call (expensive)
+    expect(result.payee_name).toBe("Misc");
+    expect(tools.executeTool).not.toHaveBeenCalledWith(
+      "resolve_merchant",
+      expect.anything(),
+    );
+  });
+
   it("Step 2: returns category from merchant memory hit", async () => {
     const { AgentOrchestrator } = await import("../src/orchestrator.js");
     const config = makeConfig();
@@ -915,6 +990,47 @@ describe("Phase 2: Sign correction", () => {
 
       const result = await orch._detectAccountType("UOB One");
       expect(result).toBe("credit card");
+    });
+
+    it("returns 'credit card' from memory fact without 'account' suffix", async () => {
+      const { AgentOrchestrator } = await import("../src/orchestrator.js");
+      const config = makeConfig();
+      const tools = makeTools({
+        executeTool: vi.fn(async (name) => {
+          if (name === "search_memory")
+            return {
+              results: [
+                { text: "DBS Yuu Card is a credit card", score: 1.0 },
+                { text: "DBS Yuu Card maps to Food category", score: 1.0 },
+              ],
+            };
+          return true;
+        }),
+      });
+      const orch = new AgentOrchestrator(config, tools);
+
+      const result = await orch._detectAccountType("DBS Yuu Card");
+      expect(result).toBe("credit card");
+    });
+
+    it("returns 'bank' from memory fact without 'account' suffix", async () => {
+      const { AgentOrchestrator } = await import("../src/orchestrator.js");
+      const config = makeConfig();
+      const tools = makeTools({
+        executeTool: vi.fn(async (name) => {
+          if (name === "search_memory")
+            return {
+              results: [
+                { text: "SC Bonus Saver is a bank account", score: 1.0 },
+              ],
+            };
+          return true;
+        }),
+      });
+      const orch = new AgentOrchestrator(config, tools);
+
+      const result = await orch._detectAccountType("SC Bonus Saver");
+      expect(result).toBe("bank");
     });
 
     it("returns 'bank' from memory fact", async () => {

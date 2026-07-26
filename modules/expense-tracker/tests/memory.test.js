@@ -1698,7 +1698,9 @@ describe("MemoryStore", () => {
         "Toast Box merchant maps to Food payee",
         "Toast Box merchant maps to Cafe payee",
       );
-      await store.ready();
+      // Skip model loading — these tests only need substring search
+      store._model = null;
+      store._modelPromise = null;
       const results = await store.search("Cafe");
       expect(results.some((r) => r.text.includes("Cafe"))).toBe(true);
     });
@@ -1709,10 +1711,29 @@ describe("MemoryStore", () => {
         "Toast Box merchant maps to Food payee",
         "Toast Box merchant maps to Cafe payee",
       );
-      await store.ready();
+      // Skip model loading — these tests only need substring search
+      store._model = null;
+      store._modelPromise = null;
       // "Food payee" should NOT appear in search results for Toast Box
       const results = await store.search("Toast Box");
       expect(results.every((r) => !r.text.includes("Food payee"))).toBe(true);
+    });
+
+    // ── Remove persistence ─────────────────────────────────────
+
+    it("persists to disk after remove", () => {
+      const store = new MemoryStore(tempMemoryPath);
+      const factsBefore = store.listFacts();
+      expect(factsBefore.some((f) => f.includes("DBS Yuu"))).toBe(true);
+
+      store.remove("DBS Yuu");
+
+      // In-memory: fact should be gone
+      expect(store.listFacts().some((f) => f.includes("DBS Yuu"))).toBe(false);
+
+      // On-disk: fact should be gone (reload to verify)
+      const store2 = new MemoryStore(tempMemoryPath);
+      expect(store2.listFacts().some((f) => f.includes("DBS Yuu"))).toBe(false);
     });
 
     // ── Real-world issue #100 scenario ──────────────────────
