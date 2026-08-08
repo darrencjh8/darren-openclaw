@@ -497,7 +497,7 @@ describe("AgentOrchestrator", () => {
 
     // ── Sender / Subject header prepending for Phase 1 account matching ──
 
-    it("prepends From and Subject headers to emailText for Phase 1", async () => {
+    it("prepends Email-Sender and Subject headers to emailText for Phase 1", async () => {
         const config = makeConfig();
         const tools = makeTools();
         const orch = new AgentOrchestrator(config, tools);
@@ -516,16 +516,17 @@ describe("AgentOrchestrator", () => {
         );
 
         const phase1Arg = orch._runPhase1.mock.calls[0][0];
-        expect(phase1Arg).toContain("From: alerts.dbs.com");
+        expect(phase1Arg).toContain("Email-Sender: alerts.dbs.com");
         expect(phase1Arg).toContain("Subject: Card Transaction Alert for 3255");
         expect(phase1Arg).toContain("raw email body");
-        // Headers should appear before body
-        const fromIdx = phase1Arg.indexOf("From:");
+        // Headers should appear before body. Does NOT prepend "From:".
+        expect(phase1Arg).not.toMatch(/^From:\s/);
+        const fromIdx = phase1Arg.indexOf("Email-Sender:");
         const bodyIdx = phase1Arg.indexOf("raw email body");
         expect(fromIdx).toBeLessThan(bodyIdx);
     });
 
-    it("excludes From header when sender is empty", async () => {
+    it("excludes Email-Sender header when sender is empty", async () => {
         const config = makeConfig();
         const tools = makeTools();
         const orch = new AgentOrchestrator(config, tools);
@@ -542,7 +543,7 @@ describe("AgentOrchestrator", () => {
         );
 
         const phase1Arg = orch._runPhase1.mock.calls[0][0];
-        expect(phase1Arg).not.toContain("From:");
+        expect(phase1Arg).not.toContain("Email-Sender:");
         expect(phase1Arg).toContain("Subject: Card Alert");
     });
 
@@ -563,11 +564,11 @@ describe("AgentOrchestrator", () => {
         );
 
         const phase1Arg = orch._runPhase1.mock.calls[0][0];
-        expect(phase1Arg).toContain("From: alerts.dbs.com");
+        expect(phase1Arg).toContain("Email-Sender: alerts.dbs.com");
         expect(phase1Arg).not.toContain("Subject:");
     });
 
-    it("handles undefined sender and subject gracefully", async () => {
+    it("handles undefined sender and subject gracefully — no Email-Sender or Subject", async () => {
         const config = makeConfig();
         const tools = makeTools();
         const orch = new AgentOrchestrator(config, tools);
@@ -579,7 +580,7 @@ describe("AgentOrchestrator", () => {
         await orch.processEmail("test-backcompat", "raw email body", null);
 
         const phase1Arg = orch._runPhase1.mock.calls[0][0];
-        expect(phase1Arg).not.toContain("From:");
+        expect(phase1Arg).not.toContain("Email-Sender:");
         expect(phase1Arg).not.toContain("Subject:");
         expect(phase1Arg).toContain("raw email body");
     });
@@ -595,7 +596,7 @@ describe("AgentOrchestrator", () => {
         await orch.processText("Telegram: S$12.80 at Toast Box");
 
         const phase1Arg = orch._runPhase1.mock.calls[0][0];
-        expect(phase1Arg).not.toContain("From:");
+        expect(phase1Arg).not.toContain("Email-Sender:");
         expect(phase1Arg).not.toContain("Subject:");
         expect(phase1Arg).toBe("Telegram: S$12.80 at Toast Box");
     });
@@ -945,6 +946,174 @@ describe("domain account pre-filter", () => {
         // All accounts should be passed through
         expect(toolCallsToLlm.length).toBe(1);
         expect(toolCallsToLlm[0].accounts).toHaveLength(2);
+    });
+});
+
+// ── Bill payment / transfer email pre-parser (#313) ──────────
+
+describe("bill payment pre-parser", () => {
+    const today = new Date().toISOString().slice(0, 10);
+
+    const dbsBillPaymentEmail = [
+        "Email-Sender: ibanking.alert@dbs.com",
+        "Subject: digibank Alert - Successful bill payment",
+        "",
+        "Date: 01 Aug 11:26 (SGT)",
+        "Amount: SGD 104.21",
+        "From: My Account (A/C ending 5750)",
+        "To: Yuu (Ref ending 3255)",
+    ].join("\n");
+
+    it("parses DBS bill payment deterministically, bypassing LLM", async () => {
+        const config = makeConfig();
+        const allAccounts = [
+            { id: "acc-dbs-main", name: "DBS My Account 5750", closed: false },
+            { id: "acc-dbs-yuu", name: "DBS Yuu Card", closed: false },
+        ];
+        let llmCalled = false;
+        const tools = makeTools({
+            executeTool: vi.fn(async (name) => {
+                if (name === "search_memory") return { results: [] };
+                if (name === "fetch_context")
+                    return { accounts: allAccounts, categories: [], payees: [] };
+                return true;
+            }),
+        });
+
+        const orch = new AgentOrchestrator(config, tools);
+        orch._llm = { chat: vi.fn(() => { llmCalled = true; throw new Error("LLM should not be called"); }) };
+
+        const result = await orch._runPhase1(dbsBillPaymentEmail, { senderBank: "DBS" });
+
+        expect(llmCalled).toBe(false);
+        expect(result).toBeDefined();
+        expect(result.action).toBe("insert");
+        expect(result.merchant).toBe("Yuu");
+        expect(result.amount_cents).toBe(-10421);
+        expect(result.currency).toBe("SGD");
+        expect(result.account_id).toBe("acc-dbs-main");
+        expect(result.account_name).toBe("DBS My Account 5750");
+        expect(result.budget_id).toBe("test-budget");
+    });
+
+    it("falls through to LLM for non-bill-payment emails", async () => {
+        const config = makeConfig();
+        let llmCalled = false;
+        const tools = makeTools({
+            executeTool: vi.fn(async (name) => {
+                if (name === "search_memory") return { results: [] };
+                if (name === "fetch_context")
+                    return { accounts: [{ id: "acc-1", name: "DBS Account", closed: false }], categories: [], payees: [] };
+                return true;
+            }),
+        });
+
+        const orch = new AgentOrchestrator(config, tools);
+        orch._llm = {
+            chat: vi.fn(async () => {
+                llmCalled = true;
+                return {
+                    choices: [{ message: { content: JSON.stringify({
+                        merchant: "Toast Box", amount_cents: -1280,
+                        date: today, currency: "SGD",
+                        account_id: "acc-1", account_name: "DBS Account",
+                        skip: false, reasoning: "test"
+                    }) } }],
+                };
+            }),
+        };
+
+        const result = await orch._runPhase1("Email-Sender: alerts@dbs.com\nSubject: Card Alert\n\nSGD 12.80 at Toast Box", { senderBank: "DBS" });
+
+        expect(llmCalled).toBe(true);
+        expect(result.merchant).toBe("Toast Box");
+    });
+
+    it("matches source account by suffix in A/C ending", async () => {
+        const config = makeConfig();
+        const allAccounts = [
+            { id: "acc-other", name: "DBS Savings", closed: false },
+            { id: "acc-5750", name: "DBS Current 5750", closed: false },
+        ];
+        let llmCalled = false;
+        const tools = makeTools({
+            executeTool: vi.fn(async (name) => {
+                if (name === "search_memory") return { results: [] };
+                if (name === "fetch_context")
+                    return { accounts: allAccounts, categories: [], payees: [] };
+                return true;
+            }),
+        });
+
+        const orch = new AgentOrchestrator(config, tools);
+        orch._llm = { chat: vi.fn(() => { llmCalled = true; throw new Error("LLM should not be called"); }) };
+
+        const result = await orch._runPhase1(dbsBillPaymentEmail, { senderBank: "DBS" });
+
+        expect(llmCalled).toBe(false);
+        expect(result.account_id).toBe("acc-5750");
+        expect(result.account_name).toBe("DBS Current 5750");
+    });
+
+    it("returns null when suffix-matched account is closed", async () => {
+        const config = makeConfig();
+        const allAccounts = [
+            { id: "acc-5750", name: "DBS Old 5750", closed: true },
+        ];
+        let llmCalled = false;
+        const tools = makeTools({
+            executeTool: vi.fn(async (name) => {
+                if (name === "search_memory") return { results: [] };
+                if (name === "fetch_context")
+                    return { accounts: allAccounts, categories: [], payees: [] };
+                return true;
+            }),
+        });
+
+        const orch = new AgentOrchestrator(config, tools);
+        orch._llm = { chat: vi.fn(() => { llmCalled = true; throw new Error("LLM should not be called"); }) };
+
+        const result = await orch._runPhase1(dbsBillPaymentEmail, { senderBank: "DBS" });
+
+        // Falls through — pre-parser cannot match a non-closed account, returns null
+        // and the existing LLM path handles it (not tested here, this tests the pre-parser guard)
+        expect(result).toBeNull();
+        expect(llmCalled).toBe(false);
+    });
+
+    it("handles non-DBS From/To format without crashing", async () => {
+        const config = makeConfig();
+        let llmCalled = false;
+        const tools = makeTools({
+            executeTool: vi.fn(async (name) => {
+                if (name === "search_memory") return { results: [] };
+                if (name === "fetch_context")
+                    return { accounts: [{ id: "acc-1", name: "OCBC 360", closed: false }], categories: [], payees: [] };
+                return true;
+            }),
+        });
+
+        const orch = new AgentOrchestrator(config, tools);
+        orch._llm = {
+            chat: vi.fn(async () => {
+                llmCalled = true;
+                return {
+                    choices: [{ message: { content: JSON.stringify({
+                        merchant: "Test", amount_cents: -500,
+                        date: today, currency: "SGD",
+                        account_id: "acc-1", account_name: "OCBC 360",
+                        skip: false, reasoning: "test"
+                    }) } }],
+                };
+            }),
+        };
+
+        // Email from another bank with different format
+        const emailText = "Email-Sender: noreply@ocbc.com\nSubject: Transfer\n\nYou have transferred SGD 50.00 to account 1234";
+        const result = await orch._runPhase1(emailText, { senderBank: "OCBC" });
+
+        expect(llmCalled).toBe(true);
+        expect(result.merchant).toBe("Test");
     });
 });
 
