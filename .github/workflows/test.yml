@@ -83,6 +83,7 @@ jobs:
             - name: Clone ktmb submodule
               id: submodule
               run: |
+                  set -x
                   if [ -z "${SUBMODULE_PAT}" ]; then
                     echo "::error::SUBMODULE_PAT secret is not set — add it in repo Settings > Secrets and variables > Actions"
                     exit 1
