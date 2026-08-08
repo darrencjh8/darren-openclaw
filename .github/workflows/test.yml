@@ -76,16 +76,17 @@ jobs:
 
     ktmb:
         runs-on: ubuntu-latest
-        env:
-            SUBMODULE_PAT: ${{ secrets.SUBMODULE_PAT }}
         steps:
             - uses: actions/checkout@v4
             - name: Clone ktmb submodule
               id: submodule
+              env:
+                  SUBMODULE_PAT: ${{ secrets.SUBMODULE_PAT }}
               run: |
                   if [ -z "${SUBMODULE_PAT}" ]; then
-                    echo "::error::SUBMODULE_PAT secret is not set — add it in repo Settings > Secrets and variables > Actions"
-                    exit 1
+                    echo "::warning::SUBMODULE_PAT secret is not set — skipping ktmb tests"
+                    echo "available=false" >> "$GITHUB_OUTPUT"
+                    exit 0
                   fi
                   # Unset GITHUB_TOKEN extraheader (checkout@v4 sets it on local config)
                   # to avoid auth conflict with the PAT used below
