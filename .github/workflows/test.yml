@@ -100,8 +100,9 @@ jobs:
               if: steps.submodule.outputs.available == 'true'
               working-directory: modules/ktmb
               run: |
+                  set -x
                   pip install -r requirements.txt
-                  pytest tests/ -v --no-header
+                  pytest tests/ -v --no-header --tb=long -x
 
     image-gen:
         runs-on: ubuntu-latest
