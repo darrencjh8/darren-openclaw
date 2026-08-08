@@ -221,9 +221,11 @@ export class AgentOrchestrator {
 
         // Prepend sender + subject as account-matching signals for Phase 1.
         // Skip when extractEmailContent failed — raw MIME already contains headers.
+        // Use "Email-Sender:" instead of "From:" to avoid conflicting with
+        // "From: [account]" lines in bill payment / transfer email bodies.
         if (!usedFallback) {
             const headerLines = [];
-            if (from) headerLines.push(`From: ${from}`);
+            if (from) headerLines.push(`Email-Sender: ${from}`);
             if (subject) headerLines.push(`Subject: ${subject}`);
             if (headerLines.length)
                 emailText = headerLines.join("\n") + "\n\n" + emailText;
@@ -295,7 +297,117 @@ export class AgentOrchestrator {
     // ═══════════════════════════════════════════════════════════════
 
     async _runPhase1(emailText, { senderBank } = {}) {
-        let prompt = getPhase1Prompt();
+        // Bill payment / transfer deterministic pre-parser (#313).
+        // Handles DBS structured format. Unmatched formats fall through to LLM.
+        //
+        // Format: Amount: SGD 104.21
+        //          From: My Account (A/C ending 5750)
+        //          To: Yuu (Ref ending 3255)
+        const BILL_PAYMENT_RE = /Amount:\s*(SGD|MYR)\s+([\d,.]+)[\s\S]*?From:\s*(.+?)\s*\(A\/C\s+ending\s+(\S+)\)[\s\S]*?To:\s*(.+?)\s*\(Ref\s+ending\s+\S+\)/i;
+        const bpMatch = emailText.match(BILL_PAYMENT_RE);
+        if (bpMatch && senderBank) {
+            const currency = bpMatch[1].toUpperCase() === "MYR" ? "MYR" : "SGD";
+            const amountStr = bpMatch[2].replace(/,/g, "");
+            const sourceName = bpMatch[3].trim();
+            const sourceSuffix = bpMatch[4];
+            const destName = bpMatch[5].trim();
+            const amountCents = -Math.round(parseFloat(amountStr) * 100);
+            if (isNaN(amountCents)) return null;
+
+            // Extract date from email body (DD Mon HH:MM format)
+            const DATE_RE = /Date:\s*(\d{1,2})\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{1,2}:\d{2}/i;
+            const MONTHS = { jan: "01", feb: "02", mar: "03", apr: "04", may: "05", jun: "06", jul: "07", aug: "08", sep: "09", oct: "10", nov: "11", dec: "12" };
+            let txDate;
+            const dateMatch = emailText.match(DATE_RE);
+            if (dateMatch) {
+                const day = dateMatch[1].padStart(2, "0");
+                const month = MONTHS[dateMatch[2].toLowerCase()];
+                const year = new Date().getFullYear();
+                txDate = `${year}-${month}-${day}`;
+            } else {
+                txDate = new Date().toISOString().slice(0, 10);
+            }
+
+            try {
+                const budgetId =
+                    currency === this._config.primaryCurrency
+                        ? this._config.primaryBudgetFile
+                        : this._config.secondaryBudgetFile;
+                const ctx = await this._tools.executeTool("fetch_context", {
+                    budget_id: budgetId,
+                });
+                const liveAccounts = ctx?.accounts || [];
+
+                // Match by suffix with word boundary to avoid false matches
+                // (e.g., suffix "5750" should NOT match account ending in "57500")
+                const escaped = sourceSuffix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                const suffixRe = new RegExp(`\\b${escaped}\\b`);
+                const bankLower = senderBank.toLowerCase();
+                const acctMatch = liveAccounts.find(
+                    (a) =>
+                        a.name &&
+                        !a.closed &&
+                        a.name.toLowerCase().includes(bankLower) &&
+                        suffixRe.test(a.name),
+                );
+                if (acctMatch) {
+                    logger.info({
+                        event: "bill_payment_preparse",
+                        sourceAccount: acctMatch.name,
+                        destination: destName,
+                        amount: amountCents,
+                        date: txDate,
+                    });
+                    return {
+                        merchant: destName,
+                        amount_cents: amountCents,
+                        date: txDate,
+                        currency,
+                        account_id: acctMatch.id,
+                        account_name: acctMatch.name,
+                        budget_id: budgetId,
+                        action: "insert",
+                        payee_name: "",
+                        category_id: "",
+                        raw_description: `${currency} ${amountStr} to ${destName}`,
+                        notes: `Bill payment from ${sourceName} (${sourceSuffix}) to ${destName}`,
+                        reasoning: `Deterministic parse: bill payment from ${acctMatch.name}`,
+                        notify_message: "",
+                    };
+                }
+
+                // Check if a matching account exists but is closed
+                const closedMatch = liveAccounts.find(
+                    (a) =>
+                        a.name &&
+                        a.closed &&
+                        a.name.toLowerCase().includes(bankLower) &&
+                        suffixRe.test(a.name),
+                );
+                if (closedMatch) {
+                    // Account exists but closed - return null so email stays unread.
+                    // User may re-open it; on next cron cycle it will be matched.
+                    logger.info({
+                        event: "bill_payment_preparse_closed_account",
+                        suffix: sourceSuffix,
+                        accountName: closedMatch.name,
+                    });
+                    return null;
+                }
+
+                // No matching account at all - fall through to LLM (may match
+                // by name or handle POSB accounts where bank name differs)
+                logger.info({
+                    event: "bill_payment_preparse_no_match",
+                    suffix: sourceSuffix,
+                    senderBank,
+                });
+            } catch {
+                // fetch_context failed - fall through to LLM
+            }
+        }
+
+let prompt = getPhase1Prompt();
 
         // ── Pre-Phase-1: inject card/account suffix context from memory ──
         // AI trigger: semantic search surfaces relevant suffix facts.
