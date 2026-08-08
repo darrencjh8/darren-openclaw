@@ -78,9 +78,12 @@ jobs:
         runs-on: ubuntu-latest
         steps:
             - uses: actions/checkout@v4
+            - uses: actions/checkout@v4
               with:
+                  repository: darrencjh8/openclaw-module-ktmb
                   token: ${{ secrets.SUBMODULE_PAT }}
-                  submodules: true
+                  path: modules/ktmb
+                  ref: c48f491f2b5688dd2034df4249708a884a4a9a8b
             - uses: actions/setup-python@v5
               with:
                   python-version: "3.12"
