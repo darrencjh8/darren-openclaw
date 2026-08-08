@@ -10,14 +10,11 @@
 
 ## Production Server
 
-- **Server**: `<SERVER_IP>`, SSH as `$USER` (sudoer).
-- **Deploy workflow**:
-  1. Propose a plan and get explicit approval before any production changes.
-  2. **Config-only**: `scp` file → `docker compose restart <svc>`
-  3. **Code change**: `git pull` → `docker compose build <svc>` → `docker compose up -d <svc>`
-  4. Sync `.env` before deploying: `scp .env $USER@<SERVER_IP>:~/darren-openclaw/modules/hermes/.env and all the other modules`
-  5. After deploy, verify changes in production container.
-- **Deploy script**: `ssh $USER@<SERVER_IP> 'cd ~/darren-openclaw && bash ./modules/deploy.sh --component all --non-interactive'` — validates env vars, builds, health-checks
+- **Server**: `192.168.68.51`, SSH as `darren` (sudoer).
+- **Deploy workflow**: CI/CD owns deployment. Push code changes via PR; CI/CD builds and deploys on merge.
+- **Manual intervention**: Only for config-only changes (`scp` .env file → ask user to trigger CI restart), or when CI/CD fails and user explicitly requests it.
+- Never run `docker compose up`, `docker compose build`, `git pull` or `deploy.sh` on production — these are CI/CD responsibilities.
+- Before running any debug/inspection command on production, ask for explicit approval.
 
 ## Configuration
 
@@ -27,7 +24,6 @@
   - https://docs.openclaw.ai/start/hubs
   - https://github.com/openclaw/openclaw/tree/main/docs
 - Do not guess schema.
-- Always run deploy.sh script instead of running docker compose up manually
 
 ## Planning
 
