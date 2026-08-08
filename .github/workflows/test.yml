@@ -102,7 +102,7 @@ jobs:
               working-directory: modules/ktmb
               run: |
                   set -x
-                  pip install -r requirements.txt
+                  pip install --upgrade -r requirements.txt
                   pytest tests/ -v --no-header --tb=long -x
 
     image-gen:
