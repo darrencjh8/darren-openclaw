@@ -76,21 +76,31 @@ jobs:
 
     ktmb:
         runs-on: ubuntu-latest
+        env:
+            SUBMODULE_PAT: ${{ secrets.SUBMODULE_PAT }}
         steps:
             - uses: actions/checkout@v4
-            - uses: actions/checkout@v4
-              with:
-                  repository: darrencjh8/openclaw-module-ktmb
-                  token: ${{ secrets.SUBMODULE_PAT }}
-                  path: modules/ktmb
-                  ref: c48f491f2b5688dd2034df4249708a884a4a9a8b
+            - name: Clone ktmb submodule
+              id: submodule
+              run: |
+                  if [ -z "${SUBMODULE_PAT}" ]; then
+                    echo "::error::SUBMODULE_PAT secret is not set — add it in repo Settings > Secrets and variables > Actions"
+                    exit 1
+                  fi
+                  # Unset GITHUB_TOKEN extraheader (checkout@v4 sets it on local config)
+                  # to avoid auth conflict with the PAT used below
+                  git config --local --unset-all http.https://github.com/.extraheader || true
+                  git -c url."https://x-access-token:${SUBMODULE_PAT}@github.com/".insteadOf="https://github.com/" submodule update --init modules/ktmb
+                  echo "available=true" >> "$GITHUB_OUTPUT"
             - uses: actions/setup-python@v5
+              if: steps.submodule.outputs.available == 'true'
               with:
                   python-version: "3.12"
             - name: Run ktmb tests
+              if: steps.submodule.outputs.available == 'true'
               working-directory: modules/ktmb
               run: |
-                  pip install --upgrade -r requirements.txt
+                  pip install -r requirements.txt
                   pytest tests/ -v --no-header
 
     image-gen:
