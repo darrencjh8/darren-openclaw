@@ -183,6 +183,15 @@ function createTools(server, registry) {
     async (a) => tx(await registry.executeTool("reconcile_transaction", a)),
   );
   server.tool(
+    "unclear_transaction",
+    "Unclear one or more Actual Budget transactions (mark as not reconciled). Pass ab_transaction_ids as an array. Each is set cleared=false.",
+    {
+      ab_transaction_ids: z.array(z.string().min(1)).min(1),
+      budget_id: z.string().min(1),
+    },
+    async (a) => tx(await registry.executeTool("unclear_transaction", a)),
+  );
+  server.tool(
     "fetch_unreconciled_transactions",
     "Fetch uncleared (not reconciled) transactions from Actual Budget for an account within a date range. Use this during statement reconciliation to find transactions that need clearing.",
     {

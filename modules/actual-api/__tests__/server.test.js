@@ -309,6 +309,25 @@ describe("Route handlers", () => {
         });
     });
 
+    test("POST /transactions/:id/unclear sets cleared to false", async () => {
+        const handler = findHandler("post", "/transactions/:id/unclear");
+        const req = mockReq({
+            params: { id: "txn-2" },
+            body: {},
+        });
+        const res = mockRes();
+
+        await handler(req, res);
+
+        expect(actual.updateTransaction).toHaveBeenCalledWith("txn-2", {
+            cleared: false,
+        });
+        expect(res.json).toHaveBeenCalledWith({
+            status: "uncleared",
+            id: "txn-2",
+        });
+    });
+
     test("route error returns 500 with error.message in JSON body", async () => {
         actual.getTransactions.mockRejectedValue(
             new Error("DB connection failed"),

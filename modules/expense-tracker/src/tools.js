@@ -416,6 +416,26 @@ const TOOLS = [
     },
   },
   {
+    name: "unclear_transaction",
+    description:
+      "Unclear one or more Actual Budget transactions (mark as not reconciled). Pass ab_transaction_ids as an array. Each is set cleared=false.",
+    schema: {
+      type: "object",
+      properties: {
+        ab_transaction_ids: {
+          type: "array",
+          items: { type: "string" },
+          description: "One or more AB transaction IDs to unclear",
+        },
+        budget_id: {
+          type: "string",
+          description: "Budget file name (required)",
+        },
+      },
+      required: ["ab_transaction_ids", "budget_id"],
+    },
+  },
+  {
     name: "fetch_unreconciled_transactions",
     description:
       "Fetch uncleared transactions from Actual Budget for an account within a date range.",
@@ -1165,6 +1185,34 @@ export class ToolRegistry {
     }
     return {
       cleared: results.filter((r) => r.status === "cleared").length,
+      failed: results.filter((r) => r.status === "error").length,
+      results,
+    };
+  }
+
+  async _handle_unclear_transaction({
+    ab_transaction_ids,
+    budget_id,
+  }) {
+    if (!budget_id) return { error: "budget_id is required" };
+    if (!Array.isArray(ab_transaction_ids) || ab_transaction_ids.length === 0)
+      return { error: "ab_transaction_ids must be a non-empty array" };
+
+    const results = [];
+    for (const id of ab_transaction_ids) {
+      try {
+        const r = await this._post(
+          `/transactions/${id}/unclear`,
+          {},
+          budget_id,
+        );
+        results.push({ id, status: r.status || "uncleared" });
+      } catch (e) {
+        results.push({ id, status: "error", error: e.message });
+      }
+    }
+    return {
+      uncleared: results.filter((r) => r.status === "uncleared").length,
       failed: results.filter((r) => r.status === "error").length,
       results,
     };
