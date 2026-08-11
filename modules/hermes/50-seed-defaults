@@ -92,7 +92,7 @@ if [ -n "${MEMORY_REPO_URL}" ] && [ ! -f "/opt/data/memories/MEMORY.md" ]; then
     rm -rf /tmp/friday-memory-clone || true
 fi
 
-# Seed portfolio-sync cron job (idempotent, updates prompt on redeploy)
+# Seed portfolio-sync cron job (no_agent — zero-token REST call)
 python3 <<'PYEOF' || true
 import os, json, uuid, datetime
 jobs_path = "/opt/data/cron/jobs.json"
@@ -104,23 +104,33 @@ try:
 except (FileNotFoundError, json.JSONDecodeError):
     jobs = []
 
-new_prompt = (
-    'Run portfolio_sync \u2014 it handles balances and taxonomies deterministically.\n\nRelay the portfolio_sync output verbatim \u2014 do not change a single character, line, or word. Do NOT convert to tables. Do NOT merge lines. Do NOT add commentary. The report already includes everything (sync status, portfolio data, news headlines).\n\nIf any sync step failed (check portfolio_sync.sync_targets for errors), tell the user what went wrong and what action to take (e.g. /onedrive setup).'
-)
-
-
 found = False
 for j in jobs:
     if not isinstance(j, dict):
         continue
     if j.get("name") == "portfolio-daily-sync":
         found = True
-        old_prompt = j.get("prompt", "")
-        if old_prompt != new_prompt:
-            j["prompt"] = new_prompt
-            print("cron: portfolio-daily-sync prompt updated")
+        # Migrate old prompt-based job to no_agent on redeploy
+        changed = False
+        if not j.get("no_agent"):
+            j["no_agent"] = True
+            changed = True
+        if j.get("script") != "portfolio-sync.sh":
+            j["script"] = "portfolio-sync.sh"
+            changed = True
+        if j.get("deliver") != "local":
+            j["deliver"] = "local"
+            changed = True
+        if "prompt" in j:
+            del j["prompt"]
+            changed = True
+        if "deliver_extra" in j:
+            del j["deliver_extra"]
+            changed = True
+        if changed:
+            print("cron: portfolio-daily-sync migrated to no_agent")
         else:
-            print("cron: portfolio-daily-sync prompt unchanged")
+            print("cron: portfolio-daily-sync unchanged")
         break
 
 if not found:
@@ -129,14 +139,14 @@ if not found:
         "name": "portfolio-daily-sync",
         "schedule": {"kind": "cron", "expr": "0 12 * * *", "display": "0 12 * * *"},
         "schedule_display": "0 12 * * *",
-        "prompt": new_prompt,
+        "script": "portfolio-sync.sh",
+        "no_agent": True,
         "enabled": True,
-        "deliver": "telegram",
-        "deliver_extra": {"chat_id": os.environ.get("TELEGRAM_HOME_CHANNEL", "")},
+        "deliver": "local",
         "next_run_at": None,
         "created_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
     })
-    print("cron: portfolio-daily-sync seeded")
+    print("cron: portfolio-daily-sync seeded (no_agent)")
 
 with open(jobs_path, "w") as f:
     json.dump({"jobs": jobs, "updated_at": datetime.datetime.now(datetime.timezone.utc).isoformat()}, f, indent=2)
