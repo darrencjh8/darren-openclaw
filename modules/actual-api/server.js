@@ -389,6 +389,16 @@ app.post("/transactions/:id/clear", async (req, res) => {
     }
 });
 
+app.post("/transactions/:id/unclear", async (req, res) => {
+    try {
+        await ensureBudget(getBudgetId(req));
+        await actual.updateTransaction(req.params.id, { cleared: false });
+        res.json({ status: "uncleared", id: req.params.id });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
 app.patch("/transactions/:id", async (req, res) => {
     try {
         await ensureBudget(getBudgetId(req));

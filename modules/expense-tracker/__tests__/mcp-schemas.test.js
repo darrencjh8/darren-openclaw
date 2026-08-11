@@ -41,6 +41,10 @@ const schemas = {
         statement_ref: z.string().optional().default(""),
         budget_id: z.string().min(1),
     }),
+    unclear_transaction: z.object({
+        ab_transaction_ids: z.array(z.string().min(1)).min(1),
+        budget_id: z.string().min(1),
+    }),
     fetch_unreconciled_transactions: z.object({
         account_id: z.string().min(1),
         date_from: z.string().min(1),
@@ -243,6 +247,42 @@ describe("MCP Zod schemas — budget_id rejects empty string", () => {
             expect(r.success).toBe(true);
             expect(r.data.ab_transaction_ids.length).toBe(3);
             expect(r.data.statement_ref).toBe("Affin Jun 2026");
+        });
+    });
+
+    describe("unclear_transaction", () => {
+        test("rejects empty ab_transaction_ids array", () => {
+            const r = schemas.unclear_transaction.safeParse({
+                ab_transaction_ids: [],
+                budget_id: "My Budget",
+            });
+            expect(r.success).toBe(false);
+        });
+
+        test("rejects empty budget_id", () => {
+            const r = schemas.unclear_transaction.safeParse({
+                ab_transaction_ids: ["txn-1"],
+                budget_id: "",
+            });
+            expect(r.success).toBe(false);
+        });
+
+        test("accepts single ID in array", () => {
+            const r = schemas.unclear_transaction.safeParse({
+                ab_transaction_ids: ["txn-1"],
+                budget_id: "My Budget",
+            });
+            expect(r.success).toBe(true);
+            expect(r.data.ab_transaction_ids).toEqual(["txn-1"]);
+        });
+
+        test("accepts multiple IDs", () => {
+            const r = schemas.unclear_transaction.safeParse({
+                ab_transaction_ids: ["txn-1", "txn-2", "txn-3"],
+                budget_id: "My Budget",
+            });
+            expect(r.success).toBe(true);
+            expect(r.data.ab_transaction_ids.length).toBe(3);
         });
     });
 

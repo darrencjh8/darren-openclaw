@@ -140,6 +140,7 @@ async function main() {
         "check_duplicate",
         "extract_pdf_text",
         "reconcile_transaction",
+        "unclear_transaction",
         "fetch_unreconciled_transactions",
         "record_statement",
         "fetch_statement_history",
