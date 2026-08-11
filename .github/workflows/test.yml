@@ -73,6 +73,8 @@ jobs:
               run: bash modules/hermes/tests/test-50-seed-defaults.sh
             - name: Test deploy.sh logic
               run: bash modules/hermes/tests/test-deploy.sh
+            - name: Test docker-compose hermes env vars
+              run: bash modules/hermes/tests/test-docker-compose-env.sh
 
     image-gen:
         runs-on: ubuntu-latest
