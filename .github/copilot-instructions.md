@@ -37,3 +37,5 @@
 - **Iterate until clean**: fix issues found by reviewers, re-run tests, and re-review. Repeat until 2 **consecutive** rounds produce zero findings from both agents.
 - **Only bugs count as findings**: cosmetic notes, code style, and missing test-coverage suggestions do not block the loop.
 - **After review**: raise a PR and merge (squash).
+- **Never push directly to `main`**: all changes go through PRs. After committing to a feature branch, push it, create a PR, wait for required checks (gitleaks, CI), then merge.
+- **Before creating a new branch**: check for pending work. You MUST be on a clean worktree — no uncommitted changes, no unstaged files. If there are, ask the user before proceeding.
