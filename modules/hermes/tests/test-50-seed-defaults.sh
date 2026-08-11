@@ -157,7 +157,7 @@ for j in data.get('jobs', []):
 echo ""
 echo "=== portfolio-daily-sync schedule ==="
 
-# Extract the portfolio sync seeding snippet (uses cron kind)
+# Extract the portfolio sync seeding snippet (no_agent + script, cron kind)
 portfolio_snippet='
 import os, json, uuid, datetime
 jobs_path = "/'"$TMPDIR"'/cron/jobs.json"
@@ -174,10 +174,10 @@ if not any(j.get("name") == "portfolio-daily-sync" for j in jobs if isinstance(j
         "name": "portfolio-daily-sync",
         "schedule": {"kind": "cron", "expr": "0 12 * * *", "display": "0 12 * * *"},
         "schedule_display": "0 12 * * *",
-        "prompt": "Run portfolio_sync",
+        "script": "portfolio-sync.sh",
+        "no_agent": True,
         "enabled": True,
-        "deliver": "telegram",
-        "deliver_extra": {"chat_id": "test-channel"},
+        "deliver": "local",
         "next_run_at": None,
         "created_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
     })
@@ -189,9 +189,11 @@ rm -rf "$TMPDIR/cron"
 output3=$(run_seed_python "$portfolio_snippet")
 name3=$(echo "$output3" | cut -d'|' -f1)
 kind3=$(echo "$output3" | cut -d'|' -f2)
+display3=$(echo "$output3" | cut -d'|' -f3)
 
 [ "$name3" = "portfolio-daily-sync" ] && ok "job name" || nope "job name" "got: $name3"
 [ "$kind3" = "cron" ] && ok "schedule kind is cron" || nope "schedule kind" "got: $kind3"
+[ "$display3" = "0 12 * * *" ] && ok "schedule display correct" || nope "schedule display" "got: $display3"
 
 expr_val=$(python3 -c "
 import json
@@ -203,129 +205,57 @@ for j in data.get('jobs', []):
 [ "$expr_val" = "0 12 * * *" ] && ok "cron expr is correct" || nope "cron expr" "got: $expr_val"
 
 echo ""
-echo "=== portfolio-daily-sync prompt content ==="
+echo "=== portfolio-daily-sync no_agent config ==="
 
-# Verify the prompt in 50-seed-defaults contains key instructions.
-# The prompt is a Python parenthesised string concat inside a heredoc.
-# We extract the PYEOF block and use balanced-paren matching to eval the prompt.
-	prompt_content=$(python3 -c "
-import re
-with open('$SEED_SCRIPT') as f:
-    content = f.read()
-# Extract the heredoc Python block between <<'PYEOF' and PYEOF
-match = re.search(r\"<<'PYEOF'.*?\n(.*?)\nPYEOF\", content, re.DOTALL)
-if not match:
-    print('EXTRACT_FAILED')
-else:
-    pyblock = match.group(1)
-    # Find new_prompt variable: new_prompt = (...)
-    idx = pyblock.find('new_prompt =')
-    if idx >= 0:
-        rest = pyblock[idx:]
-        paren_start = rest.index('(')
-    else:
-        # Fallback: inline \"prompt\": (...)
-        idx = pyblock.find('\"prompt\":')
-        if idx < 0:
-            print('PROMPT_NOT_FOUND')
-            exit()
-        rest = pyblock[idx:]
-        paren_start = rest.index('(')
-    depth = 0
-    for i, ch in enumerate(rest[paren_start:], paren_start):
-        if ch == '(': depth += 1
-        elif ch == ')': depth -= 1
-        if depth == 0:
-            expr = rest[paren_start:i+1]
-            break
-    prompt = eval(expr)
-    print(prompt)
+# Verify no_agent is True
+no_agent_val=$(python3 -c "
+import json
+with open('$TMPDIR/cron/jobs.json') as f:
+    data = json.load(f)
+for j in data.get('jobs', []):
+    print(j.get('no_agent', 'missing'))
 ")
+[ "$no_agent_val" = "True" ] && ok "no_agent is True" || nope "no_agent" "got: $no_agent_val"
 
-# Test: prompt must instruct agent to relay message_body verbatim
-echo "$prompt_content" | grep -q 'verbatim' \
-    && ok "prompt: relay message_body verbatim" \
-    || nope "prompt: relay message_body verbatim" "missing 'verbatim' instruction"
-
-# Test: prompt must instruct agent NOT to modify/reformat/compute
-echo "$prompt_content" | grep -q 'Do NOT convert to tables' \
-    && ok "prompt: forbid modification of message_body" \
-    || nope "prompt: forbid modification" "missing 'Do NOT convert to tables' instruction"
-
-# Test: prompt must instruct LLM to NOT add commentary on news
-echo "$prompt_content" | grep -q 'Do NOT add commentary' \
-    && ok "prompt: forbid news commentary" \
-    || nope "prompt: forbid news commentary" "missing 'Do NOT add commentary' instruction"
-
-# Test: prompt tells LLM to relay portfolio_sync output directly
-echo "$prompt_content" | grep -q 'Relay the portfolio_sync output' \
-    && ok "prompt: relays portfolio_sync output" \
-    || nope "prompt: relays portfolio_sync output" "missing relay instruction"
-
-# Test: prompt must reference portfolio_sync (entry point unchanged)
-echo "$prompt_content" | grep -q 'portfolio_sync' \
-    && ok "prompt: references portfolio_sync entry point" \
-    || nope "prompt: references portfolio_sync" "missing portfolio_sync reference"
-# Test: prompt handles sync failures with user guidance
-echo "$prompt_content" | grep -q 'onedrive setup' \
-    && ok "prompt: guides user on sync failure" \
-    || nope "prompt: guides user on sync failure" "missing 'onedrive setup' guidance"
-
-# Test: prompt must NOT contain old LLM-computed analysis instructions
-if echo "$prompt_content" | grep -q 'tag each child as Tech'; then
-    nope "prompt: no hardcoded sector tagging (removed)" "old instruction still present"
-else
-    ok "prompt: no hardcoded sector tagging (removed)"
-fi
-
-if echo "$prompt_content" | grep -q 'Only report CHANGES from your memory'; then
-    nope "prompt: no manual change tracking (removed)" "old instruction still present"
-else
-    ok "prompt: no manual change tracking (removed)"
-fi
-
-if echo "$prompt_content" | grep -q 'omit this section entirely'; then
-    nope "prompt: no manual actions section (removed)" "old instruction still present"
-else
-    ok "prompt: no manual actions section (removed)"
-fi
-
-echo ""
-echo "=== portfolio-daily-sync deliver config ==="
-
-# Verify deliver_extra.chat_id is set in the actual seed script
-deliver_extra=$(python3 -c "
-import re
-with open('$SEED_SCRIPT') as f:
-    content = f.read()
-match = re.search(r\"<<'PYEOF'.*?\n(.*?)\nPYEOF\", content, re.DOTALL)
-if match:
-    pyblock = match.group(1)
-    idx = pyblock.find('\"deliver_extra\":')
-    if idx >= 0:
-        # Extract the dict after deliver_extra
-        rest = pyblock[idx:]
-        brace_start = rest.index('{')
-        depth = 0
-        for i, ch in enumerate(rest[brace_start:], brace_start):
-            if ch == '{': depth += 1
-            elif ch == '}': depth -= 1
-            if depth == 0:
-                expr = rest[brace_start:i+1]
-                break
-        obj = eval(expr, {'os': __import__('os')})
-        if 'chat_id' in obj:
-            print('chat_id_present')
-        else:
-            print('chat_id_missing')
-    else:
-        print('deliver_extra_not_found')
-else:
-    print('PYEOF_NOT_FOUND')
+# Verify script is portfolio-sync.sh
+script_val=$(python3 -c "
+import json
+with open('$TMPDIR/cron/jobs.json') as f:
+    data = json.load(f)
+for j in data.get('jobs', []):
+    print(j.get('script', 'missing'))
 ")
-[ "$deliver_extra" = "chat_id_present" ] \
-    && ok "deliver_extra.chat_id is set" \
-    || nope "deliver_extra.chat_id is set" "got: $deliver_extra"
+[ "$script_val" = "portfolio-sync.sh" ] && ok "script is portfolio-sync.sh" || nope "script" "got: $script_val"
+
+# Verify deliver is local
+deliver_val=$(python3 -c "
+import json
+with open('$TMPDIR/cron/jobs.json') as f:
+    data = json.load(f)
+for j in data.get('jobs', []):
+    print(j.get('deliver', 'missing'))
+")
+[ "$deliver_val" = "local" ] && ok "deliver is local" || nope "deliver" "got: $deliver_val"
+
+# Verify no prompt field (no LLM agent)
+prompt_val=$(python3 -c "
+import json
+with open('$TMPDIR/cron/jobs.json') as f:
+    data = json.load(f)
+for j in data.get('jobs', []):
+    print(j.get('prompt', 'ABSENT'))
+")
+[ "$prompt_val" = "ABSENT" ] && ok "no prompt field (zero-token cron)" || nope "no prompt field" "got: $prompt_val"
+
+# Verify no deliver_extra field
+deliver_extra_val=$(python3 -c "
+import json
+with open('$TMPDIR/cron/jobs.json') as f:
+    data = json.load(f)
+for j in data.get('jobs', []):
+    print(j.get('deliver_extra', 'ABSENT'))
+")
+[ "$deliver_extra_val" = "ABSENT" ] && ok "no deliver_extra field" || nope "no deliver_extra field" "got: $deliver_extra_val"
 
 echo ""
 echo "=== portfolio-daily-sync schedule integrity ==="
@@ -359,6 +289,69 @@ for j in data.get('jobs', []):
     print(j.get('enabled', 'missing'))
 ")
 [ "$enabled_ps" = "True" ] && ok "job is enabled" || nope "job enabled" "got: $enabled_ps"
+
+echo ""
+echo "=== portfolio-daily-sync seed script integrity ==="
+
+# Verify real 50-seed-defaults script has no_agent: True for portfolio-daily-sync
+seed_has_no_agent=$(python3 -c "
+import re
+with open('$SEED_SCRIPT') as f:
+    content = f.read()
+match = re.search(r\"<<'PYEOF'.*?\n(.*?)\nPYEOF\", content, re.DOTALL)
+if not match:
+    print('PYEOF_NOT_FOUND')
+else:
+    pyblock = match.group(1)
+    has_no_agent = '\"no_agent\":' in pyblock or \"'no_agent':\" in pyblock
+    print('found' if has_no_agent else 'missing')
+")
+[ "$seed_has_no_agent" = "found" ] && ok "seed: has no_agent field" || nope "seed: has no_agent field" "got: $seed_has_no_agent"
+
+# Verify real 50-seed-defaults script has script: portfolio-sync.sh
+seed_has_script=$(python3 -c "
+import re
+with open('$SEED_SCRIPT') as f:
+    content = f.read()
+match = re.search(r\"<<'PYEOF'.*?\n(.*?)\nPYEOF\", content, re.DOTALL)
+if not match:
+    print('PYEOF_NOT_FOUND')
+else:
+    pyblock = match.group(1)
+    has_script = 'portfolio-sync.sh' in pyblock
+    print('found' if has_script else 'missing')
+")
+[ "$seed_has_script" = "found" ] && ok "seed: has script portfolio-sync.sh" || nope "seed: has script portfolio-sync.sh" "got: $seed_has_script"
+
+# Verify real 50-seed-defaults script does NOT have a prompt for portfolio-daily-sync
+seed_has_prompt=$(python3 -c "
+import re
+with open('$SEED_SCRIPT') as f:
+    content = f.read()
+match = re.search(r\"<<'PYEOF'.*?\n(.*?)\nPYEOF\", content, re.DOTALL)
+if not match:
+    print('PYEOF_NOT_FOUND')
+else:
+    pyblock = match.group(1)
+    has_prompt = 'new_prompt' in pyblock
+    print('has_prompt' if has_prompt else 'no_prompt')
+")
+[ "$seed_has_prompt" = "no_prompt" ] && ok "seed: no prompt (zero-token)" || nope "seed: no prompt (zero-token)" "got: $seed_has_prompt"
+
+# Verify real 50-seed-defaults script has deliver: local
+seed_deliver=$(python3 -c "
+import re
+with open('$SEED_SCRIPT') as f:
+    content = f.read()
+match = re.search(r\"<<'PYEOF'.*?\n(.*?)\nPYEOF\", content, re.DOTALL)
+if not match:
+    print('PYEOF_NOT_FOUND')
+else:
+    pyblock = match.group(1)
+    has_local_deliver = '\"deliver\": \"local\"' in pyblock or \"'deliver': 'local'\" in pyblock or '\"deliver\":\"local\"' in pyblock
+    print('local' if has_local_deliver else 'not_local')
+")
+[ "$seed_deliver" = "local" ] && ok "seed: deliver is local" || nope "seed: deliver is local" "got: $seed_deliver"
 
 echo ""
 echo "========================================="
