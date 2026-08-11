@@ -32,10 +32,16 @@
 
 ## Implementation (bug fixes / features)
 
-- **TDD required**: write failing tests first, then implement. Run tests to confirm they fail before coding.
-- **Agentic review loop**: after implementation and all tests pass, spin up 2 sub-agents to independently review the code for bugs, edge cases, and correctness.
-- **Iterate until clean**: fix issues found by reviewers, re-run tests, and re-review. Repeat until 2 **consecutive** rounds produce zero findings from both agents.
-- **Only bugs count as findings**: cosmetic notes, code style, and missing test-coverage suggestions do not block the loop.
-- **After review**: raise a PR and merge (squash).
-- **Never push directly to `main`**: all changes go through PRs. After committing to a feature branch, push it, create a PR, wait for required checks (gitleaks, CI), then merge.
-- **Before creating a new branch**: check for pending work. You MUST be on a clean worktree — no uncommitted changes, no unstaged files. If there are, ask the user before proceeding.
+Follow this sequence in order — do not skip steps.
+
+1. **Clean worktree**: verify no uncommitted changes, no unstaged files. If dirty, ask the user before proceeding.
+2. **Create branch**: from a clean worktree, create a feature branch (`feat/...` or `fix/...`). Never make changes on `main`.
+3. **TDD — write failing tests**: on the feature branch, write tests first. Run them to confirm they fail before writing implementation code.
+4. **Implement**: write the minimum code to make tests pass. Run tests to confirm green.
+5. **Agentic review loop**: spin up 2 sub-agents to independently review the code for bugs, edge cases, and correctness.
+6. **Iterate until clean**: fix issues found by reviewers, re-run tests, and re-review. Repeat until 2 **consecutive** rounds produce zero findings from both agents.
+7. **PR & merge**: push the feature branch, create a PR, wait for required checks (gitleaks, CI), then squash-merge to `main`.
+
+**Rules**:
+- Only bugs count as findings — cosmetic notes, code style, and missing test-coverage suggestions do not block the loop.
+- Never push directly to `main`. All changes go through PRs.
