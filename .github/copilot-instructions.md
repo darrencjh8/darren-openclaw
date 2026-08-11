@@ -29,3 +29,11 @@
 
 - Always propose a plan before making changes. Wait for explicit approval.
 - Before running any test/verification command on production for the first time, explicitly ask the user for approval — never assume it's safe.
+
+## Implementation (bug fixes / features)
+
+- **TDD required**: write failing tests first, then implement. Run tests to confirm they fail before coding.
+- **Agentic review loop**: after implementation and all tests pass, spin up 2 sub-agents to independently review the code for bugs, edge cases, and correctness.
+- **Iterate until clean**: fix issues found by reviewers, re-run tests, and re-review. Repeat until 2 **consecutive** rounds produce zero findings from both agents.
+- **Only bugs count as findings**: cosmetic notes, code style, and missing test-coverage suggestions do not block the loop.
+- **After review**: raise a PR and merge (squash).
