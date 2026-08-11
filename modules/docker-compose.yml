@@ -152,6 +152,7 @@ services:
             - /var/run/docker.sock:/var/run/docker.sock
             - /home/runner/data/expense-tracker/data:/opt/data/expense-tracker-data:ro
         environment:
+            - HERMES_WRITE_SAFE_ROOT=/opt/data:/workspace
             - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
             - GEMINI_API_KEY=${GEMINI_API_KEY}
             - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
