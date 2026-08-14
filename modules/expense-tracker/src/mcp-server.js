@@ -87,8 +87,13 @@ function createTools(server, registry) {
     },
     async (a) => tx(await registry.executeTool("extract_pdf_text", a)),
   );
-  server.tool("mark_email_read", "Mark email as read on IMAP", {}, async () =>
-    tx(await registry.executeTool("mark_email_read", {})),
+  server.tool(
+    "mark_email_read",
+    "Mark an email as read on IMAP by UID. If uid is omitted, marks the email most recently read via read_inbox_email.",
+    {
+      uid: z.number().int().positive().optional(),
+    },
+    async (a) => tx(await registry.executeTool("mark_email_read", a)),
   );
   server.tool(
     "list_inbox_emails",

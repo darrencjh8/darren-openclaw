@@ -536,8 +536,13 @@ const TOOLS = [
   },
   {
     name: "mark_email_read",
-    description: "Mark the current email as read in the IMAP inbox.",
-    schema: { type: "object", properties: {} },
+    description: "Mark an email as read in the IMAP inbox. If uid is provided, marks that specific email. Otherwise marks the email most recently read via read_inbox_email.",
+    schema: {
+      type: "object",
+      properties: {
+        uid: { type: "number", description: "Optional IMAP UID of the email to mark as read." },
+      },
+    },
   },
   {
     name: "notify_user",
@@ -1281,11 +1286,14 @@ export class ToolRegistry {
 
   // ── Email / notify tools ──────────────────────────────────────
 
-  async _handle_mark_email_read() {
-    if (!this._emailMsgId) return true;
+  async _handle_mark_email_read({ uid } = {}) {
+    const targetUid = uid != null ? uid : this._emailMsgId;
+    if (targetUid == null) {
+      return { error: "No email to mark as read — provide a uid or read an email first" };
+    }
     if (!this._imapHandler) return false;
     try {
-      await this._imapHandler.markRead(this._emailMsgId);
+      await this._imapHandler.markRead(targetUid);
       return true;
     } catch {
       return false;
