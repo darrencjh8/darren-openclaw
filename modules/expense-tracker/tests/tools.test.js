@@ -329,7 +329,7 @@ describe("ToolRegistry", () => {
         expect(result.error).toContain("not connected");
     });
 
-    it("mark_email_read rejects non-positive uid", async () => {
+    it("mark_email_read rejects invalid uid (zero, negative, non-integer)", async () => {
         const { vi } = await import("vitest");
         const cfg = new Config(testEnv);
         const registry = new ToolRegistry(cfg);
@@ -339,9 +339,13 @@ describe("ToolRegistry", () => {
         };
         registry.setEmailContext(null, null, mockImapHandler);
 
-        const result = await registry.executeTool("mark_email_read", { uid: 0 });
-        expect(result).toHaveProperty("error");
-        expect(result.error).toContain("positive integer");
+        for (const badUid of [0, -1, 1.5, "42", NaN]) {
+            const result = await registry.executeTool("mark_email_read", {
+                uid: badUid,
+            });
+            expect(result).toHaveProperty("error");
+            expect(result.error).toContain("positive integer");
+        }
         expect(mockImapHandler.markRead).not.toHaveBeenCalled();
     });
 
