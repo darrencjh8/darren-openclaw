@@ -536,8 +536,13 @@ const TOOLS = [
   },
   {
     name: "mark_email_read",
-    description: "Mark the current email as read in the IMAP inbox.",
-    schema: { type: "object", properties: {} },
+    description: "Mark an email as read in the IMAP inbox by UID. If uid is omitted, marks the email most recently read via read_inbox_email.",
+    schema: {
+      type: "object",
+      properties: {
+        uid: { type: "number", description: "Optional IMAP UID of the email to mark as read." },
+      },
+    },
   },
   {
     name: "notify_user",
@@ -1281,14 +1286,22 @@ export class ToolRegistry {
 
   // ── Email / notify tools ──────────────────────────────────────
 
-  async _handle_mark_email_read() {
-    if (!this._emailMsgId) return true;
-    if (!this._imapHandler) return false;
+  async _handle_mark_email_read({ uid } = {}) {
+    if (!this._imapHandler) {
+      return { error: "IMAP not connected — no email inbox available" };
+    }
+    if (uid != null && !(Number.isInteger(uid) && uid > 0)) {
+      return { error: "Invalid uid — must be a positive integer" };
+    }
+    const targetUid = uid != null ? uid : this._emailMsgId;
+    if (targetUid == null) {
+      return { error: "No email to mark as read — provide a uid or read an email first" };
+    }
     try {
-      await this._imapHandler.markRead(this._emailMsgId);
+      await this._imapHandler.markRead(targetUid);
       return true;
-    } catch {
-      return false;
+    } catch (e) {
+      return { error: "Failed to mark email read: " + e.message };
     }
   }
 

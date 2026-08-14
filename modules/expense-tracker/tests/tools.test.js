@@ -256,6 +256,114 @@ describe("ToolRegistry", () => {
         expect(result.error).toContain("not found");
     });
 
+    it("mark_email_read schema includes optional uid field", () => {
+        const cfg = new Config(testEnv);
+        const registry = new ToolRegistry(cfg);
+        const schemas = registry.getToolSchemas();
+        const markTool = schemas.find(
+            (s) => s.function.name === "mark_email_read",
+        );
+        expect(markTool).toBeDefined();
+        expect(markTool.function.parameters.properties).toHaveProperty("uid");
+        expect(markTool.function.parameters.properties.uid).toMatchObject({
+            type: "number",
+        });
+        if (markTool.function.parameters.required) {
+            expect(markTool.function.parameters.required).not.toContain("uid");
+        }
+    });
+
+    it("mark_email_read with uid marks that specific UID directly", async () => {
+        const { vi } = await import("vitest");
+        const cfg = new Config(testEnv);
+        const registry = new ToolRegistry(cfg);
+
+        const mockImapHandler = {
+            markRead: vi.fn().mockResolvedValue(undefined),
+        };
+        registry.setEmailContext(null, null, mockImapHandler);
+
+        const result = await registry.executeTool("mark_email_read", {
+            uid: 42,
+        });
+        expect(mockImapHandler.markRead).toHaveBeenCalledWith(42);
+        expect(result).toBe(true);
+    });
+
+    it("mark_email_read with no uid falls back to email context", async () => {
+        const { vi } = await import("vitest");
+        const cfg = new Config(testEnv);
+        const registry = new ToolRegistry(cfg);
+
+        const mockImapHandler = {
+            markRead: vi.fn().mockResolvedValue(undefined),
+        };
+        registry.setEmailContext("msg-1", Buffer.from("raw"), mockImapHandler);
+
+        const result = await registry.executeTool("mark_email_read", {});
+        expect(mockImapHandler.markRead).toHaveBeenCalledWith("msg-1");
+        expect(result).toBe(true);
+    });
+
+    it("mark_email_read with no uid and no context returns error (not silent true)", async () => {
+        const { vi } = await import("vitest");
+        const cfg = new Config(testEnv);
+        const registry = new ToolRegistry(cfg);
+
+        const mockImapHandler = {
+            markRead: vi.fn().mockResolvedValue(undefined),
+        };
+        registry.setEmailContext(null, null, mockImapHandler);
+
+        const result = await registry.executeTool("mark_email_read", {});
+        expect(result).toHaveProperty("error");
+        expect(mockImapHandler.markRead).not.toHaveBeenCalled();
+    });
+
+    it("mark_email_read returns error when imapHandler missing", async () => {
+        const cfg = new Config(testEnv);
+        const registry = new ToolRegistry(cfg);
+
+        const result = await registry.executeTool("mark_email_read", { uid: 42 });
+        expect(result).toHaveProperty("error");
+        expect(result.error).toContain("not connected");
+    });
+
+    it("mark_email_read rejects invalid uid (zero, negative, non-integer)", async () => {
+        const { vi } = await import("vitest");
+        const cfg = new Config(testEnv);
+        const registry = new ToolRegistry(cfg);
+
+        const mockImapHandler = {
+            markRead: vi.fn().mockResolvedValue(undefined),
+        };
+        registry.setEmailContext(null, null, mockImapHandler);
+
+        for (const badUid of [0, -1, 1.5, "42", NaN]) {
+            const result = await registry.executeTool("mark_email_read", {
+                uid: badUid,
+            });
+            expect(result).toHaveProperty("error");
+            expect(result.error).toContain("positive integer");
+        }
+        expect(mockImapHandler.markRead).not.toHaveBeenCalled();
+    });
+
+    it("mark_email_read returns error when markRead throws", async () => {
+        const { vi } = await import("vitest");
+        const cfg = new Config(testEnv);
+        const registry = new ToolRegistry(cfg);
+
+        const mockImapHandler = {
+            markRead: vi.fn().mockRejectedValue(new Error("IMAP down")),
+        };
+        registry.setEmailContext("msg-1", Buffer.from("raw"), mockImapHandler);
+
+        const result = await registry.executeTool("mark_email_read", {});
+        expect(result).toHaveProperty("error");
+        expect(result.error).toContain("Failed to mark email read");
+    });
+
     it("throws on unknown tool", async () => {
         const cfg = new Config(testEnv);
         const registry = new ToolRegistry(cfg);
