@@ -89,7 +89,7 @@ function createTools(server, registry) {
   );
   server.tool(
     "mark_email_read",
-    "Mark an email as read on IMAP by UID. If uid is omitted, marks the email most recently read via read_inbox_email.",
+    "Mark an email as read in the IMAP inbox by UID. If uid is omitted, marks the email most recently read via read_inbox_email.",
     {
       uid: z.number().int().positive().optional(),
     },
