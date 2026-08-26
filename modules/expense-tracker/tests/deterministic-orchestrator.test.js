@@ -905,7 +905,7 @@ describe("Phase 1: LLM-directed retrieval (multi-round tools)", () => {
           };
         if (name === "search_memory") {
           if (args && String(args.query).includes("3255"))
-            return { results: [{ text: "Card ending 3255 belongs to DBS Yuu Card", score: 0.2 }] };
+            return { results: [{ text: "Card ending 3255 belongs to DBS Yuu Card", score: 0.4 }] };
           return { results: [] };
         }
         return true;
@@ -1010,6 +1010,270 @@ describe("Phase 1: LLM-directed retrieval (multi-round tools)", () => {
       (c) => c[0] === "search_memory" && c[1] && c[1].query === "3255",
     );
     expect(fallbackCalls.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("ignores cross-bank facts when senderBank unknown (Telegram path)", async () => {
+    const { AgentOrchestrator } = await import("../src/orchestrator.js");
+    const config = makeConfig();
+    const tools = multiRoundTools({
+      executeTool: vi.fn(async (name, args) => {
+        if (name === "fetch_context")
+          return {
+            accounts: [
+              { id: "acc-dbs", name: "DBS Account", closed: false },
+              { id: "acc-uob", name: "UOB Ladies Card", closed: false },
+            ],
+            categories: [],
+            payees: [],
+          };
+        if (name === "search_memory") {
+          if (args && String(args.query).includes("3255"))
+            return { results: [{ text: "Card ending 3255 belongs to UOB Ladies Card", score: 0.9 }] };
+          return { results: [] };
+        }
+        return true;
+      }),
+    });
+    const orch = new AgentOrchestrator(config, tools);
+
+    orch._llm.chat = vi
+      .fn()
+      .mockResolvedValueOnce({ choices: [{ message: toolCallMsg("search_memory", { query: "3255" }) }] })
+      .mockResolvedValueOnce({
+        choices: [{ message: jsonMsg({ ...yuuResult, account_id: "acc-dbs", account_name: "DBS Account" }) }],
+      });
+
+    // no senderBank — processText/Telegram path
+    const result = await orch._runPhase1("From: DBS/POSB card ending 3255 To: BUS/MRT", {});
+
+    // bank unknown → never override (wrong-bank booking impossible)
+    expect(result.account_id).toBe("acc-dbs");
+  });
+
+  it("falls back even when LLM searched but got no usable suffix facts", async () => {
+    const { AgentOrchestrator } = await import("../src/orchestrator.js");
+    const config = makeConfig();
+    const tools = multiRoundTools({
+      executeTool: vi.fn(async (name, args) => {
+        if (name === "fetch_context")
+          return {
+            accounts: [
+              { id: "acc-dbs", name: "DBS Account", closed: false },
+              { id: "acc-yuu", name: "DBS Yuu Card", closed: false },
+            ],
+            categories: [],
+            payees: [],
+          };
+        if (name === "search_memory") {
+          if (args && String(args.query) === "3255")
+            return { results: [{ text: "Card ending 3255 belongs to DBS Yuu Card", score: 1 }] };
+          if (args && String(args.query).includes("BUS/MRT"))
+            return { results: [{ text: "BUS/MRT maps to Public Transport payee", score: 1 }] };
+          return { results: [] };
+        }
+        return true;
+      }),
+    });
+    const orch = new AgentOrchestrator(config, tools);
+
+    // LLM searches merchant-only query — results are real but carry no suffix fact
+    orch._llm.chat = vi
+      .fn()
+      .mockResolvedValueOnce({ choices: [{ message: toolCallMsg("search_memory", { query: "BUS/MRT" }) }] })
+      .mockResolvedValueOnce({
+        choices: [{ message: jsonMsg({ ...yuuResult, account_id: "acc-dbs", account_name: "DBS Account" }) }],
+      });
+
+    const result = await orch._runPhase1("From: DBS/POSB card ending 3255 To: BUS/MRT", {
+      senderBank: "DBS",
+    });
+
+    // cache non-empty but useless → fallback still fires → override to Yuu
+    expect(result.account_id).toBe("acc-yuu");
+    const fallbackCalls = tools.executeTool.mock.calls.filter(
+      (c) => c[0] === "search_memory" && c[1] && c[1].query === "3255",
+    );
+    expect(fallbackCalls.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("redacts secrets from retry feedback hints", async () => {
+    const { AgentOrchestrator } = await import("../src/orchestrator.js");
+    const config = makeConfig();
+    const tools = multiRoundTools({
+      executeTool: vi.fn(async (name) => {
+        if (name === "fetch_context")
+          return {
+            accounts: [{ id: "acc-yuu", name: "DBS Yuu Card", closed: false }],
+            categories: [],
+            payees: [],
+          };
+        if (name === "search_memory")
+          return {
+            results: [
+              { text: "Affin Bank statement password is 20Apr1993", score: 0.9 },
+              { text: "Card ending 3255 belongs to DBS Yuu Card", score: 1 },
+            ],
+          };
+        return true;
+      }),
+    });
+    const orch = new AgentOrchestrator(config, tools);
+    let retryMessages = null;
+
+    // first answer invalid account → retry path embeds memory hints
+    orch._llm.chat = vi
+      .fn()
+      .mockResolvedValueOnce({
+        choices: [{ message: jsonMsg({ ...yuuResult, account_id: "acc-bogus", account_name: "Bogus" }) }],
+      })
+      .mockImplementationOnce(async (messages) => {
+        retryMessages = messages;
+        return { choices: [{ message: jsonMsg(yuuResult) }] };
+      });
+
+    const result = await orch._runPhase1("From: DBS/POSB card ending 3255 To: BUS/MRT", {
+      senderBank: "DBS",
+    });
+
+    expect(result.account_id).toBe("acc-yuu");
+    const userMsgs = retryMessages.filter((m) => m.role === "user");
+    const feedbackText = JSON.stringify(userMsgs);
+    expect(feedbackText).not.toMatch(/password/i);
+    expect(feedbackText).toContain("Card ending 3255 belongs to DBS Yuu Card");
+  });
+
+  it("does not override on bill-payment-shaped emails", async () => {
+    const { AgentOrchestrator } = await import("../src/orchestrator.js");
+    const config = makeConfig();
+    const tools = multiRoundTools();
+    const orch = new AgentOrchestrator(config, tools);
+
+    const billPaymentText =
+      "Amount: SGD 104.21\nFrom: My Account (A/C ending 5750)\nTo: Yuu (Ref ending 3255)";
+
+    orch._llm.chat = vi
+      .fn()
+      .mockResolvedValueOnce({ choices: [{ message: toolCallMsg("search_memory", { query: "3255" }) }] })
+      .mockResolvedValueOnce({
+        choices: [
+          {
+            message: jsonMsg({
+              ...yuuResult,
+              merchant: "Yuu",
+              account_id: "acc-dbs",
+              account_name: "DBS Account",
+            }),
+          },
+        ],
+      });
+
+    const result = await orch._runPhase1(billPaymentText, { senderBank: "DBS" });
+
+    // destination suffix (Ref ending 3255) must NOT drive a source-account override
+    expect(result.account_id).toBe("acc-dbs");
+  });
+
+  it("overrides at score 0.6 (boundary above threshold)", async () => {
+    const { AgentOrchestrator } = await import("../src/orchestrator.js");
+    const config = makeConfig();
+    const tools = multiRoundTools({
+      executeTool: vi.fn(async (name, args) => {
+        if (name === "fetch_context")
+          return {
+            accounts: [
+              { id: "acc-dbs", name: "DBS Account", closed: false },
+              { id: "acc-yuu", name: "DBS Yuu Card", closed: false },
+            ],
+            categories: [],
+            payees: [],
+          };
+        if (name === "search_memory") {
+          if (args && String(args.query).includes("3255"))
+            return { results: [{ text: "Card ending 3255 belongs to DBS Yuu Card", score: 0.6 }] };
+          return { results: [] };
+        }
+        return true;
+      }),
+    });
+    const orch = new AgentOrchestrator(config, tools);
+
+    orch._llm.chat = vi
+      .fn()
+      .mockResolvedValueOnce({ choices: [{ message: toolCallMsg("search_memory", { query: "3255" }) }] })
+      .mockResolvedValueOnce({
+        choices: [{ message: jsonMsg({ ...yuuResult, account_id: "acc-dbs", account_name: "DBS Account" }) }],
+      });
+
+    const result = await orch._runPhase1("From: DBS/POSB card ending 3255 To: BUS/MRT", {
+      senderBank: "DBS",
+    });
+
+    expect(result.account_id).toBe("acc-yuu");
+  });
+
+  it("does not extract suffixes from partial words (discard/pending)", async () => {
+    const { AgentOrchestrator } = await import("../src/orchestrator.js");
+    const config = makeConfig();
+    const tools = multiRoundTools();
+    const orch = new AgentOrchestrator(config, tools);
+
+    // LLM never searches — deterministic fallback must not query "123456"
+    orch._llm.chat = vi.fn().mockResolvedValue({
+      choices: [{ message: jsonMsg({ ...yuuResult, account_id: "acc-dbs", account_name: "DBS Account" }) }],
+    });
+
+    const result = await orch._runPhase1("please discard 123456 now. Card ending 3255", {
+      senderBank: "DBS",
+    });
+
+    expect(result.account_id).toBe("acc-yuu");
+    const badQueries = tools.executeTool.mock.calls.filter(
+      (c) => c[0] === "search_memory" && c[1] && String(c[1].query) === "123456",
+    );
+    expect(badQueries.length).toBe(0);
+  });
+
+  it("keeps legit brand facts containing 'secret'", async () => {
+    const { AgentOrchestrator } = await import("../src/orchestrator.js");
+    const config = makeConfig();
+    let capturedMessages = null;
+    const tools = multiRoundTools({
+      executeTool: vi.fn(async (name) => {
+        if (name === "fetch_context")
+          return {
+            accounts: [{ id: "acc-yuu", name: "DBS Yuu Card", closed: false }],
+            categories: [],
+            payees: [],
+          };
+        if (name === "search_memory")
+          return {
+            results: [
+              { text: "Secretlab maps to Shopping category", score: 0.9 },
+              { text: "Card ending 3255 belongs to DBS Yuu Card", score: 1 },
+            ],
+          };
+        return true;
+      }),
+    });
+    const orch = new AgentOrchestrator(config, tools);
+
+    orch._llm.chat = vi
+      .fn()
+      .mockImplementationOnce(async (messages) => {
+        capturedMessages = messages;
+        return { choices: [{ message: toolCallMsg("search_memory", { query: "3255" }) }] };
+      })
+      .mockResolvedValueOnce({ choices: [{ message: jsonMsg(yuuResult) }] });
+
+    const result = await orch._runPhase1("From: DBS/POSB card ending 3255 To: BUS/MRT", {
+      senderBank: "DBS",
+    });
+
+    expect(result.account_id).toBe("acc-yuu");
+    const toolMsgs = capturedMessages.filter((m) => m.role === "tool");
+    const toolText = JSON.stringify(toolMsgs);
+    expect(toolText).toContain("Secretlab maps to Shopping category");
+    expect(toolText).toContain("Card ending 3255 belongs to DBS Yuu Card");
   });
 
   it("keeps LLM pick when suffix evidence is ambiguous", async () => {

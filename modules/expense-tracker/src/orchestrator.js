@@ -114,6 +114,79 @@ export function bankFromSender(sender) {
     return null;
 }
 
+// ── Suffix-override helpers (LLM-directed retrieval) ────────────────
+
+/** "Card ending 3255 belongs to DBS Yuu Card" — learned suffix facts. */
+export const SUFFIX_RE =
+    /^(?:Card|Account)\s+ending\s+(\S+)\s+belongs\s+to\s+(.+)$/i;
+
+/** Secret-looking fact texts — redacted before the LLM sees them. */
+export const SECRET_RE =
+    /\b(?:password|pin|otp|secret|token|nric|passport)\b/i;
+
+/** Word-boundary-aware bank tokens found in account names. */
+export const BANK_TOKENS = [
+    "american express",
+    "standard chartered",
+    "citibank",
+    "mari bank",
+    "maribank",
+    "trust bank",
+    "youtrip",
+    "you trip",
+    "revolut",
+    "maybank",
+    "posb",
+    "ocbc",
+    "hsbc",
+    "amex",
+    "grab",
+    "gxs",
+    "trust",
+    "citi",
+    "dbs",
+    "uob",
+];
+
+/** True when the account name contains a known bank token. */
+export function hasBankToken(name) {
+    if (!name) return false;
+    return BANK_TOKENS.some((t) =>
+        new RegExp(`\\b${t}\\b`, "i").test(name),
+    );
+}
+
+/** Remove secret-looking facts from a search result list. */
+export function sanitizeResults(results) {
+    return (results || []).filter((r) => !SECRET_RE.test(r.text || ""));
+}
+
+/**
+ * True when any cached fact is usable as suffix-override evidence:
+ * high-score, suffix-format, suffix present in email, bank known and
+ * matching senderBank.
+ */
+export function hasUsableSuffixFact(facts, emailText, senderBank) {
+    return (facts || []).some((f) => {
+        if ((f.score ?? 0) < 0.5) return false;
+        const m = (f.text || "").match(SUFFIX_RE);
+        if (!m) return false;
+        const expectedAccount = m[2].trim();
+        if (!hasBankToken(expectedAccount)) return false;
+        if (
+            senderBank &&
+            !expectedAccount.toLowerCase().includes(senderBank.toLowerCase())
+        ) {
+            return false;
+        }
+        return new RegExp(`\\b${m[1]}\\b`).test(emailText);
+    });
+}
+
+/** Bill-payment layout — override must never pick the destination card. */
+export const BILL_PAYMENT_SHAPE_RE =
+    /\(A\/C\s+ending\s+\S+\)[\s\S]*\(Ref\s+ending\s+\S+\)/i;
+
 export class AgentOrchestrator {
     constructor(config, tools) {
         this._config = config;
@@ -490,11 +563,8 @@ export class AgentOrchestrator {
                         // before the LLM sees them, then cache the survivors
                         // for deterministic post-validation (suffix override).
                         if (name === "search_memory") {
-                            const SECRET_RE =
-                                /password|pin\b|otp|secret|token|nric|passport/i;
-                            const rawResults = result?.results || [];
-                            const safeResults = rawResults.filter(
-                                (r) => !SECRET_RE.test(r.text || ""),
+                            const safeResults = sanitizeResults(
+                                result?.results,
                             );
                             result = { ...result, results: safeResults };
                             cachedSearchResults.push(...safeResults);
@@ -642,18 +712,29 @@ export class AgentOrchestrator {
                     }
                 }
 
-                // ── Fallback: deterministic suffix lookup when the LLM never
-                // retrieved memory facts itself ──
+                // ── Fallback: deterministic suffix lookup when the cache
+                // holds no USABLE suffix evidence (LLM searched wrong query,
+                // or never searched) ──
+                // Skipped without senderBank — bank unknown means a
+                // deterministic override could book cross-bank. Skipped for
+                // bill-payment layouts — destination suffix must never pick
+                // the source account.
                 if (
+                    senderBank &&
                     !output.skip &&
                     output.account_id &&
                     !invalidFields.includes("account_id") &&
-                    cachedSearchResults.length === 0
+                    !BILL_PAYMENT_SHAPE_RE.test(emailText) &&
+                    !hasUsableSuffixFact(
+                        cachedSearchResults,
+                        emailText,
+                        senderBank,
+                    )
                 ) {
                     try {
                         const seen = new Set();
                         const FALLBACK_RE =
-                            /(?:card|account|a\/c)[^\d]{0,25}?(\d{4,6})|(?:ending(?:\s+in)?)[\s*#]*(\d{4,6})/gi;
+                            /\b(?:card|account|a\/c)\b[^\d]{0,25}?(\d{4,6})(?!\d)|\bending(?:\s+in)?\b[\s*#]*(\d{4,6})(?!\d)/gi;
                         let m;
                         while ((m = FALLBACK_RE.exec(emailText)) !== null) {
                             const suffix = (m[1] || m[2] || "").trim();
@@ -664,7 +745,7 @@ export class AgentOrchestrator {
                                     { query: suffix },
                                 );
                                 cachedSearchResults.push(
-                                    ...(res?.results || []),
+                                    ...sanitizeResults(res?.results),
                                 );
                             }
                             if (seen.size >= 3) break;
@@ -675,16 +756,19 @@ export class AgentOrchestrator {
                 // ── Post-Phase-1 safety net: suffix-based account override ──
                 // Uses search_memory results the LLM itself retrieved via tool
                 // calls (or the deterministic fallback above). Overrides only
-                // when evidence is UNIQUE, same-bank, and high-score;
-                // ambiguous or absent evidence keeps the LLM's pick untouched.
+                // when evidence is UNIQUE, same-bank, high-score, and the
+                // email is not a bill-payment layout. Without senderBank
+                // (Telegram path) no deterministic override fires — a wrong
+                // bank would be worse than no correction.
                 if (
+                    senderBank &&
                     !output.skip &&
                     output.account_id &&
                     !invalidFields.includes("account_id") &&
+                    !BILL_PAYMENT_SHAPE_RE.test(emailText) &&
                     cachedSearchResults.length > 0 &&
                     liveAccounts.length > 0
                 ) {
-                    const SUFFIX_RE = /^(?:Card|Account)\s+ending\s+(\S+)\s+belongs\s+to\s+(.+)$/i;
                     const candidates = new Map();
                     for (const fact of cachedSearchResults) {
                         if ((fact.score ?? 0) < 0.5) continue;
@@ -692,9 +776,10 @@ export class AgentOrchestrator {
                         if (!m) continue;
                         const suffix = m[1];
                         const expectedAccount = m[2].trim();
+                        // Unknown-bank facts: cannot verify — never override.
+                        if (!hasBankToken(expectedAccount)) continue;
                         // Cross-bank facts must never drive an override
                         if (
-                            senderBank &&
                             !expectedAccount
                                 .toLowerCase()
                                 .includes(senderBank.toLowerCase())
@@ -746,9 +831,9 @@ export class AgentOrchestrator {
                             "search_memory",
                             { query: output.merchant },
                         );
-                        const relevant = (hints?.results || []).filter(
-                            (r) => r.score >= 0.5,
-                        );
+                        const relevant = sanitizeResults(
+                            hints?.results,
+                        ).filter((r) => r.score >= 0.5);
                         if (relevant.length > 0) {
                             const mentionsDifferent = relevant.some((r) => {
                                 const text = (r.text || "").toLowerCase();
@@ -814,10 +899,13 @@ export class AgentOrchestrator {
                                         query: output.merchant + " account",
                                     },
                                 );
-                                if (hints?.results?.length > 0) {
+                                const safeHints = sanitizeResults(
+                                    hints?.results,
+                                );
+                                if (safeHints.length > 0) {
                                     hintText =
                                         " Memory hints: " +
-                                        hints.results
+                                        safeHints
                                             .map((r) => r.text)
                                             .join("; ");
                                 }
