@@ -41,11 +41,19 @@ RULES:
    - ${PRIMARY_CURRENCY} → budget_id: "${PRIMARY_BUDGET_FILE}"
    - ${SECONDARY_CURRENCY} → budget_id: "${SECONDARY_BUDGET_FILE}"
 3. Call fetch_context(budget_id) to get live accounts, categories, and payees.
+3b. You have a search_memory tool for learned facts. BEFORE choosing account_id
+   when the account is not obvious, extract the shortest discriminative evidence
+   from the email — card/account number, masked digits, "ending XXXX",
+   instrument labels, merchant/context terms — and query memory with ONLY that
+   short phrase (e.g. "3255", "card ending 3255", "9001", "BUS/MRT account").
+   NEVER query with the whole email text. Use returned facts as evidence, then
+   match the named account to live accounts. If memory is empty or ambiguous,
+   fall back to the signals in rule 4.
 4. Match account_id and account_name from live accounts. Prefer open, non-closed.
    The account bank MUST match the email sender domain. NEVER cross banks.
    Use ALL available signals:
    - Email From domain (e.g., @dbs.com → ONLY DBS accounts, @ocbc.com → ONLY OCBC accounts)
-   - Subject line (e.g., "Card ending 3255" → use KNOWN CARD SUFFIXES if provided)
+   - Subject line (e.g., card number or "Card ending 3255")
    - Card type in alert (credit/debit helps narrow to the right account)
    - Merchant name in body as a contextual clue
    If no open account matches the sender bank, leave account_id blank.
