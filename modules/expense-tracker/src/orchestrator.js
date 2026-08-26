@@ -446,7 +446,8 @@ export class AgentOrchestrator {
                 while (msg.tool_calls && msg.tool_calls.length > 0) {
                     if (
                         toolRounds >= TOOL_MAX_ROUNDS ||
-                        toolCallsTotal >= TOOL_MAX_CALLS
+                        toolCallsTotal >= TOOL_MAX_CALLS ||
+                        toolCallsTotal + msg.tool_calls.length > TOOL_MAX_CALLS
                     ) {
                         messages.push({
                             role: "user",
@@ -481,16 +482,22 @@ export class AgentOrchestrator {
                         try {
                             args = JSON.parse(func.arguments || "{}");
                         } catch {}
-                        const result = await this._tools.executeTool(
+                        let result = await this._tools.executeTool(
                             name,
                             args,
                         );
-                        // Cache search_memory results for deterministic
-                        // post-validation (suffix facts) across attempts.
+                        // search_memory results: redact secret-looking facts
+                        // before the LLM sees them, then cache the survivors
+                        // for deterministic post-validation (suffix override).
                         if (name === "search_memory") {
-                            cachedSearchResults.push(
-                                ...(result?.results || []),
+                            const SECRET_RE =
+                                /password|pin\b|otp|secret|token|nric|passport/i;
+                            const rawResults = result?.results || [];
+                            const safeResults = rawResults.filter(
+                                (r) => !SECRET_RE.test(r.text || ""),
                             );
+                            result = { ...result, results: safeResults };
+                            cachedSearchResults.push(...safeResults);
                         }
                         // Domain-based account pre-filter: restrict accounts
                         // to the sender's bank so the LLM cannot cross banks.
@@ -635,10 +642,41 @@ export class AgentOrchestrator {
                     }
                 }
 
+                // ── Fallback: deterministic suffix lookup when the LLM never
+                // retrieved memory facts itself ──
+                if (
+                    !output.skip &&
+                    output.account_id &&
+                    !invalidFields.includes("account_id") &&
+                    cachedSearchResults.length === 0
+                ) {
+                    try {
+                        const seen = new Set();
+                        const FALLBACK_RE =
+                            /(?:card|account|a\/c)[^\d]{0,25}?(\d{4,6})|(?:ending(?:\s+in)?)[\s*#]*(\d{4,6})/gi;
+                        let m;
+                        while ((m = FALLBACK_RE.exec(emailText)) !== null) {
+                            const suffix = (m[1] || m[2] || "").trim();
+                            if (suffix && !seen.has(suffix)) {
+                                seen.add(suffix);
+                                const res = await this._tools.executeTool(
+                                    "search_memory",
+                                    { query: suffix },
+                                );
+                                cachedSearchResults.push(
+                                    ...(res?.results || []),
+                                );
+                            }
+                            if (seen.size >= 3) break;
+                        }
+                    } catch {}
+                }
+
                 // ── Post-Phase-1 safety net: suffix-based account override ──
                 // Uses search_memory results the LLM itself retrieved via tool
-                // calls. Overrides only when evidence is UNIQUE; ambiguous or
-                // absent evidence keeps the LLM's pick untouched.
+                // calls (or the deterministic fallback above). Overrides only
+                // when evidence is UNIQUE, same-bank, and high-score;
+                // ambiguous or absent evidence keeps the LLM's pick untouched.
                 if (
                     !output.skip &&
                     output.account_id &&
@@ -649,10 +687,20 @@ export class AgentOrchestrator {
                     const SUFFIX_RE = /^(?:Card|Account)\s+ending\s+(\S+)\s+belongs\s+to\s+(.+)$/i;
                     const candidates = new Map();
                     for (const fact of cachedSearchResults) {
+                        if ((fact.score ?? 0) < 0.5) continue;
                         const m = (fact.text || "").match(SUFFIX_RE);
                         if (!m) continue;
                         const suffix = m[1];
                         const expectedAccount = m[2].trim();
+                        // Cross-bank facts must never drive an override
+                        if (
+                            senderBank &&
+                            !expectedAccount
+                                .toLowerCase()
+                                .includes(senderBank.toLowerCase())
+                        ) {
+                            continue;
+                        }
                         // Only facts whose suffix actually appears in this email
                         if (!new RegExp(`\\b${suffix}\\b`).test(emailText)) continue;
                         candidates.set(expectedAccount.toLowerCase(), {
