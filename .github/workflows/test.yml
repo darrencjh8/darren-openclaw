@@ -59,6 +59,16 @@ jobs:
             - name: Run Java tests
               run: mvn test
 
+    compose-config:
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v4
+            - uses: actions/setup-python@v5
+              with:
+                  python-version: "3.12"
+            - run: python -m pip install PyYAML
+            - run: python -m unittest modules.tests.test_compose_hermes_memory_limit
+
     hermes-scripts:
         runs-on: ubuntu-latest
         steps:
