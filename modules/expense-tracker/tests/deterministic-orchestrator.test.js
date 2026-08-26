@@ -781,6 +781,42 @@ describe("Phase 1: LLM-directed retrieval (multi-round tools)", () => {
     expect(result).toBeNull();
   });
 
+  it("settles every tool call before budget-exhaustion correction", async () => {
+    const { AgentOrchestrator } = await import("../src/orchestrator.js");
+    const config = makeConfig();
+    const tools = multiRoundTools();
+    const orch = new AgentOrchestrator(config, tools);
+    let correctionMessages = null;
+
+    const sixCalls = Array.from({ length: 6 }, (_, i) => ({
+      id: `tc-${i}`,
+      function: { name: "search_memory", arguments: JSON.stringify({ query: "3255" }) },
+    }));
+
+    orch._llm.chat = vi
+      .fn()
+      .mockResolvedValueOnce({ choices: [{ message: { tool_calls: sixCalls } }] })
+      .mockResolvedValueOnce({
+        choices: [{ message: toolCallMsg("search_memory", { query: "9999" }) }],
+      })
+      .mockImplementationOnce(async (messages) => {
+        correctionMessages = messages;
+        return { choices: [{ message: jsonMsg(yuuResult) }] };
+      });
+
+    const result = await orch._runPhase1("card ending 3255", {});
+
+    expect(result.account_id).toBe("acc-yuu");
+    // Next request must contain tool response for every prior tool_call.
+    const assistantCalls = correctionMessages
+      .filter((m) => m.role === "assistant" && m.tool_calls)
+      .flatMap((m) => m.tool_calls.map((tc) => tc.id));
+    const settledCalls = correctionMessages
+      .filter((m) => m.role === "tool")
+      .map((m) => m.tool_call_id);
+    expect(settledCalls).toEqual(expect.arrayContaining(assistantCalls));
+  });
+
   it("overrides a wrong generic account pick using cached suffix evidence", async () => {
     const { AgentOrchestrator } = await import("../src/orchestrator.js");
     const config = makeConfig();
