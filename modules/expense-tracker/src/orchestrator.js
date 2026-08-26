@@ -156,6 +156,29 @@ export function hasBankToken(name) {
     );
 }
 
+/** Brand aliases — POSB is DBS, Citi is Citibank, SC is Standard Chartered. */
+export const BANK_ALIASES = {
+    dbs: ["dbs", "posb"],
+    posb: ["posb", "dbs"],
+    citi: ["citi", "citibank"],
+    citibank: ["citibank", "citi"],
+    sc: ["sc", "standard chartered"],
+    "standard chartered": ["standard chartered", "sc"],
+};
+
+/**
+ * True when the account name carries a known bank token that belongs to
+ * the sender bank (or one of its brand aliases). Unknown-bank names return
+ * false — never assume.
+ */
+export function nameMatchesBank(name, bank) {
+    if (!name || !bank) return false;
+    if (!hasBankToken(name)) return false;
+    const aliases = BANK_ALIASES[bank.toLowerCase()] || [bank];
+    const lower = name.toLowerCase();
+    return aliases.some((t) => new RegExp(`\\b${t}\\b`, "i").test(lower));
+}
+
 /** Remove secret-looking facts from a search result list. */
 export function sanitizeResults(results) {
     return (results || []).filter((r) => !SECRET_RE.test(r.text || ""));
@@ -172,13 +195,7 @@ export function hasUsableSuffixFact(facts, emailText, senderBank) {
         const m = (f.text || "").match(SUFFIX_RE);
         if (!m) return false;
         const expectedAccount = m[2].trim();
-        if (!hasBankToken(expectedAccount)) return false;
-        if (
-            senderBank &&
-            !expectedAccount.toLowerCase().includes(senderBank.toLowerCase())
-        ) {
-            return false;
-        }
+        if (!nameMatchesBank(expectedAccount, senderBank)) return false;
         return new RegExp(`\\b${m[1]}\\b`).test(emailText);
     });
 }
@@ -494,6 +511,7 @@ export class AgentOrchestrator {
         // for deterministic post-validation (suffix override). Persists across
         // validation-retry attempts (facts do not change between attempts).
         const cachedSearchResults = [];
+        let fallbackRan = false;
         for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
             const tools = this._tools.getPhase1ToolSchemas
                 ? this._tools.getPhase1ToolSchemas()
@@ -724,6 +742,7 @@ export class AgentOrchestrator {
                     !output.skip &&
                     output.account_id &&
                     !invalidFields.includes("account_id") &&
+                    !fallbackRan &&
                     !BILL_PAYMENT_SHAPE_RE.test(emailText) &&
                     !hasUsableSuffixFact(
                         cachedSearchResults,
@@ -731,6 +750,7 @@ export class AgentOrchestrator {
                         senderBank,
                     )
                 ) {
+                    fallbackRan = true;
                     try {
                         const seen = new Set();
                         const FALLBACK_RE =
@@ -776,14 +796,9 @@ export class AgentOrchestrator {
                         if (!m) continue;
                         const suffix = m[1];
                         const expectedAccount = m[2].trim();
-                        // Unknown-bank facts: cannot verify — never override.
-                        if (!hasBankToken(expectedAccount)) continue;
-                        // Cross-bank facts must never drive an override
-                        if (
-                            !expectedAccount
-                                .toLowerCase()
-                                .includes(senderBank.toLowerCase())
-                        ) {
+                        // Unknown-bank or cross-bank facts must never drive
+                        // an override (brand aliases count as same-bank).
+                        if (!nameMatchesBank(expectedAccount, senderBank)) {
                             continue;
                         }
                         // Only facts whose suffix actually appears in this email

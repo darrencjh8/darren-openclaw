@@ -1276,6 +1276,101 @@ describe("Phase 1: LLM-directed retrieval (multi-round tools)", () => {
     expect(toolText).toContain("Card ending 3255 belongs to DBS Yuu Card");
   });
 
+  it("redacts secrets from memory-hint retry path (valid pick, merchant hints)", async () => {
+    const { AgentOrchestrator } = await import("../src/orchestrator.js");
+    const config = makeConfig();
+    const tools = multiRoundTools({
+      executeTool: vi.fn(async (name, args) => {
+        if (name === "fetch_context")
+          return {
+            accounts: [
+              { id: "acc-dbs", name: "DBS Account", closed: false },
+              { id: "acc-yuu", name: "DBS Yuu Card", closed: false },
+            ],
+            categories: [],
+            payees: [],
+          };
+        if (name === "search_memory") {
+          if (args && String(args.query) === "3255")
+            return { results: [{ text: "Card ending 3255 belongs to DBS Yuu Card", score: 1 }] };
+          if (args && String(args.query).includes("BUS/MRT"))
+            return {
+              results: [
+                { text: "Affin Bank statement password is 20Apr1993", score: 0.9 },
+                { text: "BUS/MRT transactions belong to DBS Yuu Card", score: 1 },
+              ],
+            };
+          return { results: [] };
+        }
+        return true;
+      }),
+    });
+    const orch = new AgentOrchestrator(config, tools);
+    let retryMessages = null;
+
+    // valid pick, NO suffix in email — merchant hints mention a different
+    // account → retry path (memoryAccountHints) is what corrects the pick
+    orch._llm.chat = vi
+      .fn()
+      .mockResolvedValueOnce({
+        choices: [{ message: jsonMsg({ ...yuuResult, account_id: "acc-dbs", account_name: "DBS Account" }) }],
+      })
+      .mockImplementationOnce(async (messages) => {
+        retryMessages = messages;
+        return { choices: [{ message: jsonMsg(yuuResult) }] };
+      });
+
+    const result = await orch._runPhase1("To: BUS/MRT SGD 2.30", {
+      senderBank: "DBS",
+    });
+
+    expect(result.account_id).toBe("acc-yuu");
+    const userMsgs = retryMessages.filter((m) => m.role === "user");
+    const feedbackText = JSON.stringify(userMsgs);
+    expect(feedbackText).not.toMatch(/password/i);
+    expect(feedbackText).toContain("BUS/MRT transactions belong to DBS Yuu Card");
+  });
+
+  it("overrides to a POSB-branded account for a DBS email (brand alias)", async () => {
+    const { AgentOrchestrator } = await import("../src/orchestrator.js");
+    const config = makeConfig();
+    const tools = multiRoundTools({
+      executeTool: vi.fn(async (name, args) => {
+        if (name === "fetch_context")
+          return {
+            accounts: [
+              { id: "acc-dbs", name: "DBS Account", closed: false },
+              { id: "acc-posb", name: "POSB Everyday Card", closed: false },
+            ],
+            categories: [],
+            payees: [],
+          };
+        if (name === "search_memory") {
+          if (args && String(args.query).includes("3255"))
+            return { results: [{ text: "Card ending 3255 belongs to POSB Everyday Card", score: 1 }] };
+          return { results: [] };
+        }
+        return true;
+      }),
+    });
+    const orch = new AgentOrchestrator(config, tools);
+
+    orch._llm.chat = vi
+      .fn()
+      .mockResolvedValueOnce({ choices: [{ message: toolCallMsg("search_memory", { query: "3255" }) }] })
+      .mockResolvedValueOnce({
+        choices: [{ message: jsonMsg({ ...yuuResult, account_id: "acc-dbs", account_name: "DBS Account" }) }],
+      });
+
+    const result = await orch._runPhase1("From: DBS/POSB card ending 3255 To: BUS/MRT", {
+      senderBank: "DBS",
+    });
+
+    // POSB is a DBS brand — alias must allow the override
+    expect(result.account_id).toBe("acc-posb");
+    expect(result.account_name).toBe("POSB Everyday Card");
+  });
+
   it("keeps LLM pick when suffix evidence is ambiguous", async () => {
     const { AgentOrchestrator } = await import("../src/orchestrator.js");
     const config = makeConfig();
@@ -1329,6 +1424,108 @@ describe("Phase 1: LLM-directed retrieval (multi-round tools)", () => {
 
     // conflicting evidence → no unsafe override; LLM pick kept (memory check silent)
     expect(result.account_id).toBe("acc-dbs");
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════
+// Suffix-override helpers (direct unit tests)
+// ═══════════════════════════════════════════════════════════════════
+
+describe("suffix-override helpers (unit)", () => {
+  it("hasBankToken: known tokens, unknown names, empty", async () => {
+    const { hasBankToken } = await import("../src/orchestrator.js");
+    expect(hasBankToken("POSB Everyday Card")).toBe(true);
+    expect(hasBankToken("Standard Chartered XtraSaver")).toBe(true);
+    expect(hasBankToken("DBS Yuu Card")).toBe(true);
+    expect(hasBankToken("My Savings")).toBe(false);
+    expect(hasBankToken("Yuu Card")).toBe(false);
+    expect(hasBankToken("")).toBe(false);
+    expect(hasBankToken(null)).toBe(false);
+  });
+
+  it("nameMatchesBank: brand aliases and cross-bank rejection", async () => {
+    const { nameMatchesBank } = await import("../src/orchestrator.js");
+    expect(nameMatchesBank("POSB Everyday Card", "DBS")).toBe(true);
+    expect(nameMatchesBank("DBS Yuu Card", "POSB")).toBe(true);
+    expect(nameMatchesBank("Standard Chartered XtraSaver", "SC")).toBe(true);
+    expect(nameMatchesBank("Citibank Rewards", "Citi")).toBe(true);
+    expect(nameMatchesBank("UOB Ladies Card", "DBS")).toBe(false);
+    expect(nameMatchesBank("Yuu Card", "DBS")).toBe(false);
+    expect(nameMatchesBank("DBS Yuu Card", null)).toBe(false);
+  });
+
+  it("sanitizeResults: word-boundary secrets only", async () => {
+    const { sanitizeResults, SECRET_RE } = await import("../src/orchestrator.js");
+    const results = [
+      { text: "Affin Bank statement password is 20Apr1993", score: 0.9 },
+      { text: "login pin 1234", score: 0.9 },
+      { text: "OTP for login", score: 0.9 },
+      { text: "Secretlab maps to Shopping category", score: 0.9 },
+      { text: "Token2049 conference map", score: 0.9 },
+      { text: "Pineapple merchant mapping", score: 0.9 },
+      { text: "Card ending 3255 belongs to DBS Yuu Card", score: 1 },
+    ];
+    const safe = sanitizeResults(results);
+    expect(safe.map((r) => r.text)).toEqual([
+      "Secretlab maps to Shopping category",
+      "Token2049 conference map",
+      "Pineapple merchant mapping",
+      "Card ending 3255 belongs to DBS Yuu Card",
+    ]);
+    expect(SECRET_RE.test("secretlab")).toBe(false);
+    expect(SECRET_RE.test("my secret code")).toBe(true);
+    expect(SECRET_RE.test("token2049")).toBe(false);
+    expect(SECRET_RE.test("api token xyz")).toBe(true);
+  });
+
+  it("BILL_PAYMENT_SHAPE_RE: matches layout, rejects plain card email", async () => {
+    const { BILL_PAYMENT_SHAPE_RE } = await import("../src/orchestrator.js");
+    expect(
+      BILL_PAYMENT_SHAPE_RE.test(
+        "Amount: SGD 104.21\nFrom: My Account (A/C ending 5750)\nTo: Yuu (Ref ending 3255)",
+      ),
+    ).toBe(true);
+    expect(
+      BILL_PAYMENT_SHAPE_RE.test("From: DBS/POSB card ending 3255 To: BUS/MRT"),
+    ).toBe(false);
+  });
+
+  it("hasUsableSuffixFact: score/bank/suffix gates", async () => {
+    const { hasUsableSuffixFact } = await import("../src/orchestrator.js");
+    const email = "From: DBS/POSB card ending 3255 To: BUS/MRT";
+    const usable = [
+      { text: "Card ending 3255 belongs to DBS Yuu Card", score: 1 },
+    ];
+    expect(hasUsableSuffixFact(usable, email, "DBS")).toBe(true);
+    expect(
+      hasUsableSuffixFact(
+        [{ text: "Card ending 3255 belongs to DBS Yuu Card", score: 0.4 }],
+        email,
+        "DBS",
+      ),
+    ).toBe(false);
+    expect(
+      hasUsableSuffixFact(
+        [{ text: "Card ending 3255 belongs to UOB Ladies Card", score: 1 }],
+        email,
+        "DBS",
+      ),
+    ).toBe(false);
+    expect(
+      hasUsableSuffixFact(
+        [{ text: "Card ending 3255 belongs to Yuu Card", score: 1 }],
+        email,
+        "DBS",
+      ),
+    ).toBe(false);
+    expect(
+      hasUsableSuffixFact(
+        [{ text: "Card ending 9001 belongs to DBS Yuu Card", score: 1 }],
+        email,
+        "DBS",
+      ),
+    ).toBe(false);
+    expect(hasUsableSuffixFact([], email, "DBS")).toBe(false);
   });
 });
 
