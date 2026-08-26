@@ -659,6 +659,213 @@ describe("Phase 1: LLM Analysis (3-phase)", () => {
 });
 
 // ═══════════════════════════════════════════════════════════════════
+// Phase 1: LLM-directed memory retrieval (multi-round tool use)
+// ═══════════════════════════════════════════════════════════════════
+
+describe("Phase 1: LLM-directed retrieval (multi-round tools)", () => {
+  function multiRoundTools(extra = {}) {
+    return makeTools({
+      getPhase1ToolSchemas: vi.fn(() => [
+        { type: "function", function: { name: "fetch_context", parameters: {} } },
+        { type: "function", function: { name: "search_memory", parameters: {} } },
+      ]),
+      executeTool: vi.fn(async (name, args) => {
+        if (name === "fetch_context")
+          return {
+            accounts: [
+              { id: "acc-dbs", name: "DBS Account", closed: false },
+              { id: "acc-yuu", name: "DBS Yuu Card", closed: false },
+              { id: "acc-alt", name: "DBS Altitude Card", closed: false },
+            ],
+            categories: [],
+            payees: [],
+          };
+        if (name === "search_memory") {
+          if (args && String(args.query).includes("3255"))
+            return { results: [{ text: "Card ending 3255 belongs to DBS Yuu Card", score: 1 }] };
+          return { results: [] };
+        }
+        return true;
+      }),
+      ...extra,
+    });
+  }
+
+  function toolCallMsg(name, args) {
+    return {
+      tool_calls: [
+        { id: "tc-1", function: { name, arguments: JSON.stringify(args || {}) } },
+      ],
+    };
+  }
+  function jsonMsg(obj) {
+    return { content: JSON.stringify(obj) };
+  }
+
+  const yuuResult = {
+    merchant: "BUS/MRT",
+    amount_cents: -230,
+    date: "2026-08-25",
+    currency: "SGD",
+    account_id: "acc-yuu",
+    account_name: "DBS Yuu Card",
+    raw_description: "SGD 2.30 at BUS/MRT",
+    notes: "",
+    skip: false,
+    reasoning: "suffix fact matched",
+    notify_message: "",
+  };
+
+  it("searches memory first, then fetches context, then returns JSON", async () => {
+    const { AgentOrchestrator } = await import("../src/orchestrator.js");
+    const config = makeConfig();
+    const tools = multiRoundTools();
+    const orch = new AgentOrchestrator(config, tools);
+
+    orch._llm.chat = vi
+      .fn()
+      .mockResolvedValueOnce({ choices: [{ message: toolCallMsg("search_memory", { query: "3255" }) }] })
+      .mockResolvedValueOnce({ choices: [{ message: toolCallMsg("fetch_context", {}) }] })
+      .mockResolvedValueOnce({ choices: [{ message: jsonMsg(yuuResult) }] });
+
+    const result = await orch._runPhase1("From: DBS/POSB card ending 3255 To: BUS/MRT", {
+      senderBank: "DBS",
+    });
+
+    expect(orch._llm.chat).toHaveBeenCalledTimes(3);
+    expect(result.account_id).toBe("acc-yuu");
+    // every follow-up tool round still receives the tool schemas
+    const round2Args = orch._llm.chat.mock.calls[1];
+    expect(round2Args[1]).toBeDefined();
+    expect(round2Args[1].map((t) => t.function.name)).toEqual([
+      "fetch_context",
+      "search_memory",
+    ]);
+  });
+
+  it("fetches context first, then searches memory, then returns JSON", async () => {
+    const { AgentOrchestrator } = await import("../src/orchestrator.js");
+    const config = makeConfig();
+    const tools = multiRoundTools();
+    const orch = new AgentOrchestrator(config, tools);
+
+    orch._llm.chat = vi
+      .fn()
+      .mockResolvedValueOnce({ choices: [{ message: toolCallMsg("fetch_context", {}) }] })
+      .mockResolvedValueOnce({ choices: [{ message: toolCallMsg("search_memory", { query: "card ending 3255" }) }] })
+      .mockResolvedValueOnce({ choices: [{ message: jsonMsg(yuuResult) }] });
+
+    const result = await orch._runPhase1("From: DBS/POSB card ending 3255 To: BUS/MRT", {
+      senderBank: "DBS",
+    });
+
+    expect(orch._llm.chat).toHaveBeenCalledTimes(3);
+    expect(result.account_id).toBe("acc-yuu");
+  });
+
+  it("stops after tool budget with a JSON-only correction", async () => {
+    const { AgentOrchestrator } = await import("../src/orchestrator.js");
+    const config = makeConfig();
+    const tools = multiRoundTools();
+    const orch = new AgentOrchestrator(config, tools);
+
+    // LLM always requests tools — budget must stop the loop, not hang
+    orch._llm.chat = vi.fn(async () => ({
+      choices: [{ message: toolCallMsg("search_memory", { query: "3255" }) }],
+    }));
+
+    const result = await orch._runPhase1("card ending 3255", {});
+
+    // per attempt: 1 initial + 3 tool rounds + 1 JSON-only correction = 5; 2 attempts = 10
+    expect(orch._llm.chat).toHaveBeenCalledTimes(10);
+    expect(result).toBeNull();
+  });
+
+  it("overrides a wrong generic account pick using cached suffix evidence", async () => {
+    const { AgentOrchestrator } = await import("../src/orchestrator.js");
+    const config = makeConfig();
+    const tools = multiRoundTools();
+    const orch = new AgentOrchestrator(config, tools);
+
+    // LLM searches memory, then STILL picks the literal DBS Account
+    orch._llm.chat = vi
+      .fn()
+      .mockResolvedValueOnce({ choices: [{ message: toolCallMsg("search_memory", { query: "3255" }) }] })
+      .mockResolvedValueOnce({
+        choices: [
+          {
+            message: jsonMsg({
+              ...yuuResult,
+              account_id: "acc-dbs",
+              account_name: "DBS Account",
+              reasoning: "literal account name in text",
+            }),
+          },
+        ],
+      });
+
+    const result = await orch._runPhase1("From: DBS/POSB card ending 3255 To: BUS/MRT", {
+      senderBank: "DBS",
+    });
+
+    // deterministic override from cached tool results — no extra retry call
+    expect(orch._llm.chat).toHaveBeenCalledTimes(2);
+    expect(result.account_id).toBe("acc-yuu");
+  });
+
+  it("refuses ambiguous suffix evidence (null, never a wrong override)", async () => {
+    const { AgentOrchestrator } = await import("../src/orchestrator.js");
+    const config = makeConfig();
+    const tools = multiRoundTools({
+      executeTool: vi.fn(async (name, args) => {
+        if (name === "fetch_context")
+          return {
+            accounts: [
+              { id: "acc-dbs", name: "DBS Account", closed: false },
+              { id: "acc-yuu", name: "DBS Yuu Card", closed: false },
+              { id: "acc-alt", name: "DBS Altitude Card", closed: false },
+            ],
+            categories: [],
+            payees: [],
+          };
+        if (name === "search_memory")
+          return {
+            results: [
+              { text: "Card ending 3255 belongs to DBS Yuu Card", score: 1 },
+              { text: "Card ending 3255 belongs to DBS Altitude Card", score: 0.9 },
+            ],
+          };
+        return true;
+      }),
+    });
+    const orch = new AgentOrchestrator(config, tools);
+
+    orch._llm.chat = vi
+      .fn()
+      .mockResolvedValueOnce({ choices: [{ message: toolCallMsg("search_memory", { query: "3255" }) }] })
+      .mockResolvedValueOnce({
+        choices: [
+          {
+            message: jsonMsg({
+              ...yuuResult,
+              account_id: "acc-dbs",
+              account_name: "DBS Account",
+              reasoning: "guessed",
+            }),
+          },
+        ],
+      });
+
+    const result = await orch._runPhase1("From: DBS/POSB card ending 3255 To: BUS/MRT", {
+      senderBank: "DBS",
+    });
+
+    // conflicting evidence → no unsafe override; pipeline refuses to insert
+    expect(result).toBeNull();
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════
 // 3. Phase 2: Resolution (3-phase)
 // ═══════════════════════════════════════════════════════════════════
 

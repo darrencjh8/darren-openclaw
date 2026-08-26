@@ -407,35 +407,7 @@ export class AgentOrchestrator {
             }
         }
 
-let prompt = getPhase1Prompt();
-
-        // ── Pre-Phase-1: inject card/account suffix context from memory ──
-        // AI trigger: semantic search surfaces relevant suffix facts.
-        // Filter by senderBank to avoid cross-bank confusion.
-        let suffixFacts = [];
-        try {
-            const memResult = await this._tools.executeTool("search_memory", {
-                query: emailText.slice(0, 300),
-            });
-            const SUFFIX_RE = /^(?:Card|Account)\s+ending\s+(\S+)\s+belongs\s+to\s+(.+)$/i;
-            for (const r of memResult?.results || []) {
-                if (r.score >= 0.3 && SUFFIX_RE.test(r.text)) {
-                    // Filter by sender bank: only include facts whose account
-                    // name contains the sender bank prefix
-                    if (senderBank) {
-                        const bankLower = senderBank.toLowerCase();
-                        if (!r.text.toLowerCase().includes(bankLower)) continue;
-                    }
-                    suffixFacts.push(r.text);
-                }
-            }
-        } catch {}
-
-        if (suffixFacts.length > 0) {
-            prompt +=
-                "\n\nKNOWN CARD SUFFIXES (from memory — use these for account matching):\n" +
-                suffixFacts.map((f) => `- ${f}`).join("\n");
-        }
+        let prompt = getPhase1Prompt();
 
         // let (not const) — validation retries (continue) push feedback and
         // must preserve messages; error retries (catch) reset to clean state.
@@ -445,6 +417,10 @@ let prompt = getPhase1Prompt();
         ];
 
         const MAX_RETRIES = 1;
+        // Accumulates search_memory results the LLM retrieves via tool calls,
+        // for deterministic post-validation (suffix override). Persists across
+        // validation-retry attempts (facts do not change between attempts).
+        const cachedSearchResults = [];
         for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
             const tools = this._tools.getPhase1ToolSchemas
                 ? this._tools.getPhase1ToolSchemas()
@@ -458,8 +434,37 @@ let prompt = getPhase1Prompt();
                 let msg = choice.message || {};
                 let cachedLiveData = null;
 
-                // Handle tool calls (fetch_context) — cache result to avoid second call
-                if (msg.tool_calls && msg.tool_calls.length > 0) {
+                // ── Bounded multi-round tool use ──
+                // The LLM may call fetch_context and search_memory in any
+                // order across rounds. Cap rounds and total calls to stop
+                // runaway tool loops; on exhaustion demand JSON-only output.
+                const TOOL_MAX_ROUNDS = 3;
+                const TOOL_MAX_CALLS = 6;
+                let toolRounds = 0;
+                let toolCallsTotal = 0;
+
+                while (msg.tool_calls && msg.tool_calls.length > 0) {
+                    if (
+                        toolRounds >= TOOL_MAX_ROUNDS ||
+                        toolCallsTotal >= TOOL_MAX_CALLS
+                    ) {
+                        messages.push({
+                            role: "user",
+                            content:
+                                "Tool budget exhausted. Respond ONLY with valid JSON now, no tool calls.",
+                        });
+                        response = await this._llm.chat(
+                            messages,
+                            undefined,
+                            undefined,
+                            { reasoning: "adaptive" },
+                        );
+                        choice = (response.choices || [{}])[0];
+                        msg = choice.message || {};
+                        break;
+                    }
+                    toolRounds++;
+
                     const assistantMsg = {
                         role: "assistant",
                         content: msg.content || null,
@@ -469,6 +474,7 @@ let prompt = getPhase1Prompt();
                     messages.push(assistantMsg);
 
                     for (const tc of msg.tool_calls) {
+                        toolCallsTotal++;
                         const func = tc.function || {};
                         const name = func.name || "";
                         let args = {};
@@ -479,6 +485,13 @@ let prompt = getPhase1Prompt();
                             name,
                             args,
                         );
+                        // Cache search_memory results for deterministic
+                        // post-validation (suffix facts) across attempts.
+                        if (name === "search_memory") {
+                            cachedSearchResults.push(
+                                ...(result?.results || []),
+                            );
+                        }
                         // Domain-based account pre-filter: restrict accounts
                         // to the sender's bank so the LLM cannot cross banks.
                         let filteredResult = result;
@@ -515,14 +528,9 @@ let prompt = getPhase1Prompt();
                         if (name === "fetch_context") cachedLiveData = result;
                     }
 
-                    response = await this._llm.chat(
-                        messages,
-                        undefined,
-                        undefined,
-                        {
-                            reasoning: "adaptive",
-                        },
-                    );
+                    response = await this._llm.chat(messages, tools, "auto", {
+                        reasoning: "adaptive",
+                    });
                     choice = (response.choices || [{}])[0];
                     msg = choice.message || {};
                 }
@@ -628,28 +636,38 @@ let prompt = getPhase1Prompt();
                 }
 
                 // ── Post-Phase-1 safety net: suffix-based account override ──
-                // If suffix facts were injected but the LLM still picked the
-                // wrong account, deterministically override before memory check.
+                // Uses search_memory results the LLM itself retrieved via tool
+                // calls. Overrides only when evidence is UNIQUE; ambiguous or
+                // absent evidence keeps the LLM's pick untouched.
                 if (
                     !output.skip &&
                     output.account_id &&
                     !invalidFields.includes("account_id") &&
-                    suffixFacts.length > 0 &&
+                    cachedSearchResults.length > 0 &&
                     liveAccounts.length > 0
                 ) {
                     const SUFFIX_RE = /^(?:Card|Account)\s+ending\s+(\S+)\s+belongs\s+to\s+(.+)$/i;
-                    for (const fact of suffixFacts) {
-                        const m = fact.match(SUFFIX_RE);
+                    const candidates = new Map();
+                    for (const fact of cachedSearchResults) {
+                        const m = (fact.text || "").match(SUFFIX_RE);
                         if (!m) continue;
                         const suffix = m[1];
                         const expectedAccount = m[2].trim();
-                        // Check if this suffix appears in the email text
-                        const suffixRe = new RegExp(`\\b${suffix}\\b`);
-                        if (!suffixRe.test(emailText)) continue;
-                        // Find the expected account in live data
+                        // Only facts whose suffix actually appears in this email
+                        if (!new RegExp(`\\b${suffix}\\b`).test(emailText)) continue;
+                        candidates.set(expectedAccount.toLowerCase(), {
+                            suffix,
+                            expectedAccount,
+                        });
+                    }
+                    if (candidates.size === 1) {
+                        const { suffix, expectedAccount } = [
+                            ...candidates.values(),
+                        ][0];
                         const match = liveAccounts.find(
                             (a) =>
-                                a.name.toLowerCase() === expectedAccount.toLowerCase() &&
+                                a.name.toLowerCase() ===
+                                    expectedAccount.toLowerCase() &&
                                 !a.closed,
                         );
                         if (match && match.id !== output.account_id) {
@@ -661,7 +679,6 @@ let prompt = getPhase1Prompt();
                             });
                             output.account_id = match.id;
                             output.account_name = match.name;
-                            break;
                         }
                     }
                 }
