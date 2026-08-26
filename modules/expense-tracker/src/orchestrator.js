@@ -92,6 +92,7 @@ export class DeepSeekClient {
 export const DOMAIN_BANK_MAP = {
     "ocbc.com": "OCBC",
     "dbs.com": "DBS",
+    "posb.com.sg": "DBS",
     "uobgroup.com": "UOB",
     "hsbc.com.hk": "HSBC",
     "trustbank.sg": "Trust",
@@ -595,11 +596,12 @@ export class AgentOrchestrator {
                             senderBank &&
                             result?.accounts
                         ) {
-                            const bankLower = senderBank.toLowerCase();
+                            // Token+alias bank match (POSB=DBS etc.) — no
+                            // substring collisions ("SC" vs "Discover").
                             const filtered = result.accounts.filter(
                                 (a) =>
                                     a.name &&
-                                    a.name.toLowerCase().includes(bankLower),
+                                    nameMatchesBank(a.name, senderBank),
                             );
                             // Only restrict if at least one account matched the bank
                             if (filtered.length > 0) {

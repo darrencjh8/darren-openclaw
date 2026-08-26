@@ -1371,6 +1371,98 @@ describe("Phase 1: LLM-directed retrieval (multi-round tools)", () => {
     expect(result.account_name).toBe("POSB Everyday Card");
   });
 
+  it("domain filter keeps POSB for DBS, excludes no-token and collision names", async () => {
+    const { AgentOrchestrator } = await import("../src/orchestrator.js");
+    const config = makeConfig();
+    const tools = multiRoundTools({
+      executeTool: vi.fn(async (name) => {
+        if (name === "fetch_context")
+          return {
+            accounts: [
+              { id: "acc-dbs", name: "DBS Account", closed: false },
+              { id: "acc-posb", name: "POSB Everyday Card", closed: false },
+              { id: "acc-yuu", name: "Yuu Card", closed: false },
+              { id: "acc-disc", name: "Discover Card", closed: false },
+            ],
+            categories: [],
+            payees: [],
+          };
+        if (name === "search_memory") return { results: [] };
+        return true;
+      }),
+    });
+    const orch = new AgentOrchestrator(config, tools);
+    let toolMessages = null;
+
+    orch._llm.chat = vi
+      .fn()
+      .mockResolvedValueOnce({ choices: [{ message: toolCallMsg("fetch_context", {}) }] })
+      .mockImplementationOnce(async (messages) => {
+        toolMessages = messages.filter((m) => m.role === "tool");
+        return { choices: [{ message: jsonMsg(yuuResult) }] };
+      });
+
+    const result = await orch._runPhase1("From: DBS/POSB card ending 3255 To: BUS/MRT", {
+      senderBank: "DBS",
+    });
+
+    expect(result.account_id).toBe("acc-yuu");
+    const ctx = JSON.parse(toolMessages[toolMessages.length - 1].content);
+    expect(ctx.accounts.map((a) => a.name)).toEqual([
+      "DBS Account",
+      "POSB Everyday Card",
+    ]);
+  });
+
+  it("domain filter for SC keeps Standard Chartered, drops substring collisions", async () => {
+    const { AgentOrchestrator } = await import("../src/orchestrator.js");
+    const config = makeConfig();
+    const tools = multiRoundTools({
+      executeTool: vi.fn(async (name) => {
+        if (name === "fetch_context")
+          return {
+            accounts: [
+              { id: "acc-sc", name: "Standard Chartered XtraSaver", closed: false },
+              { id: "acc-disc", name: "Discover Card", closed: false },
+            ],
+            categories: [],
+            payees: [],
+          };
+        if (name === "search_memory") return { results: [] };
+        return true;
+      }),
+    });
+    const orch = new AgentOrchestrator(config, tools);
+    let toolMessages = null;
+
+    orch._llm.chat = vi
+      .fn()
+      .mockResolvedValueOnce({ choices: [{ message: toolCallMsg("fetch_context", {}) }] })
+      .mockImplementationOnce(async (messages) => {
+        toolMessages = messages.filter((m) => m.role === "tool");
+        return {
+          choices: [
+            {
+              message: jsonMsg({
+                ...yuuResult,
+                account_id: "acc-sc",
+                account_name: "Standard Chartered XtraSaver",
+              }),
+            },
+          ],
+        };
+      });
+
+    await orch._runPhase1("From: alerts@sc.com\nSubject: Transaction\n\nCard payment", {
+      senderBank: "SC",
+    });
+
+    const ctx = JSON.parse(toolMessages[toolMessages.length - 1].content);
+    expect(ctx.accounts.map((a) => a.name)).toEqual([
+      "Standard Chartered XtraSaver",
+    ]);
+  });
+
   it("keeps LLM pick when suffix evidence is ambiguous", async () => {
     const { AgentOrchestrator } = await import("../src/orchestrator.js");
     const config = makeConfig();
@@ -1432,6 +1524,14 @@ describe("Phase 1: LLM-directed retrieval (multi-round tools)", () => {
 // ═══════════════════════════════════════════════════════════════════
 
 describe("suffix-override helpers (unit)", () => {
+  it("bankFromSender: POSB domain maps to DBS", async () => {
+    const { bankFromSender } = await import("../src/orchestrator.js");
+    expect(bankFromSender("alerts@posb.com.sg")).toBe("DBS");
+    expect(bankFromSender("x@dbs.com")).toBe("DBS");
+    expect(bankFromSender("y@ocbc.com")).toBe("OCBC");
+    expect(bankFromSender(null)).toBe(null);
+  });
+
   it("hasBankToken: known tokens, unknown names, empty", async () => {
     const { hasBankToken } = await import("../src/orchestrator.js");
     expect(hasBankToken("POSB Everyday Card")).toBe(true);
