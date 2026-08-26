@@ -43,14 +43,28 @@ function mockChatResponse(jsonObj) {
 // ═══════════════════════════════════════════════════════════════════
 
 describe("Tool Registry: restricted tool schemas", () => {
-  it("getPhase1ToolSchemas() returns only fetch_context", async () => {
+  it("getPhase1ToolSchemas() returns fetch_context + search_memory (read-only)", async () => {
     const { ToolRegistry } = await import("../src/tools.js");
     const registry = new ToolRegistry({ dedupDbPath: ":memory:" }, null);
 
     const schemas = registry.getPhase1ToolSchemas();
     const names = schemas.map((s) => s.function.name);
 
-    expect(names).toEqual(["fetch_context"]);
+    expect(names).toEqual(["fetch_context", "search_memory"]);
+
+    // No mutation or side-effecting tools may reach Phase 1
+    const forbidden = [
+      "insert_transaction",
+      "learn_fact",
+      "update_transaction",
+      "mark_email_read",
+      "reconcile_transaction",
+      "unclear_transaction",
+      "check_duplicate",
+    ];
+    for (const tool of forbidden) {
+      expect(names).not.toContain(tool);
+    }
   });
 
   it("getToolSchemas() returns all tools (backward compat)", async () => {

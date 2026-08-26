@@ -812,20 +812,23 @@ export class ToolRegistry {
   }
 
   /**
-   * Get only the fetch_context tool schema for Phase 1 LLM (3-phase design).
+   * Get only the read-only tool schemas for Phase 1 LLM (3-phase design):
+   * fetch_context (live accounts) + search_memory (account evidence lookup).
+   * No mutation tools reach Phase 1.
    */
   getPhase1ToolSchemas() {
-    const t = TOOL_MAP["fetch_context"];
-    return [
-      {
+    const names = ["fetch_context", "search_memory"];
+    return names.map((name) => {
+      const t = TOOL_MAP[name];
+      return {
         type: "function",
         function: {
           name: t.name,
           description: t.description,
           parameters: t.schema,
         },
-      },
-    ];
+      };
+    });
   }
 
   async executeTool(name, args) {
