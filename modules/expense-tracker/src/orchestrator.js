@@ -145,6 +145,9 @@ export const BANK_TOKENS = [
     "gxs",
     "trust",
     "citi",
+    "cimb",
+    "rhb",
+    "ryt",
     "dbs",
     "uob",
 ];
@@ -157,7 +160,8 @@ export function hasBankToken(name) {
     );
 }
 
-/** Brand aliases — POSB is DBS, Citi is Citibank, SC is Standard Chartered. */
+/** Brand aliases — POSB is DBS, Citi is Citibank, SC is Standard Chartered,
+ *  RYT is RHB. */
 export const BANK_ALIASES = {
     dbs: ["dbs", "posb"],
     posb: ["posb", "dbs"],
@@ -165,6 +169,8 @@ export const BANK_ALIASES = {
     citibank: ["citibank", "citi"],
     sc: ["sc", "standard chartered"],
     "standard chartered": ["standard chartered", "sc"],
+    ryt: ["ryt", "rhb"],
+    rhb: ["rhb", "ryt"],
 };
 
 /**

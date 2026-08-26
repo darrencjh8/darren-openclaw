@@ -1463,6 +1463,53 @@ describe("Phase 1: LLM-directed retrieval (multi-round tools)", () => {
     ]);
   });
 
+  it("domain filter for CIMB keeps CIMB accounts only", async () => {
+    const { AgentOrchestrator } = await import("../src/orchestrator.js");
+    const config = makeConfig();
+    const tools = multiRoundTools({
+      executeTool: vi.fn(async (name) => {
+        if (name === "fetch_context")
+          return {
+            accounts: [
+              { id: "acc-cimb", name: "CIMB FastSaver", closed: false },
+              { id: "acc-dbs", name: "DBS Account", closed: false },
+            ],
+            categories: [],
+            payees: [],
+          };
+        if (name === "search_memory") return { results: [] };
+        return true;
+      }),
+    });
+    const orch = new AgentOrchestrator(config, tools);
+    let toolMessages = null;
+
+    orch._llm.chat = vi
+      .fn()
+      .mockResolvedValueOnce({ choices: [{ message: toolCallMsg("fetch_context", {}) }] })
+      .mockImplementationOnce(async (messages) => {
+        toolMessages = messages.filter((m) => m.role === "tool");
+        return {
+          choices: [
+            {
+              message: jsonMsg({
+                ...yuuResult,
+                account_id: "acc-cimb",
+                account_name: "CIMB FastSaver",
+              }),
+            },
+          ],
+        };
+      });
+
+    await orch._runPhase1("From: alerts@cimb.com\nSubject: Alert\n\nPayment", {
+      senderBank: "CIMB",
+    });
+
+    const ctx = JSON.parse(toolMessages[toolMessages.length - 1].content);
+    expect(ctx.accounts.map((a) => a.name)).toEqual(["CIMB FastSaver"]);
+  });
+
   it("keeps LLM pick when suffix evidence is ambiguous", async () => {
     const { AgentOrchestrator } = await import("../src/orchestrator.js");
     const config = makeConfig();
@@ -1537,6 +1584,8 @@ describe("suffix-override helpers (unit)", () => {
     expect(hasBankToken("POSB Everyday Card")).toBe(true);
     expect(hasBankToken("Standard Chartered XtraSaver")).toBe(true);
     expect(hasBankToken("DBS Yuu Card")).toBe(true);
+    expect(hasBankToken("CIMB FastSaver")).toBe(true);
+    expect(hasBankToken("RYT Savings")).toBe(true);
     expect(hasBankToken("My Savings")).toBe(false);
     expect(hasBankToken("Yuu Card")).toBe(false);
     expect(hasBankToken("")).toBe(false);
@@ -1549,6 +1598,8 @@ describe("suffix-override helpers (unit)", () => {
     expect(nameMatchesBank("DBS Yuu Card", "POSB")).toBe(true);
     expect(nameMatchesBank("Standard Chartered XtraSaver", "SC")).toBe(true);
     expect(nameMatchesBank("Citibank Rewards", "Citi")).toBe(true);
+    expect(nameMatchesBank("RHB RYT Savings", "Ryt")).toBe(true);
+    expect(nameMatchesBank("CIMB FastSaver", "CIMB")).toBe(true);
     expect(nameMatchesBank("UOB Ladies Card", "DBS")).toBe(false);
     expect(nameMatchesBank("Yuu Card", "DBS")).toBe(false);
     expect(nameMatchesBank("DBS Yuu Card", null)).toBe(false);
