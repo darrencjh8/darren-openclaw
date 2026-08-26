@@ -52,10 +52,21 @@ describe("getPhase1Prompt", () => {
     expect(prompt).toMatch(/Card ending/);
   });
 
-  it("references KNOWN CARD SUFFIXES section for suffix matching (#269)", () => {
-    expect(prompt).toContain("KNOWN CARD SUFFIXES");
-    // Should NOT say "match from memory" since Phase 1 has no search_memory tool
-    expect(prompt).not.toMatch(/match from memory/i);
+  it("instructs LLM to call search_memory with short targeted queries", () => {
+    expect(prompt).toContain("search_memory");
+    expect(prompt).toMatch(/short(?:est)?|targeted|specific/i);
+    expect(prompt).toMatch(/query/i);
+  });
+
+  it("forbids searching memory with the whole email body", () => {
+    expect(prompt).not.toMatch(/whole email (?:body|text).*search_memory|search_memory.*whole email/i);
+    expect(prompt).not.toContain("slice(0, 300)");
+  });
+
+  it("lists evidence signals to extract from heterogeneous emails", () => {
+    expect(prompt).toMatch(/card number|account ending|suffix/i);
+    expect(prompt).toMatch(/subject/i);
+    expect(prompt).toMatch(/sender|domain/i);
   });
 
   it("instructs LLM to use card type for account matching", () => {

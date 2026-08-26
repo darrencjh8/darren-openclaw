@@ -67,3 +67,6 @@ modules/onedrive-sync/config/onedrive-state/
 
 # Secret scanning
 .trufflehog.yaml
+
+# dev-loop state file
+.agents/dev-loop-state.md

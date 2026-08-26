@@ -92,6 +92,7 @@ export class DeepSeekClient {
 export const DOMAIN_BANK_MAP = {
     "ocbc.com": "OCBC",
     "dbs.com": "DBS",
+    "posb.com.sg": "DBS",
     "uobgroup.com": "UOB",
     "hsbc.com.hk": "HSBC",
     "trustbank.sg": "Trust",
@@ -113,6 +114,102 @@ export function bankFromSender(sender) {
     }
     return null;
 }
+
+// ── Suffix-override helpers (LLM-directed retrieval) ────────────────
+
+/** "Card ending 3255 belongs to DBS Yuu Card" — learned suffix facts. */
+export const SUFFIX_RE =
+    /^(?:Card|Account)\s+ending\s+(\S+)\s+belongs\s+to\s+(.+)$/i;
+
+/** Secret-looking fact texts — redacted before the LLM sees them. */
+export const SECRET_RE =
+    /\b(?:password|pin|otp|secret|token|nric|passport)\b/i;
+
+/** Word-boundary-aware bank tokens found in account names. */
+export const BANK_TOKENS = [
+    "american express",
+    "standard chartered",
+    "citibank",
+    "mari bank",
+    "maribank",
+    "trust bank",
+    "youtrip",
+    "you trip",
+    "revolut",
+    "maybank",
+    "posb",
+    "ocbc",
+    "hsbc",
+    "amex",
+    "grab",
+    "gxs",
+    "trust",
+    "citi",
+    "cimb",
+    "rhb",
+    "ryt",
+    "dbs",
+    "uob",
+];
+
+/** True when the account name contains a known bank token. */
+export function hasBankToken(name) {
+    if (!name) return false;
+    return BANK_TOKENS.some((t) =>
+        new RegExp(`\\b${t}\\b`, "i").test(name),
+    );
+}
+
+/** Brand aliases — POSB is DBS, Citi is Citibank, SC is Standard Chartered,
+ *  RYT is RHB. */
+export const BANK_ALIASES = {
+    dbs: ["dbs", "posb"],
+    posb: ["posb", "dbs"],
+    citi: ["citi", "citibank"],
+    citibank: ["citibank", "citi"],
+    sc: ["sc", "standard chartered"],
+    "standard chartered": ["standard chartered", "sc"],
+    ryt: ["ryt", "rhb"],
+    rhb: ["rhb", "ryt"],
+};
+
+/**
+ * True when the account name carries a known bank token that belongs to
+ * the sender bank (or one of its brand aliases). Unknown-bank names return
+ * false — never assume.
+ */
+export function nameMatchesBank(name, bank) {
+    if (!name || !bank) return false;
+    if (!hasBankToken(name)) return false;
+    const aliases = BANK_ALIASES[bank.toLowerCase()] || [bank];
+    const lower = name.toLowerCase();
+    return aliases.some((t) => new RegExp(`\\b${t}\\b`, "i").test(lower));
+}
+
+/** Remove secret-looking facts from a search result list. */
+export function sanitizeResults(results) {
+    return (results || []).filter((r) => !SECRET_RE.test(r.text || ""));
+}
+
+/**
+ * True when any cached fact is usable as suffix-override evidence:
+ * high-score, suffix-format, suffix present in email, bank known and
+ * matching senderBank.
+ */
+export function hasUsableSuffixFact(facts, emailText, senderBank) {
+    return (facts || []).some((f) => {
+        if ((f.score ?? 0) < 0.5) return false;
+        const m = (f.text || "").match(SUFFIX_RE);
+        if (!m) return false;
+        const expectedAccount = m[2].trim();
+        if (!nameMatchesBank(expectedAccount, senderBank)) return false;
+        return new RegExp(`\\b${m[1]}\\b`).test(emailText);
+    });
+}
+
+/** Bill-payment layout — override must never pick the destination card. */
+export const BILL_PAYMENT_SHAPE_RE =
+    /\(A\/C\s+ending\s+\S+\)[\s\S]*\(Ref\s+ending\s+\S+\)/i;
 
 export class AgentOrchestrator {
     constructor(config, tools) {
@@ -407,35 +504,7 @@ export class AgentOrchestrator {
             }
         }
 
-let prompt = getPhase1Prompt();
-
-        // ── Pre-Phase-1: inject card/account suffix context from memory ──
-        // AI trigger: semantic search surfaces relevant suffix facts.
-        // Filter by senderBank to avoid cross-bank confusion.
-        let suffixFacts = [];
-        try {
-            const memResult = await this._tools.executeTool("search_memory", {
-                query: emailText.slice(0, 300),
-            });
-            const SUFFIX_RE = /^(?:Card|Account)\s+ending\s+(\S+)\s+belongs\s+to\s+(.+)$/i;
-            for (const r of memResult?.results || []) {
-                if (r.score >= 0.3 && SUFFIX_RE.test(r.text)) {
-                    // Filter by sender bank: only include facts whose account
-                    // name contains the sender bank prefix
-                    if (senderBank) {
-                        const bankLower = senderBank.toLowerCase();
-                        if (!r.text.toLowerCase().includes(bankLower)) continue;
-                    }
-                    suffixFacts.push(r.text);
-                }
-            }
-        } catch {}
-
-        if (suffixFacts.length > 0) {
-            prompt +=
-                "\n\nKNOWN CARD SUFFIXES (from memory — use these for account matching):\n" +
-                suffixFacts.map((f) => `- ${f}`).join("\n");
-        }
+        let prompt = getPhase1Prompt();
 
         // let (not const) — validation retries (continue) push feedback and
         // must preserve messages; error retries (catch) reset to clean state.
@@ -445,6 +514,11 @@ let prompt = getPhase1Prompt();
         ];
 
         const MAX_RETRIES = 1;
+        // Accumulates search_memory results the LLM retrieves via tool calls,
+        // for deterministic post-validation (suffix override). Persists across
+        // validation-retry attempts (facts do not change between attempts).
+        const cachedSearchResults = [];
+        let fallbackRan = false;
         for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
             const tools = this._tools.getPhase1ToolSchemas
                 ? this._tools.getPhase1ToolSchemas()
@@ -458,8 +532,38 @@ let prompt = getPhase1Prompt();
                 let msg = choice.message || {};
                 let cachedLiveData = null;
 
-                // Handle tool calls (fetch_context) — cache result to avoid second call
-                if (msg.tool_calls && msg.tool_calls.length > 0) {
+                // ── Bounded multi-round tool use ──
+                // The LLM may call fetch_context and search_memory in any
+                // order across rounds. Cap rounds and total calls to stop
+                // runaway tool loops; on exhaustion demand JSON-only output.
+                const TOOL_MAX_ROUNDS = 3;
+                const TOOL_MAX_CALLS = 6;
+                let toolRounds = 0;
+                let toolCallsTotal = 0;
+
+                while (msg.tool_calls && msg.tool_calls.length > 0) {
+                    if (
+                        toolRounds >= TOOL_MAX_ROUNDS ||
+                        toolCallsTotal >= TOOL_MAX_CALLS ||
+                        toolCallsTotal + msg.tool_calls.length > TOOL_MAX_CALLS
+                    ) {
+                        messages.push({
+                            role: "user",
+                            content:
+                                "Tool budget exhausted. Respond ONLY with valid JSON now, no tool calls.",
+                        });
+                        response = await this._llm.chat(
+                            messages,
+                            undefined,
+                            undefined,
+                            { reasoning: "adaptive" },
+                        );
+                        choice = (response.choices || [{}])[0];
+                        msg = choice.message || {};
+                        break;
+                    }
+                    toolRounds++;
+
                     const assistantMsg = {
                         role: "assistant",
                         content: msg.content || null,
@@ -469,16 +573,27 @@ let prompt = getPhase1Prompt();
                     messages.push(assistantMsg);
 
                     for (const tc of msg.tool_calls) {
+                        toolCallsTotal++;
                         const func = tc.function || {};
                         const name = func.name || "";
                         let args = {};
                         try {
                             args = JSON.parse(func.arguments || "{}");
                         } catch {}
-                        const result = await this._tools.executeTool(
+                        let result = await this._tools.executeTool(
                             name,
                             args,
                         );
+                        // search_memory results: redact secret-looking facts
+                        // before the LLM sees them, then cache the survivors
+                        // for deterministic post-validation (suffix override).
+                        if (name === "search_memory") {
+                            const safeResults = sanitizeResults(
+                                result?.results,
+                            );
+                            result = { ...result, results: safeResults };
+                            cachedSearchResults.push(...safeResults);
+                        }
                         // Domain-based account pre-filter: restrict accounts
                         // to the sender's bank so the LLM cannot cross banks.
                         let filteredResult = result;
@@ -487,11 +602,12 @@ let prompt = getPhase1Prompt();
                             senderBank &&
                             result?.accounts
                         ) {
-                            const bankLower = senderBank.toLowerCase();
+                            // Token+alias bank match (POSB=DBS etc.) — no
+                            // substring collisions ("SC" vs "Discover").
                             const filtered = result.accounts.filter(
                                 (a) =>
                                     a.name &&
-                                    a.name.toLowerCase().includes(bankLower),
+                                    nameMatchesBank(a.name, senderBank),
                             );
                             // Only restrict if at least one account matched the bank
                             if (filtered.length > 0) {
@@ -515,14 +631,9 @@ let prompt = getPhase1Prompt();
                         if (name === "fetch_context") cachedLiveData = result;
                     }
 
-                    response = await this._llm.chat(
-                        messages,
-                        undefined,
-                        undefined,
-                        {
-                            reasoning: "adaptive",
-                        },
-                    );
+                    response = await this._llm.chat(messages, tools, "auto", {
+                        reasoning: "adaptive",
+                    });
                     choice = (response.choices || [{}])[0];
                     msg = choice.message || {};
                 }
@@ -627,29 +738,92 @@ let prompt = getPhase1Prompt();
                     }
                 }
 
-                // ── Post-Phase-1 safety net: suffix-based account override ──
-                // If suffix facts were injected but the LLM still picked the
-                // wrong account, deterministically override before memory check.
+                // ── Fallback: deterministic suffix lookup when the cache
+                // holds no USABLE suffix evidence (LLM searched wrong query,
+                // or never searched) ──
+                // Skipped without senderBank — bank unknown means a
+                // deterministic override could book cross-bank. Skipped for
+                // bill-payment layouts — destination suffix must never pick
+                // the source account.
                 if (
+                    senderBank &&
                     !output.skip &&
                     output.account_id &&
                     !invalidFields.includes("account_id") &&
-                    suffixFacts.length > 0 &&
+                    !fallbackRan &&
+                    !BILL_PAYMENT_SHAPE_RE.test(emailText) &&
+                    !hasUsableSuffixFact(
+                        cachedSearchResults,
+                        emailText,
+                        senderBank,
+                    )
+                ) {
+                    fallbackRan = true;
+                    try {
+                        const seen = new Set();
+                        const FALLBACK_RE =
+                            /\b(?:card|account|a\/c)\b[^\d]{0,25}?(\d{4,6})(?!\d)|\bending(?:\s+in)?\b[\s*#]*(\d{4,6})(?!\d)/gi;
+                        let m;
+                        while ((m = FALLBACK_RE.exec(emailText)) !== null) {
+                            const suffix = (m[1] || m[2] || "").trim();
+                            if (suffix && !seen.has(suffix)) {
+                                seen.add(suffix);
+                                const res = await this._tools.executeTool(
+                                    "search_memory",
+                                    { query: suffix },
+                                );
+                                cachedSearchResults.push(
+                                    ...sanitizeResults(res?.results),
+                                );
+                            }
+                            if (seen.size >= 3) break;
+                        }
+                    } catch {}
+                }
+
+                // ── Post-Phase-1 safety net: suffix-based account override ──
+                // Uses search_memory results the LLM itself retrieved via tool
+                // calls (or the deterministic fallback above). Overrides only
+                // when evidence is UNIQUE, same-bank, high-score, and the
+                // email is not a bill-payment layout. Without senderBank
+                // (Telegram path) no deterministic override fires — a wrong
+                // bank would be worse than no correction.
+                if (
+                    senderBank &&
+                    !output.skip &&
+                    output.account_id &&
+                    !invalidFields.includes("account_id") &&
+                    !BILL_PAYMENT_SHAPE_RE.test(emailText) &&
+                    cachedSearchResults.length > 0 &&
                     liveAccounts.length > 0
                 ) {
-                    const SUFFIX_RE = /^(?:Card|Account)\s+ending\s+(\S+)\s+belongs\s+to\s+(.+)$/i;
-                    for (const fact of suffixFacts) {
-                        const m = fact.match(SUFFIX_RE);
+                    const candidates = new Map();
+                    for (const fact of cachedSearchResults) {
+                        if ((fact.score ?? 0) < 0.5) continue;
+                        const m = (fact.text || "").match(SUFFIX_RE);
                         if (!m) continue;
                         const suffix = m[1];
                         const expectedAccount = m[2].trim();
-                        // Check if this suffix appears in the email text
-                        const suffixRe = new RegExp(`\\b${suffix}\\b`);
-                        if (!suffixRe.test(emailText)) continue;
-                        // Find the expected account in live data
+                        // Unknown-bank or cross-bank facts must never drive
+                        // an override (brand aliases count as same-bank).
+                        if (!nameMatchesBank(expectedAccount, senderBank)) {
+                            continue;
+                        }
+                        // Only facts whose suffix actually appears in this email
+                        if (!new RegExp(`\\b${suffix}\\b`).test(emailText)) continue;
+                        candidates.set(expectedAccount.toLowerCase(), {
+                            suffix,
+                            expectedAccount,
+                        });
+                    }
+                    if (candidates.size === 1) {
+                        const { suffix, expectedAccount } = [
+                            ...candidates.values(),
+                        ][0];
                         const match = liveAccounts.find(
                             (a) =>
-                                a.name.toLowerCase() === expectedAccount.toLowerCase() &&
+                                a.name.toLowerCase() ===
+                                    expectedAccount.toLowerCase() &&
                                 !a.closed,
                         );
                         if (match && match.id !== output.account_id) {
@@ -661,7 +835,6 @@ let prompt = getPhase1Prompt();
                             });
                             output.account_id = match.id;
                             output.account_name = match.name;
-                            break;
                         }
                     }
                 }
@@ -681,9 +854,9 @@ let prompt = getPhase1Prompt();
                             "search_memory",
                             { query: output.merchant },
                         );
-                        const relevant = (hints?.results || []).filter(
-                            (r) => r.score >= 0.5,
-                        );
+                        const relevant = sanitizeResults(
+                            hints?.results,
+                        ).filter((r) => r.score >= 0.5);
                         if (relevant.length > 0) {
                             const mentionsDifferent = relevant.some((r) => {
                                 const text = (r.text || "").toLowerCase();
@@ -749,10 +922,13 @@ let prompt = getPhase1Prompt();
                                         query: output.merchant + " account",
                                     },
                                 );
-                                if (hints?.results?.length > 0) {
+                                const safeHints = sanitizeResults(
+                                    hints?.results,
+                                );
+                                if (safeHints.length > 0) {
                                     hintText =
                                         " Memory hints: " +
-                                        hints.results
+                                        safeHints
                                             .map((r) => r.text)
                                             .join("; ");
                                 }
