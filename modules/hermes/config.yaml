@@ -1,7 +1,6 @@
 model:
-    provider: deepseek
-    default: deepseek-v4-pro
-    api_key: ${DEEPSEEK_API_KEY}
+    provider: openai-codex
+    default: gpt-5.6-terra
 
 agent:
     reasoning_effort: medium
@@ -13,9 +12,11 @@ display:
     show_reasoning: false
 
 fallback_providers:
-    - provider: gemini
-      model: gemini-3.1-flash-lite
-      api_key: ${GEMINI_API_KEY}
+    - provider: deepseek
+      model: deepseek-v4-pro
+
+credential_pool_strategies:
+    openai-codex: round_robin
 
 delegation:
     max_spawn_depth: 1
@@ -46,8 +47,8 @@ web:
 
 auxiliary:
     vision:
-        provider: gemini
-        model: gemini-3.1-flash-lite
+        provider: deepseek
+        model: deepseek-v4-flash-vision-exp
     web_extract:
         provider: deepseek
         model: deepseek-v4-flash

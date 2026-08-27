@@ -173,7 +173,6 @@ services:
             - SOUL_VOICE_RULES=${SOUL_VOICE_RULES}
             - SOUL_DELEGATION=${SOUL_DELEGATION}
             - HERMES_DASHBOARD=1
-            - OPENAI_API_KEY=not-needed
             - FIRECRAWL_API_KEY=${FIRECRAWL_API_KEY}
             - NOTION_API_KEY=${NOTION_API_KEY}
             - POLLINATIONS_API_KEY=${POLLINATIONS_API_KEY}
