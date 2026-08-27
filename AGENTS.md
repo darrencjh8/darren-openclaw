@@ -38,6 +38,15 @@
 
 ## Git Operations
 
+### Worktree discipline (always)
+- Before starting any task, create a fresh git worktree from a clean, updated `origin/main`:
+  ```bash
+  git fetch origin && git worktree add -b <branch-name> ../darren-openclaw-<task> origin/main
+  ```
+  Never start work directly on `main` or on an existing branch.
+- Do not interrupt another agent's in-progress work: never switch, checkout, rebase, or force-push a branch or worktree that another agent/profile is actively using.
+- Check for existing worktrees first: `git worktree list`.
+
 ### Primary: Use `gh` CLI
 For pushing, pulling, and interacting with GitHub, always prefer the `gh` CLI tool over MCP.
 
