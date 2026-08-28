@@ -505,8 +505,8 @@ echo ""
 echo "--- Health Checks ---"
 
 health_ok() {
-  local name="$1" url="$2"
-  local code attempt=0 max_attempts=10
+  local name="$1" url="$2" max_attempts="${3:-10}"
+  local code attempt=0
   # Give the container a moment to bind the port
   sleep 2
   while [ "$attempt" -lt "$max_attempts" ]; do
@@ -545,7 +545,7 @@ if should_deploy "portfolio-tracker" || should_deploy "all"; then
 fi
 
 if should_deploy "codex-router" || should_deploy "all"; then
-  health_ok "codex-router" "http://localhost:4100/health/liveliness" || failed=$((failed + 1))
+  health_ok "codex-router" "http://localhost:4100/health/liveliness" 30 || failed=$((failed + 1))
 fi
 
 # Pluggable module health checks (auto-discovered)
