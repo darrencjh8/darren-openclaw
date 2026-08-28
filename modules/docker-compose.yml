@@ -137,7 +137,7 @@ services:
 
     codex-router:
         build:
-            context: ../../codex-router
+            context: ./codex-router
             dockerfile: Dockerfile
         ports:
             - "127.0.0.1:4100:4100"

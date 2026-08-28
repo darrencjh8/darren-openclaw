@@ -65,7 +65,7 @@ jobs:
               with:
                   repository: darrencjh8/codex-router
                   token: ${{ secrets.SUBMODULE_PAT }}
-                  path: ../codex-router
+                  path: modules/codex-router
 
             - name: Detect changed modules
               id: changes
