@@ -37,6 +37,7 @@ if [[ ${#COMPONENTS[@]} -eq 0 ]]; then
   echo "  actual-api           Actual Budget API"
   echo "  image-gen            Image generation"
   echo "  ktmb-booking         KTMB train booking"
+  echo "  codex-router         LiteLLM proxy (ChatGPT/DeepSeek router)"
   echo ""
   echo "Example:"
   echo "  ./modules/deploy.sh --component portfolio-tracker --component hermes --non-interactive"
@@ -230,7 +231,19 @@ echo ""
 echo "--- Expense Tracker (.env) ---"
 ET_ENV="$ET_DIR/.env"
 if $GITHUB_MODE || check_file "$ET_ENV"; then
-  for v in DEEPSEEK_API_KEY ACTUAL_BUDGET_URL ACTUAL_BUDGET_PASSWORD \
+  # DEEPSEEK_API_KEY is only required when LLM_PROVIDER=deepseek (default)
+  if $GITHUB_MODE; then
+    et_llm_provider="${LLM_PROVIDER:-deepseek}"
+  else
+    et_llm_provider=$(env_get "LLM_PROVIDER" "$ET_ENV")
+    [ -z "$et_llm_provider" ] && et_llm_provider="deepseek"
+  fi
+  if [ "$et_llm_provider" = "deepseek" ]; then
+    check_var "DEEPSEEK_API_KEY" "$ET_ENV"
+  else
+    check_var_optional "DEEPSEEK_API_KEY" "$ET_ENV"
+  fi
+  for v in ACTUAL_BUDGET_URL ACTUAL_BUDGET_PASSWORD \
            ACTUAL_PRIMARY_BUDGET_FILE ACTUAL_SECONDARY_BUDGET_FILE \
            ACTUAL_PRIMARY_CURRENCY ACTUAL_SECONDARY_CURRENCY \
            NOTIFY_URL HERMES_WEBHOOK_SECRET \
@@ -239,6 +252,11 @@ if $GITHUB_MODE || check_file "$ET_ENV"; then
   done
   echo "  [Optional]"
   check_var_optional "BRAVE_SEARCH_API_KEY" "$ET_ENV"
+  check_var_optional "LLM_PROVIDER" "$ET_ENV"
+  check_var_optional "LLM_BASE_URL" "$ET_ENV"
+  check_var_optional "LLM_MODEL" "$ET_ENV"
+  check_var_optional "LLM_API_KEY" "$ET_ENV"
+  check_var_optional "LLM_REASONING_EFFORT" "$ET_ENV"
 fi
 fi
 
@@ -255,6 +273,20 @@ if $GITHUB_MODE || check_file "$PT_ENV"; then
 elif ! $GITHUB_MODE; then
   echo -e "  ${YELLOW}(portfolio-tracker/.env not found — cannot validate actual-api vars)${NC}"
 fi
+fi
+
+# ---- codex-router ----
+
+if should_deploy "codex-router" || should_deploy "all"; then
+echo ""
+echo "--- Codex Router ---"
+  check_var "CODEX_ROUTER_AUTH_PASSWORD" ""
+  echo "  [LLM Provider]"
+  check_var_optional "LLM_PROVIDER" ""
+  check_var_optional "LLM_BASE_URL" ""
+  check_var_optional "LLM_MODEL" ""
+  check_var_optional "LLM_API_KEY" ""
+  check_var_optional "LLM_REASONING_EFFORT" ""
 fi
 
 # ---- pluggable modules (auto-discover from modules/*/module.env) ----
@@ -510,6 +542,10 @@ fi
 
 if should_deploy "portfolio-tracker" || should_deploy "all"; then
   health_ok "portfolio-tracker" "http://localhost:8081/health" || failed=$((failed + 1))
+fi
+
+if should_deploy "codex-router" || should_deploy "all"; then
+  health_ok "codex-router" "http://localhost:4100/health/liveliness" || failed=$((failed + 1))
 fi
 
 # Pluggable module health checks (auto-discovered)
