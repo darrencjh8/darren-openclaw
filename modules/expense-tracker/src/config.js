@@ -3,7 +3,6 @@ import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
 
 const REQUIRED_ENV_VARS = [
-  "DEEPSEEK_API_KEY",
   "ACTUAL_BUDGET_URL",
   "ACTUAL_BUDGET_PASSWORD",
   "ACTUAL_PRIMARY_CURRENCY",
@@ -24,7 +23,24 @@ const REQUIRED_ENV_VARS = [
 
 export class Config {
   constructor(env = process.env) {
-    this.deepseekApiKey = env.DEEPSEEK_API_KEY;
+    // LLM provider configuration
+    this.llmProvider = env.LLM_PROVIDER || "deepseek";
+    this.llmBaseUrl =
+      env.LLM_BASE_URL ||
+      (this.llmProvider === "deepseek"
+        ? "https://api.deepseek.com/v1"
+        : "http://localhost:4100/v1");
+    this.llmModel =
+      env.LLM_MODEL ||
+      (this.llmProvider === "deepseek" ? "deepseek-v4-pro" : "gpt-5.6-luna-1");
+    this.llmApiKey = env.LLM_API_KEY || env.DEEPSEEK_API_KEY || "";
+    this.llmReasoningEffort =
+      env.LLM_REASONING_EFFORT ||
+      (this.llmProvider === "deepseek" ? "adaptive" : "low");
+
+    // Backward compat alias
+    this.deepseekApiKey = this.llmApiKey;
+
     this.actualBudgetUrl = env.ACTUAL_BUDGET_URL;
     this.actualBudgetPassword = env.ACTUAL_BUDGET_PASSWORD;
     this.primaryBudgetFile = env.ACTUAL_PRIMARY_BUDGET_FILE;
@@ -78,6 +94,14 @@ export class Config {
     }
     const config = new Config();
     const missing = REQUIRED_ENV_VARS.filter((k) => !process.env[k]);
+    // LLM API key is required when provider is deepseek (default) and
+    // no LLM_API_KEY override is set. For litellm_proxy the proxy handles auth.
+    if (
+      config.llmProvider === "deepseek" &&
+      !config.llmApiKey
+    ) {
+      missing.push("DEEPSEEK_API_KEY");
+    }
     if (missing.length > 0) {
       throw new Error(
         `Missing required environment variables: ${missing.join(", ")}`,

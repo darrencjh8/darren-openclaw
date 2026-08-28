@@ -12,16 +12,19 @@ import { getPhase1Prompt, getCategoryPickerPrompt } from "./prompts.js";
 import { extractEmailContent } from "./extractors.js";
 import { logger } from "./logging.js";
 
-export class DeepSeekClient {
+export class LLMClient {
     constructor(config) {
+        this._provider = config.llmProvider || "deepseek";
         this._client = new OpenAI({
-            apiKey: config.deepseekApiKey,
-            baseURL: "https://api.deepseek.com/v1",
+            apiKey: config.llmApiKey || config.deepseekApiKey,
+            baseURL: config.llmBaseUrl || "https://api.deepseek.com/v1",
         });
-        this._model = "deepseek-v4-pro";
+        this._model = config.llmModel || "deepseek-v4-pro";
+        this._reasoningEffort = config.llmReasoningEffort || "adaptive";
     }
 
     _mergeReasoning(data) {
+        if (this._provider !== "deepseek") return;
         for (const choice of data.choices || []) {
             const msg = choice.message || {};
             if (!msg.content && msg.reasoning_content) {
@@ -34,7 +37,7 @@ export class DeepSeekClient {
      * @param {Array} messages
      * @param {Array} [tools]
      * @param {string} [toolChoice]
-     * @param {{reasoning?: 'auto'|'disabled'|'adaptive'}} [opts]
+     * @param {{reasoning?: 'auto'|'disabled'|'adaptive'|'low'|'medium'|'high'}} [opts]
      */
     async chat(messages, tools, toolChoice, opts = {}) {
         const kwargs = {
@@ -46,17 +49,22 @@ export class DeepSeekClient {
             kwargs.tools = tools;
             kwargs.tool_choice = toolChoice || "auto";
         }
-        // DeepSeek: reasoning control via opts.reasoning
-        // 'disabled' = no thinking at all; 'adaptive' = let model decide;
-        // 'auto' (default) = adaptive when no explicit tool_choice
         const reasoning = opts.reasoning || "auto";
-        if (reasoning === "disabled") {
-            // No thinking — faster extraction for simple tasks
-        } else if (reasoning === "adaptive") {
-            kwargs.thinking = { type: "adaptive" };
-        } else if (!toolChoice || toolChoice === "auto") {
-            // Legacy default: adaptive for auto tool_choice
-            kwargs.thinking = { type: "adaptive" };
+        if (this._provider === "deepseek") {
+            // DeepSeek: reasoning control via thinking.type
+            // 'disabled' = no thinking; 'adaptive' = let model decide
+            if (reasoning === "disabled") {
+                // No thinking — faster extraction for simple tasks
+            } else if (reasoning === "adaptive") {
+                kwargs.thinking = { type: "adaptive" };
+            } else if (!toolChoice || toolChoice === "auto") {
+                kwargs.thinking = { type: "adaptive" };
+            }
+        } else {
+            // OpenAI / LiteLLM: reasoning via reasoning_effort
+            if (reasoning !== "disabled") {
+                kwargs.reasoning_effort = this._reasoningEffort;
+            }
         }
 
         const retryDelays = [1000, 2000, 4000];
@@ -83,6 +91,9 @@ export class DeepSeekClient {
         }
     }
 }
+
+// Backward compat alias
+export const DeepSeekClient = LLMClient;
 
 /**
  * Maps email sender domains to bank name prefixes used in Actual Budget
@@ -214,7 +225,7 @@ export const BILL_PAYMENT_SHAPE_RE =
 export class AgentOrchestrator {
     constructor(config, tools) {
         this._config = config;
-        this._llm = new DeepSeekClient(config);
+        this._llm = new LLMClient(config);
         this._tools = tools;
     }
 

@@ -7,69 +7,15 @@
  * or failure.
  */
 
-import OpenAI from "openai";
+import { LLMClient, DeepSeekClient } from "../orchestrator.js";
 import { extractEmailContent } from "../extractors.js";
 import { logger } from "../logging.js";
 import { STATEMENT_PROMPT } from "./prompts.js";
 
 const MAX_TOOL_ITERATIONS = 20;
 
-export class DeepSeekClient {
-  /**
-   * Thin wrapper around OpenAI-compatible DeepSeek API.
-   * @param {object} config - Config instance with .deepseekApiKey
-   * @param {string} [model="deepseek-v4-pro"]
-   */
-  constructor(config, model = "deepseek-v4-pro") {
-    this._client = new OpenAI({
-      apiKey: config.deepseekApiKey,
-      baseURL: "https://api.deepseek.com/v1",
-    });
-    this._model = model;
-  }
-
-  _mergeReasoning(data) {
-    for (const choice of data.choices || []) {
-      const msg = choice.message || {};
-      if (!msg.content && msg.reasoning_content) {
-        msg.content = msg.reasoning_content;
-      }
-    }
-  }
-
-  async chat(messages, tools) {
-    const kwargs = {
-      model: this._model,
-      messages,
-      temperature: 0.1,
-      thinking: { type: "adaptive" },
-    };
-    if (tools) {
-      kwargs.tools = tools;
-      kwargs.tool_choice = "auto";
-    }
-
-    const retryDelays = [1000, 2000, 4000];
-    for (let attempt = 0; attempt < 3; attempt++) {
-      try {
-        const response = await Promise.race([
-          this._client.chat.completions.create(kwargs),
-          new Promise((_, reject) =>
-            setTimeout(() => reject(new Error("timeout")), 60000),
-          ),
-        ]);
-        this._mergeReasoning(response);
-        return response;
-      } catch (e) {
-        if (attempt < 2) {
-          await new Promise((r) => setTimeout(r, retryDelays[attempt]));
-        } else {
-          throw e;
-        }
-      }
-    }
-  }
-}
+// Re-export for backward compat with tests that import from here
+export { DeepSeekClient };
 
 export function extractPasswordFromFacts(facts) {
   if (!Array.isArray(facts)) return null;
@@ -89,7 +35,7 @@ export class StatementProcessor {
    */
   constructor(config, tools) {
     this._config = config;
-    this._llm = new DeepSeekClient(config, "deepseek-v4-pro");
+    this._llm = new LLMClient(config);
     this._tools = tools;
   }
 

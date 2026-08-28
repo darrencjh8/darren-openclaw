@@ -8,7 +8,12 @@ services:
         volumes:
             - /home/runner/data/expense-tracker/data:/app/data
         environment:
-            - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
+            - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}
+            - LLM_PROVIDER=${LLM_PROVIDER:-deepseek}
+            - LLM_BASE_URL=${LLM_BASE_URL:-}
+            - LLM_MODEL=${LLM_MODEL:-}
+            - LLM_API_KEY=${LLM_API_KEY:-}
+            - LLM_REASONING_EFFORT=${LLM_REASONING_EFFORT:-}
             - ACTUAL_BUDGET_URL=http://actual-api:3000
             - ACTUAL_BUDGET_PASSWORD=${ACTUAL_BUDGET_PASSWORD}
             - ACTUAL_PRIMARY_BUDGET_FILE=${ACTUAL_PRIMARY_BUDGET_FILE}
@@ -129,6 +134,27 @@ services:
             - KTMB_BOT_PASSPORT=${KTMB_BOT_PASSPORT:-}
             - KTMB_BOT_ALLOWED_CHAT_ID=${KTMB_BOT_ALLOWED_CHAT_ID:-}
         restart: unless-stopped
+
+    codex-router:
+        build:
+            context: ../../codex-router
+            dockerfile: Dockerfile
+        ports:
+            - "127.0.0.1:4100:4100"
+        environment:
+            - CODEX_ROUTER_AUTH_PASSWORD=${CODEX_ROUTER_AUTH_PASSWORD}
+        restart: unless-stopped
+        mem_limit: 1g
+        healthcheck:
+            test:
+                [
+                    "CMD-SHELL",
+                    "curl -fsS http://127.0.0.1:4100/health/liveliness || exit 1",
+                ]
+            interval: 30s
+            timeout: 10s
+            retries: 3
+            start_period: 60s
 
     hermes:
         build:

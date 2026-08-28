@@ -2,7 +2,7 @@
  * Mock-based tests for AgentOrchestrator 3-phase pipeline.
  */
 import { describe, it, expect, vi } from "vitest";
-import { AgentOrchestrator, DeepSeekClient, DOMAIN_BANK_MAP, bankFromSender } from "../src/orchestrator.js";
+import { AgentOrchestrator, LLMClient, DeepSeekClient, DOMAIN_BANK_MAP, bankFromSender } from "../src/orchestrator.js";
 import { Config } from "../src/config.js";
 import { dispatchEmail } from "../src/classify.js";
 

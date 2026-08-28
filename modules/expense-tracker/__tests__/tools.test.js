@@ -49,6 +49,11 @@ const { ToolRegistry } = await import("../src/tools.js");
 function mockConfig() {
     return {
         deepseekApiKey: "sk-test",
+        llmProvider: "deepseek",
+        llmApiKey: "sk-test",
+        llmBaseUrl: "https://api.deepseek.com/v1",
+        llmModel: "deepseek-v4-pro",
+        llmReasoningEffort: "adaptive",
         actualBudgetUrl: "http://actual-api:3000",
         actualBudgetPassword: "pw",
         primaryBudgetFile: "My Budget",

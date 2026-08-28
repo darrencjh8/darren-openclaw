@@ -32,6 +32,7 @@ on:
                     - actual-api
                     - image-gen
                     - ktmb-booking
+                    - codex-router
 
 concurrency:
     group: production-deploy
@@ -60,6 +61,12 @@ jobs:
                   submodules: recursive
                   token: ${{ secrets.SUBMODULE_PAT }}
 
+            - uses: actions/checkout@v4
+              with:
+                  repository: darrencjh8/codex-router
+                  token: ${{ secrets.SUBMODULE_PAT }}
+                  path: ../codex-router
+
             - name: Detect changed modules
               id: changes
               env:
@@ -86,6 +93,7 @@ jobs:
                   echo "$CHANGED" | grep -q "^modules/image-gen/"      && COMPONENTS="$COMPONENTS image-gen"
                   echo "$CHANGED" | grep -q "^gateway/"                && COMPONENTS="$COMPONENTS hermes"
                   echo "$CHANGED" | grep -q "^\.github/"               && COMPONENTS="$COMPONENTS hermes"
+                  echo "$CHANGED" | grep -q "^modules/docker-compose"  && COMPONENTS="$COMPONENTS codex-router"
                   if [ -z "$COMPONENTS" ] || echo "$CHANGED" | grep -qE "^(Dockerfile|deploy\.sh)"; then
                       COMPONENTS="all"
                   fi
@@ -127,6 +135,12 @@ jobs:
                   KTMB_BOT_PASSPORT: ${{ secrets.KTMB_BOT_PASSPORT }}
                   KTMB_BOT_ALLOWED_CHAT_ID: ${{ secrets.KTMB_BOT_ALLOWED_CHAT_ID }}
                   BRAVE_SEARCH_API_KEY: ${{ secrets.BRAVE_SEARCH_API_KEY }}
+                  CODEX_ROUTER_AUTH_PASSWORD: ${{ secrets.CODEX_ROUTER_AUTH_PASSWORD }}
+                  LLM_PROVIDER: ${{ vars.LLM_PROVIDER }}
+                  LLM_BASE_URL: ${{ vars.LLM_BASE_URL }}
+                  LLM_MODEL: ${{ vars.LLM_MODEL }}
+                  LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+                  LLM_REASONING_EFFORT: ${{ vars.LLM_REASONING_EFFORT }}
                   FIRECRAWL_API_KEY: ${{ secrets.FIRECRAWL_API_KEY }}
                   NOTION_API_KEY: ${{ secrets.NOTION_API_KEY }}
                   POLLINATIONS_API_KEY: ${{ secrets.POLLINATIONS_API_KEY }}

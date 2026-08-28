@@ -14,6 +14,11 @@ import { describe, it, expect, vi } from "vitest";
 function makeConfig(overrides = {}) {
   return {
     deepseekApiKey: "sk-test",
+    llmProvider: "deepseek",
+    llmApiKey: "sk-test",
+    llmBaseUrl: "https://api.deepseek.com/v1",
+    llmModel: "deepseek-v4-pro",
+    llmReasoningEffort: "adaptive",
     primaryCurrency: "SGD",
     secondaryCurrency: "MYR",
     primaryBudgetFile: "primary-budget-id",

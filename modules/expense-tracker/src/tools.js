@@ -9,7 +9,7 @@ import Database from "better-sqlite3";
 import { simpleParser } from "mailparser";
 import { DedupJournal } from "./dedup.js";
 import { extractPdfFromBuffer, extractEmailContent } from "./extractors.js";
-import { DeepSeekClient } from "./orchestrator.js";
+import { LLMClient } from "./orchestrator.js";
 import { logger, getLogger } from "./logging.js";
 
 export class NotificationCooldown {
@@ -1518,7 +1518,7 @@ export class ToolRegistry {
       'Respond with a JSON object: { "payee": "Chosen Payee Name" }',
     ].join("\n");
 
-    const client = new DeepSeekClient(this._config);
+    const client = new LLMClient(this._config);
     const response = await client.chat(
       [{ role: "user", content: prompt }],
       undefined,
