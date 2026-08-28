@@ -201,6 +201,10 @@ echo "$deploy_src" | grep -q 'health_ok' \
     && ok "health_ok function exists" \
     || nope "health_ok function" "not found"
 
+echo "$deploy_src" | grep -q 'health_ok "codex-router" "http://localhost:4100/health/liveliness" 30' \
+    && ok "codex-router gets extended startup health budget" \
+    || nope "codex-router startup health budget" "expected 30 attempts"
+
 echo "$deploy_src" | grep -q 'check_var' \
     && ok "check_var function exists" \
     || nope "check_var function" "not found"
