@@ -61,6 +61,12 @@ jobs:
                   submodules: recursive
                   token: ${{ secrets.SUBMODULE_PAT }}
 
+            - uses: actions/checkout@v4
+              with:
+                  repository: darrencjh8/codex-router
+                  token: ${{ secrets.SUBMODULE_PAT }}
+                  path: ../codex-router
+
             - name: Detect changed modules
               id: changes
               env:
