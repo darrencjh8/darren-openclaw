@@ -140,7 +140,7 @@ services:
             context: ./codex-router
             dockerfile: Dockerfile
         ports:
-            - "127.0.0.1:4100:4100"
+            - "0.0.0.0:4100:4100"
         environment:
             - CODEX_ROUTER_AUTH_PASSWORD=${CODEX_ROUTER_AUTH_PASSWORD}
             - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}
