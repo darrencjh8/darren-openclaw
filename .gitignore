@@ -1,3 +1,6 @@
+# Agent state
+.agents/dev-loop-state.md
+
 # Environment
 .env
 .env.*
