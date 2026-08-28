@@ -26,9 +26,10 @@ describe("Config", () => {
         expect(config.primaryBudgetFile).toBe("my-budget");
     });
 
-    it("throws on missing required variables", () => {
-        // Config pulls from env directly — missing vars are undefined, not ""
-        expect(new Config({}).deepseekApiKey).toBeUndefined();
+    it("returns empty API key when no key env vars are set", () => {
+        // llmApiKey falls back to DEEPSEEK_API_KEY, then to ""
+        expect(new Config({}).deepseekApiKey).toBe("");
+        expect(new Config({}).llmApiKey).toBe("");
     });
 
     it("uses defaults for optional variables", () => {

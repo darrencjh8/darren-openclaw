@@ -40,7 +40,11 @@ beforeEach(() => {
 // ─────────────────────────────────────────────────────────────────────────
 
 describe("classifyEmail", () => {
-  const apiKey = "sk-test-classify";
+  const config = {
+    llmApiKey: "sk-test-classify",
+    llmBaseUrl: "https://api.deepseek.com/v1",
+    llmModel: "deepseek-v4-pro",
+  };
 
   it("classifies a single-transaction email as 'transaction'", async () => {
     mockCreate.mockResolvedValueOnce({
@@ -51,17 +55,17 @@ describe("classifyEmail", () => {
       "From: alerts@example.com\nSubject: Transaction Alert\n\nSGD 12.80 at Toast Box",
       "Transaction Alert",
       "alerts@example.com",
-      apiKey,
+      config,
     );
 
     expect(result).toBe("transaction");
     expect(OpenAI).toHaveBeenCalledWith({
-      apiKey,
-      baseURL: "https://api.deepseek.com/v1",
+      apiKey: config.llmApiKey,
+      baseURL: config.llmBaseUrl,
     });
     expect(mockCreate).toHaveBeenCalledOnce();
     const callArgs = mockCreate.mock.calls[0][0];
-    expect(callArgs.model).toBe("deepseek-v4-pro");
+    expect(callArgs.model).toBe(config.llmModel);
     expect(callArgs.temperature).toBe(0);
     expect(callArgs.max_tokens).toBe(5);
     expect(callArgs.messages[0].content).toBe(CLASSIFICATION_PROMPT);
@@ -76,7 +80,7 @@ describe("classifyEmail", () => {
       "Subject: Your Monthly eStatement\nFrom: bank@example.com\n\nYour statement for May 2026 is ready",
       "Your Monthly eStatement",
       "bank@example.com",
-      apiKey,
+      config,
     );
 
     expect(result).toBe("statement");
@@ -91,7 +95,7 @@ describe("classifyEmail", () => {
       "Subject: IBKR Trade Confirmation\nFrom: ibkr@test.com\n\nYour IBKR trade confirmation for AAPL",
       "IBKR Trade Confirmation",
       "ibkr@test.com",
-      apiKey,
+      config,
     );
 
     expect(result).toBe("skip");
@@ -104,7 +108,7 @@ describe("classifyEmail", () => {
       "Some email content",
       "Test Subject",
       "test@example.com",
-      apiKey,
+      config,
     );
 
     expect(result).toBe("transaction");
@@ -120,7 +124,7 @@ describe("classifyEmail", () => {
       "Timeout test email",
       "Test",
       "test@example.com",
-      apiKey,
+      config,
     );
 
     expect(result).toBe("transaction");
@@ -131,7 +135,7 @@ describe("classifyEmail", () => {
       choices: [{ message: { content: "transaction" } }],
     });
 
-    const result = await classifyEmail("", "", "", apiKey);
+    const result = await classifyEmail("", "", "", config);
 
     expect(result).toBe("transaction");
     const userMessage = mockCreate.mock.calls[0][0].messages[1].content;
@@ -152,7 +156,7 @@ describe("classifyEmail", () => {
       buf,
       "IBKR Activity Flex",
       "ibkr@test.com",
-      apiKey,
+      config,
     );
 
     expect(result).toBe("skip");
@@ -167,7 +171,7 @@ describe("classifyEmail", () => {
       "Statement email",
       "Statement",
       "bank@test.com",
-      apiKey,
+      config,
     );
 
     expect(result).toBe("statement");
@@ -182,7 +186,7 @@ describe("classifyEmail", () => {
       "Some email",
       "Test",
       "test@example.com",
-      apiKey,
+      config,
     );
 
     expect(result).toBe("transaction");
@@ -194,7 +198,7 @@ describe("classifyEmail", () => {
     });
 
     const longBody = "A".repeat(5000);
-    await classifyEmail(longBody, "Long email", "test@example.com", apiKey);
+    await classifyEmail(longBody, "Long email", "test@example.com", config);
 
     const userMsgContent = mockCreate.mock.calls[0][0].messages[1].content;
     // The body portion after headers should not exceed 2000 chars
@@ -211,7 +215,7 @@ describe("classifyEmail", () => {
       null,
       "Subject",
       "sender@test.com",
-      apiKey,
+      config,
     );
 
     expect(result).toBe("transaction");
@@ -229,7 +233,7 @@ describe("classifyEmail", () => {
       undefined,
       "Subj",
       "from@test.com",
-      apiKey,
+      config,
     );
 
     expect(result).toBe("skip");
@@ -248,7 +252,7 @@ describe("classifyEmail", () => {
       "raw fallback content",
       "Subject",
       "test@example.com",
-      apiKey,
+      config,
     );
 
     expect(result).toBe("transaction");
@@ -265,7 +269,7 @@ describe("classifyEmail", () => {
       "body text",
       "🔥 Special! <script>alert('xss')</script>",
       '"Test User" <test+tag@example.com>',
-      apiKey,
+      config,
     );
 
     expect(result).toBe("transaction");
@@ -285,7 +289,7 @@ describe("classifyEmail", () => {
       "short body",
       longSubject,
       "test@example.com",
-      apiKey,
+      config,
     );
 
     expect(result).toBe("transaction");

@@ -93,7 +93,7 @@ async function main() {
             result = await dispatchEmail(
                 msg,
                 (raw, subject, sender) =>
-                    classifyEmail(raw, subject, sender, cfg.deepseekApiKey),
+                    classifyEmail(raw, subject, sender, cfg),
                 orchestrator,
                 imapHandler,
                 statementProcessor,

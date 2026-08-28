@@ -22,16 +22,17 @@ portfolio, dividend, ISIN, ticker, shares, securities, equity, options, futures,
 DO NOT explain. Only respond with "statement", "transaction", or "skip".`;
 
 /**
- * Classify an email as "statement" | "transaction" | "skip" using DeepSeek.
+ * Classify an email as "statement" | "transaction" | "skip" using the
+ * configured LLM provider.
  * Falls back to "transaction" on any error so the orchestrator can still attempt processing.
  *
  * @param {string|Buffer} rawEmail - raw email source
  * @param {string} subject - email subject
  * @param {string} sender - email sender
- * @param {string} apiKey - DeepSeek API key
+ * @param {object} config - Config instance with llmApiKey, llmBaseUrl, llmModel
  * @returns {Promise<"statement"|"transaction"|"skip">}
  */
-export async function classifyEmail(rawEmail, subject, sender, apiKey) {
+export async function classifyEmail(rawEmail, subject, sender, config) {
     try {
         const raw = Buffer.isBuffer(rawEmail)
             ? rawEmail
@@ -50,13 +51,13 @@ export async function classifyEmail(rawEmail, subject, sender, apiKey) {
         ].join("\n");
 
         const client = new OpenAI({
-            apiKey: apiKey || "",
-            baseURL: "https://api.deepseek.com/v1",
+            apiKey: config.llmApiKey || config.deepseekApiKey || "",
+            baseURL: config.llmBaseUrl || "https://api.deepseek.com/v1",
         });
 
         const response = await Promise.race([
             client.chat.completions.create({
-                model: "deepseek-v4-pro",
+                model: config.llmModel || "deepseek-v4-pro",
                 messages: [
                     { role: "system", content: CLASSIFICATION_PROMPT },
                     { role: "user", content: text },

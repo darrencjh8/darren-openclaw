@@ -22,6 +22,11 @@ import { extractEmailContent } from "../../src/extractors.js";
 function makeConfig(overrides = {}) {
   return {
     deepseekApiKey: "sk-test",
+    llmProvider: "deepseek",
+    llmApiKey: "sk-test",
+    llmBaseUrl: "https://api.deepseek.com/v1",
+    llmModel: "deepseek-v4-pro",
+    llmReasoningEffort: "adaptive",
     systemPrompt: "You are a test agent.",
     actualBudgetFile: "test-budget",
     openclawGatewayUrl: "http://openclaw:18800",

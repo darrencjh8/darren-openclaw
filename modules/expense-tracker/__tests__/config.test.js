@@ -18,6 +18,11 @@ const originalEnv = { ...process.env };
 function clearRequiredVars() {
     const required = [
         "DEEPSEEK_API_KEY",
+        "LLM_PROVIDER",
+        "LLM_BASE_URL",
+        "LLM_MODEL",
+        "LLM_API_KEY",
+        "LLM_REASONING_EFFORT",
         "ACTUAL_BUDGET_URL",
         "ACTUAL_BUDGET_PASSWORD",
         "ACTUAL_PRIMARY_CURRENCY",

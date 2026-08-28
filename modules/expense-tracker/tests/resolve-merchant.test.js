@@ -21,13 +21,14 @@ vi.mock("../src/dedup.js", () => ({
   }),
 }));
 
-// Mock DeepSeekClient used by _classify_merchant for web-search resolution
-const mockChat = vi.fn();
-vi.mock("../src/orchestrator.js", () => ({
-  DeepSeekClient: vi.fn(function () {
+// Mock LLMClient used by _classify_merchant for web-search resolution
+const { mockChat } = vi.hoisted(() => ({ mockChat: vi.fn() }));
+vi.mock("../src/orchestrator.js", () => {
+  const Mock = vi.fn(function () {
     this.chat = mockChat;
-  }),
-}));
+  });
+  return { LLMClient: Mock, DeepSeekClient: Mock };
+});
 
 // ── Imports ──────────────────────────────────────────────────────────────
 
