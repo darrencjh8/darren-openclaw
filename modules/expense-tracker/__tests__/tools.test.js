@@ -39,6 +39,7 @@ vi.mock("../src/logging.js", () => ({
         error: vi.fn(),
     })),
     setLogLevel: vi.fn(),
+    redactSensitive: (value) => value,
 }));
 
 const mockFetch = vi.fn();

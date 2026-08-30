@@ -19,6 +19,7 @@ import {
   unlinkSync,
 } from "fs";
 import { dirname } from "path";
+import { pipeline, env as transformersEnv } from "@xenova/transformers";
 
 const MEMORY_TEMPLATE = `# Long-Term Memory
 
@@ -87,11 +88,17 @@ export class MemoryStore {
 
   async search(query, topK = 5) {
     if (!this._facts.length) return [];
+    // Exact/substring match first — deterministic for known entities (e.g.
+    // "Grab" must resolve to its own fact, not a semantically-near "Amaze
+    // Grab"). Semantic search only runs when substring finds nothing, so it
+    // acts as a fuzzy fallback for unknown/near-miss merchants.
+    const sub = this._substringSearch(query, topK);
+    if (sub.length > 0) return sub;
     try {
-      return await this._semanticSearch(query, topK);
-    } catch {
-      return this._substringSearch(query, topK);
-    }
+      const sem = await this._semanticSearch(query, topK);
+      if (sem.length > 0) return sem;
+    } catch {}
+    return [];
   }
 
   /**
@@ -564,7 +571,16 @@ export class MemoryStore {
   _loadModel() {
     this._modelPromise = (async () => {
       try {
-        const { pipeline } = await import("@xenova/transformers");
+        // Use the baked model cache when running in the container (Docker
+        // sets TRANSFORMERS_CACHE=/app/.models and pre-downloads the model);
+        // otherwise leave transformers' default writable cache so dev/CI do
+        // not fail with EACCES on a non-existent /app path.
+        if (transformersEnv) {
+          if (process.env.TRANSFORMERS_CACHE) {
+            transformersEnv.cacheDir = process.env.TRANSFORMERS_CACHE;
+          }
+          transformersEnv.allowRemoteModels = true;
+        }
         this._model = await pipeline(
           "feature-extraction",
           "Xenova/all-MiniLM-L6-v2",

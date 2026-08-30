@@ -529,6 +529,22 @@ describe("GET /transactions/:id", () => {
         });
     });
 
+    test("returns notes in single transaction by ID (notes transport)", async () => {
+        actual.getTransaction.mockResolvedValue({
+            id: "txn-43",
+            notes: "Merchant: WWW.TADA.G* N01A04E712\nStatement: DBS Yuu | 2026-06-01..2026-06-30\n\nuser note",
+        });
+        const handler = findHandler("get", "/transactions/:id");
+        const res = mockRes();
+
+        await handler(mockReq({ params: { id: "txn-43" } }), res);
+
+        expect(res.json).toHaveBeenCalledWith({
+            id: "txn-43",
+            notes: "Merchant: WWW.TADA.G* N01A04E712\nStatement: DBS Yuu | 2026-06-01..2026-06-30\n\nuser note",
+        });
+    });
+
     test("returns 404 when transaction not found", async () => {
         actual.getTransaction.mockResolvedValue(null);
         const handler = findHandler("get", "/transactions/:id");

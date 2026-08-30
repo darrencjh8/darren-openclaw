@@ -109,7 +109,7 @@ describe("WASM Embeddings Parity (T034-T035)", () => {
         try {
             unlinkSync(path);
         } catch {}
-    });
+    }, 120000);
 
     it("T035: 500-fact search under 500ms (semantic) or 100ms (substring)", async () => {
         const bigFacts = Array.from(
@@ -144,5 +144,5 @@ describe("WASM Embeddings Parity (T034-T035)", () => {
         try {
             unlinkSync(path);
         } catch {}
-    });
+    }, 120000);
 });

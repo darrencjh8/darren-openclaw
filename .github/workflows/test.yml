@@ -7,6 +7,7 @@ on:
         secrets:
             ONEDRIVE_CLIENT_ID:
             SUBMODULE_PAT:
+            FRIDAY_PAT:
 
 jobs:
     expense-tracker:
@@ -14,12 +15,27 @@ jobs:
         defaults:
             run:
                 working-directory: modules/expense-tracker
+        env:
+            GH_TOKEN: ${{ secrets.FRIDAY_PAT }}
         steps:
             - uses: actions/checkout@v4
             - uses: actions/setup-node@v4
               with:
                   node-version: 22
             - run: sudo apt-get update -qq && sudo apt-get install -y -qq poppler-utils qpdf
+            - run: npm ci
+            - run: npm test
+
+    actual-api:
+        runs-on: ubuntu-latest
+        defaults:
+            run:
+                working-directory: modules/actual-api
+        steps:
+            - uses: actions/checkout@v4
+            - uses: actions/setup-node@v4
+              with:
+                  node-version: 22
             - run: npm ci
             - run: npm test
 

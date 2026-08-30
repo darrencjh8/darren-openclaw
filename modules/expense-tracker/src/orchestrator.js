@@ -10,6 +10,7 @@
 import OpenAI from "openai";
 import { getPhase1Prompt, getCategoryPickerPrompt } from "./prompts.js";
 import { extractEmailContent } from "./extractors.js";
+import { composeNotes } from "./transaction-notes.js";
 import { logger } from "./logging.js";
 
 export class LLMClient {
@@ -1147,9 +1148,12 @@ export class AgentOrchestrator {
             } catch {}
 
             // Tier 1: Memory lookup (payee_name → category, matches auto-learn key)
+            // Query by payee name only (not "payee + ' category'") so substring
+            // search can reach facts like "Maxis Fibre maps to Malaysia Utilities
+            // category" (the "X category" suffix is not contiguous in the fact).
             try {
                 const catMem = await this._tools.executeTool("search_memory", {
-                    query: output.payee_name + " category",
+                    query: output.payee_name,
                 });
                 for (const r of catMem?.results || []) {
                     const m = (r.text || "").match(/maps to (.+?) category/i);
@@ -1306,7 +1310,10 @@ export class AgentOrchestrator {
                     imported_description: payeeName,
                     category_id: llmOutput.category_id || undefined,
                     payee_id: llmOutput.payee_id || undefined,
-                    notes: llmOutput.notes || "",
+                    notes: composeNotes({
+                        notes: llmOutput.notes || "",
+                        merchantDescriptor: llmOutput.raw_merchant_descriptor || "",
+                    }),
                     budget_id: llmOutput.budget_id || "",
                 });
             } catch (e) {

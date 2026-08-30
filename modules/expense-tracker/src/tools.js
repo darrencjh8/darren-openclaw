@@ -10,7 +10,8 @@ import { simpleParser } from "mailparser";
 import { DedupJournal } from "./dedup.js";
 import { extractPdfFromBuffer, extractEmailContent } from "./extractors.js";
 import { LLMClient } from "./orchestrator.js";
-import { logger, getLogger } from "./logging.js";
+import { composeNotes } from "./transaction-notes.js";
+import { logger, getLogger, redactSensitive } from "./logging.js";
 
 export class NotificationCooldown {
   COOLDOWN_SECONDS = 3600;
@@ -838,11 +839,11 @@ export class ToolRegistry {
     logger.info({
       event: "tool_exec",
       tool: name,
-      args: JSON.stringify(args).slice(0, 200),
+      args: JSON.stringify(redactSensitive(args)).slice(0, 200),
       result:
         typeof result === "string"
           ? result.slice(0, 200)
-          : JSON.stringify(result).slice(0, 200),
+          : JSON.stringify(redactSensitive(result)).slice(0, 200),
     });
     return result;
   }
@@ -1178,11 +1179,24 @@ export class ToolRegistry {
 
     const results = [];
     for (const id of ab_transaction_ids) {
-      const body = {};
-      if (statement_ref) body.notes = statement_ref;
       try {
+        // 1. Fetch current notes by immutable ID (fresh GET on every retry).
+        const txn = await this._get(
+          `/transactions/${encodeURIComponent(id)}`,
+          budget_id,
+        );
+        const currentNotes =
+          txn && !txn.error && txn.notes ? String(txn.notes) : "";
+        // 2. Compose canonical notes, preserving any existing Merchant line
+        //    and user notes (a GET/compose failure below does not clear).
+        const composed = composeNotes({
+          notes: currentNotes,
+          statementRef: statement_ref,
+        });
+        // 3. Clear with the complete composed notes.
+        const body = composed ? { notes: composed } : {};
         const r = await this._post(
-          `/transactions/${id}/clear`,
+          `/transactions/${encodeURIComponent(id)}/clear`,
           body,
           budget_id,
         );

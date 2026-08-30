@@ -45,6 +45,7 @@ jobs:
         secrets:
             ONEDRIVE_CLIENT_ID: ${{ secrets.ONEDRIVE_CLIENT_ID }}
             SUBMODULE_PAT: ${{ secrets.SUBMODULE_PAT }}
+            FRIDAY_PAT: ${{ secrets.FRIDAY_PAT }}
 
     deploy:
         if: always() && needs.test.result != 'failure'

@@ -29,3 +29,47 @@ export function setLogLevel(level) {
 }
 
 export { logger };
+
+/**
+ * Case-insensitive keys that must never appear in serialized logs.
+ */
+const SENSITIVE_KEYS = new Set([
+    "notes",
+    "statement_ref",
+    "raw_text",
+    "raw_description",
+    "raw_merchant_descriptor",
+    "pdf_bytes_b64",
+    "password",
+    "authorization",
+    "token",
+    "secret",
+    "api_key",
+]);
+
+const REDACTED = "[REDACTED]";
+
+function isSensitiveKey(key) {
+    return SENSITIVE_KEYS.has(String(key).toLowerCase());
+}
+
+/**
+ * Recursively redact sensitive fields from a value before serialization.
+ * Returns a new structure; the input is never mutated.
+ *
+ * @param {unknown} value - args, result, or nested structure to redact
+ * @returns {unknown} a deep copy with sensitive object keys replaced by `[REDACTED]`
+ */
+export function redactSensitive(value) {
+    if (Array.isArray(value)) {
+        return value.map((item) => redactSensitive(item));
+    }
+    if (value !== null && typeof value === "object") {
+        const out = {};
+        for (const [key, val] of Object.entries(value)) {
+            out[key] = isSensitiveKey(key) ? REDACTED : redactSensitive(val);
+        }
+        return out;
+    }
+    return value;
+}
