@@ -1,6 +1,6 @@
 model:
     provider: custom
-    default: gpt-5.6-terra-3
+    default: gpt-5.6-terra
     base_url: http://codex-router:4100/v1
     api_key: local
 

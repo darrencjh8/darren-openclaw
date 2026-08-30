@@ -5,6 +5,7 @@ on:
         branches: [main]
         paths-ignore:
             - ".gitmodules"
+
     workflow_dispatch:
         inputs:
             ref:
@@ -75,6 +76,7 @@ jobs:
                   FORCE_ALL: ${{ inputs.force_all || 'false' }}
                   DEPLOY_COMPONENTS_OVERRIDE: ${{ inputs.components || '' }}
               run: |
+
                   # Workflow dispatch with explicit components: use them directly
                   if [ -n "${DEPLOY_COMPONENTS_OVERRIDE:-}" ]; then
                       echo "components=${DEPLOY_COMPONENTS_OVERRIDE}" >> "$GITHUB_OUTPUT"
@@ -184,8 +186,16 @@ jobs:
               run: |
                   if [ "${DEPLOY_COMPONENTS}" = "all" ]; then
                       bash ./modules/deploy.sh --component all --non-interactive --skip-build
-                  else
+                  else:
                       ARGS=""
                       for c in ${DEPLOY_COMPONENTS}; do ARGS="$ARGS --component $c"; done
                       bash ./modules/deploy.sh $ARGS --non-interactive --skip-build
                   fi
+
+            - name: Record deployed Codex Router revision
+              if: success() && (steps.changes.outputs.components == 'all' || steps.changes.outputs.components == 'codex-router')
+              env:
+                  GH_TOKEN: ${{ secrets.FRIDAY_PAT }}
+              run: >-
+                  gh variable set CODEX_ROUTER_DEPLOYED_SHA --repo darrencjh8/darren-openclaw
+                  --body "$(git -C modules/codex-router rev-parse HEAD)"

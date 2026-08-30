@@ -1,0 +1,30 @@
+name: Sync Codex Router
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+jobs:
+  deploy-if-updated:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Compare router main with deployed revision
+        id: router
+        env:
+          GH_TOKEN: ${{ secrets.FRIDAY_PAT }}
+        run: |
+          remote_sha="$(gh api repos/darrencjh8/codex-router/commits/main --jq .sha)"
+          deployed_sha="$(gh variable get CODEX_ROUTER_DEPLOYED_SHA --repo darrencjh8/darren-openclaw 2>/dev/null || true)"
+          echo "remote_sha=$remote_sha" >> "$GITHUB_OUTPUT"
+          if [ "$remote_sha" != "$deployed_sha" ]; then
+            echo "deploy=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Dispatch router-only deployment
+        if: steps.router.outputs.deploy == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.FRIDAY_PAT }}
+        run: >-
+          gh workflow run deploy.yml --repo darrencjh8/darren-openclaw
+          --ref main -f components=codex-router
