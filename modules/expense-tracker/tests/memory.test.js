@@ -16,7 +16,7 @@ import { tmpdir } from "os";
 // Mock @xenova/transformers before importing MemoryStore
 vi.mock("@xenova/transformers", () => {
   // Deterministic char-bigram embeddings for testing
-  function bigramEmbed(text, dim = 8) {
+  function bigramEmbed(text, dim = 256) {
     const emb = new Float32Array(dim);
     for (let i = 0; i < text.length - 1; i++) {
       const bigram = text.charCodeAt(i) * 256 + text.charCodeAt(i + 1);
@@ -28,8 +28,9 @@ vi.mock("@xenova/transformers", () => {
   return {
     pipeline: vi.fn().mockResolvedValue(async (text) => ({
       data: bigramEmbed(text),
-      dims: [1, 1, 8],
+      dims: [1, 1, 256],
     })),
+    env: {},
   };
 });
 
@@ -216,8 +217,9 @@ describe("MemoryStore", () => {
         return;
       }
 
-      // Populate cache
-      await store.search("debit card");
+      // Populate cache (non-substring query forces the semantic path, which
+      // is what populates _embeddingCache)
+      await store.search("banking");
       const factsBefore = store.listFacts();
       expect(store._embeddingCache.size).toBeGreaterThan(0);
 
@@ -237,8 +239,8 @@ describe("MemoryStore", () => {
       const loaded = await store.ready();
       if (!loaded) return;
 
-      // Populate cache
-      await store.search("food");
+      // Populate cache (non-substring query forces the semantic path)
+      await store.search("dining");
       expect(store._embeddingCache.size).toBeGreaterThan(0);
 
       // Find the Toast Box fact
@@ -256,8 +258,9 @@ describe("MemoryStore", () => {
       expect(newFact).toContain("Coffee");
       expect(store._embeddingCache.has(newFact)).toBe(false); // not yet cached
 
-      // After a search, new fact should be cached
-      await store.search("coffee");
+      // After a search, new fact should be cached (non-substring query forces
+      // the semantic path that populates _embeddingCache)
+      await store.search("caffeine");
       expect(store._embeddingCache.has(newFact)).toBe(true);
     });
 
@@ -265,8 +268,8 @@ describe("MemoryStore", () => {
       const store = new MemoryStore(tempMemoryPath);
       await store.ready();
 
-      // Populate cache
-      await store.search("transport");
+      // Populate cache (non-substring query forces the semantic path)
+      await store.search("transit");
       const cacheSizeBefore = store._embeddingCache.size;
       expect(cacheSizeBefore).toBeGreaterThan(0);
 
@@ -491,9 +494,11 @@ describe("MemoryStore", () => {
     it("returns compacted: true when facts exceed maxFacts", async () => {
       // Use low maxFacts=5, compactTo=3 to trigger compaction easily
       const store = new MemoryStore(emptyMemoryPath, 5, 3);
-      // Add 6 facts — 6 > maxFacts=5 triggers compaction
-      for (let i = 1; i <= 5; i++) {
-        const r = await store.add(`fact number ${i}`);
+      // Add 6 distinct facts — 6 > maxFacts=5 triggers compaction. Facts must
+      // be distinct or semantic dedup would collapse the near-identical padding.
+      const words = ["apple", "banana", "cherry", "dragonfruit", "elderberry", "fig"];
+      for (let i = 0; i < 5; i++) {
+        const r = await store.add(words[i]);
         expect(r).toEqual({
           added: true,
           skipped: false,
@@ -501,7 +506,7 @@ describe("MemoryStore", () => {
         });
       }
       // 6th fact exceeds maxFacts → compacted: true
-      const r6 = await store.add("fact number 6");
+      const r6 = await store.add(words[5]);
       expect(r6).toEqual({
         added: true,
         skipped: false,
@@ -548,8 +553,9 @@ describe("MemoryStore", () => {
         ].join("\n") + "\n",
       );
       store.reload();
-      for (let i = 1; i <= 8; i++) {
-        await store.add(`padding fact ${i}`);
+      const padding = ["kite", "lamp", "mango", "noodle", "orange", "piano", "quilt", "rocket"];
+      for (let i = 0; i < 8; i++) {
+        await store.add(padding[i]);
       }
       const facts = store.listFacts();
       expect(facts).toContain("Kopitiam merchant maps to Coffee payee");
