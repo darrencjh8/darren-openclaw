@@ -40,7 +40,7 @@
 - For documentation, configuration, or skill changes with no testable behavior, state why TDD does not apply and run relevant validation.
 - For code changes that require CI, run one independent fresh-context review subagent. Prefer `deepseek-v4-pro`; do not reuse reviewer context between rounds.
 - Fix validated Critical and High findings before merge. Cosmetic notes, style preferences, and coverage-only suggestions do not block the loop.
-- Require one clean review round before merge unless the user explicitly changes this requirement.
+- Require one clean review round before merge unless the user explicitly changes this requirement. Treat a review that remains in progress for 30 minutes as stuck: stop waiting, report it, and ask the user rather than continuing indefinitely.
 - Push a branch, open a pull request, wait for required GitHub Actions checks, then squash-merge. CI/CD owns deployment after merge.
 
 
