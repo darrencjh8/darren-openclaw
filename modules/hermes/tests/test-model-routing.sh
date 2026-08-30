@@ -34,18 +34,18 @@ def assert_route(route, model, label):
 
 for key, value in router.items():
     assert config["model"].get(key) == value, f"model.{key}: expected {value!r}, got {config['model'].get(key)!r}"
-assert config["model"].get("default") == "gpt-5.6-terra-3"
+assert config["model"].get("default") == "gpt-5.6-terra"
 assert config["agent"]["reasoning_effort"] == "medium"
 assert config["fallback_providers"] == [deepseek_fallback]
-assert_route(config["delegation"], "gpt-5.6-luna-3", "delegation")
+assert_route(config["delegation"], "gpt-5.6-luna", "delegation")
 
 for task, model in {
-    "vision": "gpt-5.6-terra-3",
-    "web_extract": "gpt-5.6-luna-3",
-    "compression": "gpt-5.6-luna-3",
-    "approval": "gpt-5.6-terra-3",
-    "triage_specifier": "gpt-5.6-luna-3",
-    "profile_describer": "gpt-5.6-luna-3",
+    "vision": "gpt-5.6-terra",
+    "web_extract": "gpt-5.6-luna",
+    "compression": "gpt-5.6-luna",
+    "approval": "gpt-5.6-terra",
+    "triage_specifier": "gpt-5.6-luna",
+    "profile_describer": "gpt-5.6-luna",
 }.items():
     route = config["auxiliary"][task]
     assert_route(route, model, f"auxiliary.{task}")
@@ -60,9 +60,9 @@ assert config["auxiliary"]["kanban_decomposer"] == {
 }
 
 for profile, model in {
-    "architect": "gpt-5.6-sol-3",
-    "code-reviewer": "gpt-5.6-terra-3",
-    "project-manager": "gpt-5.6-luna-3",
+    "architect": "gpt-5.6-sol",
+    "code-reviewer": "gpt-5.6-terra",
+    "project-manager": "gpt-5.6-luna",
 }.items():
     with open(root / "modules/hermes/profiles" / profile / "config.yaml") as f:
         profile_config = yaml.safe_load(f)

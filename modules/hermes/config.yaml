@@ -1,6 +1,6 @@
 model:
     provider: custom
-    default: gpt-5.6-terra-3
+    default: gpt-5.6-terra
     base_url: http://codex-router:4100/v1
     api_key: local
 
@@ -22,7 +22,7 @@ delegation:
     max_spawn_depth: 1
     max_iterations: 100
     provider: custom
-    model: gpt-5.6-luna-3
+    model: gpt-5.6-luna
     base_url: http://codex-router:4100/v1
     api_key: local
 
@@ -51,7 +51,7 @@ web:
 auxiliary:
     vision:
         provider: custom
-        model: gpt-5.6-terra-3
+        model: gpt-5.6-terra
         base_url: http://codex-router:4100/v1
         api_key: local
         fallback_chain:
@@ -59,7 +59,7 @@ auxiliary:
               model: deepseek-v4-pro
     web_extract:
         provider: custom
-        model: gpt-5.6-luna-3
+        model: gpt-5.6-luna
         base_url: http://codex-router:4100/v1
         api_key: local
         fallback_chain:
@@ -67,7 +67,7 @@ auxiliary:
               model: deepseek-v4-pro
     compression:
         provider: custom
-        model: gpt-5.6-luna-3
+        model: gpt-5.6-luna
         base_url: http://codex-router:4100/v1
         api_key: local
         fallback_chain:
@@ -75,7 +75,7 @@ auxiliary:
               model: deepseek-v4-pro
     approval:
         provider: custom
-        model: gpt-5.6-terra-3
+        model: gpt-5.6-terra
         base_url: http://codex-router:4100/v1
         api_key: local
         fallback_chain:
@@ -86,7 +86,7 @@ auxiliary:
         model: deepseek-v4-pro
     triage_specifier:
         provider: custom
-        model: gpt-5.6-luna-3
+        model: gpt-5.6-luna
         base_url: http://codex-router:4100/v1
         api_key: local
         fallback_chain:
@@ -94,7 +94,7 @@ auxiliary:
               model: deepseek-v4-pro
     profile_describer:
         provider: custom
-        model: gpt-5.6-luna-3
+        model: gpt-5.6-luna
         base_url: http://codex-router:4100/v1
         api_key: local
         fallback_chain:
