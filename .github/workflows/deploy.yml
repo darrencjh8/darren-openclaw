@@ -196,6 +196,18 @@ jobs:
               if: success() && (steps.changes.outputs.components == 'all' || steps.changes.outputs.components == 'codex-router')
               env:
                   GH_TOKEN: ${{ secrets.FRIDAY_PAT }}
-              run: >-
-                  gh variable set CODEX_ROUTER_DEPLOYED_SHA --repo darrencjh8/darren-openclaw
-                  --body "$(git -C modules/codex-router rev-parse HEAD)"
+              run: |
+                  sha="$(git -C modules/codex-router rev-parse HEAD)"
+                  url="https://api.github.com/repos/darrencjh8/darren-openclaw/actions/variables/CODEX_ROUTER_DEPLOYED_SHA"
+                  status="$(curl -sS -o /dev/null -w '%{http_code}' -X PATCH \
+                    -H "Authorization: Bearer ${GH_TOKEN}" \
+                    -H "Accept: application/vnd.github+json" \
+                    -H "X-GitHub-Api-Version: 2022-11-28" \
+                    "${url}" -d "{\"value\":\"${sha}\"}")"
+                  if [ "$status" = "404" ]; then
+                    curl -sS -X POST \
+                      -H "Authorization: Bearer ${GH_TOKEN}" \
+                      -H "Accept: application/vnd.github+json" \
+                      -H "X-GitHub-Api-Version: 2022-11-28" \
+                      "${url%/*}" -d "{\"name\":\"CODEX_ROUTER_DEPLOYED_SHA\",\"value\":\"${sha}\"}"
+                  fi
