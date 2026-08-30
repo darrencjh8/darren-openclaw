@@ -1,2 +1,0 @@
-description: Fills test gaps. Writes tests without touching production code. Works one task at a time in bite-size branches, opens PRs when done. Expert in TDD and pytest patterns.
-description_auto: false

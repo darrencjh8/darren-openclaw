@@ -1,6 +1,8 @@
 model:
-    provider: openai-codex
-    default: gpt-5.6-terra
+    provider: custom
+    default: gpt-5.6-terra-3
+    base_url: http://codex-router:4100/v1
+    api_key: local
 
 agent:
     reasoning_effort: medium
@@ -15,13 +17,14 @@ fallback_providers:
     - provider: deepseek
       model: deepseek-v4-pro
 
-credential_pool_strategies:
-    openai-codex: round_robin
 
 delegation:
     max_spawn_depth: 1
     max_iterations: 100
-    model: deepseek-v4-flash
+    provider: custom
+    model: gpt-5.6-luna-3
+    base_url: http://codex-router:4100/v1
+    api_key: local
 
 approvals:
     mode: smart
@@ -47,41 +50,56 @@ web:
 
 auxiliary:
     vision:
-        provider: openai-codex
-        model: gpt-5.6-terra
+        provider: custom
+        model: gpt-5.6-terra-3
+        base_url: http://codex-router:4100/v1
+        api_key: local
+        fallback_chain:
+            - provider: deepseek
+              model: deepseek-v4-pro
     web_extract:
-        provider: deepseek
-        model: deepseek-v4-flash
-        extra_body:
-            thinking:
-                type: disabled
+        provider: custom
+        model: gpt-5.6-luna-3
+        base_url: http://codex-router:4100/v1
+        api_key: local
+        fallback_chain:
+            - provider: deepseek
+              model: deepseek-v4-pro
     compression:
-        provider: deepseek
-        model: deepseek-v4-flash
-        extra_body:
-            thinking:
-                type: disabled
+        provider: custom
+        model: gpt-5.6-luna-3
+        base_url: http://codex-router:4100/v1
+        api_key: local
+        fallback_chain:
+            - provider: deepseek
+              model: deepseek-v4-pro
     approval:
-        provider: deepseek
-        model: deepseek-v4-flash
-        extra_body:
-            thinking:
-                type: disabled
+        provider: custom
+        model: gpt-5.6-terra-3
+        base_url: http://codex-router:4100/v1
+        api_key: local
+        fallback_chain:
+            - provider: deepseek
+              model: deepseek-v4-pro
     kanban_decomposer:
         provider: deepseek
         model: deepseek-v4-pro
     triage_specifier:
-        provider: deepseek
-        model: deepseek-v4-flash
-        extra_body:
-            thinking:
-                type: disabled
+        provider: custom
+        model: gpt-5.6-luna-3
+        base_url: http://codex-router:4100/v1
+        api_key: local
+        fallback_chain:
+            - provider: deepseek
+              model: deepseek-v4-pro
     profile_describer:
-        provider: deepseek
-        model: deepseek-v4-flash
-        extra_body:
-            thinking:
-                type: disabled
+        provider: custom
+        model: gpt-5.6-luna-3
+        base_url: http://codex-router:4100/v1
+        api_key: local
+        fallback_chain:
+            - provider: deepseek
+              model: deepseek-v4-pro
 
 kanban:
     dispatch_in_gateway: true
@@ -93,7 +111,7 @@ kanban:
     max_in_progress: 4
     max_in_progress_per_profile: 2
     orchestrator_profile: project-manager
-    default_assignee: quality-assurance
+    default_assignee: code-reviewer
 
 timezone: Asia/Kuala_Lumpur
 

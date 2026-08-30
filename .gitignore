@@ -26,6 +26,7 @@ build/
 .vscode/
 .idea/
 .trae/
+.codex/
 
 # OS
 .DS_Store

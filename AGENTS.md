@@ -3,22 +3,21 @@
 ## Communication
 - Get to the point. No polite filler ("That's right", "I'm sorry", "Great question", "Sure thing", "Let me explain").
 - State the action, result, or next step. Drop conversational fluff.
+- Follow global `caveman` ultra guidance for agent communication. Do not compress evidence, safety warnings, code, commands, errors, commits, issues, pull requests, or documentation.
 
 ## General
 
 - Always propose a plan before making changes. Wait for explicit approval before implementing.
 - Before running any command on production for the first time, ask for explicit approval.
+- Never expose or commit credentials, tokens, `.env` files, `modules/expense-tracker/db.sqlite`, or `modules/expense-tracker/metadata.json`.
 
 ## Production Server
 
-- **Server**: `<SERVER_IP>`, SSH as `$USER` (sudoer).
-- **Deploy workflow**:
-  1. Propose a plan and get explicit approval before any production changes.
-  2. **Config-only**: `scp` file → `docker compose restart <svc>`
-  3. **Code change**: `git pull` → `docker compose build <svc>` → `docker compose up -d <svc>`
-  4. Sync `.env` before deploying: `scp .env $USER@<SERVER_IP>:~/darren-openclaw/gateway/.env`
-  5. After deploy, verify changes in production container.
-- **Deploy script**: `ssh $USER@<SERVER_IP> 'cd ~/darren-openclaw && bash ./modules/deploy.sh --component all --non-interactive'` — validates env vars, builds, health-checks
+- Production host details are in global Codex rules.
+- Never restart, rebuild, pull, or deploy directly on production. Always use the GitHub Actions CI/CD pipeline.
+- Never run `docker compose`, `git pull`, `deploy.sh`, or direct deployment commands on production.
+- For config-only intervention or CI/CD failure, ask the user for direction; do not perform manual production remediation by default.
+- Before any production debug, inspection, test, or verification command, ask for explicit approval.
 
 ## Configuration
 
@@ -28,12 +27,21 @@
   - https://docs.openclaw.ai/start/hubs
   - https://github.com/openclaw/openclaw/tree/main/docs
 - Do not guess schema.
-- Always run deploy.sh script instead of running docker compose up manually
 
 ## Planning
 
 - Always propose a plan before making changes. Wait for explicit approval.
 - Before running any test/verification command on production for the first time, explicitly ask the user for approval — never assume it's safe.
+
+## Implementation
+- Start from a clean worktree. If it is dirty, ask the user before proceeding.
+- Create `feat/...` or `fix/...` branches. Never commit or push directly to `main`.
+- For behavior changes, write a failing test first, implement the minimum passing change, then refactor with tests green.
+- For documentation, configuration, or skill changes with no testable behavior, state why TDD does not apply and run relevant validation.
+- For code changes that require CI, run one independent fresh-context review subagent. Prefer `deepseek-v4-pro`; do not reuse reviewer context between rounds.
+- Fix validated Critical and High findings before merge. Cosmetic notes, style preferences, and coverage-only suggestions do not block the loop.
+- Require one clean review round before merge unless the user explicitly changes this requirement. Treat a review that remains in progress for 30 minutes as stuck: stop waiting, report it, and ask the user rather than continuing indefinitely.
+- Push a branch, open a pull request, wait for required GitHub Actions checks, then squash-merge. CI/CD owns deployment after merge.
 
 
 ## Git Operations

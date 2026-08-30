@@ -354,6 +354,37 @@ else:
 [ "$seed_deliver" = "local" ] && ok "seed: deliver is local" || nope "seed: deliver is local" "got: $seed_deliver"
 
 echo ""
+echo "=== retired profile migration ==="
+retired_profiles=$(python3 -c "
+import re
+with open('$SEED_SCRIPT') as f:
+    content = f.read()
+match = re.search(r'for retired_profile in (.*?); do(.*?)done', content, re.DOTALL)
+if not match:
+    print('missing')
+else:
+    names = match.group(1) + match.group(2)
+    expected = ('static-analyst', 'qa-engineer', 'quality-assurance')
+    print('present' if all(name in names for name in expected) else 'incomplete')
+")
+[ "$retired_profiles" = "present" ] && ok "retired profiles are removed on startup" || nope "retired profile migration" "got: $retired_profiles"
+
+code_reviewer_seed=$(python3 -c "
+import re
+with open('$SEED_SCRIPT') as f:
+    content = f.read()
+print('present' if 'hermes profile create \$name --no-alias' in content else 'missing')
+")
+[ "$code_reviewer_seed" = "present" ] && ok "remaining profiles are registered on startup" || nope "profile registration" "got: $code_reviewer_seed"
+
+managed_routing_migration=$(python3 -c "
+with open('$SEED_SCRIPT') as f:
+    content = f.read()
+print('present' if 'managed_routing_profiles = (\"architect\", \"project-manager\")' in content else 'missing')
+")
+[ "$managed_routing_migration" = "present" ] && ok "managed profile routing migrates on startup" || nope "managed profile routing migration" "got: $managed_routing_migration"
+
+echo ""
 echo "========================================="
 echo -e " Results: ${GREEN}$pass passed${NC}, ${RED}$fail failed${NC}"
 echo "========================================="
