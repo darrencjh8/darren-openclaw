@@ -8,6 +8,8 @@ on:
 jobs:
   deploy-if-updated:
     runs-on: ubuntu-latest
+    permissions:
+      actions: write
     environment:
       name: darren-prod
     steps:
@@ -26,7 +28,7 @@ jobs:
       - name: Dispatch router-only deployment
         if: steps.router.outputs.deploy == 'true'
         env:
-          GH_TOKEN: ${{ secrets.FRIDAY_PAT }}
+          GH_TOKEN: ${{ github.token }}
         run: >-
           gh workflow run deploy.yml --repo darrencjh8/darren-openclaw
           --ref main -f components=codex-router
