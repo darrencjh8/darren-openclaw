@@ -145,7 +145,7 @@ services:
             - CODEX_ROUTER_AUTH_PASSWORD=${CODEX_ROUTER_AUTH_PASSWORD}
             - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}
         restart: unless-stopped
-        mem_limit: 1g
+        mem_limit: 1536m
         healthcheck:
             test:
                 [
