@@ -380,7 +380,8 @@ print('present' if 'hermes profile create \$name --no-alias' in content else 'mi
 managed_routing_migration=$(python3 -c "
 with open('$SEED_SCRIPT') as f:
     content = f.read()
-print('present' if 'managed_routing_profiles = (\"architect\", \"project-manager\")' in content else 'missing')
+expected = 'managed_routing_profiles = (\"architect\", \"code-reviewer\", \"project-manager\")'
+print('present' if expected in content else 'missing')
 ")
 [ "$managed_routing_migration" = "present" ] && ok "managed profile routing migrates on startup" || nope "managed profile routing migration" "got: $managed_routing_migration"
 

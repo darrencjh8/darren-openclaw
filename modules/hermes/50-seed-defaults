@@ -37,7 +37,7 @@ from pathlib import Path
 
 import yaml
 
-managed_routing_profiles = ("architect", "project-manager")
+managed_routing_profiles = ("architect", "code-reviewer", "project-manager")
 for name in managed_routing_profiles:
     default_path = Path(f"/opt/hermes-defaults/profiles/{name}/config.yaml")
     target_path = Path(f"/opt/data/profiles/{name}/config.yaml")
