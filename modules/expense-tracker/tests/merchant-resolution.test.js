@@ -1,88 +1,146 @@
 /**
- * Merchant -> payee -> category resolution test against the live memory.
+ * Merchant -> payee -> category resolution test against the live memory, using
+ * the PRODUCTION resolution path (the real `MemoryStore.search` + the exact
+ * regexes from `orchestrator._resolvePhase2` / `tools._validate_payee`).
  *
- * Fetches `friday-memory` at test time (via `gh api`, like live-memory.test.js)
- * and verifies each committed fixture merchant resolves to its approved payee
- * and category. This is the "always up-to-date" accuracy gate: when the memory
- * changes, the test re-verifies against the latest mappings.
+ * This is the "always up-to-date" accuracy gate: it fetches `friday-memory` at
+ * test time (via `gh api`, like live-memory.test.js) and verifies each fixture
+ * resolves to its approved payee/category. When the memory changes, the test
+ * re-verifies against the latest mappings and fails on drift.
  *
- * Fixtures contain only public business merchant names; person names (PII) are
- * intentionally excluded and covered by the generic transfer rule elsewhere.
+ * Business merchants live in committed fixtures (non-PII). Person names are PII
+ * and are NOT committed here; they are fetched from the private friday-memory
+ * repo as `expense-tracker/person-rules.json`, so the "person name -> transfer
+ * -> Misc (no category)" rule is also verified against production without
+ * leaking identities into the public darren-openclaw repo.
  */
 import { describe, it, expect } from "vitest";
-import { readFileSync } from "fs";
+import { readFileSync, writeFileSync } from "fs";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
+import { tmpdir } from "os";
+import { randomBytes } from "crypto";
+import { MemoryStore } from "../src/memory.js";
 import {
     fetchLiveMemory,
     redactMemory,
-    parseMemory,
+    fetchPersonRules,
 } from "../src/fetch-memory.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const fixtures = JSON.parse(
+const merchantFixtures = JSON.parse(
     readFileSync(join(__dirname, "fixtures", "merchant-mappings.json"), "utf8"),
 );
 
-let parsed = null;
+let store = null;
+let personRules = null;
 let fetchError = null;
 try {
-    parsed = parseMemory(redactMemory(fetchLiveMemory()));
+    const raw = redactMemory(fetchLiveMemory());
+    const memPath = join(
+        tmpdir(),
+        `merchant-res-${randomBytes(6).toString("hex")}.md`,
+    );
+    writeFileSync(memPath, raw);
+    store = new MemoryStore(memPath);
+    try {
+        personRules = fetchPersonRules();
+    } catch {
+        personRules = null;
+    }
 } catch (e) {
     fetchError = e;
 }
 
-const norm = (s) => (s || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+// ── Production-faithful resolution ─────────────────────────────
+// Mirror `_resolvePhase2` Step 1 (payee) and Step 2 Tier 1 (category) exactly:
+//   search(query) -> first result matching /maps to (.+?) payee|category/i.
 
-function resolve(merchant) {
-    const d = norm(merchant);
-    // exact normalized match first
-    for (const [m, payees] of parsed.merchantToPayee) {
-        if (norm(m) === d) return [...payees].join("|");
+async function resolvePayee(merchant) {
+    const results = await store.search(merchant, 5);
+    for (const r of results) {
+        const m = (r.text || "").match(/maps to (.+?) payee/i);
+        if (m) return m[1];
     }
-    // substring match (longest key wins)
-    let best = null;
-    let bestLen = 0;
-    for (const [m, payees] of parsed.merchantToPayee) {
-        const nm = norm(m);
-        if (nm.length < 3) continue;
-        if (d.includes(nm) || nm.includes(d)) {
-            if (nm.length > bestLen) {
-                bestLen = nm.length;
-                best = [...payees].join("|");
-            }
-        }
-    }
-    return best;
+    return "Misc";
 }
 
-function categoryOf(payee) {
-    const cats = parsed.entityToCategory.get(payee);
-    return cats ? [...cats].join("|") : "";
+async function resolveCategory(payee) {
+    const results = await store.search(payee, 5);
+    for (const r of results) {
+        const m = (r.text || "").match(/maps to (.+?) category/i);
+        if (m) return m[1];
+    }
+    return null;
 }
 
 const run = fetchError ? describe.skip : describe;
 
-run("merchant -> payee -> category resolution (live memory)", () => {
-    it("resolves every fixture merchant to its approved payee", () => {
+run("merchant -> payee -> category (production MemoryStore)", () => {
+    it("resolves every fixture merchant to its approved payee", async () => {
         const failures = [];
-        for (const f of fixtures) {
-            const resolved = resolve(f.merchant);
+        for (const f of merchantFixtures) {
+            const resolved = await resolvePayee(f.merchant);
             if (resolved !== f.payee) {
-                failures.push(`${f.merchant}: expected ${f.payee}, got ${resolved}`);
+                failures.push(
+                    `${f.merchant}: expected ${f.payee}, got ${resolved}`,
+                );
             }
         }
         expect(failures).toEqual([]);
     });
 
-    it("resolves every fixture merchant to its approved category", () => {
+    it("resolves every fixture merchant to its approved category", async () => {
         const failures = [];
-        for (const f of fixtures) {
-            if (f.category === null) continue; // Misc / no category
-            const cats = categoryOf(f.payee);
-            if (!cats.includes(f.category)) {
+        for (const f of merchantFixtures) {
+            const resolved = await resolveCategory(f.payee);
+            if (f.category === null) {
+                if (resolved !== null) {
+                    failures.push(
+                        `${f.merchant} (${f.payee}): expected no category, got ${resolved}`,
+                    );
+                }
+            } else if (resolved !== f.category) {
                 failures.push(
-                    `${f.merchant} (${f.payee}): expected ${f.category}, got ${cats}`,
+                    `${f.merchant} (${f.payee}): expected ${f.category}, got ${resolved}`,
+                );
+            }
+        }
+        expect(failures).toEqual([]);
+    });
+});
+
+run("person-name rule (production MemoryStore)", () => {
+    it("fetches person-name golden rules from friday-memory", () => {
+        expect(personRules).not.toBeNull();
+    });
+
+    it("resolves every person name to its approved payee", async () => {
+        const failures = [];
+        for (const f of personRules || []) {
+            const resolved = await resolvePayee(f.merchant);
+            if (resolved !== f.payee) {
+                failures.push(
+                    `${f.merchant}: expected ${f.payee}, got ${resolved}`,
+                );
+            }
+        }
+        expect(failures).toEqual([]);
+    });
+
+    it("resolves every person name to its approved category", async () => {
+        const failures = [];
+        for (const f of personRules || []) {
+            const resolved = await resolveCategory(f.payee);
+            if (f.category === null) {
+                if (resolved !== null) {
+                    failures.push(
+                        `${f.merchant} (${f.payee}): expected no category, got ${resolved}`,
+                    );
+                }
+            } else if (resolved !== f.category) {
+                failures.push(
+                    `${f.merchant} (${f.payee}): expected ${f.category}, got ${resolved}`,
                 );
             }
         }

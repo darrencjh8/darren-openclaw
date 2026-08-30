@@ -13,6 +13,9 @@ import { execFileSync } from "child_process";
 const MEMORY_PATH =
     "repos/darrencjh8/friday-memory/contents/expense-tracker/MEMORY.md";
 
+const PERSON_RULES_PATH =
+    "repos/darrencjh8/friday-memory/contents/expense-tracker/person-rules.json";
+
 const PASSWORD_FACT_RE = /^-\s+.*(?:password|DOB|legal name)\s*[:is]*\s*.+$/i;
 
 /**
@@ -33,6 +36,27 @@ export function fetchLiveMemory() {
         { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
     );
     return output;
+}
+
+/**
+ * Fetch the person-name golden rules (name -> approved payee/category) from the
+ * private friday-memory repo. Person names are PII and must stay out of the
+ * public darren-openclaw repo, so they are fetched at test time like MEMORY.md.
+ *
+ * @returns {Array<{merchant: string, payee: string, category: string|null}>}
+ */
+export function fetchPersonRules() {
+    const output = execFileSync(
+        "gh",
+        [
+            "api",
+            "-H",
+            "Accept: application/vnd.github.raw+json",
+            PERSON_RULES_PATH,
+        ],
+        { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
+    );
+    return JSON.parse(output);
 }
 
 /**
