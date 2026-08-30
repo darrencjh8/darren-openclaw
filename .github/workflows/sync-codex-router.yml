@@ -8,6 +8,8 @@ on:
 jobs:
   deploy-if-updated:
     runs-on: ubuntu-latest
+    environment:
+      name: darren-prod
     steps:
       - name: Compare router main with deployed revision
         id: router
