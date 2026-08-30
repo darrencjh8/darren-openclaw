@@ -1148,9 +1148,12 @@ export class AgentOrchestrator {
             } catch {}
 
             // Tier 1: Memory lookup (payee_name → category, matches auto-learn key)
+            // Query by payee name only (not "payee + ' category'") so substring
+            // search can reach facts like "Maxis Fibre maps to Malaysia Utilities
+            // category" (the "X category" suffix is not contiguous in the fact).
             try {
                 const catMem = await this._tools.executeTool("search_memory", {
-                    query: output.payee_name + " category",
+                    query: output.payee_name,
                 });
                 for (const r of catMem?.results || []) {
                     const m = (r.text || "").match(/maps to (.+?) category/i);

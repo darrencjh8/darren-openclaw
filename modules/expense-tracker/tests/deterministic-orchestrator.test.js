@@ -1863,7 +1863,7 @@ describe("Phase 2: Resolution (3-phase)", () => {
             return {
               results: [{ text: "Toast Box maps to Food payee", score: 0.9 }],
             };
-          if (args.query.includes("category"))
+          if (args.query === "Food")
             return {
               results: [
                 { text: "Toast Box maps to Food category", score: 0.8 },
