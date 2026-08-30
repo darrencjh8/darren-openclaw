@@ -67,7 +67,11 @@ RULES:
 6. IMPORTANT: Leave payee_name and category_id BLANK (empty string).
    Phase 2 resolves these deterministically.
 7. Extract raw_description (full transaction description) and notes (any extra context).
-7b. Write notify_message as a concise one-liner containing:
+7b. Extract raw_merchant_descriptor: the VERBATIM merchant/descriptor string as it
+    appears on the bank statement or transaction alert (e.g. "WWW.TADA.G* N01A04E712").
+    This is the raw bank descriptor, NOT the cleaned merchant name. Leave it as an
+    empty string if the email does not contain a distinct verbatim descriptor.
+7c. Write notify_message as a concise one-liner containing:
     merchant, amount with currency symbol, account_name, and date.
 8. Amount examples: S$12.80 spent = -1280, RM46.00 received = 4600. INTEGER cents.
 9. Date: extract from email timestamp or transaction mention.
@@ -81,6 +85,7 @@ Respond ONLY with valid JSON (no markdown, no code fences):
   "account_id": "uuid-from-fetch_context",
   "account_name": "DBS Yuu",
   "raw_description": "S\$12.80 at Toast Box",
+  "raw_merchant_descriptor": "WWW.TADA.G* N01A04E712",
   "notes": "",
   "skip": false,
   "reasoning": "Matched DBS Yuu account ending 1234",

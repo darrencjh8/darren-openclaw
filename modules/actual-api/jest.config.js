@@ -1,6 +1,8 @@
 module.exports = {
   testEnvironment: "node",
-  roots: ["<rootDir>", "<rootDir>/../workspace/skills", "<rootDir>/.."],
+  roots: ["<rootDir>"],
   testMatch: ["**/__tests__/**/*.test.js"],
-  modulePathIgnorePatterns: ["<rootDir>/../workspace/skills/.*/node_modules"],
+  testPathIgnorePatterns: ["/__tests__/integration_"],
+  setupFiles: ["<rootDir>/jest.setup.js"],
+  modulePathIgnorePatterns: ["<rootDir>/node_modules"],
 };

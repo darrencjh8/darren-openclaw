@@ -10,6 +10,7 @@
 import OpenAI from "openai";
 import { getPhase1Prompt, getCategoryPickerPrompt } from "./prompts.js";
 import { extractEmailContent } from "./extractors.js";
+import { composeNotes } from "./transaction-notes.js";
 import { logger } from "./logging.js";
 
 export class LLMClient {
@@ -1306,7 +1307,10 @@ export class AgentOrchestrator {
                     imported_description: payeeName,
                     category_id: llmOutput.category_id || undefined,
                     payee_id: llmOutput.payee_id || undefined,
-                    notes: llmOutput.notes || "",
+                    notes: composeNotes({
+                        notes: llmOutput.notes || "",
+                        merchantDescriptor: llmOutput.raw_merchant_descriptor || "",
+                    }),
                     budget_id: llmOutput.budget_id || "",
                 });
             } catch (e) {
