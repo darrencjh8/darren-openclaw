@@ -50,25 +50,48 @@ export async function classifyEmail(rawEmail, subject, sender, config) {
             body.slice(0, 2000),
         ].join("\n");
 
-        const client = new OpenAI({
+        const provider = config.llmProvider || "deepseek";
+        const routes = [{
+            provider,
+            model: config.llmModel || "deepseek-v4-pro",
             apiKey: config.llmApiKey || config.deepseekApiKey || "",
             baseURL: config.llmBaseUrl || "https://api.deepseek.com/v1",
-        });
+        }];
+        if (provider !== "deepseek" && config.llmFallbackModel) {
+            routes.push({ ...routes[0], model: config.llmFallbackModel });
+            routes.push({
+                provider: config.llmFinalFallbackProvider || "deepseek",
+                model: config.llmFinalFallbackModel || "deepseek-v4-pro",
+                apiKey: config.deepseekApiKey || "",
+                baseURL: "https://api.deepseek.com/v1",
+            });
+        }
 
-        const response = await Promise.race([
-            client.chat.completions.create({
-                model: config.llmModel || "deepseek-v4-pro",
-                messages: [
-                    { role: "system", content: CLASSIFICATION_PROMPT },
-                    { role: "user", content: text },
-                ],
-                temperature: 0,
-                max_tokens: 5,
-            }),
-            new Promise((_, reject) =>
-                setTimeout(() => reject(new Error("timeout")), 10000),
-            ),
-        ]);
+        let response;
+        let lastError;
+        for (const route of routes) {
+            try {
+                const client = new OpenAI({ apiKey: route.apiKey, baseURL: route.baseURL });
+                response = await Promise.race([
+                    client.chat.completions.create({
+                        model: route.model,
+                        messages: [
+                            { role: "system", content: CLASSIFICATION_PROMPT },
+                            { role: "user", content: text },
+                        ],
+                        temperature: route.provider === "deepseek" ? 0 : 1,
+                        max_tokens: 5,
+                    }),
+                    new Promise((_, reject) =>
+                        setTimeout(() => reject(new Error("timeout")), 10000),
+                    ),
+                ]);
+                break;
+            } catch (error) {
+                lastError = error;
+            }
+        }
+        if (!response) throw lastError;
 
         const result = (response.choices[0].message.content || "")
             .trim()

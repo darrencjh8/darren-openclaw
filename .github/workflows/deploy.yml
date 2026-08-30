@@ -143,11 +143,14 @@ jobs:
                   KTMB_BOT_ALLOWED_CHAT_ID: ${{ secrets.KTMB_BOT_ALLOWED_CHAT_ID }}
                   BRAVE_SEARCH_API_KEY: ${{ secrets.BRAVE_SEARCH_API_KEY }}
                   CODEX_ROUTER_AUTH_PASSWORD: ${{ secrets.CODEX_ROUTER_AUTH_PASSWORD }}
-                  LLM_PROVIDER: ${{ vars.LLM_PROVIDER }}
-                  LLM_BASE_URL: ${{ vars.LLM_BASE_URL }}
-                  LLM_MODEL: ${{ vars.LLM_MODEL }}
+                  LLM_PROVIDER: litellm
+                  LLM_BASE_URL: http://codex-router:4100/v1
+                  LLM_MODEL: gpt-5.6-luna
                   LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
-                  LLM_REASONING_EFFORT: ${{ vars.LLM_REASONING_EFFORT }}
+                  LLM_REASONING_EFFORT: low
+                  LLM_FALLBACK_MODEL: gpt-5.6-terra
+                  LLM_FINAL_FALLBACK_PROVIDER: deepseek
+                  LLM_FINAL_FALLBACK_MODEL: deepseek-v4-pro
                   FIRECRAWL_API_KEY: ${{ secrets.FIRECRAWL_API_KEY }}
                   NOTION_API_KEY: ${{ secrets.NOTION_API_KEY }}
                   POLLINATIONS_API_KEY: ${{ secrets.POLLINATIONS_API_KEY }}

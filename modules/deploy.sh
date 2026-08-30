@@ -231,12 +231,12 @@ echo ""
 echo "--- Expense Tracker (.env) ---"
 ET_ENV="$ET_DIR/.env"
 if $GITHUB_MODE || check_file "$ET_ENV"; then
-  # DEEPSEEK_API_KEY is only required when LLM_PROVIDER=deepseek (default)
+  # DEEPSEEK_API_KEY is only required for the final fallback when LiteLLM is primary.
   if $GITHUB_MODE; then
-    et_llm_provider="${LLM_PROVIDER:-deepseek}"
+    et_llm_provider="${LLM_PROVIDER:-litellm}"
   else
     et_llm_provider=$(env_get "LLM_PROVIDER" "$ET_ENV")
-    [ -z "$et_llm_provider" ] && et_llm_provider="deepseek"
+    [ -z "$et_llm_provider" ] && et_llm_provider="litellm"
   fi
   if [ "$et_llm_provider" = "deepseek" ]; then
     check_var "DEEPSEEK_API_KEY" "$ET_ENV"
@@ -257,6 +257,9 @@ if $GITHUB_MODE || check_file "$ET_ENV"; then
   check_var_optional "LLM_MODEL" "$ET_ENV"
   check_var_optional "LLM_API_KEY" "$ET_ENV"
   check_var_optional "LLM_REASONING_EFFORT" "$ET_ENV"
+  check_var_optional "LLM_FALLBACK_MODEL" "$ET_ENV"
+  check_var_optional "LLM_FINAL_FALLBACK_PROVIDER" "$ET_ENV"
+  check_var_optional "LLM_FINAL_FALLBACK_MODEL" "$ET_ENV"
 fi
 fi
 
@@ -287,6 +290,9 @@ echo "--- Codex Router ---"
   check_var_optional "LLM_MODEL" ""
   check_var_optional "LLM_API_KEY" ""
   check_var_optional "LLM_REASONING_EFFORT" ""
+  check_var_optional "LLM_FALLBACK_MODEL" ""
+  check_var_optional "LLM_FINAL_FALLBACK_PROVIDER" ""
+  check_var_optional "LLM_FINAL_FALLBACK_MODEL" ""
 fi
 
 # ---- pluggable modules (auto-discover from modules/*/module.env) ----

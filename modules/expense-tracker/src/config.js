@@ -32,11 +32,17 @@ export class Config {
         : "http://localhost:4100/v1");
     this.llmModel =
       env.LLM_MODEL ||
-      (this.llmProvider === "deepseek" ? "deepseek-v4-pro" : "gpt-5.6-luna-1");
+      (this.llmProvider === "deepseek" ? "deepseek-v4-pro" : "gpt-5.6-luna");
     this.llmApiKey = env.LLM_API_KEY || env.DEEPSEEK_API_KEY || "";
     this.llmReasoningEffort =
       env.LLM_REASONING_EFFORT ||
       (this.llmProvider === "deepseek" ? "adaptive" : "low");
+    this.llmFallbackModel =
+      env.LLM_FALLBACK_MODEL ||
+      (this.llmProvider === "deepseek" ? "" : "gpt-5.6-terra");
+    this.llmFinalFallbackProvider = env.LLM_FINAL_FALLBACK_PROVIDER || "deepseek";
+    this.llmFinalFallbackModel =
+      env.LLM_FINAL_FALLBACK_MODEL || "deepseek-v4-pro";
 
     // Backward compat alias
     this.deepseekApiKey = this.llmApiKey;
