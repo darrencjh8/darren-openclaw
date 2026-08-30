@@ -1,7 +1,13 @@
 model:
-    provider: deepseek
-    default: deepseek-v4-flash
-    api_key: ${DEEPSEEK_API_KEY}
+    provider: custom
+    default: gpt-5.6-luna-3
+    base_url: http://codex-router:4100/v1
+    api_key: local
+
+fallback_providers:
+    - provider: deepseek
+      model: deepseek-v4-pro
+      api_key: ${DEEPSEEK_API_KEY}
 
 agent:
     reasoning_effort: low

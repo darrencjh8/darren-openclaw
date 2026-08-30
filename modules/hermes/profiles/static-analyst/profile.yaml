@@ -1,2 +1,0 @@
-description: Reads code statically to find root causes of bugs and issues. Reports findings with file:line references. Does NOT run code, create GitHub issues, or push to remotes.
-description_auto: false

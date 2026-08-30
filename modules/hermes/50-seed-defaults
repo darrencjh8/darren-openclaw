@@ -12,6 +12,11 @@ mkdir -p /opt/data/scripts
 cp -r /opt/hermes-defaults/scripts/* /opt/data/scripts/
 chmod +x /opt/data/scripts/*.sh
 
+# Remove retired profile runtime state before seeding the managed profile set.
+for retired_profile in static-analyst qa-engineer quality-assurance; do
+    rm -rf "/opt/data/profiles/$retired_profile"
+done
+
 # Seed profile configs and SOUL files (idempotent — won't overwrite existing)
 for profile_dir in /opt/hermes-defaults/profiles/*/; do
     [ -d "$profile_dir" ] || continue
