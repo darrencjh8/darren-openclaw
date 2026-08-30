@@ -198,7 +198,7 @@ jobs:
             - name: Record deployed Codex Router revision
               if: success() && (steps.changes.outputs.components == 'all' || steps.changes.outputs.components == 'codex-router')
               env:
-                  GH_TOKEN: ${{ github.token }}
+                  GH_TOKEN: ${{ secrets.SUBMODULE_PAT }}
               run: |
                   sha="$(git -C modules/codex-router rev-parse HEAD)"
                   url="https://api.github.com/repos/darrencjh8/darren-openclaw/actions/variables/CODEX_ROUTER_DEPLOYED_SHA"
