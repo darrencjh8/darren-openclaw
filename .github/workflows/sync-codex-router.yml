@@ -14,7 +14,7 @@ jobs:
       - name: Compare router main with deployed revision
         id: router
         env:
-          GH_TOKEN: ${{ secrets.FRIDAY_PAT }}
+          GH_TOKEN: ${{ secrets.SUBMODULE_PAT }}
         run: |
           remote_sha="$(gh api repos/darrencjh8/codex-router/commits/main --jq .sha)"
           deployed_sha="$(gh variable get CODEX_ROUTER_DEPLOYED_SHA --repo darrencjh8/darren-openclaw 2>/dev/null || true)"
