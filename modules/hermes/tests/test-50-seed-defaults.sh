@@ -377,6 +377,13 @@ print('present' if 'hermes profile create \$name --no-alias' in content else 'mi
 ")
 [ "$code_reviewer_seed" = "present" ] && ok "remaining profiles are registered on startup" || nope "profile registration" "got: $code_reviewer_seed"
 
+managed_routing_migration=$(python3 -c "
+with open('$SEED_SCRIPT') as f:
+    content = f.read()
+print('present' if 'managed_routing_profiles = (\"architect\", \"project-manager\")' in content else 'missing')
+")
+[ "$managed_routing_migration" = "present" ] && ok "managed profile routing migrates on startup" || nope "managed profile routing migration" "got: $managed_routing_migration"
+
 echo ""
 echo "========================================="
 echo -e " Results: ${GREEN}$pass passed${NC}, ${RED}$fail failed${NC}"

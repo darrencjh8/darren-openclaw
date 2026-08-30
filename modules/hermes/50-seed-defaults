@@ -31,6 +31,26 @@ for profile_dir in /opt/hermes-defaults/profiles/*/; do
     su -s /bin/sh hermes -c "hermes profile create $name --no-alias 2>/dev/null" || true
 done
 
+# Migrate only routing fields for managed profiles while preserving user-owned settings.
+python3 - <<'PY'
+from pathlib import Path
+
+import yaml
+
+managed_routing_profiles = ("architect", "project-manager")
+for name in managed_routing_profiles:
+    default_path = Path(f"/opt/hermes-defaults/profiles/{name}/config.yaml")
+    target_path = Path(f"/opt/data/profiles/{name}/config.yaml")
+    if not target_path.exists():
+        continue
+    defaults = yaml.safe_load(default_path.read_text()) or {}
+    target = yaml.safe_load(target_path.read_text()) or {}
+    for key in ("model", "fallback_providers"):
+        if key in defaults:
+            target[key] = defaults[key]
+    target_path.write_text(yaml.safe_dump(target, sort_keys=False))
+PY
+
 # Ensure cron-run directories are owned by hermes (gateway runs as hermes)
 mkdir -p /opt/data/memories-backup
 chown -R hermes:hermes /opt/data/memories-backup 2>/dev/null || true

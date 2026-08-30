@@ -54,6 +54,10 @@ for task, model in {
     )
 
 assert config["kanban"]["default_assignee"] == "code-reviewer"
+assert config["auxiliary"]["kanban_decomposer"] == {
+    "provider": "deepseek",
+    "model": "deepseek-v4-pro",
+}
 
 for profile, model in {
     "architect": "gpt-5.6-sol-3",
