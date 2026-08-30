@@ -10,8 +10,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       actions: write
-    environment:
-      name: darren-prod
+      contents: read
     steps:
       - name: Compare router main with deployed revision
         id: router
@@ -19,7 +18,12 @@ jobs:
           GH_TOKEN: ${{ secrets.SUBMODULE_PAT }}
         run: |
           remote_sha="$(gh api repos/darrencjh8/codex-router/commits/main --jq .sha)"
-          deployed_sha="$(gh variable get CODEX_ROUTER_DEPLOYED_SHA --repo darrencjh8/darren-openclaw 2>/dev/null || true)"
+          latest_run="$(gh run list --repo darrencjh8/darren-openclaw --workflow deploy.yml --branch main --status success --limit 1 --json databaseId --jq '.[0].databaseId' 2>/dev/null || true)"
+          deployed_sha=""
+          if [ -n "$latest_run" ]; then
+            gh run download "$latest_run" --repo darrencjh8/darren-openclaw -n codex-router-sha -D /tmp/router-sha >/dev/null 2>&1 || true
+            deployed_sha="$(cat /tmp/router-sha/codex-router-sha/codex-router-sha.txt 2>/dev/null || true)"
+          fi
           echo "remote_sha=$remote_sha" >> "$GITHUB_OUTPUT"
           if [ "$remote_sha" != "$deployed_sha" ]; then
             echo "deploy=true" >> "$GITHUB_OUTPUT"
