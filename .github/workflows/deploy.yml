@@ -189,18 +189,24 @@ jobs:
               run: |
                   if [ "${DEPLOY_COMPONENTS}" = "all" ]; then
                       bash ./modules/deploy.sh --component all --non-interactive --skip-build
-                  else:
+                  else
                       ARGS=""
                       for c in ${DEPLOY_COMPONENTS}; do ARGS="$ARGS --component $c"; done
                       bash ./modules/deploy.sh $ARGS --non-interactive --skip-build
                   fi
 
             - name: Record deployed Codex Router revision
+              if: >-
+                  success() &&
+                  (steps.changes.outputs.components == 'all' || contains(format(' {0} ', steps.changes.outputs.components), ' codex-router '))
               run: |
                   mkdir -p /tmp/router-sha
                   git -C modules/codex-router rev-parse HEAD > /tmp/router-sha/codex-router-sha.txt
 
             - uses: actions/upload-artifact@v4
+              if: >-
+                  success() &&
+                  (steps.changes.outputs.components == 'all' || contains(format(' {0} ', steps.changes.outputs.components), ' codex-router '))
               with:
                   name: codex-router-sha
                   path: /tmp/router-sha/codex-router-sha.txt

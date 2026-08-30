@@ -12,20 +12,34 @@ jobs:
       actions: write
       contents: read
     steps:
+      - name: Read router main revision
+        id: remote
+        env:
+          GH_TOKEN: ${{ secrets.SUBMODULE_PAT }}
+        run: echo "sha=$(gh api repos/darrencjh8/codex-router/commits/main --jq .sha)" >> "$GITHUB_OUTPUT"
+
       - name: Compare router main with deployed revision
         id: router
         env:
-          GH_TOKEN: ${{ secrets.SUBMODULE_PAT }}
+          GH_TOKEN: ${{ github.token }}
+          REMOTE_SHA: ${{ steps.remote.outputs.sha }}
         run: |
-          remote_sha="$(gh api repos/darrencjh8/codex-router/commits/main --jq .sha)"
-          latest_run="$(gh run list --repo darrencjh8/darren-openclaw --workflow deploy.yml --branch main --status success --limit 1 --json databaseId --jq '.[0].databaseId' 2>/dev/null || true)"
           deployed_sha=""
-          if [ -n "$latest_run" ]; then
-            gh run download "$latest_run" --repo darrencjh8/darren-openclaw -n codex-router-sha -D /tmp/router-sha >/dev/null 2>&1 || true
-            deployed_sha="$(cat /tmp/router-sha/codex-router-sha/codex-router-sha.txt 2>/dev/null || true)"
-          fi
-          echo "remote_sha=$remote_sha" >> "$GITHUB_OUTPUT"
-          if [ "$remote_sha" != "$deployed_sha" ]; then
+          page=1
+          while [ -z "$deployed_sha" ]; do
+            run_ids="$(gh api "repos/darrencjh8/darren-openclaw/actions/workflows/deploy.yml/runs?branch=main&status=success&per_page=100&page=$page" --jq '.workflow_runs[].id')"
+            [ -n "$run_ids" ] || break
+            for run_id in $run_ids; do
+              rm -rf /tmp/router-sha
+              if gh run download "$run_id" --repo darrencjh8/darren-openclaw -n codex-router-sha -D /tmp/router-sha >/dev/null 2>&1; then
+                deployed_sha="$(cat /tmp/router-sha/codex-router-sha.txt)"
+                break
+              fi
+            done
+            page=$((page + 1))
+          done
+          echo "remote_sha=$REMOTE_SHA" >> "$GITHUB_OUTPUT"
+          if [ "$REMOTE_SHA" != "$deployed_sha" ]; then
             echo "deploy=true" >> "$GITHUB_OUTPUT"
           fi
 
