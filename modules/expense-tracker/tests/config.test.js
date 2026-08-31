@@ -42,6 +42,30 @@ describe("Config", () => {
         expect(config.actualBudgetEncryptionPassword).toBe(null);
     });
 
+    it("uses stable GPT router aliases and keeps DeepSeek as final fallback", () => {
+        const config = new Config({
+            ...requiredEnv,
+            LLM_PROVIDER: "litellm",
+        });
+
+        expect(config.llmModel).toBe("gpt-5.6-luna");
+        expect(config.llmFallbackModel).toBe("gpt-5.6-terra");
+        expect(config.llmFinalFallbackProvider).toBe("deepseek");
+        expect(config.llmFinalFallbackModel).toBe("deepseek-v4-pro");
+    });
+
+    it("keeps the DeepSeek fallback credential separate from the router credential", () => {
+        const config = new Config({
+            ...requiredEnv,
+            DEEPSEEK_API_KEY: "deepseek-final-key",
+            LLM_PROVIDER: "litellm",
+            LLM_API_KEY: "router-key",
+        });
+
+        expect(config.llmApiKey).toBe("router-key");
+        expect(config.deepseekApiKey).toBe("deepseek-final-key");
+    });
+
     it("respects custom IMAP_MAILBOX", () => {
         const config = new Config({ ...requiredEnv, IMAP_MAILBOX: "Archive" });
         expect(config.imapMailbox).toBe("Archive");
