@@ -1,8 +1,14 @@
+providers:
+    codex-router:
+        name: Codex Router
+        api: http://codex-router:4100/v1
+        api_key: local
+        transport: chat_completions
+        default_model: gpt-5.6-terra
+
 model:
-    provider: custom
+    provider: custom:codex-router
     default: gpt-5.6-terra
-    base_url: http://codex-router:4100/v1
-    api_key: local
 
 agent:
     reasoning_effort: medium
@@ -21,10 +27,8 @@ fallback_providers:
 delegation:
     max_spawn_depth: 1
     max_iterations: 100
-    provider: custom
+    provider: custom:codex-router
     model: gpt-5.6-luna
-    base_url: http://codex-router:4100/v1
-    api_key: local
 
 approvals:
     mode: smart
@@ -50,53 +54,41 @@ web:
 
 auxiliary:
     vision:
-        provider: custom
+        provider: custom:codex-router
         model: gpt-5.6-terra
-        base_url: http://codex-router:4100/v1
-        api_key: local
         fallback_chain:
             - provider: deepseek
               model: deepseek-v4-pro
     web_extract:
-        provider: custom
+        provider: custom:codex-router
         model: gpt-5.6-luna
-        base_url: http://codex-router:4100/v1
-        api_key: local
         fallback_chain:
             - provider: deepseek
               model: deepseek-v4-pro
     compression:
-        provider: custom
+        provider: custom:codex-router
         model: gpt-5.6-luna
-        base_url: http://codex-router:4100/v1
-        api_key: local
         fallback_chain:
             - provider: deepseek
               model: deepseek-v4-pro
     approval:
-        provider: custom
+        provider: custom:codex-router
         model: gpt-5.6-terra
-        base_url: http://codex-router:4100/v1
-        api_key: local
         fallback_chain:
             - provider: deepseek
               model: deepseek-v4-pro
     kanban_decomposer:
-        provider: deepseek
+        provider: custom:codex-router
         model: deepseek-v4-pro
     triage_specifier:
-        provider: custom
+        provider: custom:codex-router
         model: gpt-5.6-luna
-        base_url: http://codex-router:4100/v1
-        api_key: local
         fallback_chain:
             - provider: deepseek
               model: deepseek-v4-pro
     profile_describer:
-        provider: custom
+        provider: custom:codex-router
         model: gpt-5.6-luna
-        base_url: http://codex-router:4100/v1
-        api_key: local
         fallback_chain:
             - provider: deepseek
               model: deepseek-v4-pro

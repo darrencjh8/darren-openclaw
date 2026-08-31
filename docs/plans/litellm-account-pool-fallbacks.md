@@ -9,7 +9,7 @@ Route Hermes primary model calls through the Docker-hosted LiteLLM router while 
 ### Terra pool
 
 ```text
-gpt-5.6-terra-3 -> gpt-5.6-terra-2 -> gpt-5.6-terra-1
+gpt-5.6-terra (router selects account 3 -> 2 -> 1)
 ```
 
 Use for Hermes main chat, vision, approval, and the `code-reviewer` profile.
@@ -17,7 +17,7 @@ Use for Hermes main chat, vision, approval, and the `code-reviewer` profile.
 ### Luna pool
 
 ```text
-gpt-5.6-luna-3 -> gpt-5.6-luna-2 -> gpt-5.6-luna-1
+gpt-5.6-luna (router selects account 3 -> 2 -> 1)
 ```
 
 Use for compression, delegation, triage specification, profile description, and the Project Manager profile.
@@ -25,7 +25,7 @@ Use for compression, delegation, triage specification, profile description, and 
 ### Sol
 
 ```text
-gpt-5.6-sol-3
+gpt-5.6-sol
 ```
 
 Use for the Architect profile. Its fallback is direct DeepSeek V4 Pro.
@@ -41,7 +41,7 @@ DeepSeek is the final direct fallback after the applicable LiteLLM route fails.
 ## Phase 1: codex-router
 
 1. Inspect the router's generated LiteLLM configuration path.
-2. Generate LiteLLM `router_settings.fallbacks` in descending account priority:
+2. Add LiteLLM `router_settings.fallbacks`:
    - Terra-3 -> Terra-2 -> Terra-1
    - Luna-3 -> Luna-2 -> Luna-1
 3. Keep account-specific models individually addressable.
@@ -51,8 +51,8 @@ DeepSeek is the final direct fallback after the applicable LiteLLM route fails.
 ## Phase 2: darren-openclaw
 
 1. Keep Hermes primary roles pointed at `http://codex-router:4100/v1`.
-2. Keep exactly one direct DeepSeek V4 Pro fallback per primary/profile route; LiteLLM handles intra-pool fallback.
-3. Configure each LiteLLM-backed auxiliary task's `fallback_chain` to direct DeepSeek V4 Pro after LiteLLM pool exhaustion, including compression.
+2. Use transparent pooled aliases (`gpt-5.6-terra`, `gpt-5.6-luna`, `gpt-5.6-sol`) so LiteLLM selects the account and handles intra-pool fallback; keep exactly one direct DeepSeek V4 Pro fallback per primary/profile route.
+3. Configure `auxiliary.compression.fallback_chain` to direct DeepSeek V4 Pro after LiteLLM Luna-pool exhaustion.
 4. Replace `static-analyst` with persistent `code-reviewer`; remove `qa-engineer` and `quality-assurance` from source and startup runtime state.
 5. Keep `kanban.default_assignee` set to `code-reviewer`.
 6. Keep generated `.codex/` metadata ignored.
