@@ -16,16 +16,41 @@ import { logger } from "./logging.js";
 export class LLMClient {
     constructor(config) {
         this._provider = config.llmProvider || "deepseek";
-        this._client = new OpenAI({
-            apiKey: config.llmApiKey || config.deepseekApiKey,
-            baseURL: config.llmBaseUrl || "https://api.deepseek.com/v1",
-        });
         this._model = config.llmModel || "deepseek-v4-pro";
         this._reasoningEffort = config.llmReasoningEffort || "adaptive";
+        this._routes = [{
+            provider: this._provider,
+            model: this._model,
+            apiKey: config.llmApiKey || config.deepseekApiKey,
+            baseURL: config.llmBaseUrl || "https://api.deepseek.com/v1",
+            retries: 3,
+        }];
+        this._client = new OpenAI({
+            apiKey: this._routes[0].apiKey || "",
+            baseURL: this._routes[0].baseURL,
+        });
+        if (this._provider !== "deepseek" && config.llmFallbackModel) {
+            this._routes.push({
+                provider: this._provider,
+                model: config.llmFallbackModel,
+                apiKey: config.llmApiKey || config.deepseekApiKey,
+                baseURL: config.llmBaseUrl,
+                retries: 1,
+            });
+        }
+        if (this._provider !== "deepseek") {
+            this._routes.push({
+                provider: config.llmFinalFallbackProvider || "deepseek",
+                model: config.llmFinalFallbackModel || "deepseek-v4-pro",
+                apiKey: config.deepseekApiKey,
+                baseURL: "https://api.deepseek.com/v1",
+                retries: 1,
+            });
+        }
     }
 
-    _mergeReasoning(data) {
-        if (this._provider !== "deepseek") return;
+    _mergeReasoning(data, provider = this._provider) {
+        if (provider !== "deepseek") return;
         for (const choice of data.choices || []) {
             const msg = choice.message || {};
             if (!msg.content && msg.reasoning_content) {
@@ -41,55 +66,50 @@ export class LLMClient {
      * @param {{reasoning?: 'auto'|'disabled'|'adaptive'|'low'|'medium'|'high'}} [opts]
      */
     async chat(messages, tools, toolChoice, opts = {}) {
-        const kwargs = {
-            model: this._model,
-            messages,
-            temperature: opts.temperature ?? 0.1,
-        };
-        if (tools) {
-            kwargs.tools = tools;
-            kwargs.tool_choice = toolChoice || "auto";
-        }
-        const reasoning = opts.reasoning || "auto";
-        if (this._provider === "deepseek") {
-            // DeepSeek: reasoning control via thinking.type
-            // 'disabled' = no thinking; 'adaptive' = let model decide
-            if (reasoning === "disabled") {
-                // No thinking — faster extraction for simple tasks
-            } else if (reasoning === "adaptive") {
-                kwargs.thinking = { type: "adaptive" };
-            } else if (!toolChoice || toolChoice === "auto") {
-                kwargs.thinking = { type: "adaptive" };
+        const retryDelays = [1000, 2000, 4000];
+        let lastError;
+        for (const route of this._routes) {
+            const client = route === this._routes[0]
+                ? this._client
+                : new OpenAI({
+                    apiKey: route.apiKey || "",
+                    baseURL: route.baseURL,
+                });
+            const kwargs = {
+                model: route.model,
+                messages,
+                temperature: route.provider === "deepseek" ? (opts.temperature ?? 0.1) : 1,
+            };
+            if (tools) {
+                kwargs.tools = tools;
+                kwargs.tool_choice = toolChoice || "auto";
             }
-        } else {
-            // OpenAI / LiteLLM: reasoning via reasoning_effort
-            if (reasoning !== "disabled") {
+            const reasoning = opts.reasoning || "auto";
+            if (route.provider === "deepseek") {
+                if (reasoning === "adaptive" || (!toolChoice || toolChoice === "auto")) {
+                    kwargs.thinking = { type: "adaptive" };
+                }
+            } else if (reasoning !== "disabled") {
                 kwargs.reasoning_effort = this._reasoningEffort;
             }
-        }
-
-        const retryDelays = [1000, 2000, 4000];
-        for (let attempt = 0; attempt < 3; attempt++) {
-            try {
-                const response = await Promise.race([
-                    this._client.chat.completions.create(kwargs),
-                    new Promise((_, reject) =>
-                        setTimeout(() => reject(new Error("timeout")), 60000),
-                    ),
-                ]);
-                const data = response._request_id ? response : response;
-                this._mergeReasoning(data);
-                return data;
-            } catch (e) {
-                if (attempt < 2) {
-                    await new Promise((r) =>
-                        setTimeout(r, retryDelays[attempt]),
-                    );
-                } else {
-                    throw e;
+            for (let attempt = 0; attempt < route.retries; attempt++) {
+                try {
+                    const response = await Promise.race([
+                        client.chat.completions.create(kwargs),
+                        new Promise((_, reject) =>
+                            setTimeout(() => reject(new Error("timeout")), 60000),
+                    )]);
+                    this._mergeReasoning(response, route.provider);
+                    return response;
+                } catch (error) {
+                    lastError = error;
+                    if (attempt < route.retries - 1) {
+                        await new Promise((resolve) => setTimeout(resolve, retryDelays[attempt]));
+                    }
                 }
             }
         }
+        throw lastError;
     }
 }
 

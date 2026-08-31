@@ -86,6 +86,31 @@ describe("classifyEmail", () => {
     expect(result).toBe("statement");
   });
 
+  it("uses GPT-5-compatible temperature through LiteLLM", async () => {
+    const routerConfig = {
+      llmProvider: "litellm",
+      llmApiKey: "router-key",
+      llmBaseUrl: "http://codex-router:4100/v1",
+      llmModel: "gpt-5.6-luna",
+      llmFallbackModel: "gpt-5.6-terra",
+      deepseekApiKey: "deepseek-key",
+    };
+    mockCreate.mockResolvedValueOnce({
+      choices: [{ message: { content: "transaction" } }],
+    });
+
+    await classifyEmail(
+      "Card Number XXXX-XXXX-XXXX-5748\nTransaction Amount SGD5.86\nDescription SHOPEE SG MP",
+      "Transaction Alerts (Credit Card)",
+      "HSBC.Bank.Singapore.Limited@notification.hsbc.com.hk",
+      routerConfig,
+    );
+
+    const call = mockCreate.mock.calls[0][0];
+    expect(call.model).toBe("gpt-5.6-luna");
+    expect(call.temperature).toBe(1);
+  });
+
   it("classifies an IBKR trade confirmation as 'skip'", async () => {
     mockCreate.mockResolvedValueOnce({
       choices: [{ message: { content: "skip" } }],

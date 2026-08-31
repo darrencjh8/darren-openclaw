@@ -231,12 +231,12 @@ echo ""
 echo "--- Expense Tracker (.env) ---"
 ET_ENV="$ET_DIR/.env"
 if $GITHUB_MODE || check_file "$ET_ENV"; then
-  # DEEPSEEK_API_KEY is only required when LLM_PROVIDER=deepseek (default)
+  # DEEPSEEK_API_KEY is only required for the final fallback when LiteLLM is primary.
   if $GITHUB_MODE; then
-    et_llm_provider="${LLM_PROVIDER:-deepseek}"
+    et_llm_provider="${LLM_PROVIDER:-litellm}"
   else
     et_llm_provider=$(env_get "LLM_PROVIDER" "$ET_ENV")
-    [ -z "$et_llm_provider" ] && et_llm_provider="deepseek"
+    [ -z "$et_llm_provider" ] && et_llm_provider="litellm"
   fi
   if [ "$et_llm_provider" = "deepseek" ]; then
     check_var "DEEPSEEK_API_KEY" "$ET_ENV"
