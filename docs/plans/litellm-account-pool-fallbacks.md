@@ -64,3 +64,7 @@ DeepSeek is the final direct fallback after the applicable LiteLLM route fails.
 3. Router tests prove ordered fallback configuration.
 4. Hermes YAML and startup shell tests pass.
 5. No direct production restart, rebuild, pull, Docker Compose command, or deployment is performed. Deployment occurs only through a reviewed PR and GitHub Actions.
+
+## 2026-08-31 Responses transport rollout
+
+Codex Router PR #17 marks every dynamically discovered ChatGPT model as LiteLLM `mode: responses` at the account-proxy, account-alias, and transparent pool-alias layers. This prevents unknown GPT-5.6 slugs from defaulting to the Cloudflare-blocked Chat Completions endpoint. The router repository's 42-test suite and skills-only installation test passed before merge. This documentation update intentionally drives the normal `darren-openclaw` GitHub Actions deployment so the merged router revision is built and verified without direct production intervention.
