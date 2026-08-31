@@ -40,7 +40,7 @@ export class ImapIdleHandler {
     }
 
     async connect() {
-        this._client = new ImapFlow({
+        const client = new ImapFlow({
             host: this._host,
             port: this._port,
             secure: true,
@@ -48,8 +48,17 @@ export class ImapIdleHandler {
             logger: false,
             disableAutoIdle: true,
         });
-        await this._client.connect();
-        await this._client.mailboxOpen(this._mailbox);
+        this._client = client;
+        client.on?.("error", (err) => {
+            logger.warn({
+                event: "imap_client_error",
+                error: err?.message || String(err),
+                retry_in_s: this.RECONNECT_DELAY,
+            });
+            if (this._client === client) this._client = null;
+        });
+        await client.connect();
+        await client.mailboxOpen(this._mailbox);
     }
 
     async disconnect() {
