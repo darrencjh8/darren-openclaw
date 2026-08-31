@@ -45,7 +45,7 @@ for name in managed_routing_profiles:
         continue
     defaults = yaml.safe_load(default_path.read_text()) or {}
     target = yaml.safe_load(target_path.read_text()) or {}
-    for key in ("model", "fallback_providers"):
+    for key in ("providers", "model", "fallback_providers"):
         if key in defaults:
             target[key] = defaults[key]
     target_path.write_text(yaml.safe_dump(target, sort_keys=False))

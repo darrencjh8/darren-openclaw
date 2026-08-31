@@ -15,26 +15,44 @@ root = Path(sys.argv[1]).resolve().parents[2]
 with open(sys.argv[1]) as f:
     config = yaml.safe_load(f)
 
-router = {
-    "provider": "custom",
-    "base_url": "http://codex-router:4100/v1",
+router_provider = {
+    "name": "Codex Router",
+    "api": "http://codex-router:4100/v1",
     "api_key": "local",
+    "transport": "chat_completions",
 }
+router_route = "custom:codex-router"
 deepseek_fallback = {
     "provider": "deepseek",
     "model": "deepseek-v4-pro",
 }
 
 
+def assert_provider(config, model, label):
+    provider = config.get("providers", {}).get("codex-router", {})
+    for key, value in router_provider.items():
+        assert provider.get(key) == value, (
+            f"{label}.providers.codex-router.{key}: expected {value!r}, got {provider.get(key)!r}"
+        )
+    assert provider.get("default_model") == model, (
+        f"{label}.providers.codex-router.default_model: expected {model!r}, got {provider.get('default_model')!r}"
+    )
+
+
 def assert_route(route, model, label):
-    for key, value in router.items():
-        assert route.get(key) == value, f"{label}.{key}: expected {value!r}, got {route.get(key)!r}"
+    assert route.get("provider") == router_route, (
+        f"{label}.provider: expected {router_route!r}, got {route.get('provider')!r}"
+    )
     assert route.get("model") == model, f"{label}.model: expected {model!r}, got {route.get('model')!r}"
+    assert "base_url" not in route, f"{label} must use its named provider URL"
+    assert "api_key" not in route, f"{label} must use its named provider API key"
 
 
-for key, value in router.items():
-    assert config["model"].get(key) == value, f"model.{key}: expected {value!r}, got {config['model'].get(key)!r}"
+assert_provider(config, "gpt-5.6-terra", "main")
+assert config["model"].get("provider") == router_route
 assert config["model"].get("default") == "gpt-5.6-terra"
+assert "base_url" not in config["model"]
+assert "api_key" not in config["model"]
 assert config["agent"]["reasoning_effort"] == "medium"
 assert config["fallback_providers"] == [deepseek_fallback]
 assert_route(config["delegation"], "gpt-5.6-luna", "delegation")
@@ -54,10 +72,7 @@ for task, model in {
     )
 
 assert config["kanban"]["default_assignee"] == "code-reviewer"
-assert config["auxiliary"]["kanban_decomposer"] == {
-    "provider": "deepseek",
-    "model": "deepseek-v4-pro",
-}
+assert_route(config["auxiliary"]["kanban_decomposer"], "deepseek-v4-pro", "auxiliary.kanban_decomposer")
 
 for profile, model in {
     "architect": "gpt-5.6-sol",
@@ -66,11 +81,11 @@ for profile, model in {
 }.items():
     with open(root / "modules/hermes/profiles" / profile / "config.yaml") as f:
         profile_config = yaml.safe_load(f)
-    for key, value in router.items():
-        assert profile_config["model"].get(key) == value, (
-            f"{profile}.model.{key}: expected {value!r}, got {profile_config['model'].get(key)!r}"
-        )
+    assert_provider(profile_config, model, profile)
+    assert profile_config["model"].get("provider") == router_route
     assert profile_config["model"].get("default") == model
+    assert "base_url" not in profile_config["model"]
+    assert "api_key" not in profile_config["model"]
     fallback = profile_config["fallback_providers"]
     assert len(fallback) == 1
     assert fallback[0].get("provider") == "deepseek"

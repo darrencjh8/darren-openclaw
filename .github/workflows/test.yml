@@ -97,6 +97,10 @@ jobs:
               run: bash modules/hermes/tests/test-github-auth.sh
             - name: Test 50-seed-defaults cron jobs
               run: bash modules/hermes/tests/test-50-seed-defaults.sh
+            - name: Test Hermes model routing
+              run: bash modules/hermes/tests/test-model-routing.sh
+            - name: Test Codex Router provider config
+              run: bash modules/hermes/tests/test-codex-router-config.sh
             - name: Test deploy.sh logic
               run: bash modules/hermes/tests/test-deploy.sh
             - name: Test docker-compose hermes env vars
