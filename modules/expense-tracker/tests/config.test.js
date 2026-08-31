@@ -42,6 +42,26 @@ describe("Config", () => {
         expect(config.actualBudgetEncryptionPassword).toBe(null);
     });
 
+    it("loads fallback LLM routing settings when provided", () => {
+        const config = new Config({
+            ...requiredEnv,
+            LLM_PROVIDER: "litellm",
+            LLM_BASE_URL: "http://codex-router:4100/v1",
+            LLM_MODEL: "gpt-5.6-luna",
+            LLM_REASONING_EFFORT: "low",
+            LLM_FALLBACK_MODEL: "gpt-5.6-terra",
+            LLM_FINAL_FALLBACK_PROVIDER: "deepseek",
+            LLM_FINAL_FALLBACK_MODEL: "deepseek-v4-pro",
+        });
+        expect(config.llmProvider).toBe("litellm");
+        expect(config.llmBaseUrl).toBe("http://codex-router:4100/v1");
+        expect(config.llmModel).toBe("gpt-5.6-luna");
+        expect(config.llmReasoningEffort).toBe("low");
+        expect(config.llmFallbackModel).toBe("gpt-5.6-terra");
+        expect(config.llmFinalFallbackProvider).toBe("deepseek");
+        expect(config.llmFinalFallbackModel).toBe("deepseek-v4-pro");
+    });
+
     it("respects custom IMAP_MAILBOX", () => {
         const config = new Config({ ...requiredEnv, IMAP_MAILBOX: "Archive" });
         expect(config.imapMailbox).toBe("Archive");

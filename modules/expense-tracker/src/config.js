@@ -37,6 +37,9 @@ export class Config {
     this.llmReasoningEffort =
       env.LLM_REASONING_EFFORT ||
       (this.llmProvider === "deepseek" ? "adaptive" : "low");
+    this.llmFallbackModel = env.LLM_FALLBACK_MODEL || "";
+    this.llmFinalFallbackProvider = env.LLM_FINAL_FALLBACK_PROVIDER || "";
+    this.llmFinalFallbackModel = env.LLM_FINAL_FALLBACK_MODEL || "";
 
     // Backward compat alias
     this.deepseekApiKey = this.llmApiKey;

@@ -257,6 +257,9 @@ if $GITHUB_MODE || check_file "$ET_ENV"; then
   check_var_optional "LLM_MODEL" "$ET_ENV"
   check_var_optional "LLM_API_KEY" "$ET_ENV"
   check_var_optional "LLM_REASONING_EFFORT" "$ET_ENV"
+  check_var_optional "LLM_FALLBACK_MODEL" "$ET_ENV"
+  check_var_optional "LLM_FINAL_FALLBACK_PROVIDER" "$ET_ENV"
+  check_var_optional "LLM_FINAL_FALLBACK_MODEL" "$ET_ENV"
 fi
 fi
 
@@ -287,6 +290,9 @@ echo "--- Codex Router ---"
   check_var_optional "LLM_MODEL" ""
   check_var_optional "LLM_API_KEY" ""
   check_var_optional "LLM_REASONING_EFFORT" ""
+  check_var_optional "LLM_FALLBACK_MODEL" ""
+  check_var_optional "LLM_FINAL_FALLBACK_PROVIDER" ""
+  check_var_optional "LLM_FINAL_FALLBACK_MODEL" ""
 fi
 
 # ---- pluggable modules (auto-discover from modules/*/module.env) ----
