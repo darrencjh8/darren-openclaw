@@ -44,8 +44,8 @@ export class Config {
     this.llmFinalFallbackModel =
       env.LLM_FINAL_FALLBACK_MODEL || "deepseek-v4-pro";
 
-    // Backward compat alias
-    this.deepseekApiKey = this.llmApiKey;
+    // Direct DeepSeek credential stays available for cross-provider fallback.
+    this.deepseekApiKey = env.DEEPSEEK_API_KEY || "";
 
     this.actualBudgetUrl = env.ACTUAL_BUDGET_URL;
     this.actualBudgetPassword = env.ACTUAL_BUDGET_PASSWORD;

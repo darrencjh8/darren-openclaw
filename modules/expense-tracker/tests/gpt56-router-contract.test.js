@@ -76,11 +76,12 @@ describe("GPT-5.6 LiteLLM contract", () => {
     expect(request).not.toHaveProperty("thinking");
   });
 
-  it("falls back from Luna to Terra then DeepSeek", async () => {
+  it("falls back from Luna to Terra then DeepSeek with the final fallback credential", async () => {
     create
       .mockRejectedValueOnce(new Error("Luna unavailable"))
       .mockRejectedValueOnce(new Error("Luna unavailable"))
       .mockRejectedValueOnce(new Error("Luna unavailable"))
+      .mockRejectedValueOnce(new Error("Terra unavailable"))
       .mockResolvedValueOnce({ choices: [{ message: { content: "{}" } }] });
     const client = new LLMClient(gptRouterConfig());
 
@@ -91,6 +92,9 @@ describe("GPT-5.6 LiteLLM contract", () => {
       "gpt-5.6-luna",
       "gpt-5.6-luna",
       "gpt-5.6-terra",
+      "deepseek-v4-pro",
     ]);
+    expect(create.mock.calls[4][0].temperature).toBe(0.1);
+    expect(create.mock.calls[4][0].thinking).toEqual({ type: "adaptive" });
   }, 15000);
 });
