@@ -42,13 +42,13 @@ describe("Config", () => {
         expect(config.actualBudgetEncryptionPassword).toBe(null);
     });
 
-    it("uses stable GPT router aliases and keeps DeepSeek as final fallback", () => {
+    it("uses the auto-thinking router pool and keeps DeepSeek as final fallback", () => {
         const config = new Config({
             ...requiredEnv,
             LLM_PROVIDER: "litellm",
         });
 
-        expect(config.llmModel).toBe("gpt-5.6-luna");
+        expect(config.llmModel).toBe("auto-thinking");
         expect(config.llmFallbackModel).toBe("gpt-5.6-terra");
         expect(config.llmFinalFallbackProvider).toBe("deepseek");
         expect(config.llmFinalFallbackModel).toBe("deepseek-v4-flash");

@@ -48,12 +48,11 @@ class DeployWorkflowRouterTests(unittest.TestCase):
     def test_pins_expense_tracker_litellm_routing_in_deploy_workflow(self):
         workflow = WORKFLOW.read_text(encoding="utf-8")
 
-        # Repository variables still drive routing, but always resolve to the
-        # intended Luna -> Terra -> DeepSeek chain even if unset (run 33345786742
-        # showed the fallback vars were never set upstream).
+        # Repository variables still drive routing, but the default primary
+        # model is the router's explicit cross-provider pool.
         self.assertIn("LLM_PROVIDER: ${{ vars.LLM_PROVIDER || 'litellm' }}", workflow)
         self.assertIn("LLM_BASE_URL: ${{ vars.LLM_BASE_URL || 'http://codex-router:4100/v1' }}", workflow)
-        self.assertIn("LLM_MODEL: ${{ vars.LLM_MODEL || 'gpt-5.6-luna' }}", workflow)
+        self.assertIn("LLM_MODEL: ${{ vars.LLM_MODEL || 'auto-thinking' }}", workflow)
         self.assertIn("LLM_REASONING_EFFORT: ${{ vars.LLM_REASONING_EFFORT || 'low' }}", workflow)
         self.assertIn("LLM_FALLBACK_MODEL: ${{ vars.LLM_FALLBACK_MODEL || 'gpt-5.6-terra' }}", workflow)
         self.assertIn("LLM_FINAL_FALLBACK_PROVIDER: ${{ vars.LLM_FINAL_FALLBACK_PROVIDER || 'deepseek' }}", workflow)
@@ -69,6 +68,7 @@ class DeployWorkflowRouterTests(unittest.TestCase):
         compose = yaml.safe_load(COMPOSE_FILE.read_text(encoding="utf-8"))
         env_list = compose["services"]["expense-tracker"]["environment"]
 
+        self.assertIn("LLM_MODEL=${LLM_MODEL:-auto-thinking}", env_list)
         self.assertIn("LLM_FALLBACK_MODEL=${LLM_FALLBACK_MODEL:-gpt-5.6-terra}", env_list)
         self.assertIn("LLM_FINAL_FALLBACK_PROVIDER=${LLM_FINAL_FALLBACK_PROVIDER:-deepseek}", env_list)
         self.assertIn("LLM_FINAL_FALLBACK_MODEL=${LLM_FINAL_FALLBACK_MODEL:-deepseek-v4-flash}", env_list)

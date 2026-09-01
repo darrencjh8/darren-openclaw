@@ -42,10 +42,10 @@ function gptRouterConfig() {
 }
 
 describe("GPT-5.6 LiteLLM contract", () => {
-  it("defaults LiteLLM traffic to the stable Luna router alias", () => {
+  it("defaults LiteLLM traffic to the auto-thinking router pool", () => {
     const config = new Config({ ...requiredEnv, LLM_PROVIDER: "litellm" });
 
-    expect(config.llmModel).toBe("gpt-5.6-luna");
+    expect(config.llmModel).toBe("auto-thinking");
     expect(config.llmFallbackModel).toBe("gpt-5.6-terra");
     expect(config.llmFinalFallbackProvider).toBe("deepseek");
   });
