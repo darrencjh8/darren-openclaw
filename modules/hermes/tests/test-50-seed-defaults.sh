@@ -1,4 +1,6 @@
 #!/bin/bash
+# Copyright © 2022 Dell Inc. or its subsidiaries. All Rights Reserved.
+
 # Unit tests for 50-seed-defaults cron job seeding.
 # Tests that jobs are seeded with proper parsed schedule dicts, not raw strings.
 set -euo pipefail
@@ -380,7 +382,7 @@ print('present' if 'hermes profile create \$name --no-alias' in content else 'mi
 managed_routing_migration=$(python3 -c "
 with open('$SEED_SCRIPT') as f:
     content = f.read()
-profiles = 'managed_routing_profiles = (\"architect\", \"code-reviewer\", \"project-manager\")' in content
+profiles = 'managed_routing_profiles = (\"architect\", \"code-reviewer\", \"project-manager\", \"spec-auditor\")' in content
 fields = 'for key in (\"providers\", \"model\", \"fallback_providers\")' in content
 print('present' if profiles and fields else 'missing')
 ")

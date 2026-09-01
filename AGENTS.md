@@ -38,7 +38,8 @@
 - Create `feat/...` or `fix/...` branches. Never commit or push directly to `main`.
 - For behavior changes, write a failing test first, implement the minimum passing change, then refactor with tests green.
 - For documentation, configuration, or skill changes with no testable behavior, state why TDD does not apply and run relevant validation.
-- For code changes that require CI, run two independent fresh-context review subagents: reviewer A uses `gpt-5.6-terra-3`; reviewer B uses `deepseek-v4-pro`. Do not reuse reviewer contexts between rounds.
+- For code changes that require CI, run one independent fresh-context code-reviewer per round. Never run a second code-reviewer in the same round or reuse reviewer context between rounds.
+- When a relevant specification or approved implementation plan exists, invoke spec-auditor before code review. Skip spec-auditor only when no relevant specification exists.
 - Fix validated Critical and High findings before merge. Cosmetic notes, style preferences, and coverage-only suggestions do not block the loop.
 - Require two consecutive clean review rounds before merge unless the user explicitly changes this requirement.
 - Push a branch, open a pull request, wait for required GitHub Actions checks, then squash-merge. CI/CD owns deployment after merge.

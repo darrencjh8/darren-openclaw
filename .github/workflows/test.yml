@@ -99,6 +99,8 @@ jobs:
               run: bash modules/hermes/tests/test-50-seed-defaults.sh
             - name: Test Hermes model routing
               run: bash modules/hermes/tests/test-model-routing.sh
+            - name: Test Hermes dev-loop review policy
+              run: bash modules/hermes/tests/test-dev-loop-skill.sh
             - name: Test Codex Router provider config
               run: bash modules/hermes/tests/test-codex-router-config.sh
             - name: Test deploy.sh logic

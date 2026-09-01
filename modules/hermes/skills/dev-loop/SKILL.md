@@ -19,6 +19,7 @@ Use normal prose for user-facing PRs, issues, commits, docs, and other persisted
 - Repo rules override this skill.
 - One code-reviewer process maximum at any moment. Never parallelize reviewers.
 - Review profile: `code-reviewer`; its managed route is GPT Terra through the codex router.
+- If a relevant specification exists, it must pass the `spec-auditor` gate before code review.
 - No production code before a failing assertion test.
 - Any repository change resets review clean streak to zero.
 - Never direct-push default branch.
@@ -46,6 +47,8 @@ Write atomically: write a same-directory temporary file, then rename it. Never s
 - tdd_cycles: <N>
 - review_round: <N>
 - clean_round_shas: <SHA list>
+- spec_path: <path, issue/plan reference, or none>
+- spec_audit_verdict: <PASS|DRIFT|GAP|SKIPPED>
 - findings: <IDs, evidence, trigger, severity, disposition>
 - accepted_risks: <PR-visible rationale, owner, follow-up issue>
 - review_lenses: <round number, A|B, HEAD SHA, verdict>
@@ -93,6 +96,42 @@ Retain state through PR lifecycle. Archive review evidence in PR. Remove transie
 
 Docs, workflow, dependency, configuration, and test-only changes may skip RED only when no executable behavior changes.
 Record reason and run relevant validation: syntax, config parsing, lint, build, or targeted tests.
+
+## Phase 1.5 - Specification audit gate
+
+If a relevant specification exists, invoke `spec-auditor` before code review.
+A relevant specification may be a repository `spec.md` or `dd.md`, an approved
+implementation plan, or an approved issue body supplied as the change contract.
+Record its stable path or reference in state. If no relevant specification
+exists, record `SKIPPED` and continue to Phase 2.
+
+Run one fresh isolated Hermes process with the full specification, exact
+`merge-base(base, HEAD)..HEAD` diff, changed-file list, repository instructions,
+and test evidence:
+
+```bash
+cd <worktree>
+HERMES_HOME=<hermes-home> hermes chat \
+  --profile spec-auditor \
+  -t terminal \
+  -Q \
+  --max-turns 20 \
+  --query-file <spec-audit-prompt-outside-repo>
+```
+
+Require the auditor to load `caveman`, then `spec-auditor`, remain read-only,
+and return exactly one verdict: `PASS`, `DRIFT`, or `GAP`.
+
+- `PASS`: record verdict and continue to Phase 2.
+- `DRIFT`: correct implementation through TDD, run required local gates,
+  commit, then rerun a fresh spec audit.
+- `GAP`: fail closed and request a human specification decision. Do not enter
+  code review until the specification is resolved and a fresh audit passes.
+- Auditor/profile failure: fail closed. Do not replace the independent audit
+  with developer self-review.
+
+Before and after the auditor run, verify repository status and diff hash are
+unchanged. Any auditor mutation is a hard failure.
 
 ## Phase 2 - Review gate
 
