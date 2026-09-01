@@ -32,7 +32,7 @@ export class Config {
         : "http://localhost:4100/v1");
     this.llmModel =
       env.LLM_MODEL ||
-      (this.llmProvider === "deepseek" ? "deepseek-v4-pro" : "gpt-5.6-luna");
+      (this.llmProvider === "deepseek" ? "deepseek-v4-pro" : "auto-thinking");
     this.llmApiKey = env.LLM_API_KEY || env.DEEPSEEK_API_KEY || "";
     this.llmReasoningEffort =
       env.LLM_REASONING_EFFORT ||

@@ -185,43 +185,43 @@ echo "=== deploy.sh: key functions present ==="
 
 deploy_src=$(cat "$DEPLOY_SCRIPT")
 
-echo "$deploy_src" | grep -q 'should_deploy' \
+grep -q 'should_deploy' <<<"$deploy_src" \
     && ok "should_deploy function exists" \
     || nope "should_deploy function" "not found"
 
-echo "$deploy_src" | grep -q 'FORCE_ALL' \
+grep -q 'FORCE_ALL' <<<"$deploy_src" \
     && ok "FORCE_ALL referenced in deploy.sh" \
     || nope "FORCE_ALL referenced" "not found"
 
-echo "$deploy_src" | grep -q 'force-recreate' \
+grep -q 'force-recreate' <<<"$deploy_src" \
     && ok "--force-recreate referenced in deploy.sh" \
     || nope "--force-recreate referenced" "not found"
 
-echo "$deploy_src" | grep -q 'health_ok' \
+grep -q 'health_ok' <<<"$deploy_src" \
     && ok "health_ok function exists" \
     || nope "health_ok function" "not found"
 
-echo "$deploy_src" | grep -q 'health_ok "codex-router" "http://localhost:4100/health/liveliness" 30' \
+grep -q 'health_ok "codex-router" "http://localhost:4100/health/liveliness" 30' <<<"$deploy_src" \
     && ok "codex-router gets extended startup health budget" \
     || nope "codex-router startup health budget" "expected 30 attempts"
 
 # Auto-discovered module health checks must not fail deployments of unrelated components.
-echo "$deploy_src" | grep -q 'should_deploy "${MODULE_NAME:-}" || continue' \
+grep -q 'should_deploy "${MODULE_NAME:-}" || continue' <<<"$deploy_src" \
     && ok "module health checks are scoped to deployed components" \
     || nope "module health checks are scoped" "missing component guard before module health check"
 
-echo "$deploy_src" | grep -q 'check_var' \
+grep -q 'check_var' <<<"$deploy_src" \
     && ok "check_var function exists" \
     || nope "check_var function" "not found"
 
-echo "$deploy_src" | grep -q 'check_file' \
+grep -q 'check_file' <<<"$deploy_src" \
     && ok "check_file function exists" \
     || nope "check_file function" "not found"
 
 # DEPLOY_COMPONENTS_OVERRIDE is a workflow-level env var (deploy.yml), not in deploy.sh.
 # deploy.sh receives individual --component flags from the workflow.
 # This is correct — deploy.sh doesn't need to know about workflow inputs.
-echo "$deploy_src" | grep -q 'DEPLOY_COMPONENTS_OVERRIDE' \
+grep -q 'DEPLOY_COMPONENTS_OVERRIDE' <<<"$deploy_src" \
     || true  # Expected: this var is workflow-only
 ok "DEPLOY_COMPONENTS_OVERRIDE is workflow-level (correctly absent from deploy.sh)"
 
@@ -229,11 +229,11 @@ echo ""
 echo "=== deploy.sh: requires --component flag ==="
 
 # deploy.sh should reject invocations without --component
-echo "$deploy_src" | grep -q 'Usage:' \
+grep -q 'Usage:' <<<"$deploy_src" \
     && ok "usage message present" \
     || nope "usage message" "not found"
 
-echo "$deploy_src" | grep -q '\-\-component' \
+grep -q '\-\-component' <<<"$deploy_src" \
     && ok "--component documented in usage" \
     || nope "--component in usage" "not found"
 

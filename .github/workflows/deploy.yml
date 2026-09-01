@@ -124,6 +124,7 @@ jobs:
                   GITHUB_ACTIONS: true
                   HERMES_WORKSPACE: /home/darren/workspace/hermes
                   DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+                  OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
                   GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
                   TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
                   HERMES_WEBHOOK_SECRET: ${{ secrets.HERMES_WEBHOOK_SECRET }}
@@ -145,7 +146,7 @@ jobs:
                   CODEX_ROUTER_AUTH_PASSWORD: ${{ secrets.CODEX_ROUTER_AUTH_PASSWORD }}
                   LLM_PROVIDER: ${{ vars.LLM_PROVIDER || 'litellm' }}
                   LLM_BASE_URL: ${{ vars.LLM_BASE_URL || 'http://codex-router:4100/v1' }}
-                  LLM_MODEL: ${{ vars.LLM_MODEL || 'gpt-5.6-luna' }}
+                  LLM_MODEL: ${{ vars.LLM_MODEL || 'auto-thinking' }}
                   LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
                   LLM_REASONING_EFFORT: ${{ vars.LLM_REASONING_EFFORT || 'low' }}
                   LLM_FALLBACK_MODEL: ${{ vars.LLM_FALLBACK_MODEL || 'gpt-5.6-terra' }}
