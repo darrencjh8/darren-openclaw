@@ -111,6 +111,17 @@ describe("classifyEmail", () => {
     expect(call.temperature).toBe(1);
   });
 
+  it.each([
+    ["Reminder: upcoming scheduled transfer", "info@alerts.rytbank.my"],
+    ["digibank Alert - Unsuccessful bill payment", "ibanking.alert@dbs.com"],
+    ["Your eDocument(s) are ready for viewing", "ibanking.alert@dbs.com"],
+  ])("skips known bank notifications that are not completed transactions", async (subject, sender) => {
+    const result = await classifyEmail("This is a reminder or document notification.", subject, sender, config);
+
+    expect(result).toBe("skip");
+    expect(mockCreate).not.toHaveBeenCalled();
+  });
+
   it("classifies an IBKR trade confirmation as 'skip'", async () => {
     mockCreate.mockResolvedValueOnce({
       choices: [{ message: { content: "skip" } }],
