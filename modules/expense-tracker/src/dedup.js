@@ -155,6 +155,10 @@ export class DedupJournal {
         return reserve();
     }
 
+    getTransfer(id) {
+        return this._db.prepare("SELECT * FROM transfer_journal WHERE id = ?").get(id) || null;
+    }
+
     markTransferInserted(id, actualTransactionId = null) {
         this._db.prepare(`
           UPDATE transfer_journal

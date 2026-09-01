@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  identityMappingsFromFacts,
   parseBankMovement,
   resolveMovementAccounts,
 } from "../src/bank-movement.js";
@@ -131,7 +132,9 @@ describe("structured movement orchestration", () => {
           categories: [],
           payees: [{ id: "transfer-citi", transfer_acct: "citi-card" }],
         };
-        if (name === "search_memory") return { results: [] };
+        if (name === "search_memory") return { results: [
+          { text: "Card ending 9302 belongs to Altitude 9302", score: 1 },
+        ] };
         if (name === "reserve_transfer") return { status: "reserved", entry: { id: 1 } };
         if (name === "check_duplicate") return false;
         if (name === "insert_transaction") return { id: "actual-1" };
@@ -170,6 +173,79 @@ To: CITI CREDIT CARDS (Ref ending 4756)
       category_id: undefined,
     });
     expect(calls.some((call) => call.name === "complete_transfer")).toBe(true);
+  });
+
+  it("passes the RFC email date to phase 1 across a year boundary", async () => {
+    const { AgentOrchestrator } = await import("../src/orchestrator.js");
+    const tools = {
+      executeTool: vi.fn(async () => true),
+      getPhase1ToolSchemas: vi.fn(() => []),
+      setEmailContext: vi.fn(),
+    };
+    const orch = new AgentOrchestrator({
+      primaryCurrency: "SGD", secondaryCurrency: "MYR",
+      primaryBudgetFile: "budget-sgd", secondaryBudgetFile: "budget-myr",
+      llmProvider: "deepseek", llmApiKey: "test", deepseekApiKey: "test",
+    }, tools);
+    orch._runPhase1 = vi.fn().mockResolvedValue({ action: "skip" });
+
+    await orch.processEmail(
+      "deposit-year-boundary",
+      [
+        "Date: Fri, 01 Jan 2027 00:01:00 +0800",
+        "Content-Type: text/plain; charset=utf-8",
+        "",
+        "A deposit was made in your account.",
+      ].join("\r\n"),
+      null,
+      "Notifications@ocbc.com",
+      "OCBC Alert: Deposit in your account",
+    );
+
+    expect(orch._runPhase1).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({
+        senderBank: "OCBC",
+        receivedAt: "2026-12-31T16:01:00.000Z",
+      }),
+    );
+  });
+
+  it("does not create an internal transfer from a bankless source without an identity fact", async () => {
+    const { AgentOrchestrator } = await import("../src/orchestrator.js");
+    const tools = {
+      executeTool: vi.fn(async (name) => {
+        if (name === "fetch_context") return {
+          accounts: [
+            { id: "dbs-altitude", name: "Altitude 9302", closed: false },
+            { id: "citi-card", name: "Citi Rewards 4756", closed: false },
+          ],
+          categories: [],
+          payees: [{ id: "transfer-citi", transfer_acct: "citi-card" }],
+        };
+        if (name === "search_memory") return { results: [] };
+        return true;
+      }),
+      getPhase1ToolSchemas: vi.fn(() => []),
+      setEmailContext: vi.fn(),
+    };
+    const orch = new AgentOrchestrator({
+      primaryCurrency: "SGD", secondaryCurrency: "MYR",
+      primaryBudgetFile: "budget-sgd", secondaryBudgetFile: "budget-myr",
+      llmProvider: "deepseek", llmApiKey: "test", deepseekApiKey: "test",
+    }, tools);
+    orch._llm.chat = vi.fn();
+
+    const phase1 = await orch._runPhase1(`
+Transaction Ref: REF-DBS-NO-IDENTITY
+Date and Time: 01 Sep 01:05 (SGT)
+Amount: SGD 253.37
+From: Altitude (A/C ending 9302)
+To: CITI CREDIT CARDS (Ref ending 4756)
+`, { senderBank: "DBS", receivedAt: "2026-09-01T01:06:00+08:00" });
+
+    expect(phase1).toBeNull();
+    expect(orch._llm.chat).toHaveBeenCalled();
   });
 
   it("deduplicates Trust incoming alert without LLM or payee-memory account override", async () => {
@@ -225,7 +301,9 @@ describe("resolveMovementAccounts", () => {
       direction: "outgoing",
       own_account: { bank: "DBS", suffix: "9302" },
       counterparty: { bank: "Citi", suffix: "4756" },
-    }, accounts, payees);
+    }, accounts, payees, identityMappingsFromFacts([
+      "Card ending 9302 belongs to Altitude 9302",
+    ], accounts));
 
     expect(resolved).toEqual({
       source_account: accounts[2],
@@ -233,6 +311,16 @@ describe("resolveMovementAccounts", () => {
       destination_payee: payees[1],
       internal: true,
     });
+  });
+
+  it("rejects bankless account names unless explicitly mapped", () => {
+    const result = resolveMovementAccounts({
+      direction: "outgoing",
+      own_account: { bank: "DBS", suffix: "9302" },
+      counterparty: { bank: "Citi", suffix: "4756" },
+    }, accounts, payees);
+    expect(result.source_account).toBeNull();
+    expect(result.internal).toBe(false);
   });
 
   it("uses unique short suffix but rejects ambiguous short suffix", () => {

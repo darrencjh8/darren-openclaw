@@ -367,7 +367,10 @@ export class AgentOrchestrator {
 
         // Phase 1: LLM Analysis
         const senderBank = bankFromSender(from);
-        const phase1 = await this._runPhase1(emailText, { senderBank });
+        const phase1 = await this._runPhase1(emailText, {
+            senderBank,
+            receivedAt: this._emailReceivedAt(rawEmail),
+        });
         if (!phase1) {
             const notified = await this._tools.executeTool("notify_user", {
                 message: `Couldn't understand email from "${from || "unknown"}" re: "${subject || "unknown"}".`,
@@ -430,10 +433,18 @@ export class AgentOrchestrator {
     // Phase 1: LLM Analysis
     // ═══════════════════════════════════════════════════════════════
 
-    async _runStructuredMovement(emailText, senderBank) {
+    _emailReceivedAt(rawEmail) {
+        const raw = Buffer.isBuffer(rawEmail) ? rawEmail.toString("utf8") : String(rawEmail || "");
+        const header = raw.match(/^Date:\s*([^\r\n]+(?:\r?\n[ \t]+[^\r\n]+)*)/im)?.[1]
+            ?.replace(/\r?\n[ \t]+/g, " ");
+        const parsed = header ? Date.parse(header) : NaN;
+        return Number.isNaN(parsed) ? new Date().toISOString() : new Date(parsed).toISOString();
+    }
+
+    async _runStructuredMovement(emailText, senderBank, receivedAt) {
         const movement = parseBankMovement(emailText, {
             senderBank,
-            receivedAt: new Date().toISOString(),
+            receivedAt: receivedAt || new Date().toISOString(),
         });
         if (!movement) return null;
         const budgetId = movement.currency === this._config.primaryCurrency
@@ -484,6 +495,7 @@ export class AgentOrchestrator {
                     currency: movement.currency,
                     amount_cents: Math.abs(movement.amount_cents),
                     occurred_at: movement.occurred_at,
+                    payee_id: resolved.destination_payee.id,
                 },
             };
         }
@@ -532,9 +544,9 @@ export class AgentOrchestrator {
         return null;
     }
 
-    async _runPhase1(emailText, { senderBank } = {}) {
+    async _runPhase1(emailText, { senderBank, receivedAt } = {}) {
         try {
-            const structured = await this._runStructuredMovement(emailText, senderBank);
+            const structured = await this._runStructuredMovement(emailText, senderBank, receivedAt);
             if (structured) return structured;
         } catch (error) {
             logger.warn({ event: "structured_movement_failed", error: error.message });

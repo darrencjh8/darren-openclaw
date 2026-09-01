@@ -2391,7 +2391,10 @@ describe("3-phase entry points", () => {
 
       const result = await orch.processEmail("msg-1", "raw email");
 
-      expect(orch._runPhase1).toHaveBeenCalledWith("S$12.80 at Toast Box", { senderBank: null });
+      expect(orch._runPhase1).toHaveBeenCalledWith(
+        "S$12.80 at Toast Box",
+        expect.objectContaining({ senderBank: null, receivedAt: expect.any(String) }),
+      );
       expect(orch._resolvePhase2).toHaveBeenCalledWith(phase1Out);
       expect(result.action).toBe("inserted");
       expect(executeCalls.some((c) => c.name === "insert_transaction")).toBe(

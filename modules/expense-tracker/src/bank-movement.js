@@ -173,7 +173,7 @@ export function parseBankMovement(text, { senderBank = null, receivedAt } = {}) 
 function accountMatches(account, evidence) {
   if (!account?.name || account.closed || !evidence?.suffix) return false;
   const bank = bankFromText(account.name);
-  if (bank && evidence.bank && bank !== evidence.bank) return false;
+  if (evidence.bank && bank !== evidence.bank) return false;
   const digits = [...account.name.matchAll(/\d{4,}/g)].map((match) => match[0]);
   return digits.some((value) => value === evidence.suffix || evidence.suffix.endsWith(value) || value.endsWith(evidence.suffix));
 }
@@ -188,7 +188,7 @@ export function identityMappingsFromFacts(facts, accounts) {
   const mappings = { suffix: new Map(), recipient: new Map() };
   for (const fact of facts || []) {
     const text = typeof fact === "string" ? fact : fact?.text || "";
-    const suffixMatch = text.match(/^Account ending\s+(\d{4,})\s+belongs to\s+(.+?)(?:\s+account)?$/i);
+    const suffixMatch = text.match(/^(?:Account|Card) ending\s+(\d{4,})\s+belongs to\s+(.+?)(?:\s+account)?$/i);
     if (suffixMatch) {
       const account = accounts.find((a) => a.name?.toLowerCase() === suffixMatch[2].trim().toLowerCase() && !a.closed);
       if (account) mappings.suffix.set(suffixMatch[1], account);
