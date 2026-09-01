@@ -69,7 +69,7 @@ export async function classifyEmail(rawEmail, subject, sender, config) {
             routes.push({ ...routes[0], model: config.llmFallbackModel });
             routes.push({
                 provider: config.llmFinalFallbackProvider || "deepseek",
-                model: config.llmFinalFallbackModel || "deepseek-v4-pro",
+                model: config.llmFinalFallbackModel || "deepseek-v4-flash",
                 apiKey: config.deepseekApiKey || "",
                 baseURL: "https://api.deepseek.com/v1",
             });

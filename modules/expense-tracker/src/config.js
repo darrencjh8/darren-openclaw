@@ -42,7 +42,7 @@ export class Config {
       (this.llmProvider === "deepseek" ? "" : "gpt-5.6-terra");
     this.llmFinalFallbackProvider = env.LLM_FINAL_FALLBACK_PROVIDER || "deepseek";
     this.llmFinalFallbackModel =
-      env.LLM_FINAL_FALLBACK_MODEL || "deepseek-v4-pro";
+      env.LLM_FINAL_FALLBACK_MODEL || "deepseek-v4-flash";
 
     // Direct DeepSeek credential stays available for cross-provider fallback.
     this.deepseekApiKey = env.DEEPSEEK_API_KEY || "";

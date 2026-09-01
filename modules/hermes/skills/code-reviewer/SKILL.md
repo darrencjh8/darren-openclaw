@@ -20,7 +20,7 @@ While this skill is active, load and follow the global `caveman` skill at **ultr
 
 ## Model Pin
 
-Launch the independent reviewer with the managed `code-reviewer` profile. It routes to GPT Terra through the codex router, with DeepSeek V4 Pro only as the configured fallback. Do not override its provider, model, or reasoning setting on the command line. If the profile or its GPT Terra route is unavailable, fail closed and report the blocker.
+Launch the independent reviewer with the managed `code-reviewer` profile. It routes to GPT Terra through the codex router, with DeepSeek V4 Flash only as the configured fallback. Do not override its provider, model, or reasoning setting on the command line. If the profile or its GPT Terra route is unavailable, fail closed and report the blocker.
 
 ## Phase 1: Orientation (do this FIRST)
 

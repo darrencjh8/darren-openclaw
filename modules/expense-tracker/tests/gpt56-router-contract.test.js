@@ -92,7 +92,7 @@ describe("GPT-5.6 LiteLLM contract", () => {
       "gpt-5.6-luna",
       "gpt-5.6-luna",
       "gpt-5.6-terra",
-      "deepseek-v4-pro",
+      "deepseek-v4-flash",
     ]);
     expect(create.mock.calls[4][0].temperature).toBe(0.1);
     expect(create.mock.calls[4][0].thinking).toEqual({ type: "adaptive" });
