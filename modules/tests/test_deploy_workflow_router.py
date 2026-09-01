@@ -82,6 +82,18 @@ class DeployWorkflowRouterTests(unittest.TestCase):
         router_section = deploy_script.split("# ---- codex-router ----", 1)[1].split("# ---- pluggable modules", 1)[0]
         self.assertIn('check_var_optional "OPENCODE_API_KEY" ""', router_section)
 
+    def test_opencode_go_key_is_passed_to_hermes(self):
+        compose = yaml.safe_load(COMPOSE_FILE.read_text(encoding="utf-8"))
+        hermes_env = compose["services"]["hermes"]["environment"]
+        self.assertIn("OPENCODE_GO_API_KEY=${OPENCODE_GO_API_KEY:-}", hermes_env)
+
+        workflow = WORKFLOW.read_text(encoding="utf-8")
+        self.assertIn("OPENCODE_GO_API_KEY: ${{ secrets.OPENCODE_API_KEY }}", workflow)
+
+        deploy_script = DEPLOY_SCRIPT.read_text(encoding="utf-8")
+        hermes_section = deploy_script.split("# ---- Hermes ----", 1)[1].split("# ---- portfolio-tracker", 1)[0]
+        self.assertIn('check_var_optional "OPENCODE_GO_API_KEY" "$HERMES_ENV"', hermes_section)
+
     def test_public_workflow_runs_private_router_tests_at_an_explicit_ref(self):
         workflow = ROUTER_CI_WORKFLOW.read_text(encoding="utf-8")
         self.assertIn("workflow_dispatch:", workflow)
