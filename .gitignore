@@ -74,3 +74,6 @@ modules/onedrive-sync/config/onedrive-state/
 
 # dev-loop state file
 .agents/dev-loop-state.md
+
+# dev-loop state
+.agents/dev-loop-state.json

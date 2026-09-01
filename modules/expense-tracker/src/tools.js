@@ -1112,6 +1112,46 @@ export class ToolRegistry {
     return result;
   }
 
+  async _handle_reserve_transfer(args) {
+    let reservation = this._dedup.reserveTransfer(args);
+    if (reservation.status !== "pending") return reservation;
+
+    // A timeout may occur after Actual committed. Reconcile the exact source
+    // account, amount, date, and transfer payee before allowing another insert.
+    try {
+      const date = new Date(args.occurred_at).toISOString().slice(0, 10);
+      const transactions = await this._get("/transactions", args.budget_id, {
+        since_date: date,
+        until_date: date,
+        account_id: args.source_account_id,
+      });
+      const matches = Array.isArray(transactions)
+        ? transactions.filter((tx) =>
+            tx.amount === -Math.abs(args.amount_cents) &&
+            (tx.payee === args.payee_id || tx.payee_id === args.payee_id),
+          )
+        : [];
+      if (matches.length === 1) {
+        this._dedup.markTransferInserted(reservation.entry.id, matches[0].id || null);
+        return { status: "inserted", entry: this._dedup.getTransfer(reservation.entry.id) };
+      }
+      // Only release a reservation after an exact Actual lookup proves absent.
+      const created = Date.parse(`${reservation.entry.created_at}Z`);
+      if (matches.length === 0 && Number.isFinite(created) && Date.now() - created > 5 * 60 * 1000) {
+        this._dedup.markTransferFailed(reservation.entry.id);
+        reservation = this._dedup.reserveTransfer(args);
+      }
+    } catch {
+      // Cannot prove Actual absence: retain pending reservation.
+    }
+    return reservation;
+  }
+
+  async _handle_complete_transfer({ id, actual_transaction_id }) {
+    this._dedup.markTransferInserted(id, actual_transaction_id || null);
+    return true;
+  }
+
   async _handle_check_duplicate({
     date,
     amount_cents,

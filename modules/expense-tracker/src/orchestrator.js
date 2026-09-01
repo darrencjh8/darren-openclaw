@@ -11,6 +11,11 @@ import OpenAI from "openai";
 import { getPhase1Prompt, getCategoryPickerPrompt } from "./prompts.js";
 import { extractEmailContent } from "./extractors.js";
 import { composeNotes } from "./transaction-notes.js";
+import {
+    identityMappingsFromFacts,
+    parseBankMovement,
+    resolveMovementAccounts,
+} from "./bank-movement.js";
 import { logger } from "./logging.js";
 
 export class LLMClient {
@@ -362,7 +367,10 @@ export class AgentOrchestrator {
 
         // Phase 1: LLM Analysis
         const senderBank = bankFromSender(from);
-        const phase1 = await this._runPhase1(emailText, { senderBank });
+        const phase1 = await this._runPhase1(emailText, {
+            senderBank,
+            receivedAt: this._emailReceivedAt(rawEmail),
+        });
         if (!phase1) {
             const notified = await this._tools.executeTool("notify_user", {
                 message: `Couldn't understand email from "${from || "unknown"}" re: "${subject || "unknown"}".`,
@@ -425,7 +433,125 @@ export class AgentOrchestrator {
     // Phase 1: LLM Analysis
     // ═══════════════════════════════════════════════════════════════
 
-    async _runPhase1(emailText, { senderBank } = {}) {
+    _emailReceivedAt(rawEmail) {
+        const raw = Buffer.isBuffer(rawEmail) ? rawEmail.toString("utf8") : String(rawEmail || "");
+        const header = raw.match(/^Date:\s*([^\r\n]+(?:\r?\n[ \t]+[^\r\n]+)*)/im)?.[1]
+            ?.replace(/\r?\n[ \t]+/g, " ");
+        const parsed = header ? Date.parse(header) : NaN;
+        return Number.isNaN(parsed) ? new Date().toISOString() : new Date(parsed).toISOString();
+    }
+
+    async _runStructuredMovement(emailText, senderBank, receivedAt) {
+        const movement = parseBankMovement(emailText, {
+            senderBank,
+            receivedAt: receivedAt || new Date().toISOString(),
+        });
+        if (!movement) return null;
+        const budgetId = movement.currency === this._config.primaryCurrency
+            ? this._config.primaryBudgetFile
+            : this._config.secondaryBudgetFile;
+        const ctx = await this._tools.executeTool("fetch_context", { budget_id: budgetId });
+        const accounts = ctx?.accounts || [];
+        const facts = [];
+        const queries = new Set([
+            movement.own_account?.suffix,
+            movement.counterparty?.suffix,
+            movement.recipient_bank ? `${movement.recipient_bank} alert recipient` : "",
+        ].filter(Boolean));
+        for (const query of queries) {
+            const result = await this._tools.executeTool("search_memory", { query });
+            facts.push(...(result?.results || []));
+        }
+        const mappings = identityMappingsFromFacts(facts, accounts);
+        const resolved = resolveMovementAccounts(movement, accounts, ctx?.payees || [], mappings);
+        const source = resolved.source_account;
+        const destination = resolved.destination_account;
+        const date = movement.occurred_at?.slice(0, 10);
+        if (!source || !date) return null;
+
+        if (resolved.internal) {
+            return {
+                merchant: movement.counterparty?.name || destination.name,
+                amount_cents: -Math.abs(movement.amount_cents),
+                date,
+                currency: movement.currency,
+                account_id: source.id,
+                account_name: source.name,
+                budget_id: budgetId,
+                action: "insert",
+                payee_name: destination.name,
+                payee_id: resolved.destination_payee.id,
+                category_id: null,
+                raw_description: `Transfer to ${movement.counterparty?.name || destination.name}`,
+                raw_merchant_descriptor: "",
+                notes: movement.reference_number ? `Statement: ${movement.reference_number}` : "",
+                reasoning: "Deterministic structured bank transfer",
+                notify_message: "",
+                _is_transfer: true,
+                _transfer: {
+                    budget_id: budgetId,
+                    source_account_id: source.id,
+                    destination_account_id: destination.id,
+                    currency: movement.currency,
+                    amount_cents: Math.abs(movement.amount_cents),
+                    occurred_at: movement.occurred_at,
+                    payee_id: resolved.destination_payee.id,
+                },
+            };
+        }
+
+        if (movement.direction === "incoming" && !movement.counterparty) {
+            return {
+                merchant: "Unidentified deposit",
+                amount_cents: Math.abs(movement.amount_cents),
+                date,
+                currency: movement.currency,
+                account_id: source.id,
+                account_name: source.name,
+                budget_id: budgetId,
+                action: "insert",
+                payee_name: "Misc",
+                category_id: null,
+                raw_description: "Unidentified deposit",
+                raw_merchant_descriptor: "",
+                notes: "",
+                reasoning: "Deterministic one-sided bank deposit",
+                notify_message: "",
+                _structured_movement: true,
+            };
+        }
+
+        if (movement.direction === "outgoing") {
+            return {
+                merchant: movement.merchant_display_name || movement.counterparty?.name || "Bank payment",
+                amount_cents: -Math.abs(movement.amount_cents),
+                date,
+                currency: movement.currency,
+                account_id: source.id,
+                account_name: source.name,
+                budget_id: budgetId,
+                action: "insert",
+                payee_name: "",
+                category_id: null,
+                raw_description: movement.merchant_display_name || movement.counterparty?.name || "Bank payment",
+                raw_merchant_descriptor: movement.raw_merchant_descriptor || "",
+                notes: movement.reference_number ? `Statement: ${movement.reference_number}` : "",
+                reasoning: "Deterministic external bank payment",
+                notify_message: "",
+                _structured_movement: true,
+            };
+        }
+        return null;
+    }
+
+    async _runPhase1(emailText, { senderBank, receivedAt } = {}) {
+        try {
+            const structured = await this._runStructuredMovement(emailText, senderBank, receivedAt);
+            if (structured) return structured;
+        } catch (error) {
+            logger.warn({ event: "structured_movement_failed", error: error.message });
+        }
+
         // Bill payment / transfer deterministic pre-parser (#313).
         // Handles DBS structured format. Unmatched formats fall through to LLM.
         //
@@ -1293,6 +1419,7 @@ export class AgentOrchestrator {
         if (action === "insert") {
             const payeeName = llmOutput.payee_name || "Misc";
             const accountId = llmOutput.account_id || "";
+            let transferReservation = null;
 
             // Check duplicate
             const isDuplicate = await this._tools.executeTool(
@@ -1320,9 +1447,28 @@ export class AgentOrchestrator {
                 };
             }
 
+            if (llmOutput._transfer) {
+                transferReservation = await this._tools.executeTool(
+                    "reserve_transfer",
+                    llmOutput._transfer,
+                );
+                if (transferReservation?.status === "inserted") {
+                    if (!silent) await this._tools.executeTool("mark_email_read", {});
+                    await this._tools.executeTool("log_decision", {
+                        action: "transfer_counterpart_deduplicated",
+                        reasoning: llmOutput.reasoning || "",
+                        timestamp: new Date().toISOString(),
+                    });
+                    return { action: "transfer_counterpart_deduplicated", details: "Transfer counterpart matched" };
+                }
+                if (transferReservation?.status === "pending" || transferReservation?.status === "ambiguous") {
+                    return { action: "notified", details: "Transfer pending reconciliation" };
+                }
+            }
+
             // Insert transaction
             try {
-                await this._tools.executeTool("insert_transaction", {
+                const inserted = await this._tools.executeTool("insert_transaction", {
                     account_id: accountId,
                     date:
                         llmOutput.date || new Date().toISOString().slice(0, 10),
@@ -1336,6 +1482,12 @@ export class AgentOrchestrator {
                     }),
                     budget_id: llmOutput.budget_id || "",
                 });
+                if (transferReservation?.status === "reserved") {
+                    await this._tools.executeTool("complete_transfer", {
+                        id: transferReservation.entry.id,
+                        actual_transaction_id: inserted?.id || null,
+                    });
+                }
             } catch (e) {
                 logger.error({ event: "insert_failed", error: e.message });
                 if (!silent) {
