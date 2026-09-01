@@ -1,6 +1,4 @@
 #!/bin/bash
-# Copyright © 2022 Dell Inc. or its subsidiaries. All Rights Reserved.
-
 # Contract test for durable Hermes model routing defaults.
 set -euo pipefail
 
@@ -24,6 +22,10 @@ router_provider = {
     "transport": "chat_completions",
 }
 router_route = "custom:codex-router"
+opencode_glm_fallback = {
+    "provider": "opencode-go",
+    "model": "glm-5.2",
+}
 deepseek_pro_fallback = {
     "provider": "deepseek",
     "model": "deepseek-v4-pro",
@@ -64,16 +66,14 @@ assert config["model"].get("default") == "gpt-5.6-terra"
 assert "base_url" not in config["model"]
 assert "api_key" not in config["model"]
 assert config["agent"]["reasoning_effort"] == "medium"
-assert config["fallback_providers"] == [deepseek_pro_fallback], (
-    "main fallback_providers must use deepseek-v4-pro — fallbacks fire rarely, "
-    "so the main agent wants the strongest available net"
+assert config["fallback_providers"] == [opencode_glm_fallback, deepseek_pro_fallback], (
+    "main fallback_providers must start with opencode-go/glm-5.2, then deepseek-v4-pro"
 )
 assert_route(config["delegation"], "gpt-5.6-luna", "delegation")
 
 assert_route(config["auxiliary"]["vision"], "gpt-5.6-terra", "auxiliary.vision")
-assert config["auxiliary"]["vision"].get("fallback_chain") == [deepseek_vision_fallback], (
-    "auxiliary.vision.fallback_chain must use deepseek-v4-flash-vision-exp — "
-    "deepseek-v4-pro and deepseek-v4-flash are text-only and reject image content"
+assert config["auxiliary"]["vision"].get("fallback_chain") == [opencode_glm_fallback, deepseek_vision_fallback], (
+    "auxiliary.vision.fallback_chain must start with opencode-go/glm-5.2, then deepseek-v4-flash-vision-exp"
 )
 
 for task, model in {
@@ -85,8 +85,8 @@ for task, model in {
 }.items():
     route = config["auxiliary"][task]
     assert_route(route, model, f"auxiliary.{task}")
-    assert route.get("fallback_chain") == [deepseek_flash_fallback], (
-        f"auxiliary.{task}.fallback_chain must directly use deepseek-v4-flash after LiteLLM exhaustion"
+    assert route.get("fallback_chain") == [opencode_glm_fallback, deepseek_flash_fallback], (
+        f"auxiliary.{task}.fallback_chain must start with opencode-go/glm-5.2, then deepseek-v4-flash"
     )
 
 assert config["kanban"]["default_assignee"] == "code-reviewer"
@@ -106,7 +106,7 @@ assert "fallback_chain" not in decomposer, (
 
 for profile, (model, fallback_model) in {
     "architect": ("gpt-5.6-sol", "deepseek-v4-pro"),
-    "code-reviewer": ("gpt-5.6-terra", "deepseek-v4-pro"),
+    "code-reviewer": ("glm-5.2", "deepseek-v4-pro"),
     "spec-auditor": ("gpt-5.6-terra", "deepseek-v4-pro"),
     "project-manager": ("gpt-5.6-luna", "deepseek-v4-flash"),
 }.items():
@@ -114,15 +114,32 @@ for profile, (model, fallback_model) in {
     assert profile_config_path.is_file(), f"{profile} profile config is missing"
     with open(profile_config_path) as f:
         profile_config = yaml.safe_load(f)
-    assert_provider(profile_config, model, profile)
-    assert profile_config["model"].get("provider") == router_route
+    if profile != "code-reviewer":
+        assert_provider(profile_config, model, profile)
+    expected_provider = "opencode-go" if profile == "code-reviewer" else router_route
+    assert profile_config["model"].get("provider") == expected_provider, (
+        f"{profile}.model.provider: expected {expected_provider!r}, got {profile_config['model'].get('provider')!r}"
+    )
     assert profile_config["model"].get("default") == model
     assert "base_url" not in profile_config["model"]
     assert "api_key" not in profile_config["model"]
     fallback = profile_config["fallback_providers"]
-    assert len(fallback) == 1
-    assert fallback[0].get("provider") == "deepseek"
-    assert fallback[0].get("model") == fallback_model, (
-        f"{profile} fallback must use {fallback_model}, got {fallback[0].get('model')!r}"
-    )
+    if profile == "code-reviewer":
+        assert len(fallback) >= 2, (
+            f"{profile} fallback must have at least 2 entries (codex-router/terra + deepseek)"
+        )
+        assert fallback[0].get("provider") == "custom:codex-router", (
+            f"{profile} first fallback must use custom:codex-router/terra"
+        )
+        assert fallback[0].get("model") == "gpt-5.6-terra", (
+            f"{profile} first fallback model must be gpt-5.6-terra"
+        )
+        assert fallback[1].get("provider") == "deepseek"
+        assert fallback[1].get("model") == fallback_model
+    else:
+        assert len(fallback) == 1
+        assert fallback[0].get("provider") == "deepseek"
+        assert fallback[0].get("model") == fallback_model, (
+            f"{profile} fallback must use {fallback_model}, got {fallback[0].get('model')!r}"
+        )
 PY
