@@ -1,0 +1,62 @@
+providers:
+    codex-router:
+        name: Codex Router
+        api: http://codex-router:4100/v1
+        api_key: local
+        transport: chat_completions
+        default_model: gpt-5.6-terra
+
+model:
+    provider: custom:codex-router
+    default: gpt-5.6-terra
+
+fallback_providers:
+    - provider: deepseek
+      model: deepseek-v4-flash
+      api_key: ${DEEPSEEK_API_KEY}
+
+agent:
+    reasoning_effort: medium
+    disabled_toolsets:
+        - image_gen
+        - moa
+
+display:
+    show_reasoning: false
+
+approvals:
+    mode: smart
+    timeout: 60
+
+memory:
+    memory_enabled: false
+    user_profile_enabled: false
+    write_approval: true
+
+terminal:
+    backend: local
+    persistent_shell: true
+    cwd: /workspace
+
+web:
+    search_backend: brave-free
+    extract_backend: firecrawl
+
+timezone: Asia/Kuala_Lumpur
+
+mcp_servers:
+    expense-tracker:
+        url: http://expense-tracker:8080/mcp
+        tools:
+            exclude: []
+        supports_parallel_tool_calls: false
+    portfolio-tracker:
+        url: http://portfolio-tracker:8081/mcp
+        tools:
+            exclude: []
+        supports_parallel_tool_calls: false
+    ktmb-booking:
+        url: http://ktmb-booking:8082/mcp
+        tools:
+            exclude: []
+        supports_parallel_tool_calls: false

@@ -1,4 +1,6 @@
 #!/command/with-contenv sh
+# Copyright © 2022 Dell Inc. or its subsidiaries. All Rights Reserved.
+
 # shellcheck shell=sh
 # shellcheck disable=SC2015,SC2235
 # Seed baked-in config, SOUL, skills, and scripts on every boot.
@@ -37,7 +39,7 @@ from pathlib import Path
 
 import yaml
 
-managed_routing_profiles = ("architect", "code-reviewer", "project-manager")
+managed_routing_profiles = ("architect", "code-reviewer", "project-manager", "spec-auditor")
 for name in managed_routing_profiles:
     default_path = Path(f"/opt/hermes-defaults/profiles/{name}/config.yaml")
     target_path = Path(f"/opt/data/profiles/{name}/config.yaml")

@@ -1,4 +1,6 @@
 #!/bin/bash
+# Copyright © 2022 Dell Inc. or its subsidiaries. All Rights Reserved.
+
 # Contract test for durable Hermes model routing defaults.
 set -euo pipefail
 
@@ -78,8 +80,11 @@ for profile, model in {
     "architect": "gpt-5.6-sol",
     "code-reviewer": "gpt-5.6-terra",
     "project-manager": "gpt-5.6-luna",
+    "spec-auditor": "gpt-5.6-terra",
 }.items():
-    with open(root / "modules/hermes/profiles" / profile / "config.yaml") as f:
+    profile_config_path = root / "modules/hermes/profiles" / profile / "config.yaml"
+    assert profile_config_path.is_file(), f"{profile} profile config is missing"
+    with open(profile_config_path) as f:
         profile_config = yaml.safe_load(f)
     assert_provider(profile_config, model, profile)
     assert profile_config["model"].get("provider") == router_route
