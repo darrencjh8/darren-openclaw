@@ -148,6 +148,33 @@ Description : UEN123-REFERENCE
   });
 });
 
+describe("identityMappingsFromFacts", () => {
+  it("maps identity facts whose account name ends in Account without truncating it", () => {
+    const localAccounts = [
+      { id: "dbs-account", name: "DBS Account", closed: false },
+      { id: "dbs-yuu", name: "DBS Yuu Card", closed: false },
+    ];
+    const mappings = identityMappingsFromFacts([
+      "Account ending 5750 belongs to DBS Account",
+      "Card ending 3255 belongs to DBS Yuu Card",
+    ], localAccounts);
+
+    expect(mappings.suffix.get("5750")?.name).toBe("DBS Account");
+    expect(mappings.suffix.get("3255")?.name).toBe("DBS Yuu Card");
+  });
+
+  it("still maps identity facts with a trailing filler account word", () => {
+    const localAccounts = [
+      { id: "ocbc-360", name: "OCBC 360", closed: false },
+    ];
+    const mappings = identityMappingsFromFacts([
+      "Account ending 869001 belongs to OCBC 360 account",
+    ], localAccounts);
+
+    expect(mappings.suffix.get("869001")?.name).toBe("OCBC 360");
+  });
+});
+
 describe("structured movement orchestration", () => {
   it("bypasses LLM and sends a transfer payee for DBS bill payment", async () => {
     const { AgentOrchestrator } = await import("../src/orchestrator.js");
@@ -304,6 +331,55 @@ To: CITI CREDIT CARDS (Ref ending 4756)
         receivedAt: "2026-12-31T16:01:00.000Z",
       }),
     );
+  });
+
+  it("resolves the Yuu bill-payment source account deterministically without the LLM", async () => {
+    const { AgentOrchestrator } = await import("../src/orchestrator.js");
+    const tools = {
+      executeTool: vi.fn(async (name) => {
+        if (name === "fetch_context") return {
+          accounts: [
+            { id: "dbs-account", name: "DBS Account", closed: false },
+            { id: "dbs-yuu", name: "DBS Yuu Card", closed: false },
+          ],
+          categories: [],
+          payees: [{ id: "transfer-yuu", transfer_acct: "dbs-yuu" }],
+        };
+        if (name === "search_memory") return { results: [
+          { text: "Account ending 5750 belongs to DBS Account", score: 1 },
+          { text: "Card ending 3255 belongs to DBS Yuu Card", score: 1 },
+        ] };
+        return true;
+      }),
+      getPhase1ToolSchemas: vi.fn(() => []),
+      setEmailContext: vi.fn(),
+    };
+    const orch = new AgentOrchestrator({
+      primaryCurrency: "SGD", secondaryCurrency: "MYR",
+      primaryBudgetFile: "budget-sgd", secondaryBudgetFile: "budget-myr",
+      llmProvider: "deepseek", llmApiKey: "test", deepseekApiKey: "test",
+    }, tools);
+    orch._llm.chat = vi.fn();
+
+    const phase1 = await orch._runPhase1(`
+Transaction Ref: 17881954645475715284
+Date and Time: 01 Sep 00:57 (SGT)
+Amount: SGD 68.94
+From: My Account (A/C ending 5750)
+To: Yuu (Ref ending 3255)
+`, { senderBank: "DBS", receivedAt: "2026-09-01T01:10:00+08:00" });
+
+    expect(orch._llm.chat).not.toHaveBeenCalled();
+    expect(phase1).toMatchObject({
+      account_id: "dbs-account",
+      payee_id: "transfer-yuu",
+      amount_cents: -6894,
+      _is_transfer: true,
+    });
+    expect(phase1._transfer).toMatchObject({
+      source_account_id: "dbs-account",
+      destination_account_id: "dbs-yuu",
+    });
   });
 
   it("does not create an internal transfer from a bankless source without an identity fact", async () => {
