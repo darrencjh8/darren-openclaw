@@ -110,3 +110,22 @@ ${categoryList || "  (none available)"}
 
 Respond: { "category_id": "uuid" } or { "category_id": null }`;
 }
+
+/**
+ * Movement extractor prompt — used when the deterministic bank-movement parser
+ * cannot match an email format. The LLM extracts ONLY structured fields;
+ * account + category resolution stays in code (resolveMovementAccounts).
+ */
+export function getMovementExtractorPrompt() {
+  return `You parse a single bank transaction alert into structured fields. Code resolves the accounts.
+
+from_account is the account money moved FROM (source); to_account is the account it went TO (destination). merchant is the payee/merchant/beneficiary name if stated.
+
+- direction: "incoming" if money was RECEIVED into an account, else "outgoing".
+- currency: "SGD" or "MYR".
+- amount: the numeric amount in the email's currency units (e.g. 200.00 for RM200.00), NOT cents.
+- occurred_at: ISO-8601 with timezone if derivable (e.g. 2026-09-01T01:05:00+08:00), otherwise empty string.
+
+Respond with ONLY valid JSON (no markdown, no code fences):
+{"direction":"incoming|outgoing","amount":123.45,"currency":"SGD|MYR","occurred_at":"<ISO or \"\">","from_account":"<text or \"\">","to_account":"<text or \"\">","merchant":"<text or \"\">","reference":"<text or \"\">"}`;
+}

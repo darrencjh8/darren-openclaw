@@ -4,16 +4,17 @@ const BANK_ALIASES = [
   ["Trust", /\btrust(?:\s+bank)?\b/i],
   ["Citi", /\b(?:citi|citibank)\b/i],
   ["UOB", /\buob\b/i],
+  ["Ryt", /\bryt(?:\s+bank)?\b/i],
 ];
 
-function bankFromText(value, fallback = null) {
+export function bankFromText(value, fallback = null) {
   for (const [bank, re] of BANK_ALIASES) {
     if (re.test(value || "")) return bank;
   }
   return fallback;
 }
 
-function cents(currency, value, direction) {
+export function cents(currency, value, direction) {
   const amount = Math.round(Number(String(value).replace(/,/g, "")) * 100);
   if (!Number.isFinite(amount)) return null;
   return direction === "outgoing" ? -amount : amount;
@@ -113,11 +114,11 @@ const FIELD_LABELS = [
 // the deterministic parser keeps working without loosening account matching.
 function restoreFieldLines(text) {
   const escaped = FIELD_LABELS.map((label) => label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|");
-  const re = new RegExp(`(?<![\\n\\r])\\b(${escaped})\\s*:`, "gi");
+  const re = new RegExp(`(?<![\\n\\r])(?:${escaped})\\s*:`, "gi");
   return String(text).replace(re, "\n$&");
 }
 
-function suffix(value) {
+export function suffix(value) {
   const match = String(value || "").match(/(?:ending\s+|\(-)(\d{4,})\)?/i);
   return match?.[1] || null;
 }
@@ -150,6 +151,30 @@ function baseMovement({ direction, amount, currency, occurredAt, ownAccount, cou
 export function parseBankMovement(text, { senderBank = null, receivedAt } = {}) {
   const body = restoreFieldLines(String(text || ""));
   const reference = field(body, ["Reference number", "Transaction Ref", "Reference"]);
+
+  // Ryt Bank "Card payment completed" alert — no "Amount :" label.
+  //   "RM200.00 was paid at TNG-EWALLET ECOM 3-EC using your Main Account on 2/9/2026, 12:46 AM (GMT+8)."
+  const ryt = body.match(/(SGD|RM|MYR)\s*([\d,.]+)\s+was paid at\s+(.+?)\s+using\s+(.+?)\s+on\s+(\d{1,2}\/\d{1,2}\/\d{4})\s*,?\s*(\d{1,2}:\d{2}\s*(?:AM|PM)?)/i);
+  if (ryt) {
+    const currency = /^RM$/i.test(ryt[1]) || /^MYR$/i.test(ryt[1]) ? "MYR" : "SGD";
+    const monthNames = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
+    const [d, mo, y] = ryt[5].split("/").map((n) => Number(n));
+    const month = monthNames[mo - 1];
+    if (!month || !Number.isFinite(d) || !Number.isFinite(y)) return null;
+    const occurredAt = isoDateTime(`${d} ${month} ${y}`, ryt[6], receivedAt);
+    if (!occurredAt) return null;
+    const merchant = ryt[3].trim();
+    return {
+      kind: "bank_movement", direction: "outgoing",
+      amount_cents: cents(currency, ryt[2], "outgoing"), currency,
+      occurred_at: occurredAt,
+      own_account: { name: ryt[4].trim(), bank: senderBank, suffix: null },
+      counterparty: { name: merchant, bank: bankFromText(merchant), suffix: null },
+      reference_number: "", recipient_bank: null,
+      merchant_display_name: merchant,
+      raw_merchant_descriptor: merchant,
+    };
+  }
 
   const trust = body.match(/received\s+(SGD|MYR)\s*([\d,.]+)\s+from\s+(.+?)\s+A\/C\s+ending\s+(\d{4,})\s+on\s+(\d{1,2}\s+[A-Za-z]{3}\s+\d{4})\s+(\d{1,2}[:.]\d{2}\s*(?:AM|PM)?)\s*SGT/i);
   if (trust) {
@@ -247,20 +272,39 @@ export function identityMappingsFromFacts(facts, accounts) {
 
 function resolveMappedAccount(evidence, mappings) {
   if (!evidence?.suffix) return null;
-  const matches = [...mappings.suffix.entries()]
-    .filter(([knownSuffix]) => knownSuffix === evidence.suffix || knownSuffix.endsWith(evidence.suffix) || evidence.suffix.endsWith(knownSuffix))
-    .map(([, account]) => account);
+  const unique = [
+    ...new Map(
+      [...mappings.suffix.entries()]
+        .filter(([knownSuffix]) =>
+          knownSuffix === evidence.suffix ||
+          knownSuffix.endsWith(evidence.suffix) ||
+          evidence.suffix.endsWith(knownSuffix),
+        )
+        .map(([, account]) => [account.id, account]),
+    ).values(),
+  ];
+  // Dedup by account so two suffix aliases that resolve to the SAME account
+  // (e.g. OCBC 360 as both 869001 and 9001) are not treated as ambiguous.
+  return unique.length === 1 ? unique[0] : null;
+}
+
+function resolveAccountByBank(evidence, accounts) {
+  if (!evidence?.bank) return null;
+  const matches = accounts.filter((a) => !a.closed && bankFromText(a.name) === evidence.bank);
   return matches.length === 1 ? matches[0] : null;
 }
 
 export function resolveMovementAccounts(movement, accounts, payees, mappings = { suffix: new Map(), recipient: new Map() }) {
   const own = resolveAccount(movement.own_account, accounts)
     || resolveMappedAccount(movement.own_account, mappings)
+    || resolveAccountByBank(movement.own_account, accounts)
     || (movement.direction === "incoming" && movement.recipient_bank ? mappings.recipient.get(movement.recipient_bank) || null : null);
   const other = resolveAccount(movement.counterparty, accounts)
     || resolveMappedAccount(movement.counterparty, mappings);
   const destination = movement.direction === "outgoing" ? other : own;
-  const source = movement.direction === "outgoing" ? own : other;
+  // For a one-sided incoming movement (deposit into own account, no counterparty),
+  // the source is the own account that received the funds.
+  const source = movement.direction === "outgoing" ? own : (other || own);
   const destinationPayee = destination
     ? payees.find((payee) => payee.transfer_acct === destination.id) || null
     : null;

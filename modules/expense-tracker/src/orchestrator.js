@@ -8,13 +8,16 @@
  */
 
 import OpenAI from "openai";
-import { getPhase1Prompt, getCategoryPickerPrompt } from "./prompts.js";
+import { getPhase1Prompt, getCategoryPickerPrompt, getMovementExtractorPrompt } from "./prompts.js";
 import { extractEmailContent } from "./extractors.js";
 import { composeNotes } from "./transaction-notes.js";
 import {
     identityMappingsFromFacts,
     parseBankMovement,
     resolveMovementAccounts,
+    cents,
+    suffix,
+    bankFromText,
 } from "./bank-movement.js";
 import { logger } from "./logging.js";
 
@@ -447,6 +450,10 @@ export class AgentOrchestrator {
             receivedAt: receivedAt || new Date().toISOString(),
         });
         if (!movement) return null;
+        return this._resolveMovementToOutput(movement);
+    }
+
+    async _resolveMovementToOutput(movement) {
         const budgetId = movement.currency === this._config.primaryCurrency
             ? this._config.primaryBudgetFile
             : this._config.secondaryBudgetFile;
@@ -542,6 +549,44 @@ export class AgentOrchestrator {
             };
         }
         return null;
+    }
+
+    async _llmExtractMovement(emailText, senderBank, receivedAt) {
+        const prompt = getMovementExtractorPrompt();
+        try {
+            const response = await this._llm.chat(
+                [{ role: "user", content: `${prompt}\n\nEMAIL:\n${String(emailText).slice(0, 4000)}` }],
+                undefined,
+                undefined,
+                { reasoning: "disabled", temperature: 0 },
+            );
+            const content = (response.choices || [{}])[0].message?.content || "";
+            const parsed = this._parseJsonFromContent(content);
+            const amount = Number(parsed?.amount);
+            const currency = String(parsed?.currency || "").toUpperCase();
+            const direction = parsed?.direction === "incoming" ? "incoming" : "outgoing";
+            if (!Number.isFinite(amount) || !["SGD", "MYR"].includes(currency)) return null;
+            const occurredAt = parsed?.occurred_at ? new Date(parsed.occurred_at).toISOString() : "";
+            const from = String(parsed?.from_account || "").trim();
+            const to = String(parsed?.to_account || "").trim();
+            if (!occurredAt || (!from && !to)) return null;
+            const movement = {
+                kind: "bank_movement",
+                direction,
+                amount_cents: cents(currency, amount, direction),
+                currency,
+                occurred_at: occurredAt,
+                own_account: from ? { name: from, bank: senderBank, suffix: suffix(from) } : null,
+                counterparty: to ? { name: to, bank: bankFromText(to), suffix: suffix(to) } : null,
+                reference_number: String(parsed?.reference || ""),
+                recipient_bank: direction === "incoming" ? senderBank : null,
+                merchant_display_name: String(parsed?.merchant || ""),
+                raw_merchant_descriptor: String(parsed?.merchant || ""),
+            };
+            return this._resolveMovementToOutput(movement);
+        } catch {
+            return null;
+        }
     }
 
     async _runPhase1(emailText, { senderBank, receivedAt } = {}) {
@@ -660,6 +705,16 @@ export class AgentOrchestrator {
             } catch {
                 // fetch_context failed - fall through to LLM
             }
+        }
+
+        // LLM-extractor fallback: parse fields via LLM, resolve accounts in code.
+        // Only for bank-movement-shaped alerts (A/C/Ref ending, parenthesized
+        // account, or a movement verb) — card purchase alerts keep going to the
+        // full Phase-1 LLM.
+        const MOVEMENT_LIKE = /(?:A\/C\s+ending|Ref\s+ending|account\s+ending|\(-\d{4,}\)|using\s+your|was paid|has been paid|you'?ve received|you have received|received a transfer|bill payment|scheduled payment|was transferred|made a transfer|transfer to|transfer from)/i;
+        if (MOVEMENT_LIKE.test(emailText)) {
+            const extracted = await this._llmExtractMovement(emailText, senderBank, receivedAt);
+            if (extracted) return extracted;
         }
 
         let prompt = getPhase1Prompt();
