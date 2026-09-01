@@ -284,6 +284,7 @@ if should_deploy "codex-router" || should_deploy "all"; then
 echo ""
 echo "--- Codex Router ---"
   check_var "CODEX_ROUTER_AUTH_PASSWORD" ""
+  check_var_optional "OPENCODE_API_KEY" ""
   echo "  [LLM Provider]"
   check_var_optional "LLM_PROVIDER" ""
   check_var_optional "LLM_BASE_URL" ""
