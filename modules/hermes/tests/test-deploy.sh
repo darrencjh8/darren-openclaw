@@ -205,6 +205,11 @@ echo "$deploy_src" | grep -q 'health_ok "codex-router" "http://localhost:4100/he
     && ok "codex-router gets extended startup health budget" \
     || nope "codex-router startup health budget" "expected 30 attempts"
 
+# Auto-discovered module health checks must not fail deployments of unrelated components.
+echo "$deploy_src" | grep -q 'should_deploy "${MODULE_NAME:-}" || continue' \
+    && ok "module health checks are scoped to deployed components" \
+    || nope "module health checks are scoped" "missing component guard before module health check"
+
 echo "$deploy_src" | grep -q 'check_var' \
     && ok "check_var function exists" \
     || nope "check_var function" "not found"

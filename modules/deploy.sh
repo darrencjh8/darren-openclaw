@@ -558,6 +558,7 @@ fi
 for mod_env in "$ROOT"/modules/*/module.env; do
   [ -f "$mod_env" ] || continue
   source "$mod_env"
+  should_deploy "${MODULE_NAME:-}" || continue
   for port in "${MODULE_HEALTH_PORTS[@]}"; do
     health_ok "${MODULE_NAME:-unknown}" "http://localhost:$port/health" || failed=$((failed + 1))
   done
