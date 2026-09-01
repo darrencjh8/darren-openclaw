@@ -1112,6 +1112,15 @@ export class ToolRegistry {
     return result;
   }
 
+  async _handle_reserve_transfer(args) {
+    return this._dedup.reserveTransfer(args);
+  }
+
+  async _handle_complete_transfer({ id, actual_transaction_id }) {
+    this._dedup.markTransferInserted(id, actual_transaction_id || null);
+    return true;
+  }
+
   async _handle_check_duplicate({
     date,
     amount_cents,

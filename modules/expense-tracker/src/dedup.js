@@ -38,6 +38,28 @@ export class DedupJournal {
         processed_at TEXT NOT NULL
       )
     `);
+        this._db.exec(`
+      CREATE TABLE IF NOT EXISTS transfer_journal (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        budget_id TEXT NOT NULL,
+        source_account_id TEXT NOT NULL,
+        destination_account_id TEXT NOT NULL,
+        currency TEXT NOT NULL,
+        amount_cents INTEGER NOT NULL,
+        occurred_at TEXT NOT NULL,
+        status TEXT NOT NULL CHECK(status IN ('pending', 'inserted', 'failed')),
+        actual_transaction_id TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+      )
+    `);
+        this._db.exec(`
+      CREATE INDEX IF NOT EXISTS idx_transfer_match
+      ON transfer_journal (
+        budget_id, source_account_id, destination_account_id,
+        currency, amount_cents, occurred_at
+      )
+    `);
         this._stmtCheckRecent = this._db.prepare(
             "SELECT 1 FROM processed_uids WHERE uid = ? AND processed_at > ?",
         );
@@ -78,6 +100,75 @@ export class DedupJournal {
     record(date, amountCents, accountId, payeeName) {
         const hash = this._makeHash(date, amountCents, accountId, payeeName);
         this._stmtInsert.run(hash, date, amountCents, accountId, payeeName);
+    }
+
+    reserveTransfer({
+        budget_id,
+        source_account_id,
+        destination_account_id,
+        currency,
+        amount_cents,
+        occurred_at,
+    }) {
+        const occurredAt = new Date(occurred_at).toISOString();
+        const start = new Date(new Date(occurredAt).getTime() - 10 * 60 * 1000).toISOString();
+        const end = new Date(new Date(occurredAt).getTime() + 10 * 60 * 1000).toISOString();
+        const reserve = this._db.transaction(() => {
+            const rows = this._db.prepare(`
+              SELECT * FROM transfer_journal
+              WHERE budget_id = ? AND source_account_id = ? AND destination_account_id = ?
+                AND currency = ? AND amount_cents = ?
+                AND occurred_at >= ? AND occurred_at <= ?
+                AND status IN ('pending', 'inserted')
+              ORDER BY occurred_at
+            `).all(
+                budget_id,
+                source_account_id,
+                destination_account_id,
+                currency,
+                Math.abs(amount_cents),
+                start,
+                end,
+            );
+            if (rows.length === 1) {
+                return { status: rows[0].status, entry: rows[0] };
+            }
+            if (rows.length > 1) return { status: "ambiguous", entry: null };
+            const result = this._db.prepare(`
+              INSERT INTO transfer_journal (
+                budget_id, source_account_id, destination_account_id,
+                currency, amount_cents, occurred_at, status
+              ) VALUES (?, ?, ?, ?, ?, ?, 'pending')
+            `).run(
+                budget_id,
+                source_account_id,
+                destination_account_id,
+                currency,
+                Math.abs(amount_cents),
+                occurredAt,
+            );
+            const entry = this._db.prepare(
+                "SELECT * FROM transfer_journal WHERE id = ?",
+            ).get(Number(result.lastInsertRowid));
+            return { status: "reserved", entry };
+        });
+        return reserve();
+    }
+
+    markTransferInserted(id, actualTransactionId = null) {
+        this._db.prepare(`
+          UPDATE transfer_journal
+          SET status = 'inserted', actual_transaction_id = ?, updated_at = datetime('now')
+          WHERE id = ?
+        `).run(actualTransactionId, id);
+    }
+
+    markTransferFailed(id) {
+        this._db.prepare(`
+          UPDATE transfer_journal
+          SET status = 'failed', updated_at = datetime('now')
+          WHERE id = ?
+        `).run(id);
     }
 
     close() {

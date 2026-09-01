@@ -209,6 +209,51 @@ describe("DedupJournal checkExact (±1 day tolerance)", () => {
     });
 });
 
+describe("DedupJournal transfer journal", () => {
+    let journal;
+
+    beforeEach(() => {
+        journal = new DedupJournal(":memory:");
+    });
+
+    afterEach(() => journal.close());
+
+    const transfer = {
+        budget_id: "budget-sgd",
+        source_account_id: "ocbc-360",
+        destination_account_id: "trust-card",
+        currency: "SGD",
+        amount_cents: 1425,
+        occurred_at: "2026-09-01T01:06:00+08:00",
+    };
+
+    it("reserves then recognizes an inserted counterpart within ten minutes", () => {
+        const reserved = journal.reserveTransfer(transfer);
+        expect(reserved.status).toBe("reserved");
+        journal.markTransferInserted(reserved.entry.id, "actual-transfer-1");
+
+        const counterpart = journal.reserveTransfer({
+            ...transfer,
+            occurred_at: "2026-09-01T01:07:00+08:00",
+        });
+        expect(counterpart.status).toBe("inserted");
+        expect(counterpart.entry.actual_transaction_id).toBe("actual-transfer-1");
+    });
+
+    it("does not merge a real reverse transfer", () => {
+        const reserved = journal.reserveTransfer(transfer);
+        journal.markTransferInserted(reserved.entry.id, "actual-transfer-1");
+
+        const reverse = journal.reserveTransfer({
+            ...transfer,
+            source_account_id: "trust-card",
+            destination_account_id: "ocbc-360",
+            occurred_at: "2026-09-01T01:07:00+08:00",
+        });
+        expect(reverse.status).toBe("reserved");
+    });
+});
+
 describe("DedupJournal cleanupOldEntries", () => {
     let dbPath;
     let journal;
