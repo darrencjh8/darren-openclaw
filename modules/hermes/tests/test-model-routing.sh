@@ -24,9 +24,17 @@ router_provider = {
     "transport": "chat_completions",
 }
 router_route = "custom:codex-router"
-deepseek_fallback = {
+deepseek_pro_fallback = {
+    "provider": "deepseek",
+    "model": "deepseek-v4-pro",
+}
+deepseek_flash_fallback = {
     "provider": "deepseek",
     "model": "deepseek-v4-flash",
+}
+deepseek_vision_fallback = {
+    "provider": "deepseek",
+    "model": "deepseek-v4-flash-vision-exp",
 }
 
 
@@ -56,11 +64,19 @@ assert config["model"].get("default") == "gpt-5.6-terra"
 assert "base_url" not in config["model"]
 assert "api_key" not in config["model"]
 assert config["agent"]["reasoning_effort"] == "medium"
-assert config["fallback_providers"] == [deepseek_fallback]
+assert config["fallback_providers"] == [deepseek_pro_fallback], (
+    "main fallback_providers must use deepseek-v4-pro — fallbacks fire rarely, "
+    "so the main agent wants the strongest available net"
+)
 assert_route(config["delegation"], "gpt-5.6-luna", "delegation")
 
+assert_route(config["auxiliary"]["vision"], "gpt-5.6-terra", "auxiliary.vision")
+assert config["auxiliary"]["vision"].get("fallback_chain") == [deepseek_vision_fallback], (
+    "auxiliary.vision.fallback_chain must use deepseek-v4-flash-vision-exp — "
+    "deepseek-v4-pro and deepseek-v4-flash are text-only and reject image content"
+)
+
 for task, model in {
-    "vision": "gpt-5.6-terra",
     "web_extract": "gpt-5.6-luna",
     "compression": "gpt-5.6-luna",
     "approval": "gpt-5.6-terra",
@@ -69,18 +85,30 @@ for task, model in {
 }.items():
     route = config["auxiliary"][task]
     assert_route(route, model, f"auxiliary.{task}")
-    assert route.get("fallback_chain") == [deepseek_fallback], (
+    assert route.get("fallback_chain") == [deepseek_flash_fallback], (
         f"auxiliary.{task}.fallback_chain must directly use deepseek-v4-flash after LiteLLM exhaustion"
     )
 
 assert config["kanban"]["default_assignee"] == "code-reviewer"
-assert_route(config["auxiliary"]["kanban_decomposer"], "deepseek-v4-flash", "auxiliary.kanban_decomposer")
+decomposer = config["auxiliary"]["kanban_decomposer"]
+assert decomposer.get("provider") == "deepseek", (
+    "auxiliary.kanban_decomposer.provider: expected 'deepseek' (direct API), got "
+    f"{decomposer.get('provider')!r} — codex-router only exposes deepseek-v4-pro natively"
+)
+assert decomposer.get("model") == "deepseek-v4-flash", (
+    f"auxiliary.kanban_decomposer.model: expected 'deepseek-v4-flash', got {decomposer.get('model')!r}"
+)
+assert "base_url" not in decomposer, "auxiliary.kanban_decomposer must use its named provider URL"
+assert "api_key" not in decomposer, "auxiliary.kanban_decomposer must use its named provider API key"
+assert "fallback_chain" not in decomposer, (
+    "auxiliary.kanban_decomposer needs no fallback chain — decomposition retries on the next dispatch tick"
+)
 
-for profile, model in {
-    "architect": "gpt-5.6-sol",
-    "code-reviewer": "gpt-5.6-terra",
-    "project-manager": "gpt-5.6-luna",
-    "spec-auditor": "gpt-5.6-terra",
+for profile, (model, fallback_model) in {
+    "architect": ("gpt-5.6-sol", "deepseek-v4-pro"),
+    "code-reviewer": ("gpt-5.6-terra", "deepseek-v4-pro"),
+    "spec-auditor": ("gpt-5.6-terra", "deepseek-v4-pro"),
+    "project-manager": ("gpt-5.6-luna", "deepseek-v4-flash"),
 }.items():
     profile_config_path = root / "modules/hermes/profiles" / profile / "config.yaml"
     assert profile_config_path.is_file(), f"{profile} profile config is missing"
@@ -94,5 +122,7 @@ for profile, model in {
     fallback = profile_config["fallback_providers"]
     assert len(fallback) == 1
     assert fallback[0].get("provider") == "deepseek"
-    assert fallback[0].get("model") == "deepseek-v4-flash"
+    assert fallback[0].get("model") == fallback_model, (
+        f"{profile} fallback must use {fallback_model}, got {fallback[0].get('model')!r}"
+    )
 PY
