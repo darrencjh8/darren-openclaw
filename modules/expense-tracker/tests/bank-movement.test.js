@@ -109,6 +109,40 @@ To: CITI CREDIT CARDS (Ref ending 4756)
     });
   });
 
+  it("parses an OCBC bill payment whose cheerio text glues labels to values", () => {
+    // extractEmailContent collapses OCBC's HTML table cells to one line with no
+    // separator, so the next label is glued onto the previous value
+    // ("2026Time of Payment", "SGTAmount", "4.00From your account").
+    const movement = parseBankMovement(
+      "Dear Valued CustomerAs you instructed, we have made the following bill payment:Date of Payment:01 Sep 2026Time of Payment:01:05 am SGTAmount:SGD 4.00From your account:360 Account (-869001)To account:OCBC 90.N Visa Card (-191149)Reference number:2609010033904322Billing Organisation may take up to three working days to process payment.",
+      { senderBank: "OCBC", receivedAt: "2026-09-01T01:06:00+08:00" },
+    );
+
+    expect(movement).toMatchObject({
+      direction: "outgoing",
+      amount_cents: -400,
+      currency: "SGD",
+      own_account: { bank: "OCBC", suffix: "869001" },
+      counterparty: { bank: "OCBC", suffix: "191149" },
+      reference_number: expect.stringContaining("2609010033904322"),
+    });
+  });
+
+  it("parses a Ryt Bank card payment without an Amount label", () => {
+    const movement = parseBankMovement(
+      "Hi Darren,\n\nRM200.00 was paid at TNG-EWALLET ECOM 3-EC using your Main Account on 2/9/2026, 12:46 AM (GMT+8).\n\nIf this was not you, give us a call.",
+      { senderBank: "Ryt", receivedAt: "2026-09-01T01:00:00+08:00" },
+    );
+
+    expect(movement).toMatchObject({
+      direction: "outgoing",
+      amount_cents: -20000,
+      currency: "MYR",
+      own_account: { bank: "Ryt", suffix: null },
+      merchant_display_name: "TNG-EWALLET ECOM 3-EC",
+    });
+  });
+
   it("parses one-sided OCBC deposit but does not invent a counterparty", () => {
     const movement = parseBankMovement(`
 A deposit was made in your account.
@@ -382,6 +416,136 @@ To: Yuu (Ref ending 3255)
     });
   });
 
+  it("does not assign a category to an internal transfer via payee→category memory", async () => {
+    const { AgentOrchestrator } = await import("../src/orchestrator.js");
+    const tools = {
+      executeTool: vi.fn(async (name, query) => {
+        if (name === "fetch_context") return {
+          accounts: [
+            { id: "dbs-account", name: "DBS Account", closed: false },
+            { id: "dbs-yuu", name: "DBS Yuu Card", closed: false },
+          ],
+          categories: [{ id: "cat-food", name: "Food" }],
+          payees: [{ id: "transfer-yuu", transfer_acct: "dbs-yuu" }],
+        };
+        if (name === "search_memory") return { results: [
+          { text: "Account ending 5750 belongs to DBS Account", score: 1 },
+          { text: "Card ending 3255 belongs to DBS Yuu Card", score: 1 },
+          { text: "DBS Yuu Card maps to Food category", score: 1 },
+        ] };
+        return true;
+      }),
+      getPhase1ToolSchemas: vi.fn(() => []),
+      setEmailContext: vi.fn(),
+    };
+    const orch = new AgentOrchestrator({
+      primaryCurrency: "SGD", secondaryCurrency: "MYR",
+      primaryBudgetFile: "budget-sgd", secondaryBudgetFile: "budget-myr",
+      llmProvider: "deepseek", llmApiKey: "test", deepseekApiKey: "test",
+    }, tools);
+    orch._llm.chat = vi.fn();
+
+    const phase1 = await orch._runPhase1(`
+Transaction Ref: 17881954645475715284
+Date and Time: 01 Sep 00:57 (SGT)
+Amount: SGD 68.94
+From: My Account (A/C ending 5750)
+To: Yuu (Ref ending 3255)
+`, { senderBank: "DBS", receivedAt: "2026-09-01T01:10:00+08:00" });
+
+    const phase2 = await orch._resolvePhase2(phase1);
+
+    expect(phase2._is_transfer).toBe(true);
+    expect(phase2.payee_id).toBe("transfer-yuu");
+    expect(phase2.category_id).toBeFalsy();
+    expect(phase2.category_name).toBeUndefined();
+  });
+
+  it("inserts a one-sided OCBC deposit deterministically without the LLM", async () => {
+    const { AgentOrchestrator } = await import("../src/orchestrator.js");
+    const tools = {
+      executeTool: vi.fn(async (name) => {
+        if (name === "fetch_context") return {
+          accounts: [{ id: "ocbc-360", name: "OCBC 360", closed: false }],
+          categories: [],
+          payees: [],
+        };
+        if (name === "search_memory") return { results: [
+          { text: "Account ending 869001 belongs to OCBC 360", score: 1 },
+        ] };
+        return true;
+      }),
+      getPhase1ToolSchemas: vi.fn(() => []),
+      setEmailContext: vi.fn(),
+    };
+    const orch = new AgentOrchestrator({
+      primaryCurrency: "SGD", secondaryCurrency: "MYR",
+      primaryBudgetFile: "budget-sgd", secondaryBudgetFile: "budget-myr",
+      llmProvider: "deepseek", llmApiKey: "test", deepseekApiKey: "test",
+    }, tools);
+    orch._llm.chat = vi.fn();
+
+    const phase1 = await orch._runPhase1(`
+A deposit was made in your account. Here are the details:
+
+Time of deposit : 11:59 PM
+Amount : SGD 0.20
+Account that money was deposited in : (-869001)
+Reference :
+`, { senderBank: "OCBC", receivedAt: "2026-09-02T00:05:00+08:00" });
+
+    expect(orch._llm.chat).not.toHaveBeenCalled();
+    expect(phase1).toMatchObject({
+      account_id: "ocbc-360",
+      amount_cents: 20,
+      merchant: "Unidentified deposit",
+      _structured_movement: true,
+    });
+  });
+
+  it("uses the LLM extractor fallback for an unknown-format email and resolves accounts in code", async () => {
+    const { AgentOrchestrator } = await import("../src/orchestrator.js");
+    const tools = {
+      executeTool: vi.fn(async (name) => {
+        if (name === "fetch_context") return {
+          accounts: [{ id: "ryt-bank", name: "Ryt Bank", closed: false }],
+          categories: [],
+          payees: [],
+        };
+        if (name === "search_memory") return { results: [] };
+        return true;
+      }),
+      getPhase1ToolSchemas: vi.fn(() => []),
+      setEmailContext: vi.fn(),
+    };
+    const orch = new AgentOrchestrator({
+      primaryCurrency: "SGD", secondaryCurrency: "MYR",
+      primaryBudgetFile: "budget-sgd", secondaryBudgetFile: "budget-myr",
+      llmProvider: "deepseek", llmApiKey: "test", deepseekApiKey: "test",
+    }, tools);
+    orch._llm.chat = vi.fn().mockResolvedValue({
+      choices: [{ message: { content: JSON.stringify({
+        direction: "outgoing", amount: 200, currency: "MYR",
+        occurred_at: "2026-09-02T00:46:00+08:00",
+        from_account: "your Main Account",
+        to_account: "TNG-EWALLET ECOM 3-EC",
+        merchant: "TNG-EWALLET ECOM 3-EC",
+      }) } }],
+    });
+
+    const phase1 = await orch._runPhase1(
+      "MYR 200.00 was transferred to TNG-EWALLET ECOM 3-EC from your Main Account on 2/9/2026, 12:46 AM (GMT+8).",
+      { senderBank: "Ryt", receivedAt: "2026-09-02T00:46:00+08:00" },
+    );
+
+    expect(orch._llm.chat).toHaveBeenCalledTimes(1);
+    expect(phase1).toMatchObject({
+      account_id: "ryt-bank",
+      amount_cents: -20000,
+      _structured_movement: true,
+    });
+  });
+
   it("does not create an internal transfer from a bankless source without an identity fact", async () => {
     const { AgentOrchestrator } = await import("../src/orchestrator.js");
     const tools = {
@@ -492,6 +656,51 @@ describe("resolveMovementAccounts", () => {
     }, accounts, payees);
     expect(result.source_account).toBeNull();
     expect(result.internal).toBe(false);
+  });
+
+  it("resolves a one-sided incoming deposit to the own account", () => {
+    const accounts = [{ id: "ocbc-360", name: "OCBC 360", closed: false }];
+    const mappings = identityMappingsFromFacts([
+      "Account ending 869001 belongs to OCBC 360",
+    ], accounts);
+    const resolved = resolveMovementAccounts({
+      direction: "incoming",
+      own_account: { bank: "OCBC", suffix: "869001" },
+      counterparty: null,
+    }, accounts, [], mappings);
+
+    expect(resolved.source_account?.id).toBe("ocbc-360");
+    expect(resolved.destination_account?.id).toBe("ocbc-360");
+  });
+
+  it("resolves an outgoing movement by unique bank when the own account has no suffix", () => {
+    const accounts = [
+      { id: "ryt-bank", name: "Ryt Bank", closed: false },
+      { id: "tng", name: "Touch N Go", closed: false },
+    ];
+    const resolved = resolveMovementAccounts({
+      direction: "outgoing",
+      own_account: { name: "your Main Account", bank: "Ryt", suffix: null },
+      counterparty: { name: "TNG-EWALLET ECOM 3-EC", bank: null, suffix: null },
+    }, accounts, [], { suffix: new Map(), recipient: new Map() });
+
+    expect(resolved.source_account?.id).toBe("ryt-bank");
+  });
+
+  it("resolves a suffix alias matched by multiple facts pointing to the same account", () => {
+    const accounts = [{ id: "ocbc-360", name: "OCBC 360", closed: false }];
+    const mappings = identityMappingsFromFacts([
+      "Account ending 869001 belongs to OCBC 360",
+      "Account ending 9001 belongs to OCBC 360",
+    ], accounts);
+    const resolved = resolveMovementAccounts({
+      direction: "outgoing",
+      own_account: { bank: "OCBC", suffix: "869001" },
+      counterparty: { bank: "OCBC", suffix: "9001" },
+    }, accounts, [], mappings);
+
+    expect(resolved.source_account?.id).toBe("ocbc-360");
+    expect(resolved.destination_account?.id).toBe("ocbc-360");
   });
 
   it("uses unique short suffix but rejects ambiguous short suffix", () => {
