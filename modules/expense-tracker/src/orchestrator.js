@@ -41,7 +41,7 @@ export class LLMClient {
         if (this._provider !== "deepseek") {
             this._routes.push({
                 provider: config.llmFinalFallbackProvider || "deepseek",
-                model: config.llmFinalFallbackModel || "deepseek-v4-pro",
+                model: config.llmFinalFallbackModel || "deepseek-v4-flash",
                 apiKey: config.deepseekApiKey,
                 baseURL: "https://api.deepseek.com/v1",
                 retries: 1,

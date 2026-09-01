@@ -21,7 +21,7 @@ display:
 
 fallback_providers:
     - provider: deepseek
-      model: deepseek-v4-pro
+      model: deepseek-v4-flash
 
 
 delegation:
@@ -58,40 +58,40 @@ auxiliary:
         model: gpt-5.6-terra
         fallback_chain:
             - provider: deepseek
-              model: deepseek-v4-pro
+              model: deepseek-v4-flash
     web_extract:
         provider: custom:codex-router
         model: gpt-5.6-luna
         fallback_chain:
             - provider: deepseek
-              model: deepseek-v4-pro
+              model: deepseek-v4-flash
     compression:
         provider: custom:codex-router
         model: gpt-5.6-luna
         fallback_chain:
             - provider: deepseek
-              model: deepseek-v4-pro
+              model: deepseek-v4-flash
     approval:
         provider: custom:codex-router
         model: gpt-5.6-terra
         fallback_chain:
             - provider: deepseek
-              model: deepseek-v4-pro
+              model: deepseek-v4-flash
     kanban_decomposer:
         provider: custom:codex-router
-        model: deepseek-v4-pro
+        model: deepseek-v4-flash
     triage_specifier:
         provider: custom:codex-router
         model: gpt-5.6-luna
         fallback_chain:
             - provider: deepseek
-              model: deepseek-v4-pro
+              model: deepseek-v4-flash
     profile_describer:
         provider: custom:codex-router
         model: gpt-5.6-luna
         fallback_chain:
             - provider: deepseek
-              model: deepseek-v4-pro
+              model: deepseek-v4-flash
 
 kanban:
     dispatch_in_gateway: true

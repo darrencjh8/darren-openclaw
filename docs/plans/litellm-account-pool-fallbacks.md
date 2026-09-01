@@ -2,7 +2,7 @@
 
 ## Goal
 
-Route Hermes primary model calls through the Docker-hosted LiteLLM router while using ordered OpenAI subscription account pools. Use direct DeepSeek V4 Pro only after the relevant LiteLLM pool is exhausted or unavailable.
+Route Hermes primary model calls through the Docker-hosted LiteLLM router while using ordered OpenAI subscription account pools. Use direct DeepSeek V4 Flash only after the relevant LiteLLM pool is exhausted or unavailable.
 
 ## Required routing
 
@@ -28,12 +28,12 @@ Use for compression, delegation, triage specification, profile description, and 
 gpt-5.6-sol
 ```
 
-Use for the Architect profile. Its fallback is direct DeepSeek V4 Pro.
+Use for the Architect profile. Its fallback is direct DeepSeek V4 Flash.
 
 ### Direct fallback
 
 ```text
-deepseek-v4-pro
+deepseek-v4-flash
 ```
 
 DeepSeek is the final direct fallback after the applicable LiteLLM route fails.

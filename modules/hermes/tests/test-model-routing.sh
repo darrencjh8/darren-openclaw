@@ -24,7 +24,7 @@ router_provider = {
 router_route = "custom:codex-router"
 deepseek_fallback = {
     "provider": "deepseek",
-    "model": "deepseek-v4-pro",
+    "model": "deepseek-v4-flash",
 }
 
 
@@ -68,11 +68,11 @@ for task, model in {
     route = config["auxiliary"][task]
     assert_route(route, model, f"auxiliary.{task}")
     assert route.get("fallback_chain") == [deepseek_fallback], (
-        f"auxiliary.{task}.fallback_chain must directly use deepseek-v4-pro after LiteLLM exhaustion"
+        f"auxiliary.{task}.fallback_chain must directly use deepseek-v4-flash after LiteLLM exhaustion"
     )
 
 assert config["kanban"]["default_assignee"] == "code-reviewer"
-assert_route(config["auxiliary"]["kanban_decomposer"], "deepseek-v4-pro", "auxiliary.kanban_decomposer")
+assert_route(config["auxiliary"]["kanban_decomposer"], "deepseek-v4-flash", "auxiliary.kanban_decomposer")
 
 for profile, model in {
     "architect": "gpt-5.6-sol",
@@ -89,5 +89,5 @@ for profile, model in {
     fallback = profile_config["fallback_providers"]
     assert len(fallback) == 1
     assert fallback[0].get("provider") == "deepseek"
-    assert fallback[0].get("model") == "deepseek-v4-pro"
+    assert fallback[0].get("model") == "deepseek-v4-flash"
 PY
