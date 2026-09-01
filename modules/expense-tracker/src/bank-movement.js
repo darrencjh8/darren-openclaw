@@ -221,9 +221,18 @@ export function identityMappingsFromFacts(facts, accounts) {
   const mappings = { suffix: new Map(), recipient: new Map() };
   for (const fact of facts || []) {
     const text = typeof fact === "string" ? fact : fact?.text || "";
-    const suffixMatch = text.match(/^(?:Account|Card) ending\s+(\d{4,})\s+belongs to\s+(.+?)(?:\s+account)?$/i);
+    const suffixMatch = text.match(/^(?:Account|Card) ending\s+(\d{4,})\s+belongs to\s+(.+)$/i);
     if (suffixMatch) {
-      const account = accounts.find((a) => a.name?.toLowerCase() === suffixMatch[2].trim().toLowerCase() && !a.closed);
+      // Match the full name first: real account names may themselves end in
+      // "Account" (e.g. "DBS Account") and must not be truncated. A trailing
+      // filler "account" word ("belongs to X account") is only used as a
+      // fallback when the full form has no account match.
+      const rawName = suffixMatch[2].trim();
+      const candidates = [rawName];
+      if (/\s+account$/i.test(rawName)) candidates.push(rawName.replace(/\s+account$/i, ""));
+      const account = candidates
+        .map((name) => accounts.find((a) => a.name?.toLowerCase() === name.toLowerCase() && !a.closed))
+        .find(Boolean);
       if (account) mappings.suffix.set(suffixMatch[1], account);
       continue;
     }
