@@ -21,6 +21,10 @@ portfolio, dividend, ISIN, ticker, shares, securities, equity, options, futures,
 
 DO NOT explain. Only respond with "statement", "transaction", or "skip".`;
 
+// These exact notification subjects do not represent completed transactions.
+// Handle them before the LLM so they are marked read instead of retried as parse failures.
+const NON_TRANSACTION_SUBJECT_RE = /^(?:reminder:\s*upcoming scheduled transfer|digibank alert\s*-\s*unsuccessful bill payment|your edocument\(s\) are ready for viewing)$/i;
+
 /**
  * Classify an email as "statement" | "transaction" | "skip" using the
  * configured LLM provider.
@@ -33,6 +37,10 @@ DO NOT explain. Only respond with "statement", "transaction", or "skip".`;
  * @returns {Promise<"statement"|"transaction"|"skip">}
  */
 export async function classifyEmail(rawEmail, subject, sender, config) {
+    if (NON_TRANSACTION_SUBJECT_RE.test(String(subject || "").trim())) {
+        return "skip";
+    }
+
     try {
         const raw = Buffer.isBuffer(rawEmail)
             ? rawEmail
