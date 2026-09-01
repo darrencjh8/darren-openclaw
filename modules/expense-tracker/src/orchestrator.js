@@ -1274,8 +1274,11 @@ export class AgentOrchestrator {
             } catch {}
         }
 
-        // Step 2: Category resolution
-        if (!output.category_id) {
+        // Step 2: Category resolution.
+        // Never categorize own-account transfers: payee→category memory facts
+        // describe card spend ("DBS Yuu Card maps to Food category"), not a
+        // credit-card repayment between the user's own accounts.
+        if (!output._is_transfer && !output.category_id) {
             let liveCategories = [];
             try {
                 if (cachedCtx) {

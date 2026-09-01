@@ -382,6 +382,51 @@ To: Yuu (Ref ending 3255)
     });
   });
 
+  it("does not assign a category to an internal transfer via payee→category memory", async () => {
+    const { AgentOrchestrator } = await import("../src/orchestrator.js");
+    const tools = {
+      executeTool: vi.fn(async (name, query) => {
+        if (name === "fetch_context") return {
+          accounts: [
+            { id: "dbs-account", name: "DBS Account", closed: false },
+            { id: "dbs-yuu", name: "DBS Yuu Card", closed: false },
+          ],
+          categories: [{ id: "cat-food", name: "Food" }],
+          payees: [{ id: "transfer-yuu", transfer_acct: "dbs-yuu" }],
+        };
+        if (name === "search_memory") return { results: [
+          { text: "Account ending 5750 belongs to DBS Account", score: 1 },
+          { text: "Card ending 3255 belongs to DBS Yuu Card", score: 1 },
+          { text: "DBS Yuu Card maps to Food category", score: 1 },
+        ] };
+        return true;
+      }),
+      getPhase1ToolSchemas: vi.fn(() => []),
+      setEmailContext: vi.fn(),
+    };
+    const orch = new AgentOrchestrator({
+      primaryCurrency: "SGD", secondaryCurrency: "MYR",
+      primaryBudgetFile: "budget-sgd", secondaryBudgetFile: "budget-myr",
+      llmProvider: "deepseek", llmApiKey: "test", deepseekApiKey: "test",
+    }, tools);
+    orch._llm.chat = vi.fn();
+
+    const phase1 = await orch._runPhase1(`
+Transaction Ref: 17881954645475715284
+Date and Time: 01 Sep 00:57 (SGT)
+Amount: SGD 68.94
+From: My Account (A/C ending 5750)
+To: Yuu (Ref ending 3255)
+`, { senderBank: "DBS", receivedAt: "2026-09-01T01:10:00+08:00" });
+
+    const phase2 = await orch._resolvePhase2(phase1);
+
+    expect(phase2._is_transfer).toBe(true);
+    expect(phase2.payee_id).toBe("transfer-yuu");
+    expect(phase2.category_id).toBeFalsy();
+    expect(phase2.category_name).toBeUndefined();
+  });
+
   it("does not create an internal transfer from a bankless source without an identity fact", async () => {
     const { AgentOrchestrator } = await import("../src/orchestrator.js");
     const tools = {
