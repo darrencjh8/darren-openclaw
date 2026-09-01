@@ -64,6 +64,37 @@ To: CITI CREDIT CARDS (Ref ending 4756)
     });
   });
 
+  it("parses the same DBS card bill payment when the email body is flattened to one line", () => {
+    const movement = parseBankMovement(
+      "Transaction Ref: REF-DBS-1 Date and Time: 01 Sep 01:05 (SGT) Amount: SGD 253.37 From: Altitude (A/C ending 9302) To: CITI CREDIT CARDS (Ref ending 4756)",
+      { senderBank: "DBS", receivedAt: "2026-09-01T01:06:00+08:00" },
+    );
+
+    expect(movement).toMatchObject({
+      direction: "outgoing",
+      amount_cents: -25337,
+      occurred_at: "2026-09-01T01:05:00+08:00",
+      own_account: { bank: "DBS", suffix: "9302" },
+      counterparty: { bank: "Citi", suffix: "4756" },
+      reference_number: "REF-DBS-1",
+    });
+  });
+
+  it("parses a flattened OCBC outgoing transfer", () => {
+    const movement = parseBankMovement(
+      "Date of Transfer : 01 Sep 2026 Time of Transfer : 01.06 AM SGT Amount : SGD 14.25 From your account : 360 Account (-869001) To account : Darren Trust (-310980) at TRUST BANK SINGAPORE LIMITED Reference number : REF-OCBC-1",
+      { senderBank: "OCBC", receivedAt: "2026-09-01T01:07:00+08:00" },
+    );
+
+    expect(movement).toMatchObject({
+      direction: "outgoing",
+      amount_cents: -1425,
+      own_account: { bank: "OCBC", suffix: "869001" },
+      counterparty: { bank: "Trust", suffix: "310980" },
+      reference_number: "REF-OCBC-1",
+    });
+  });
+
   it("parses Trust incoming counterpart", () => {
     const movement = parseBankMovement(
       "Sweet! You have received SGD 14.25 from OverseaChinese Banking Corporation Ltd A/C ending 9001 on 01 Sep 2026 01:06 SGT.",
@@ -171,6 +202,70 @@ To: CITI CREDIT CARDS (Ref ending 4756)
       amount_cents: -25337,
       payee_id: "transfer-citi",
       category_id: undefined,
+    });
+    expect(calls.some((call) => call.name === "complete_transfer")).toBe(true);
+  });
+
+  it("parses a flattened DBS bill-payment alert through real processEmail extraction", async () => {
+    const { AgentOrchestrator } = await import("../src/orchestrator.js");
+    const calls = [];
+    const tools = {
+      executeTool: vi.fn(async (name, args) => {
+        calls.push({ name, args });
+        if (name === "fetch_context") return {
+          accounts: [
+            { id: "dbs-altitude", name: "Altitude 9302", closed: false },
+            { id: "citi-card", name: "Citi Rewards 4756", closed: false },
+          ],
+          categories: [],
+          payees: [{ id: "transfer-citi", transfer_acct: "citi-card" }],
+        };
+        if (name === "search_memory") return { results: [
+          { text: "Card ending 9302 belongs to Altitude 9302", score: 1 },
+        ] };
+        if (name === "reserve_transfer") return { status: "reserved", entry: { id: 1 } };
+        if (name === "check_duplicate") return false;
+        if (name === "insert_transaction") return { id: "actual-1" };
+        return true;
+      }),
+      getPhase1ToolSchemas: vi.fn(() => []),
+      setEmailContext: vi.fn(),
+    };
+    const orch = new AgentOrchestrator({
+      primaryCurrency: "SGD", secondaryCurrency: "MYR",
+      primaryBudgetFile: "budget-sgd", secondaryBudgetFile: "budget-myr",
+      llmProvider: "deepseek", llmApiKey: "test", deepseekApiKey: "test",
+    }, tools);
+    orch._llm.chat = vi.fn();
+
+    const rawEmail = [
+      "Date: Tue, 01 Sep 2026 01:06:00 +0800",
+      "From: DBS <noreply@dbs.com>",
+      "Subject: Payment Alert",
+      "Content-Type: text/plain; charset=utf-8",
+      "",
+      "Transaction Ref: REF-DBS-1",
+      "Date and Time: 01 Sep 01:05 (SGT)",
+      "Amount: SGD 253.37",
+      "From: Altitude (A/C ending 9302)",
+      "To: CITI CREDIT CARDS (Ref ending 4756)",
+      "",
+    ].join("\r\n");
+
+    await orch.processEmail(
+      "dbs-bill-flattened",
+      rawEmail,
+      null,
+      "noreply@dbs.com",
+      "Payment Alert",
+    );
+
+    expect(orch._llm.chat).not.toHaveBeenCalled();
+    const insert = calls.find((call) => call.name === "insert_transaction");
+    expect(insert.args).toMatchObject({
+      account_id: "dbs-altitude",
+      amount_cents: -25337,
+      payee_id: "transfer-citi",
     });
     expect(calls.some((call) => call.name === "complete_transfer")).toBe(true);
   });
