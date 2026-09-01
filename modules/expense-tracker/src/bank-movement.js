@@ -84,6 +84,39 @@ function field(text, labels) {
   return match?.[1]?.trim() || "";
 }
 
+// Labels recognised by field(), longest-first so prefixed variants
+// ("From your account") win over their short forms ("From").
+const FIELD_LABELS = [
+  "Account that money was deposited in",
+  "Reference number",
+  "Transaction Ref",
+  "Date of Transfer",
+  "Date of Payment",
+  "Date and Time",
+  "Time of Transfer",
+  "Time of Payment",
+  "Time of deposit",
+  "From your account",
+  "To account",
+  "Description",
+  "Reference",
+  "Amount",
+  "From",
+  "To",
+  "Date",
+  "Time",
+];
+
+// extractEmailContent() collapses whitespace, so a labelled alert body can
+// arrive as one line and field()'s line-start anchors never fire. Re-insert a
+// line break before each known label that is not already at a line start so
+// the deterministic parser keeps working without loosening account matching.
+function restoreFieldLines(text) {
+  const escaped = FIELD_LABELS.map((label) => label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|");
+  const re = new RegExp(`(?<![\\n\\r])\\b(${escaped})\\s*:`, "gi");
+  return String(text).replace(re, "\n$&");
+}
+
 function suffix(value) {
   const match = String(value || "").match(/(?:ending\s+|\(-)(\d{4,})\)?/i);
   return match?.[1] || null;
@@ -115,7 +148,7 @@ function baseMovement({ direction, amount, currency, occurredAt, ownAccount, cou
 }
 
 export function parseBankMovement(text, { senderBank = null, receivedAt } = {}) {
-  const body = String(text || "");
+  const body = restoreFieldLines(String(text || ""));
   const reference = field(body, ["Reference number", "Transaction Ref", "Reference"]);
 
   const trust = body.match(/received\s+(SGD|MYR)\s*([\d,.]+)\s+from\s+(.+?)\s+A\/C\s+ending\s+(\d{4,})\s+on\s+(\d{1,2}\s+[A-Za-z]{3}\s+\d{4})\s+(\d{1,2}[:.]\d{2}\s*(?:AM|PM)?)\s*SGT/i);
