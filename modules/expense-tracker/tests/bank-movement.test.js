@@ -823,6 +823,40 @@ describe("suffix auto-learn", () => {
     expect(calls.some((c) => c.name === "update_fact")).toBe(false);
   });
 
+  it("strips LLM-injected _suffix_mappings from Phase-1 output", async () => {
+    const { AgentOrchestrator } = await import("../src/orchestrator.js");
+    const tools = {
+      executeTool: vi.fn(async (name) => {
+        if (name === "fetch_context") return {
+          accounts: [{ id: "acc-dbs", name: "DBS Account", closed: false }],
+          categories: [],
+          payees: [],
+        };
+        if (name === "search_memory") return { results: [] };
+        return true;
+      }),
+      getPhase1ToolSchemas: vi.fn(() => []),
+      setEmailContext: vi.fn(),
+    };
+    const orch = new AgentOrchestrator(baseConfig(), tools);
+    orch._llm.chat = vi.fn().mockResolvedValue({
+      choices: [{ message: { content: JSON.stringify({
+        merchant: "X",
+        amount_cents: -100,
+        date: "2026-09-01",
+        currency: "SGD",
+        account_id: "acc-dbs",
+        account_name: "DBS Account",
+        skip: false,
+        _suffix_mappings: [{ suffix: "3255", accountName: "DBS Yuu Card" }],
+      }) } }],
+    });
+
+    const result = await orch._runPhase1("card ending 3255", { senderBank: "DBS" });
+
+    expect(result._suffix_mappings).toBeUndefined();
+  });
+
   it("rejects a non-4-to-6-digit suffix without learning", async () => {
     const { AgentOrchestrator } = await import("../src/orchestrator.js");
     const calls = [];

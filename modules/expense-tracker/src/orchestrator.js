@@ -927,6 +927,11 @@ export class AgentOrchestrator {
                     payee_name: "",
                     category_id: "",
                 };
+                // _suffix_mappings is set only by the deterministic
+                // movement / bill-payment parsers. Strip any LLM-injected
+                // field so untrusted Phase-1 output cannot persist a
+                // fabricated suffix→account fact.
+                delete output._suffix_mappings;
 
                 // Date fallback: if the email body contains no recognisable
                 // date and the LLM returned a date that differs from today,
@@ -1674,7 +1679,10 @@ export class AgentOrchestrator {
                     })(),
                 );
             }
-            for (const mapping of llmOutput._suffix_mappings || []) {
+            const suffixMappings = Array.isArray(llmOutput._suffix_mappings)
+                ? llmOutput._suffix_mappings
+                : [];
+            for (const mapping of suffixMappings) {
                 learnPromises.push(this._learnSuffixFact(mapping));
             }
             Promise.allSettled(learnPromises).catch(() => {});
