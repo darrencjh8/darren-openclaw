@@ -207,6 +207,24 @@ describe("identityMappingsFromFacts", () => {
 
     expect(mappings.suffix.get("869001")?.name).toBe("OCBC 360");
   });
+
+  it("rejects conflicting facts for one account suffix", () => {
+    const localAccounts = [
+      { id: "dbs-one", name: "DBS One", closed: false },
+      { id: "dbs-two", name: "DBS Two", closed: false },
+    ];
+    const mappings = identityMappingsFromFacts([
+      "Account ending 5750 belongs to DBS One",
+      "Account ending 5750 belongs to DBS Two",
+    ], localAccounts);
+    const resolved = resolveMovementAccounts({
+      direction: "outgoing",
+      own_account: { bank: "DBS", suffix: "5750" },
+      counterparty: null,
+    }, localAccounts, [], mappings);
+
+    expect(resolved.source_account).toBeNull();
+  });
 });
 
 describe("structured movement orchestration", () => {

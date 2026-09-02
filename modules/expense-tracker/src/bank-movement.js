@@ -258,7 +258,11 @@ export function identityMappingsFromFacts(facts, accounts) {
       const account = candidates
         .map((name) => accounts.find((a) => a.name?.toLowerCase() === name.toLowerCase() && !a.closed))
         .find(Boolean);
-      if (account) mappings.suffix.set(suffixMatch[1], account);
+      if (account) {
+        const known = mappings.suffix.get(suffixMatch[1]);
+        if (!mappings.suffix.has(suffixMatch[1])) mappings.suffix.set(suffixMatch[1], account);
+        else if (known && known.id !== account.id) mappings.suffix.set(suffixMatch[1], null);
+      }
       continue;
     }
     const recipientMatch = text.match(/^(.+?)\s+alert recipient maps to\s+(.+?)\s+account$/i);
@@ -275,10 +279,12 @@ function resolveMappedAccount(evidence, mappings) {
   const unique = [
     ...new Map(
       [...mappings.suffix.entries()]
-        .filter(([knownSuffix]) =>
-          knownSuffix === evidence.suffix ||
-          knownSuffix.endsWith(evidence.suffix) ||
-          evidence.suffix.endsWith(knownSuffix),
+        .filter(([knownSuffix, account]) =>
+          account && (
+            knownSuffix === evidence.suffix ||
+            knownSuffix.endsWith(evidence.suffix) ||
+            evidence.suffix.endsWith(knownSuffix)
+          ),
         )
         .map(([, account]) => [account.id, account]),
     ).values(),
