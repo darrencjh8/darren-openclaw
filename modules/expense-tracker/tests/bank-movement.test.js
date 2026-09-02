@@ -1055,7 +1055,7 @@ To: Some Biller (Ref ending 1234)
     expect(phase1._suffix_mappings).toEqual([]);
   });
 
-  it("pairs source/destination evidence correctly for an incoming internal transfer", async () => {
+  it("does not learn the external counterparty suffix for an incoming transfer", async () => {
     const { AgentOrchestrator } = await import("../src/orchestrator.js");
     const orch = new AgentOrchestrator(baseConfig(), {
       executeTool: vi.fn(),
@@ -1075,7 +1075,6 @@ To: Some Biller (Ref ending 1234)
     });
 
     expect(mappings).toEqual([
-      { suffix: "9001", accountName: "OCBC 360 9001" },
       { suffix: "0980", accountName: "Trust Card 0980" },
     ]);
   });

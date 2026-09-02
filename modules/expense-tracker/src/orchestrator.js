@@ -189,6 +189,7 @@ export const BANK_TOKENS = [
     "cimb",
     "rhb",
     "ryt",
+    "sc",
     "dbs",
     "uob",
 ];
@@ -574,18 +575,19 @@ export class AgentOrchestrator {
             seen.add(value);
             pairs.push({ suffix: value, accountName: account.name });
         };
-        // Source/destination are `own`/`other` swapped by direction. Resolve
-        // the pairing so each side is matched against the evidence that
-        // actually produced it — never learn a cross-side (wrong) fact.
-        if (movement.direction === "incoming" && movement.counterparty) {
-            // source = external sender (counterparty), destination = own.
-            consider(resolved.source_account, movement.counterparty);
-            if (resolved.internal) consider(resolved.destination_account, movement.own_account);
-        } else {
-            // outgoing (source = own, destination = counterparty), or a
-            // one-sided incoming deposit where source = own and no counterparty.
+        // Source/destination are `own`/`other` swapped by direction. Only
+        // learn a suffix→account fact when the suffix belongs to the user's
+        // own account — never an external counterparty.
+        if (movement.direction === "outgoing") {
+            // source = own (always safe); destination = counterparty, which is
+            // the user's own account only on an internal transfer (confirmed
+            // by a transfer payee), never an external merchant.
             consider(resolved.source_account, movement.own_account);
             if (resolved.internal) consider(resolved.destination_account, movement.counterparty);
+        } else {
+            // incoming: the counterparty is an external sender — never learn
+            // its suffix. The own account is the recipient (destination).
+            consider(resolved.destination_account, movement.own_account);
         }
         return pairs;
     }
