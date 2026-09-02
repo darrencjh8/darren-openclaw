@@ -1079,6 +1079,35 @@ To: Yuu (Ref ending 3255)
     expect(calls.some((c) => c.name === "learn_fact")).toBe(false);
   });
 
+  it("does not choose or learn an ambiguous same-bank bill-payment account", async () => {
+    const { AgentOrchestrator } = await import("../src/orchestrator.js");
+    const orch = new AgentOrchestrator(baseConfig(), {
+      executeTool: vi.fn(async (name) => {
+        if (name === "fetch_context") return {
+          accounts: [
+            { id: "altitude", name: "DBS Altitude 1234", closed: false },
+            { id: "visa", name: "DBS Visa 1234", closed: false },
+          ],
+          categories: [],
+          payees: [],
+        };
+        if (name === "search_memory") return { results: [] };
+        return true;
+      }),
+      getPhase1ToolSchemas: vi.fn(() => []),
+      setEmailContext: vi.fn(),
+    });
+    orch._llm.chat = vi.fn();
+
+    const phase1 = await orch._runPhase1(`
+Amount: SGD 12.00
+From: My Account (A/C ending 1234)
+To: Some Biller (Ref ending 5678)
+`, { senderBank: "DBS", receivedAt: "2026-09-01T01:10:00+08:00" });
+
+    expect(phase1).toBeNull();
+  });
+
   it("does not learn a cross-bank bill-payment mapping from substring bank collision", async () => {
     const { AgentOrchestrator } = await import("../src/orchestrator.js");
     const tools = {
@@ -1103,7 +1132,7 @@ From: My Account (A/C ending 5750)
 To: Some Biller (Ref ending 1234)
 `, { senderBank: "SC", receivedAt: "2026-09-01T01:10:00+08:00" });
 
-    expect(phase1._suffix_mappings).toEqual([]);
+    expect(phase1).toBeNull();
   });
 
   it("does not learn the external counterparty suffix for an incoming transfer", async () => {

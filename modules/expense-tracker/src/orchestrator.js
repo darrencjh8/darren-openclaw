@@ -683,18 +683,13 @@ export class AgentOrchestrator {
                 });
                 const liveAccounts = ctx?.accounts || [];
 
-                // Match by suffix with word boundary to avoid false matches
-                // (e.g., suffix "5750" should NOT match account ending in "57500")
-                const escaped = sourceSuffix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-                const suffixRe = new RegExp(`\\b${escaped}\\b`);
-                const bankLower = senderBank.toLowerCase();
-                const acctMatch = liveAccounts.find(
-                    (a) =>
-                        a.name &&
-                        !a.closed &&
-                        a.name.toLowerCase().includes(bankLower) &&
-                        suffixRe.test(a.name),
+                // A suffix can collide across cards at the same bank. Resolve
+                // only a unique, bank-aware name match; otherwise leave this
+                // alert for the LLM/manual path instead of guessing.
+                const matchingAccounts = liveAccounts.filter((account) =>
+                    accountMatches(account, { suffix: sourceSuffix, bank: senderBank }),
                 );
+                const acctMatch = matchingAccounts.length === 1 ? matchingAccounts[0] : null;
                 if (acctMatch) {
                     logger.info({
                         event: "bill_payment_preparse",
@@ -726,12 +721,11 @@ export class AgentOrchestrator {
                 }
 
                 // Check if a matching account exists but is closed
-                const closedMatch = liveAccounts.find(
-                    (a) =>
-                        a.name &&
-                        a.closed &&
-                        a.name.toLowerCase().includes(bankLower) &&
-                        suffixRe.test(a.name),
+                const closedMatch = liveAccounts.find((account) =>
+                    account.closed && accountMatches(
+                        { ...account, closed: false },
+                        { suffix: sourceSuffix, bank: senderBank },
+                    ),
                 );
                 if (closedMatch) {
                     // Account exists but closed - return null so email stays unread.
