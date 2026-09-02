@@ -21,7 +21,6 @@ jest.mock("@actual-app/api", () => ({
     getAccounts: jest.fn(),
     getCategories: jest.fn(),
     getPayees: jest.fn(),
-    getTransaction: jest.fn(),
     getTransactions: jest.fn(),
     addTransactions: jest.fn(),
     deleteTransaction: jest.fn(),
@@ -211,7 +210,6 @@ describe("Route handlers", () => {
         actual.getBudgets.mockReset();
         actual.downloadBudget.mockReset();
         actual.getTransactions.mockReset();
-        actual.getTransaction.mockReset();
         actual.updateTransaction.mockReset();
         actual.addTransactions.mockReset();
         actual.deleteTransaction.mockReset();
@@ -221,7 +219,6 @@ describe("Route handlers", () => {
             { name: "TestBudget", groupId: "g1" },
         ]);
         actual.downloadBudget.mockResolvedValue(undefined);
-        actual.getTransaction.mockResolvedValue(null);
         actual.getTransactions.mockResolvedValue([]);
         actual.updateTransaction.mockResolvedValue(undefined);
         actual.addTransactions.mockResolvedValue(["txn-new"]);
@@ -283,7 +280,6 @@ describe("Route handlers", () => {
 
         await handler(req, res);
 
-        expect(actual.getTransaction).not.toHaveBeenCalled();
         expect(actual.updateTransaction).toHaveBeenCalledWith("txn-2", {
             cleared: true,
             notes: "Statement May 2026",
@@ -505,22 +501,30 @@ describe("GET /transactions/:id", () => {
         actual.init.mockReset();
         actual.getBudgets.mockReset();
         actual.downloadBudget.mockReset();
-        actual.getTransaction.mockReset();
+        actual.getTransactions.mockReset();
         actual.init.mockResolvedValue(undefined);
     });
 
     test("returns single transaction by ID", async () => {
-        actual.getTransaction.mockResolvedValue({
-            id: "txn-42",
-            date: "2026-06-17",
-            amount: -1280,
-            payee: "Toast Box",
-        });
+        actual.getTransactions.mockResolvedValue([
+            { id: "other-transaction" },
+            {
+                id: "txn-42",
+                date: "2026-06-17",
+                amount: -1280,
+                payee: "Toast Box",
+            },
+        ]);
         const handler = findHandler("get", "/transactions/:id");
         const res = mockRes();
 
         await handler(mockReq({ params: { id: "txn-42" } }), res);
 
+        expect(actual.getTransactions).toHaveBeenCalledWith(
+            undefined,
+            "1970-01-01",
+            expect.any(String),
+        );
         expect(res.json).toHaveBeenCalledWith({
             id: "txn-42",
             date: "2026-06-17",
@@ -530,10 +534,12 @@ describe("GET /transactions/:id", () => {
     });
 
     test("returns notes in single transaction by ID (notes transport)", async () => {
-        actual.getTransaction.mockResolvedValue({
-            id: "txn-43",
-            notes: "Merchant: WWW.TADA.G* N01A04E712\nStatement: DBS Yuu | 2026-06-01..2026-06-30\n\nuser note",
-        });
+        actual.getTransactions.mockResolvedValue([
+            {
+                id: "txn-43",
+                notes: "Merchant: WWW.TADA.G* N01A04E712\nStatement: DBS Yuu | 2026-06-01..2026-06-30\n\nuser note",
+            },
+        ]);
         const handler = findHandler("get", "/transactions/:id");
         const res = mockRes();
 
@@ -546,7 +552,7 @@ describe("GET /transactions/:id", () => {
     });
 
     test("returns 404 when transaction not found", async () => {
-        actual.getTransaction.mockResolvedValue(null);
+        actual.getTransactions.mockResolvedValue([{ id: "another-transaction" }]);
         const handler = findHandler("get", "/transactions/:id");
         const res = mockRes();
 
@@ -559,7 +565,7 @@ describe("GET /transactions/:id", () => {
     });
 
     test("returns 500 on API error", async () => {
-        actual.getTransaction.mockRejectedValue(new Error("DB down"));
+        actual.getTransactions.mockRejectedValue(new Error("DB down"));
         const handler = findHandler("get", "/transactions/:id");
         const res = mockRes();
 

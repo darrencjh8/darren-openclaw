@@ -336,7 +336,11 @@ app.post("/transactions", async (req, res) => {
 app.get("/transactions/:id", async (req, res) => {
     try {
         await ensureBudget(getBudgetId(req));
-        const txn = await actual.getTransaction(req.params.id);
+        const txn = (await actual.getTransactions(
+            undefined,
+            "1970-01-01",
+            new Date().toISOString().slice(0, 10),
+        )).find((transaction) => transaction.id === req.params.id);
         if (!txn)
             return res.status(404).json({ error: "Transaction not found" });
         res.json(txn);
