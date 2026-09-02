@@ -734,6 +734,20 @@ describe("resolveMovementAccounts", () => {
     }, accounts, [], mappings);
     expect(resolved.source_account.id).toBe("ocbc-acct");
   });
+
+  it("does not cross-book an SC fact against OCBC evidence (SC now recognized)", () => {
+    const accounts = [
+      { id: "sc-card", name: "SC Visa 1234", closed: false },
+      { id: "ocbc-acct", name: "OCBC 365 Account", closed: false },
+    ];
+    const mappings = identityMappingsFromFacts(["Card ending 1234 belongs to SC Visa 1234"], accounts);
+    const resolved = resolveMovementAccounts({
+      direction: "outgoing",
+      own_account: { bank: "OCBC", suffix: "1234" },
+      counterparty: { bank: "Citi", suffix: "9999" },
+    }, accounts, [], mappings);
+    expect(resolved.source_account.id).toBe("ocbc-acct");
+  });
 });
 
 describe("suffix auto-learn", () => {

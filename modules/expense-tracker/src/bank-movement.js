@@ -5,6 +5,10 @@ const BANK_ALIASES = [
   ["Citi", /\b(?:citi|citibank)\b/i],
   ["UOB", /\buob\b/i],
   ["Ryt", /\bryt(?:\s+bank)?\b/i],
+  ["SC", /\b(?:sc|standard\s+chartered)\b/i],
+  ["HSBC", /\bhsbc\b/i],
+  ["Maybank", /\bmaybank\b/i],
+  ["CIMB", /\bcimb\b/i],
 ];
 
 export function bankFromText(value, fallback = null) {
