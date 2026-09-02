@@ -15,6 +15,7 @@ import {
     identityMappingsFromFacts,
     parseBankMovement,
     resolveMovementAccounts,
+    accountMatches,
     cents,
     suffix,
     bankFromText,
@@ -473,6 +474,7 @@ export class AgentOrchestrator {
         const resolved = resolveMovementAccounts(movement, accounts, ctx?.payees || [], mappings);
         const source = resolved.source_account;
         const destination = resolved.destination_account;
+        const suffixMappings = this._collectSuffixMappings(movement, resolved);
         const date = movement.occurred_at?.slice(0, 10);
         if (!source || !date) return null;
 
@@ -494,6 +496,7 @@ export class AgentOrchestrator {
                 notes: movement.reference_number ? `Statement: ${movement.reference_number}` : "",
                 reasoning: "Deterministic structured bank transfer",
                 notify_message: "",
+                _suffix_mappings: suffixMappings,
                 _is_transfer: true,
                 _transfer: {
                     budget_id: budgetId,
@@ -524,6 +527,7 @@ export class AgentOrchestrator {
                 notes: "",
                 reasoning: "Deterministic one-sided bank deposit",
                 notify_message: "",
+                _suffix_mappings: suffixMappings,
                 _structured_movement: true,
             };
         }
@@ -545,10 +549,34 @@ export class AgentOrchestrator {
                 notes: movement.reference_number ? `Statement: ${movement.reference_number}` : "",
                 reasoning: "Deterministic external bank payment",
                 notify_message: "",
+                _suffix_mappings: suffixMappings,
                 _structured_movement: true,
             };
         }
         return null;
+    }
+
+    /**
+     * Collect (suffix, accountName) pairs confirmed by a name-digit match:
+     * the account's own name embeds the suffix digits and matches the bank.
+     * These are new ground-truth facts worth persisting — unlike memory-fact
+     * resolution, whose mapping is already stored.
+     */
+    _collectSuffixMappings(movement, resolved) {
+        const pairs = [];
+        const seen = new Set();
+        const consider = (account, evidence) => {
+            const value = evidence?.suffix;
+            if (!account || !value) return;
+            if (!/^\d{4,6}$/.test(String(value))) return;
+            if (seen.has(value)) return;
+            if (!accountMatches(account, evidence)) return;
+            seen.add(value);
+            pairs.push({ suffix: value, accountName: account.name });
+        };
+        consider(resolved.source_account, movement.own_account);
+        if (resolved.internal) consider(resolved.destination_account, movement.counterparty);
+        return pairs;
     }
 
     async _llmExtractMovement(emailText, senderBank, receivedAt) {
@@ -673,6 +701,9 @@ export class AgentOrchestrator {
                         notes: `Bill payment from ${sourceName} (${sourceSuffix}) to ${destName}`,
                         reasoning: `Deterministic parse: bill payment from ${acctMatch.name}`,
                         notify_message: "",
+                        _suffix_mappings: /^\d{4,6}$/.test(sourceSuffix)
+                            ? [{ suffix: sourceSuffix, accountName: acctMatch.name }]
+                            : [],
                     };
                 }
 
@@ -1631,6 +1662,9 @@ export class AgentOrchestrator {
                     })(),
                 );
             }
+            for (const mapping of llmOutput._suffix_mappings || []) {
+                learnPromises.push(this._learnSuffixFact(mapping));
+            }
             Promise.allSettled(learnPromises).catch(() => {});
 
             // Log decision
@@ -1650,6 +1684,38 @@ export class AgentOrchestrator {
     // ═══════════════════════════════════════════════════════════════
     // Helpers
     // ═══════════════════════════════════════════════════════════════
+
+    /**
+     * Build the canonical suffix→account fact. "Card ending X belongs to Y"
+     * for card-named accounts, "Account ending X belongs to Y" otherwise.
+     * The prefix is cosmetic — the safety net keys on suffix + account name.
+     */
+    _suffixFactText({ suffix, accountName }) {
+        const prefix = /\bcard\b/i.test(accountName) ? "Card" : "Account";
+        return `${prefix} ending ${suffix} belongs to ${accountName}`;
+    }
+
+    /**
+     * Persist a verified suffix→account mapping. Guarded to 4–6 digit
+     * suffixes; fire-and-forget with contradiction resolution.
+     */
+    async _learnSuffixFact({ suffix, accountName }) {
+        if (!suffix || !accountName) return;
+        const normalized = String(suffix).trim();
+        if (!/^\d{4,6}$/.test(normalized)) return;
+        const fact = this._suffixFactText({ suffix: normalized, accountName });
+        try {
+            const learned = await this._tools.executeTool("learn_fact", { fact });
+            if (learned?.reason === "contradiction" && learned?.existing) {
+                await this._tools.executeTool("update_fact", {
+                    old_text: learned.existing,
+                    new_text: fact,
+                });
+            }
+        } catch (e) {
+            logger.warn({ event: "suffix_learn_failed", error: e.message });
+        }
+    }
 
     /**
      * Returns true if the email body contains a recognisable date string.

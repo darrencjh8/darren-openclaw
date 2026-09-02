@@ -228,7 +228,7 @@ export function parseBankMovement(text, { senderBank = null, receivedAt } = {}) 
   });
 }
 
-function accountMatches(account, evidence) {
+export function accountMatches(account, evidence) {
   if (!account?.name || account.closed || !evidence?.suffix) return false;
   const bank = bankFromText(account.name);
   if (evidence.bank && bank !== evidence.bank) return false;
