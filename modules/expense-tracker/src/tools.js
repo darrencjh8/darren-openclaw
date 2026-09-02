@@ -686,7 +686,7 @@ const TOOLS = [
   {
     name: "update_transaction",
     description:
-      "Update an existing transaction's fields. Payee and category are validated against live lists.",
+      "Update an existing transaction's fields. Payee and category are validated against live lists. category_id null clears the category only when the resulting payee is Misc.",
     schema: {
       type: "object",
       properties: {
@@ -696,7 +696,7 @@ const TOOLS = [
         notes: { type: "string" },
         amount: { type: "number" },
         date: { type: "string" },
-        category_id: { type: "string" },
+        category_id: { type: ["string", "null"] },
         account_id: { type: "string" },
       },
       required: ["id", "budget_id"],
@@ -1660,26 +1660,48 @@ export class ToolRegistry {
     if (!budget_id) return { error: "budget_id is required" };
     const budgetId = budget_id;
 
+    // Fetch payees once whenever validation or a category-clear guard needs it.
+    let payees = null;
+    if (payee_name !== undefined || category_id === null) {
+      const result = await this._get("/payees", budgetId);
+      payees = Array.isArray(result) ? result : [];
+    }
+
     // Build fields to update
     const fields = {};
+    let updatedPayee = null;
     if (payee_name !== undefined) {
       // Validate payee exists (strict — reject unknown)
-      const payees = await this._get("/payees", budgetId);
-      const payeeMatch = Array.isArray(payees)
-        ? payees.find(
-            (p) => p.name && p.name.toLowerCase() === payee_name.toLowerCase(),
-          )
-        : null;
+      const payeeMatch = payees.find(
+        (p) => p.name && p.name.toLowerCase() === payee_name.toLowerCase(),
+      );
       if (!payeeMatch)
         return {
           error: `Payee "${payee_name}" not found in payee list. Use a valid payee from fetch_payees.`,
         };
       fields.payee = payeeMatch.id;
+      updatedPayee = payeeMatch;
     }
     if (notes !== undefined) fields.notes = notes;
     if (amount !== undefined) fields.amount = amount;
     if (date !== undefined) fields.date = date;
-    if (category_id !== undefined) {
+    if (category_id === null) {
+      let effectivePayee = updatedPayee;
+      if (!effectivePayee) {
+        const transaction = await this._get(`/transactions/${id}`, budgetId);
+        const transactionPayee = transaction?.payee;
+        effectivePayee = payees.find(
+          (payee) =>
+            payee.id === transactionPayee ||
+            payee.name?.toLowerCase() ===
+              String(transactionPayee || "").toLowerCase(),
+        );
+      }
+      if (effectivePayee?.name?.toLowerCase() !== "misc") {
+        return { error: "Category can only be cleared when payee is Misc" };
+      }
+      fields.category = null;
+    } else if (category_id !== undefined) {
       // Validate category exists (strict — reject unknown)
       const categories = await this._get("/categories", budgetId);
       const catMatch = Array.isArray(categories)

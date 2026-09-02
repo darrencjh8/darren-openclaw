@@ -1699,10 +1699,13 @@ describe("Phase 2: Resolution (3-phase)", () => {
           return {
             results: [{ text: "Toast Box maps to Food payee", score: 0.9 }],
           };
+        if (name === "fetch_context")
+          return { accounts: [], categories: [], payees: [] };
         return true;
       }),
     });
     const orch = new AgentOrchestrator(config, tools);
+    orch._llm.chat = vi.fn().mockResolvedValue(mockChatResponse({}));
 
     const phase1Output = {
       merchant: "Toast Box",
@@ -1730,10 +1733,13 @@ describe("Phase 2: Resolution (3-phase)", () => {
         if (name === "search_memory") return { results: [] };
         if (name === "resolve_merchant")
           return { payee: "New Payee", source: "web" };
+        if (name === "fetch_context")
+          return { accounts: [], categories: [], payees: [] };
         return true;
       }),
     });
     const orch = new AgentOrchestrator(config, tools);
+    orch._llm.chat = vi.fn().mockResolvedValue(mockChatResponse({}));
 
     const phase1Output = {
       merchant: "UnknownMerchant",
@@ -1798,10 +1804,13 @@ describe("Phase 2: Resolution (3-phase)", () => {
           return { results: [] };
         }
         if (name === "resolve_merchant") return { payee: "Misc", source: "fallback" };
+        if (name === "fetch_context")
+          return { accounts: [], categories: [], payees: [] };
         return true;
       }),
     });
     const orch = new AgentOrchestrator(config, tools);
+    orch._llm.chat = vi.fn().mockResolvedValue(mockChatResponse({}));
 
     // Simulate Phase 1 LLM omitting merchant but populating raw_description
     const phase1Output = {
@@ -2511,6 +2520,33 @@ describe("3-phase entry points", () => {
         (c) => c.name === "insert_transaction",
       );
       expect(insertCall.args.imported_description).toBe("Misc");
+      expect(insertCall.args.category_id).toBeUndefined();
+    });
+
+    it("removes a category selected upstream when the payee is Misc", async () => {
+      const { AgentOrchestrator } = await import("../src/orchestrator.js");
+      const executeCalls = [];
+      const tools = makeTools({
+        executeTool: vi.fn(async (name, args) => {
+          executeCalls.push({ name, args });
+          if (name === "check_duplicate") return false;
+          return true;
+        }),
+      });
+      const orch = new AgentOrchestrator(makeConfig(), tools);
+      const phase1Out = fakePhase1Output();
+      const phase2Out = fakePhase2Output(phase1Out, {
+        payee_name: "mIsC",
+        category_id: "cat-stale",
+      });
+      orch._runPhase1 = vi.fn().mockResolvedValue(phase1Out);
+      orch._resolvePhase2 = vi.fn().mockResolvedValue(phase2Out);
+
+      await orch.processEmail("msg-misc-category", "raw email");
+
+      const insertCall = executeCalls.find(
+        (call) => call.name === "insert_transaction",
+      );
       expect(insertCall.args.category_id).toBeUndefined();
     });
 

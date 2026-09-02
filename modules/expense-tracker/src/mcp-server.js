@@ -56,7 +56,7 @@ function createTools(server, registry) {
   );
   server.tool(
     "update_transaction",
-    "Update existing transaction. Payee and category are validated against live lists.",
+    "Update existing transaction. Payee and category are validated against live lists. Set category_id to null only to clear the category when the resulting payee is Misc.",
     {
       id: z.string().min(1),
       budget_id: z.string().min(1),
@@ -64,7 +64,7 @@ function createTools(server, registry) {
       notes: z.string().optional(),
       amount: z.number().optional(),
       date: z.string().optional(),
-      category_id: z.string().optional(),
+      category_id: z.string().nullable().optional(),
       account_id: z.string().optional(),
     },
     async (a) => tx(await registry.executeTool("update_transaction", a)),

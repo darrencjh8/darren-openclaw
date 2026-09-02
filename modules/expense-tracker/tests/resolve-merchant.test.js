@@ -1239,6 +1239,129 @@ describe("update_transaction", () => {
     vi.unstubAllGlobals();
   });
 
+  it("clears category when the same request sets the payee to Misc", async () => {
+    const registry = new ToolRegistry(mockConfig(), mockMemoryStore());
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => [
+          { id: "payee-misc", name: "Misc" },
+          { id: "payee-food", name: "Food" },
+        ],
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ id: "txn-1", category: null }),
+      });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await registry._handle_update_transaction({
+      id: "txn-1",
+      budget_id: "test-budget",
+      payee_name: "mIsC",
+      category_id: null,
+    });
+
+    expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toMatchObject({
+      payee: "payee-misc",
+      category: null,
+    });
+
+    vi.unstubAllGlobals();
+  });
+
+  it("clears category when the existing transaction payee is Misc", async () => {
+    const registry = new ToolRegistry(mockConfig(), mockMemoryStore());
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => [
+          { id: "payee-misc", name: "Misc" },
+          { id: "payee-food", name: "Food" },
+        ],
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ id: "txn-1", payee: "Misc" }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ id: "txn-1", category: null }),
+      });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await registry._handle_update_transaction({
+      id: "txn-1",
+      budget_id: "test-budget",
+      category_id: null,
+    });
+
+    expect(JSON.parse(fetchMock.mock.calls[2][1].body)).toMatchObject({
+      category: null,
+    });
+
+    vi.unstubAllGlobals();
+  });
+
+  it("rejects clearing category unless the resulting payee is Misc", async () => {
+    const registry = new ToolRegistry(mockConfig(), mockMemoryStore());
+    const fetchMock = vi.fn().mockResolvedValueOnce({
+      ok: true,
+      json: async () => [
+        { id: "payee-misc", name: "Misc" },
+        { id: "payee-food", name: "Food" },
+      ],
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await registry._handle_update_transaction({
+      id: "txn-1",
+      budget_id: "test-budget",
+      payee_name: "Food",
+      category_id: null,
+    });
+
+    expect(result).toEqual({
+      error: "Category can only be cleared when payee is Misc",
+    });
+    expect(fetchMock).toHaveBeenCalledOnce();
+
+    vi.unstubAllGlobals();
+  });
+
+  it("rejects clearing category when the existing transaction payee is not Misc", async () => {
+    const registry = new ToolRegistry(mockConfig(), mockMemoryStore());
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => [
+          { id: "payee-misc", name: "Misc" },
+          { id: "payee-food", name: "Food" },
+        ],
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ id: "txn-1", payee: "payee-food" }),
+      });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await registry._handle_update_transaction({
+      id: "txn-1",
+      budget_id: "test-budget",
+      category_id: null,
+    });
+
+    expect(result).toEqual({
+      error: "Category can only be cleared when payee is Misc",
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+
+    vi.unstubAllGlobals();
+  });
+
   it("builds only provided fields", async () => {
     const memory = mockMemoryStore();
     const config = mockConfig();
