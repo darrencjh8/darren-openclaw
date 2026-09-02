@@ -575,7 +575,7 @@ export class AgentOrchestrator {
             if (seen.has(value)) return;
             if (!accountMatches(account, evidence)) return;
             const accountDigits = [...account.name.matchAll(/\d{4,}/g)].map((match) => match[0]);
-            if (!accountDigits.some((digits) => digits === value || digits.endsWith(value))) return;
+            if (!accountDigits.some((digits) => digits === value)) return;
             seen.add(value);
             pairs.push({ suffix: value, accountName: account.name });
         };
@@ -713,8 +713,13 @@ export class AgentOrchestrator {
                         notes: `Bill payment from ${sourceName} (${sourceSuffix}) to ${destName}`,
                         reasoning: `Deterministic parse: bill payment from ${acctMatch.name}`,
                         notify_message: "",
+                        // Resolution above may accept a tail-overlap digit
+                        // match (15750 vs 5750), but a persisted suffix
+                        // fact requires an exact standalone digit run in
+                        // the account name — partial numeric overlap alone
+                        // is never durable evidence.
                         _suffix_mappings: /^\d{4,6}$/.test(sourceSuffix) &&
-                            accountMatches(acctMatch, { suffix: sourceSuffix, bank: senderBank })
+                            [...acctMatch.name.matchAll(/\d{4,}/g)].some((match) => match[0] === sourceSuffix)
                             ? [{ suffix: sourceSuffix, accountName: acctMatch.name }]
                             : [],
                     };

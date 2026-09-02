@@ -1108,6 +1108,55 @@ To: Some Biller (Ref ending 5678)
     expect(phase1).toBeNull();
   });
 
+  it("resolves a unique tail-overlap bill-payment account without learning its suffix", async () => {
+    const { AgentOrchestrator } = await import("../src/orchestrator.js");
+    const tools = {
+      executeTool: vi.fn(async (name) => {
+        if (name === "fetch_context") return {
+          accounts: [{ id: "visa", name: "DBS Visa 15750", closed: false }],
+          categories: [],
+          payees: [],
+        };
+        if (name === "search_memory") return { results: [] };
+        return true;
+      }),
+      getPhase1ToolSchemas: vi.fn(() => []),
+      setEmailContext: vi.fn(),
+    };
+    const orch = new AgentOrchestrator(baseConfig(), tools);
+    orch._llm.chat = vi.fn();
+
+    const phase1 = await orch._runPhase1(`
+Amount: SGD 12.00
+From: My Account (A/C ending 5750)
+To: Some Biller (Ref ending 1234)
+`, { senderBank: "DBS", receivedAt: "2026-09-01T01:10:00+08:00" });
+
+    expect(phase1).not.toBeNull();
+    expect(phase1.account_id).toBe("visa");
+    expect(phase1._suffix_mappings).toEqual([]);
+  });
+
+  it("does not learn a suffix that only tails account-name digits", async () => {
+    const { AgentOrchestrator } = await import("../src/orchestrator.js");
+    const orch = new AgentOrchestrator(baseConfig(), {
+      executeTool: vi.fn(),
+      setEmailContext: vi.fn(),
+      getPhase1ToolSchemas: vi.fn(() => []),
+    });
+
+    const mappings = orch._collectSuffixMappings({
+      direction: "outgoing",
+      own_account: { bank: "DBS", suffix: "5750" },
+    }, {
+      source_account: { id: "visa", name: "DBS Visa 15750", closed: false },
+      destination_account: null,
+      internal: false,
+    });
+
+    expect(mappings).toEqual([]);
+  });
+
   it("does not learn a cross-bank bill-payment mapping from substring bank collision", async () => {
     const { AgentOrchestrator } = await import("../src/orchestrator.js");
     const tools = {
