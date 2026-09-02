@@ -1029,7 +1029,7 @@ describe("bill payment pre-parser", () => {
         expect(result.merchant).toBe("Toast Box");
     });
 
-    it("matches source account by suffix in A/C ending", async () => {
+    it("matches source account through an identity fact, not display-name suffix", async () => {
         const config = makeConfig();
         const allAccounts = [
             { id: "acc-other", name: "DBS Savings", closed: false },
@@ -1038,7 +1038,9 @@ describe("bill payment pre-parser", () => {
         let llmCalled = false;
         const tools = makeTools({
             executeTool: vi.fn(async (name) => {
-                if (name === "search_memory") return { results: [] };
+                if (name === "search_memory") return { results: [
+                    { text: "Account ending 5750 belongs to DBS Current 5750", score: 1 },
+                ] };
                 if (name === "fetch_context")
                     return { accounts: allAccounts, categories: [], payees: [] };
                 return true;
@@ -1055,7 +1057,7 @@ describe("bill payment pre-parser", () => {
         expect(result.account_name).toBe("DBS Current 5750");
     });
 
-    it("returns null when suffix-matched account is closed", async () => {
+    it("falls through when a legacy bill-payment identity resolves only to a closed account", async () => {
         const config = makeConfig();
         const allAccounts = [
             { id: "acc-5750", name: "DBS Old 5750", closed: true },
@@ -1063,7 +1065,9 @@ describe("bill payment pre-parser", () => {
         let llmCalled = false;
         const tools = makeTools({
             executeTool: vi.fn(async (name) => {
-                if (name === "search_memory") return { results: [] };
+                if (name === "search_memory") return { results: [
+                    { text: "Account ending 5750 belongs to DBS Old 5750", score: 1 },
+                ] };
                 if (name === "fetch_context")
                     return { accounts: allAccounts, categories: [], payees: [] };
                 return true;
@@ -1075,10 +1079,8 @@ describe("bill payment pre-parser", () => {
 
         const result = await orch._runPhase1(dbsBillPaymentEmail, { senderBank: "DBS" });
 
-        // Falls through — pre-parser cannot match a non-closed account, returns null
-        // and the existing LLM path handles it (not tested here, this tests the pre-parser guard)
         expect(result).toBeNull();
-        expect(llmCalled).toBe(false);
+        expect(llmCalled).toBe(true);
     });
 
     it("handles non-DBS From/To format without crashing", async () => {

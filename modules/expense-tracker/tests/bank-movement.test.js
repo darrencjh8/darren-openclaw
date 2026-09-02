@@ -416,6 +416,80 @@ To: Yuu (Ref ending 3255)
     });
   });
 
+  it("resolves a legacy bill-payment format through identity facts, not account-name suffixes", async () => {
+    const { AgentOrchestrator } = await import("../src/orchestrator.js");
+    const tools = {
+      executeTool: vi.fn(async (name) => {
+        if (name === "fetch_context") return {
+          accounts: [
+            { id: "dbs-account", name: "DBS Account", closed: false },
+            { id: "dbs-yuu", name: "DBS Yuu Card", closed: false },
+          ],
+          categories: [],
+          payees: [{ id: "transfer-yuu", transfer_acct: "dbs-yuu" }],
+        };
+        if (name === "search_memory") return { results: [
+          { text: "Account ending 5750 belongs to DBS Account", score: 1 },
+          { text: "Card ending 3255 belongs to DBS Yuu Card", score: 1 },
+        ] };
+        return true;
+      }),
+      getPhase1ToolSchemas: vi.fn(() => []),
+      setEmailContext: vi.fn(),
+    };
+    const orch = new AgentOrchestrator({
+      primaryCurrency: "SGD", secondaryCurrency: "MYR",
+      primaryBudgetFile: "budget-sgd", secondaryBudgetFile: "budget-myr",
+      llmProvider: "deepseek", llmApiKey: "test", deepseekApiKey: "test",
+    }, tools);
+    orch._llm.chat = vi.fn();
+
+    const phase1 = await orch._runPhase1(`
+Amount: SGD 68.94
+From: My Account (A/C ending 5750)
+To: Yuu (Ref ending 3255)
+`, { senderBank: "DBS", receivedAt: "2026-09-01T01:10:00+08:00" });
+
+    expect(orch._llm.chat).not.toHaveBeenCalled();
+    expect(phase1).toMatchObject({
+      account_id: "dbs-account",
+      payee_id: "transfer-yuu",
+      amount_cents: -6894,
+      category_id: null,
+      _is_transfer: true,
+    });
+  });
+
+  it("does not resolve a closed account from a legacy bill-payment identity fact", async () => {
+    const { AgentOrchestrator } = await import("../src/orchestrator.js");
+    const tools = {
+      executeTool: vi.fn(async (name) => {
+        if (name === "fetch_context") return {
+          accounts: [{ id: "closed-dbs", name: "DBS Account", closed: true }],
+          categories: [],
+          payees: [],
+        };
+        if (name === "search_memory") return { results: [
+          { text: "Account ending 5750 belongs to DBS Account", score: 1 },
+        ] };
+        return true;
+      }),
+      getPhase1ToolSchemas: vi.fn(() => []),
+      setEmailContext: vi.fn(),
+    };
+    const orch = new AgentOrchestrator({
+      primaryCurrency: "SGD", secondaryCurrency: "MYR",
+      primaryBudgetFile: "budget-sgd", secondaryBudgetFile: "budget-myr",
+      llmProvider: "deepseek", llmApiKey: "test", deepseekApiKey: "test",
+    }, tools);
+
+    await expect(orch._runLegacyBillPaymentMovement(`
+Amount: SGD 68.94
+From: My Account (A/C ending 5750)
+To: Yuu (Ref ending 3255)
+`, "DBS", "2026-09-01T01:10:00+08:00")).resolves.toBeNull();
+  });
+
   it("does not assign a category to an internal transfer via payee→category memory", async () => {
     const { AgentOrchestrator } = await import("../src/orchestrator.js");
     const tools = {
