@@ -464,6 +464,142 @@ To: CITI CREDIT CARDS (Ref ending 4756)
     expect(calls.some((call) => call.name === "complete_transfer")).toBe(true);
   });
 
+  it("processes the full OCBC deposit alert email through real extraction as a Misc credit with no category", async () => {
+    const { AgentOrchestrator } = await import("../src/orchestrator.js");
+    const calls = [];
+    const tools = {
+      executeTool: vi.fn(async (name, args) => {
+        calls.push({ name, args });
+        if (name === "fetch_context") return {
+          accounts: [{ id: "ocbc-360", name: "OCBC 360 9001", closed: false }],
+          categories: [],
+          payees: [],
+        };
+        if (name === "search_memory") return { results: [] };
+        if (name === "check_duplicate") return false;
+        if (name === "insert_transaction") return { id: "actual-1" };
+        return true;
+      }),
+      getPhase1ToolSchemas: vi.fn(() => []),
+      setEmailContext: vi.fn(),
+    };
+    const orch = new AgentOrchestrator({
+      primaryCurrency: "SGD", secondaryCurrency: "MYR",
+      primaryBudgetFile: "budget-sgd", secondaryBudgetFile: "budget-myr",
+      llmProvider: "deepseek", llmApiKey: "test", deepseekApiKey: "test",
+    }, tools);
+    orch._llm.chat = vi.fn();
+
+    const rawEmail = [
+      "Date: Thu, 03 Sep 2026 00:38:00 +0800",
+      "From: OCBC <Notifications@ocbc.com>",
+      "Subject: OCBC Alert: Deposit in your account",
+      "Content-Type: text/plain; charset=utf-8",
+      "",
+      "Dear Valued Customer,",
+      "",
+      "A deposit was made in your account. Here are the details:",
+      "",
+      "Time of deposit: 12:37 AM",
+      "Amount: SGD 230.23",
+      "Account that money was deposited in: (-869001)",
+      "Reference: from CHONG JIN HENG",
+      "",
+      "For assistance at any time, please call us at 1800-363 3333 (or +65 6363 3333 from overseas).",
+      "",
+      "Thank you for banking with us. We look forward to serving you again.",
+      "",
+      "Yours sincerely",
+      "Digital Business",
+      "Global Consumer Financial Services",
+      "OCBC",
+      "",
+      "Do allow us to warn you against phishing attempts involving e-mails that claim to be from OCBC. We will not send you any emails with links requesting your Access Code, PIN or One-time Password. Enter your login credentials only into the OCBC app or after accessing the OCBC website (always type out the URL to do this).",
+      "",
+    ].join("\r\n");
+
+    await orch.processEmail(
+      "ocbc-deposit-full",
+      rawEmail,
+      null,
+      "Notifications@ocbc.com",
+      "OCBC Alert: Deposit in your account",
+    );
+
+    expect(orch._llm.chat).not.toHaveBeenCalled();
+    const insert = calls.find((call) => call.name === "insert_transaction");
+    expect(insert.args).toMatchObject({
+      account_id: "ocbc-360",
+      amount_cents: 23023,
+      imported_description: "Misc",
+      category_id: undefined,
+    });
+    expect(calls.some((call) => call.name === "reserve_transfer")).toBe(false);
+  });
+
+  it("processes the full UOB transfer alert email through real extraction as a Misc outgoing with no category and no transfer", async () => {
+    const { AgentOrchestrator } = await import("../src/orchestrator.js");
+    const calls = [];
+    const tools = {
+      executeTool: vi.fn(async (name, args) => {
+        calls.push({ name, args });
+        if (name === "fetch_context") return {
+          accounts: [
+            { id: "uob-one", name: "UOB One 7694", closed: false },
+            { id: "ocbc-360", name: "OCBC 360 9001", closed: false },
+          ],
+          categories: [],
+          // Destination OCBC has a live transfer payee; a UOB alert must still
+          // not be promoted to an Actual transfer (booked Misc for review).
+          payees: [{ id: "transfer-ocbc", transfer_acct: "ocbc-360" }],
+        };
+        if (name === "search_memory") return { results: [] };
+        if (name === "check_duplicate") return false;
+        if (name === "insert_transaction") return { id: "actual-1" };
+        return true;
+      }),
+      getPhase1ToolSchemas: vi.fn(() => []),
+      setEmailContext: vi.fn(),
+    };
+    const orch = new AgentOrchestrator({
+      primaryCurrency: "SGD", secondaryCurrency: "MYR",
+      primaryBudgetFile: "budget-sgd", secondaryBudgetFile: "budget-myr",
+      llmProvider: "deepseek", llmApiKey: "test", deepseekApiKey: "test",
+    }, tools);
+    orch._llm.chat = vi.fn();
+
+    const rawEmail = [
+      "Date: Thu, 03 Sep 2026 00:38:00 +0800",
+      "From: UOB <unialerts@uobgroup.com>",
+      "Subject: UOB Personal Internet Banking Notification Alerts",
+      "Content-Type: text/plain; charset=utf-8",
+      "",
+      "You made/scheduled a funds transfer(s) of SGD 230.23 to OCBC a/c ending 9001 from your a/c ending 7694 at 12:37AM SGT, 3 Sep 26. If unauthorised, call UOB 24/7 Fraud Hotline.",
+      "",
+      "UOB EMAIL DISCLAIMER: Any person receiving this email and any attachment(s) contained, shall treat the information as confidential and not misuse, copy, disclose, distribute or retain the information in any way that amounts to a breach of confidentiality. If you are not the intended recipient, please delete all copies of this email from your computer system. As the integrity of this message cannot be guaranteed, neither UOB nor any entity in the UOB Group shall be responsible for the contents. Any opinion in this email may not necessarily represent the opinion of UOB or any entity in the UOB Group.",
+      "",
+    ].join("\r\n");
+
+    await orch.processEmail(
+      "uob-transfer-full",
+      rawEmail,
+      null,
+      "unialerts@uobgroup.com",
+      "UOB Personal Internet Banking Notification Alerts",
+    );
+
+    expect(orch._llm.chat).not.toHaveBeenCalled();
+    const insert = calls.find((call) => call.name === "insert_transaction");
+    expect(insert.args).toMatchObject({
+      account_id: "uob-one",
+      amount_cents: -23023,
+      imported_description: "Misc",
+      category_id: undefined,
+    });
+    expect(calls.some((call) => call.name === "reserve_transfer")).toBe(false);
+    expect(calls.some((call) => call.name === "complete_transfer")).toBe(false);
+  });
+
   it("passes the RFC email date to phase 1 across a year boundary", async () => {
     const { AgentOrchestrator } = await import("../src/orchestrator.js");
     const tools = {
