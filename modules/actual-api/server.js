@@ -338,7 +338,7 @@ app.get("/transactions/:id", async (req, res) => {
         await ensureBudget(getBudgetId(req));
         const txn = (await actual.getTransactions(
             undefined,
-            "2020-01-01",
+            "1970-01-01",
             new Date().toISOString().slice(0, 10),
         )).find((transaction) => transaction.id === req.params.id);
         if (!txn)

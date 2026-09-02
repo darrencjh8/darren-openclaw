@@ -522,7 +522,7 @@ describe("GET /transactions/:id", () => {
 
         expect(actual.getTransactions).toHaveBeenCalledWith(
             undefined,
-            "2020-01-01",
+            "1970-01-01",
             expect.any(String),
         );
         expect(res.json).toHaveBeenCalledWith({
