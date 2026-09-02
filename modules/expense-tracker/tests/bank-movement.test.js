@@ -803,6 +803,26 @@ describe("suffix auto-learn", () => {
     });
   });
 
+  it("does not overwrite a cross-bank suffix fact on contradiction", async () => {
+    const { AgentOrchestrator } = await import("../src/orchestrator.js");
+    const calls = [];
+    const tools = {
+      executeTool: vi.fn(async (name, args) => {
+        calls.push({ name, args });
+        if (name === "learn_fact")
+          return { added: false, skipped: true, reason: "contradiction", existing: "Card ending 1234 belongs to DBS Visa 1234" };
+        return true;
+      }),
+      getPhase1ToolSchemas: vi.fn(() => []),
+      setEmailContext: vi.fn(),
+    };
+    const orch = new AgentOrchestrator(baseConfig(), tools);
+
+    await orch._learnSuffixFact({ suffix: "1234", accountName: "OCBC Visa 1234" });
+
+    expect(calls.some((c) => c.name === "update_fact")).toBe(false);
+  });
+
   it("rejects a non-4-to-6-digit suffix without learning", async () => {
     const { AgentOrchestrator } = await import("../src/orchestrator.js");
     const calls = [];

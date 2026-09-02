@@ -1719,10 +1719,27 @@ export class AgentOrchestrator {
         try {
             const learned = await this._tools.executeTool("learn_fact", { fact });
             if (learned?.reason === "contradiction" && learned?.existing) {
-                await this._tools.executeTool("update_fact", {
-                    old_text: learned.existing,
-                    new_text: fact,
-                });
+                const existingMatch = learned.existing.match(SUFFIX_RE);
+                const existingAccount = existingMatch ? existingMatch[2].trim() : "";
+                const newBank = bankFromText(accountName);
+                const existingBank = bankFromText(existingAccount);
+                // Only overwrite on a same-bank rename. A cross-bank collision
+                // (same 4-digit suffix, different bank) cannot be represented by
+                // a single suffix->account key, so retain the existing fact
+                // rather than silently flip-flop the mapping on each alert.
+                if (newBank && existingBank && newBank === existingBank) {
+                    await this._tools.executeTool("update_fact", {
+                        old_text: learned.existing,
+                        new_text: fact,
+                    });
+                } else {
+                    logger.warn({
+                        event: "suffix_learn_conflict",
+                        suffix: normalized,
+                        existing: learned.existing,
+                        incoming: fact,
+                    });
+                }
             }
         } catch (e) {
             logger.warn({ event: "suffix_learn_failed", error: e.message });
