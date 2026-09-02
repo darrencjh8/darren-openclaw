@@ -356,6 +356,22 @@ describe("Route handlers", () => {
     });
 
     describe("PATCH /transactions/:id", () => {
+        it("forwards a null category to clear it", async () => {
+            const handler = findHandler("patch", "/transactions/:id");
+            const req = mockReq({
+                params: { id: "txn-clear-category" },
+                body: { category: null },
+            });
+            const res = mockRes();
+
+            await handler(req, res);
+
+            expect(actual.updateTransaction).toHaveBeenCalledWith(
+                "txn-clear-category",
+                { category: null },
+            );
+        });
+
         it("passes partial fields to actual.updateTransaction", async () => {
             const handler = findHandler("patch", "/transactions/:id");
             const req = mockReq({

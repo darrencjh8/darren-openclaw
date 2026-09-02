@@ -1477,6 +1477,10 @@ export class AgentOrchestrator {
         if (action === "insert") {
             const payeeName = llmOutput.payee_name || "Misc";
             const accountId = llmOutput.account_id || "";
+            const categoryId =
+                payeeName.trim().toLowerCase() === "misc"
+                    ? undefined
+                    : llmOutput.category_id || undefined;
             let transferReservation = null;
 
             // Check duplicate
@@ -1532,7 +1536,7 @@ export class AgentOrchestrator {
                         llmOutput.date || new Date().toISOString().slice(0, 10),
                     amount_cents: llmOutput.amount_cents || 0,
                     imported_description: payeeName,
-                    category_id: llmOutput.category_id || undefined,
+                    category_id: categoryId,
                     payee_id: llmOutput.payee_id || undefined,
                     notes: composeNotes({
                         notes: llmOutput.notes || "",
