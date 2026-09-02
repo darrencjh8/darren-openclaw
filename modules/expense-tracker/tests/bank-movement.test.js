@@ -890,6 +890,57 @@ describe("suffix auto-learn", () => {
     expect(calls.some((c) => c.name === "learn_fact")).toBe(false);
   });
 
+  it("does not attach suffix mappings to LLM-extracted movements", async () => {
+    const { AgentOrchestrator } = await import("../src/orchestrator.js");
+    const tools = {
+      executeTool: vi.fn(async (name) => {
+        if (name === "fetch_context") return {
+          accounts: [{ id: "dbs-visa", name: "DBS Visa 1234", closed: false }],
+          categories: [],
+          payees: [],
+        };
+        if (name === "search_memory") return { results: [] };
+        return true;
+      }),
+      getPhase1ToolSchemas: vi.fn(() => []),
+      setEmailContext: vi.fn(),
+    };
+    const orch = new AgentOrchestrator(baseConfig(), tools);
+    orch._llm.chat = vi.fn().mockResolvedValue({
+      choices: [{ message: { content: JSON.stringify({
+        amount: 10,
+        currency: "SGD",
+        direction: "outgoing",
+        occurred_at: "2026-09-01T00:00:00.000Z",
+        from_account: "DBS Visa ending 1234",
+      }) } }],
+    });
+
+    const phase1 = await orch._llmExtractMovement("unstructured bank alert", "DBS");
+
+    expect(phase1._suffix_mappings).toEqual([]);
+  });
+
+  it("does not learn a longer alert suffix from shorter account-name digits", async () => {
+    const { AgentOrchestrator } = await import("../src/orchestrator.js");
+    const orch = new AgentOrchestrator(baseConfig(), {
+      executeTool: vi.fn(),
+      setEmailContext: vi.fn(),
+      getPhase1ToolSchemas: vi.fn(() => []),
+    });
+
+    const mappings = orch._collectSuffixMappings({
+      direction: "outgoing",
+      own_account: { bank: "DBS", suffix: "991234" },
+    }, {
+      source_account: { id: "dbs-visa", name: "DBS Visa 1234", closed: false },
+      destination_account: null,
+      internal: false,
+    });
+
+    expect(mappings).toEqual([]);
+  });
+
   it("attaches _suffix_mappings for a name-digit matched destination", async () => {
     const { AgentOrchestrator } = await import("../src/orchestrator.js");
     const tools = {

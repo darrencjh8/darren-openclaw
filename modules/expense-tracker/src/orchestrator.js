@@ -452,10 +452,10 @@ export class AgentOrchestrator {
             receivedAt: receivedAt || new Date().toISOString(),
         });
         if (!movement) return null;
-        return this._resolveMovementToOutput(movement);
+        return this._resolveMovementToOutput(movement, { allowSuffixLearning: true });
     }
 
-    async _resolveMovementToOutput(movement) {
+    async _resolveMovementToOutput(movement, { allowSuffixLearning = false } = {}) {
         const budgetId = movement.currency === this._config.primaryCurrency
             ? this._config.primaryBudgetFile
             : this._config.secondaryBudgetFile;
@@ -475,7 +475,9 @@ export class AgentOrchestrator {
         const resolved = resolveMovementAccounts(movement, accounts, ctx?.payees || [], mappings);
         const source = resolved.source_account;
         const destination = resolved.destination_account;
-        const suffixMappings = this._collectSuffixMappings(movement, resolved);
+        const suffixMappings = allowSuffixLearning
+            ? this._collectSuffixMappings(movement, resolved)
+            : [];
         const date = movement.occurred_at?.slice(0, 10);
         if (!source || !date) return null;
 
@@ -572,6 +574,8 @@ export class AgentOrchestrator {
             if (!/^\d{4,6}$/.test(String(value))) return;
             if (seen.has(value)) return;
             if (!accountMatches(account, evidence)) return;
+            const accountDigits = [...account.name.matchAll(/\d{4,}/g)].map((match) => match[0]);
+            if (!accountDigits.some((digits) => digits === value || digits.endsWith(value))) return;
             seen.add(value);
             pairs.push({ suffix: value, accountName: account.name });
         };
