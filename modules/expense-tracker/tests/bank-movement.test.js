@@ -206,13 +206,28 @@ For assistance at any time, please call us at 1800-363 3333.
     });
   });
 
-  it("does not parse a UOB alert without a resolvable own account", () => {
-    // The sender bank is not the user's own-account bank, so no "from your a/c"
-    // clause is present; the parser must not guess a movement from "transfer"
-    // alone (matches the non-goal: no inference from the word "transfer").
+  it("parses a UOB outgoing alert phrased as a singular made transfer without (s)", () => {
     const movement = parseBankMovement(
-      "A funds transfer of SGD 5.00 to DBS a/c ending 1234 was completed.",
-      { senderBank: "DBS", receivedAt: "2026-09-03T00:40:00.000Z" },
+      "You made a funds transfer of SGD 5.00 to OCBC a/c ending 9001 from your a/c ending 7694 at 12:37AM SGT, 3 Sep 26.",
+      { senderBank: "UOB", receivedAt: "2026-09-02T16:38:00.000Z" },
+    );
+
+    expect(movement).toMatchObject({
+      direction: "outgoing",
+      amount_cents: -500,
+      own_account: { bank: "UOB", suffix: "7694" },
+      counterparty: { bank: "OCBC", suffix: "9001" },
+      occurred_at: "2026-09-03T00:37:00+08:00",
+    });
+  });
+
+  it("does not parse a UOB transfer sentence that is missing the own-account from-clause", () => {
+    // Near-match UOB phrasing but with no "from your a/c ending <n>" clause:
+    // the parser must not guess a movement from the word "transfer" alone
+    // (matches the non-goal: no inference from the word "transfer").
+    const movement = parseBankMovement(
+      "You made a funds transfer of SGD 5.00 to DBS a/c ending 1234 at 12:37AM SGT, 3 Sep 26.",
+      { senderBank: "UOB", receivedAt: "2026-09-03T00:40:00.000Z" },
     );
     expect(movement).toBeNull();
   });
