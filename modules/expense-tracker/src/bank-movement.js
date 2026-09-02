@@ -272,15 +272,24 @@ export function identityMappingsFromFacts(facts, accounts) {
 
 function resolveMappedAccount(evidence, mappings) {
   if (!evidence?.suffix) return null;
+  const matching = [...mappings.suffix.entries()].filter(([knownSuffix]) =>
+    knownSuffix === evidence.suffix ||
+    knownSuffix.endsWith(evidence.suffix) ||
+    evidence.suffix.endsWith(knownSuffix),
+  );
+  // A banked fact must match the evidence bank; bankless legacy facts stay
+  // eligible so historical mappings for bankless account names still resolve.
+  // Without this, a DBS fact could silently book an OCBC alert that happens
+  // to share the same 4-digit suffix.
+  const bankScoped = evidence.bank
+    ? matching.filter(([, account]) => {
+        const bank = bankFromText(account?.name);
+        return bank === null || bank === evidence.bank;
+      })
+    : matching;
   const unique = [
     ...new Map(
-      [...mappings.suffix.entries()]
-        .filter(([knownSuffix]) =>
-          knownSuffix === evidence.suffix ||
-          knownSuffix.endsWith(evidence.suffix) ||
-          evidence.suffix.endsWith(knownSuffix),
-        )
-        .map(([, account]) => [account.id, account]),
+      bankScoped.map(([, account]) => [account.id, account]),
     ).values(),
   ];
   // Dedup by account so two suffix aliases that resolve to the SAME account

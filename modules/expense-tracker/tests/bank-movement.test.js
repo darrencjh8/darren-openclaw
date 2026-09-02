@@ -720,6 +720,20 @@ describe("resolveMovementAccounts", () => {
     expect(ambiguous.internal).toBe(false);
     expect(ambiguous.destination_account).toBeNull();
   });
+
+  it("does not cross-bank match a banked suffix fact (falls back to unique-bank)", () => {
+    const accounts = [
+      { id: "dbs-card", name: "DBS Visa 1234", closed: false },
+      { id: "ocbc-acct", name: "OCBC 365 Account", closed: false },
+    ];
+    const mappings = identityMappingsFromFacts(["Card ending 1234 belongs to DBS Visa 1234"], accounts);
+    const resolved = resolveMovementAccounts({
+      direction: "outgoing",
+      own_account: { bank: "OCBC", suffix: "1234" },
+      counterparty: { bank: "Citi", suffix: "9999" },
+    }, accounts, [], mappings);
+    expect(resolved.source_account.id).toBe("ocbc-acct");
+  });
 });
 
 describe("suffix auto-learn", () => {
