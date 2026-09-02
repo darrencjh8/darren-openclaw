@@ -945,4 +945,56 @@ To: Yuu (Ref ending 3255)
     expect(result.action).toBe("error");
     expect(calls.some((c) => c.name === "learn_fact")).toBe(false);
   });
+
+  it("does not learn a cross-bank bill-payment mapping from substring bank collision", async () => {
+    const { AgentOrchestrator } = await import("../src/orchestrator.js");
+    const tools = {
+      executeTool: vi.fn(async (name) => {
+        if (name === "fetch_context") return {
+          accounts: [{ id: "discover", name: "Discover Card 5750", closed: false }],
+          categories: [],
+          payees: [],
+        };
+        if (name === "search_memory") return { results: [] };
+        return true;
+      }),
+      getPhase1ToolSchemas: vi.fn(() => []),
+      setEmailContext: vi.fn(),
+    };
+    const orch = new AgentOrchestrator(baseConfig(), tools);
+    orch._llm.chat = vi.fn();
+
+    const phase1 = await orch._runPhase1(`
+Amount: SGD 12.00
+From: My Account (A/C ending 5750)
+To: Some Biller (Ref ending 1234)
+`, { senderBank: "SC", receivedAt: "2026-09-01T01:10:00+08:00" });
+
+    expect(phase1._suffix_mappings).toEqual([]);
+  });
+
+  it("pairs source/destination evidence correctly for an incoming internal transfer", async () => {
+    const { AgentOrchestrator } = await import("../src/orchestrator.js");
+    const orch = new AgentOrchestrator(baseConfig(), {
+      executeTool: vi.fn(),
+      setEmailContext: vi.fn(),
+      getPhase1ToolSchemas: vi.fn(() => []),
+    });
+
+    const mappings = orch._collectSuffixMappings({
+      direction: "incoming",
+      own_account: { bank: "Trust", suffix: "0980" },
+      counterparty: { bank: "OCBC", suffix: "9001" },
+    }, {
+      source_account: { id: "ocbc-360", name: "OCBC 360 9001", closed: false },
+      destination_account: { id: "trust-card", name: "Trust Card 0980", closed: false },
+      destination_payee: { id: "p", transfer_acct: "trust-card" },
+      internal: true,
+    });
+
+    expect(mappings).toEqual([
+      { suffix: "9001", accountName: "OCBC 360 9001" },
+      { suffix: "0980", accountName: "Trust Card 0980" },
+    ]);
+  });
 });

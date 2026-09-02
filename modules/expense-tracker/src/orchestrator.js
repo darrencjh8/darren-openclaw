@@ -574,8 +574,19 @@ export class AgentOrchestrator {
             seen.add(value);
             pairs.push({ suffix: value, accountName: account.name });
         };
-        consider(resolved.source_account, movement.own_account);
-        if (resolved.internal) consider(resolved.destination_account, movement.counterparty);
+        // Source/destination are `own`/`other` swapped by direction. Resolve
+        // the pairing so each side is matched against the evidence that
+        // actually produced it — never learn a cross-side (wrong) fact.
+        if (movement.direction === "incoming" && movement.counterparty) {
+            // source = external sender (counterparty), destination = own.
+            consider(resolved.source_account, movement.counterparty);
+            if (resolved.internal) consider(resolved.destination_account, movement.own_account);
+        } else {
+            // outgoing (source = own, destination = counterparty), or a
+            // one-sided incoming deposit where source = own and no counterparty.
+            consider(resolved.source_account, movement.own_account);
+            if (resolved.internal) consider(resolved.destination_account, movement.counterparty);
+        }
         return pairs;
     }
 
@@ -701,7 +712,8 @@ export class AgentOrchestrator {
                         notes: `Bill payment from ${sourceName} (${sourceSuffix}) to ${destName}`,
                         reasoning: `Deterministic parse: bill payment from ${acctMatch.name}`,
                         notify_message: "",
-                        _suffix_mappings: /^\d{4,6}$/.test(sourceSuffix)
+                        _suffix_mappings: /^\d{4,6}$/.test(sourceSuffix) &&
+                            accountMatches(acctMatch, { suffix: sourceSuffix, bank: senderBank })
                             ? [{ suffix: sourceSuffix, accountName: acctMatch.name }]
                             : [],
                     };
