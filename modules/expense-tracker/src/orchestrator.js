@@ -452,10 +452,17 @@ export class AgentOrchestrator {
             receivedAt: receivedAt || new Date().toISOString(),
         });
         if (!movement) return null;
-        return this._resolveMovementToOutput(movement, { allowSuffixLearning: true });
+        return this._resolveMovementToOutput(movement, {
+            allowSuffixLearning: true,
+            // UOB funds-transfer alerts are booked as a Misc outgoing (no
+            // category) so the user can review/re-categorise them by hand
+            // instead of an auto-created Actual transfer that actual-api may
+            // reject. Remove this carve-out once UOB transfers are trusted.
+            forceMiscExternal: senderBank === "UOB" && movement.direction === "outgoing",
+        });
     }
 
-    async _resolveMovementToOutput(movement, { allowSuffixLearning = false } = {}) {
+    async _resolveMovementToOutput(movement, { allowSuffixLearning = false, forceMiscExternal = false } = {}) {
         const budgetId = movement.currency === this._config.primaryCurrency
             ? this._config.primaryBudgetFile
             : this._config.secondaryBudgetFile;
@@ -481,7 +488,7 @@ export class AgentOrchestrator {
         const date = movement.occurred_at?.slice(0, 10);
         if (!source || !date) return null;
 
-        if (resolved.internal) {
+        if (resolved.internal && !forceMiscExternal) {
             return {
                 merchant: movement.counterparty?.name || destination.name,
                 amount_cents: -Math.abs(movement.amount_cents),

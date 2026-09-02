@@ -196,6 +196,37 @@ export function parseBankMovement(text, { senderBank = null, receivedAt } = {}) 
     };
   }
 
+  // UOB outgoing funds-transfer alert — single natural-language sentence with
+  // no labelled "Amount :" lines, e.g.
+  //   "You made/scheduled a funds transfer(s) of SGD 230.23 to OCBC a/c ending
+  //    9001 from your a/c ending 7694 at 12:37AM SGT, 3 Sep 26."
+  const uob = body.match(
+    /you\s+(?:made\s*\/\s*scheduled|made|scheduled)\s+a\s+funds?\s+transfer(?:\(s\))?\s+of\s+(SGD|MYR)\s*([\d,.]+)\s+to\s+(.+?)\s+a\/c\s+ending\s+(\d{3,})\s+from\s+your\s+a\/c\s+ending\s+(\d{3,})\s+at\s+(\d{1,2}[:.]\d{2}\s*(?:AM|PM)?)\s*SGT,?\s+(\d{1,2}\s+[A-Za-z]{3}\s+\d{2,4})/i,
+  );
+  if (uob) {
+    // Normalise a two-digit year ("3 Sep 26") before isoDateTime parses it.
+    const dateText = uob[7].replace(
+      /^(\d{1,2}\s+[A-Za-z]{3})\s+(\d{2})$/,
+      "$1 20$2",
+    );
+    const occurredAt = isoDateTime(dateText, uob[6], receivedAt);
+    if (!occurredAt) return null;
+    const counterpartyName = uob[3].trim();
+    return baseMovement({
+      direction: "outgoing",
+      amount: uob[2],
+      currency: uob[1],
+      occurredAt,
+      ownAccount: { bank: senderBank, suffix: uob[5] },
+      counterparty: {
+        name: counterpartyName,
+        bank: bankFromText(counterpartyName),
+        suffix: uob[4],
+      },
+      reference: "",
+    });
+  }
+
   const currencyAmount = body.match(/Amount\s*:\s*(SGD|MYR)\s*([\d,.]+)/i);
   if (!currencyAmount) return null;
   const [, currency, amount] = currencyAmount;

@@ -161,6 +161,62 @@ Reference :
     });
   });
 
+  it("parses a full OCBC deposit alert body without inventing a counterparty", () => {
+    // Real-world OCBC HTML body: labelled block plus a "Reference: from <name>"
+    // line and a trailing phishing-disclaimer paragraph.
+    const movement = parseBankMovement(`
+Dear Valued Customer,
+
+A deposit was made in your account. Here are the details:
+
+Time of deposit: 12:37 AM
+Amount: SGD 230.23
+Account that money was deposited in: (-869001)
+Reference: from CHONG JIN HENG
+
+For assistance at any time, please call us at 1800-363 3333.
+`, { senderBank: "OCBC", receivedAt: "2026-09-02T16:38:00.000Z" });
+
+    expect(movement).toMatchObject({
+      kind: "bank_movement",
+      direction: "incoming",
+      amount_cents: 23023,
+      currency: "SGD",
+      occurred_at: "2026-09-03T00:37:00+08:00",
+      own_account: { bank: "OCBC", suffix: "869001" },
+      counterparty: null,
+    });
+  });
+
+  it("parses a UOB outgoing funds-transfer alert without an Amount label", () => {
+    const movement = parseBankMovement(
+      "You made/scheduled a funds transfer(s) of SGD 230.23 to OCBC a/c ending 9001 from your a/c ending 7694 at 12:37AM SGT, 3 Sep 26.",
+      { senderBank: "UOB", receivedAt: "2026-09-02T16:38:00.000Z" },
+    );
+
+    expect(movement).toMatchObject({
+      kind: "bank_movement",
+      direction: "outgoing",
+      amount_cents: -23023,
+      currency: "SGD",
+      occurred_at: "2026-09-03T00:37:00+08:00",
+      own_account: { bank: "UOB", suffix: "7694" },
+      counterparty: { bank: "OCBC", suffix: "9001" },
+      reference_number: "",
+    });
+  });
+
+  it("does not parse a UOB alert without a resolvable own account", () => {
+    // The sender bank is not the user's own-account bank, so no "from your a/c"
+    // clause is present; the parser must not guess a movement from "transfer"
+    // alone (matches the non-goal: no inference from the word "transfer").
+    const movement = parseBankMovement(
+      "A funds transfer of SGD 5.00 to DBS a/c ending 1234 was completed.",
+      { senderBank: "DBS", receivedAt: "2026-09-03T00:40:00.000Z" },
+    );
+    expect(movement).toBeNull();
+  });
+
   it("parses PayNow UEN as external payment, not internal transfer", () => {
     const movement = parseBankMovement(`
 The following PayNow transfer has been made to Example LLP using their Unique Entity Number (UEN) UEN123.
@@ -284,6 +340,64 @@ To: CITI CREDIT CARDS (Ref ending 4756)
       category_id: undefined,
     });
     expect(calls.some((call) => call.name === "complete_transfer")).toBe(true);
+  });
+
+  it("books a UOB outgoing funds-transfer alert as Misc with no category, without an LLM or a transfer", async () => {
+    const { AgentOrchestrator } = await import("../src/orchestrator.js");
+    const calls = [];
+    const tools = {
+      executeTool: vi.fn(async (name, args) => {
+        calls.push({ name, args });
+        if (name === "fetch_context") return {
+          accounts: [
+            { id: "uob-one", name: "UOB One 7694", closed: false },
+            { id: "ocbc-360", name: "OCBC 360 9001", closed: false },
+          ],
+          categories: [],
+          // Even when the destination OCBC account has a live transfer payee,
+          // UOB transfers are deliberately not promoted to an Actual transfer.
+          payees: [{ id: "transfer-ocbc", transfer_acct: "ocbc-360" }],
+        };
+        if (name === "search_memory") return { results: [] };
+        if (name === "check_duplicate") return false;
+        if (name === "insert_transaction") return { id: "actual-1" };
+        return true;
+      }),
+      getPhase1ToolSchemas: vi.fn(() => []),
+      setEmailContext: vi.fn(),
+    };
+    const orch = new AgentOrchestrator({
+      primaryCurrency: "SGD", secondaryCurrency: "MYR",
+      primaryBudgetFile: "budget-sgd", secondaryBudgetFile: "budget-myr",
+      llmProvider: "deepseek", llmApiKey: "test", deepseekApiKey: "test",
+    }, tools);
+    orch._llm.chat = vi.fn();
+
+    const phase1 = await orch._runPhase1(
+      "You made/scheduled a funds transfer(s) of SGD 230.23 to OCBC a/c ending 9001 from your a/c ending 7694 at 12:37AM SGT, 3 Sep 26.",
+      { senderBank: "UOB" },
+    );
+
+    expect(orch._llm.chat).not.toHaveBeenCalled();
+    expect(phase1).toMatchObject({
+      account_id: "uob-one",
+      amount_cents: -23023,
+      category_id: null,
+    });
+    // Not an internal transfer: payee falls back to "Misc" for manual review.
+    expect(phase1._is_transfer).toBeUndefined();
+    expect(phase1.payee_id).toBeUndefined();
+
+    await orch._executePhase3(phase1);
+    const insert = calls.find((call) => call.name === "insert_transaction");
+    expect(insert.args).toMatchObject({
+      account_id: "uob-one",
+      amount_cents: -23023,
+      imported_description: "Misc",
+      category_id: undefined,
+    });
+    expect(calls.some((call) => call.name === "reserve_transfer")).toBe(false);
+    expect(calls.some((call) => call.name === "complete_transfer")).toBe(false);
   });
 
   it("parses a flattened DBS bill-payment alert through real processEmail extraction", async () => {
