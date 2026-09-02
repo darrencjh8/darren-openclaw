@@ -274,6 +274,17 @@ export function identityMappingsFromFacts(facts, accounts) {
   return mappings;
 }
 
+function hasConflictingMapping(evidence, mappings) {
+  if (!evidence?.suffix) return false;
+  return [...mappings.suffix.entries()].some(([knownSuffix, account]) =>
+    !account && (
+      knownSuffix === evidence.suffix ||
+      knownSuffix.endsWith(evidence.suffix) ||
+      evidence.suffix.endsWith(knownSuffix)
+    ),
+  );
+}
+
 function resolveMappedAccount(evidence, mappings) {
   if (!evidence?.suffix) return null;
   const unique = [
@@ -301,12 +312,20 @@ function resolveAccountByBank(evidence, accounts) {
 }
 
 export function resolveMovementAccounts(movement, accounts, payees, mappings = { suffix: new Map(), recipient: new Map() }) {
-  const own = resolveAccount(movement.own_account, accounts)
-    || resolveMappedAccount(movement.own_account, mappings)
-    || resolveAccountByBank(movement.own_account, accounts)
-    || (movement.direction === "incoming" && movement.recipient_bank ? mappings.recipient.get(movement.recipient_bank) || null : null);
-  const other = resolveAccount(movement.counterparty, accounts)
-    || resolveMappedAccount(movement.counterparty, mappings);
+  const ownConflict = hasConflictingMapping(movement.own_account, mappings);
+  const otherConflict = hasConflictingMapping(movement.counterparty, mappings);
+  const own = ownConflict ? null : (
+    resolveMappedAccount(movement.own_account, mappings)
+      || resolveAccount(movement.own_account, accounts)
+      || resolveAccountByBank(movement.own_account, accounts)
+      || (movement.direction === "incoming" && movement.recipient_bank
+        ? mappings.recipient.get(movement.recipient_bank) || null
+        : null)
+  );
+  const other = otherConflict ? null : (
+    resolveMappedAccount(movement.counterparty, mappings)
+      || resolveAccount(movement.counterparty, accounts)
+  );
   const destination = movement.direction === "outgoing" ? other : own;
   // For a one-sided incoming movement (deposit into own account, no counterparty),
   // the source is the own account that received the funds.

@@ -212,6 +212,7 @@ describe("identityMappingsFromFacts", () => {
     const localAccounts = [
       { id: "dbs-one", name: "DBS One", closed: false },
       { id: "dbs-two", name: "DBS Two", closed: false },
+      { id: "dbs-current", name: "DBS Current 5750", closed: false },
     ];
     const mappings = identityMappingsFromFacts([
       "Account ending 5750 belongs to DBS One",
