@@ -5,6 +5,10 @@ const BANK_ALIASES = [
   ["Citi", /\b(?:citi|citibank)\b/i],
   ["UOB", /\buob\b/i],
   ["Ryt", /\bryt(?:\s+bank)?\b/i],
+  ["SC", /\b(?:sc|standard\s+chartered)\b/i],
+  ["HSBC", /\bhsbc\b/i],
+  ["Maybank", /\bmaybank\b/i],
+  ["CIMB", /\bcimb\b/i],
 ];
 
 export function bankFromText(value, fallback = null) {
@@ -228,7 +232,7 @@ export function parseBankMovement(text, { senderBank = null, receivedAt } = {}) 
   });
 }
 
-function accountMatches(account, evidence) {
+export function accountMatches(account, evidence) {
   if (!account?.name || account.closed || !evidence?.suffix) return false;
   const bank = bankFromText(account.name);
   if (evidence.bank && bank !== evidence.bank) return false;
@@ -287,17 +291,26 @@ function hasConflictingMapping(evidence, mappings) {
 
 function resolveMappedAccount(evidence, mappings) {
   if (!evidence?.suffix) return null;
+  const matching = [...mappings.suffix.entries()].filter(([knownSuffix, account]) =>
+    account && (
+      knownSuffix === evidence.suffix ||
+      knownSuffix.endsWith(evidence.suffix) ||
+      evidence.suffix.endsWith(knownSuffix)
+    ),
+  );
+  // A banked fact must match the evidence bank; bankless legacy facts stay
+  // eligible so historical mappings for bankless account names still resolve.
+  // Without this, a DBS fact could silently book an OCBC alert that happens
+  // to share the same 4-digit suffix.
+  const bankScoped = evidence.bank
+    ? matching.filter(([, account]) => {
+        const bank = bankFromText(account?.name);
+        return bank === null || bank === evidence.bank;
+      })
+    : matching;
   const unique = [
     ...new Map(
-      [...mappings.suffix.entries()]
-        .filter(([knownSuffix, account]) =>
-          account && (
-            knownSuffix === evidence.suffix ||
-            knownSuffix.endsWith(evidence.suffix) ||
-            evidence.suffix.endsWith(knownSuffix)
-          ),
-        )
-        .map(([, account]) => [account.id, account]),
+      bankScoped.map(([, account]) => [account.id, account]),
     ).values(),
   ];
   // Dedup by account so two suffix aliases that resolve to the SAME account

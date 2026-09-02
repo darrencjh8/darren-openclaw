@@ -15,6 +15,7 @@ import {
     identityMappingsFromFacts,
     parseBankMovement,
     resolveMovementAccounts,
+    accountMatches,
     cents,
     suffix,
     bankFromText,
@@ -188,6 +189,7 @@ export const BANK_TOKENS = [
     "cimb",
     "rhb",
     "ryt",
+    "sc",
     "dbs",
     "uob",
 ];
@@ -450,10 +452,10 @@ export class AgentOrchestrator {
             receivedAt: receivedAt || new Date().toISOString(),
         });
         if (!movement) return null;
-        return this._resolveMovementToOutput(movement);
+        return this._resolveMovementToOutput(movement, { allowSuffixLearning: true });
     }
 
-    async _resolveMovementToOutput(movement) {
+    async _resolveMovementToOutput(movement, { allowSuffixLearning = false } = {}) {
         const budgetId = movement.currency === this._config.primaryCurrency
             ? this._config.primaryBudgetFile
             : this._config.secondaryBudgetFile;
@@ -473,6 +475,9 @@ export class AgentOrchestrator {
         const resolved = resolveMovementAccounts(movement, accounts, ctx?.payees || [], mappings);
         const source = resolved.source_account;
         const destination = resolved.destination_account;
+        const suffixMappings = allowSuffixLearning
+            ? this._collectSuffixMappings(movement, resolved)
+            : [];
         const date = movement.occurred_at?.slice(0, 10);
         if (!source || !date) return null;
 
@@ -494,6 +499,7 @@ export class AgentOrchestrator {
                 notes: movement.reference_number ? `Statement: ${movement.reference_number}` : "",
                 reasoning: "Deterministic structured bank transfer",
                 notify_message: "",
+                _suffix_mappings: suffixMappings,
                 _is_transfer: true,
                 _transfer: {
                     budget_id: budgetId,
@@ -524,6 +530,7 @@ export class AgentOrchestrator {
                 notes: "",
                 reasoning: "Deterministic one-sided bank deposit",
                 notify_message: "",
+                _suffix_mappings: suffixMappings,
                 _structured_movement: true,
             };
         }
@@ -545,10 +552,48 @@ export class AgentOrchestrator {
                 notes: movement.reference_number ? `Statement: ${movement.reference_number}` : "",
                 reasoning: "Deterministic external bank payment",
                 notify_message: "",
+                _suffix_mappings: suffixMappings,
                 _structured_movement: true,
             };
         }
         return null;
+    }
+
+    /**
+     * Collect (suffix, accountName) pairs confirmed by a name-digit match:
+     * the account's own name embeds the suffix digits and matches the bank.
+     * These are new ground-truth facts worth persisting — unlike memory-fact
+     * resolution, whose mapping is already stored.
+     */
+    _collectSuffixMappings(movement, resolved) {
+        const pairs = [];
+        const seen = new Set();
+        const consider = (account, evidence) => {
+            const value = evidence?.suffix;
+            if (!account || !value) return;
+            if (!/^\d{4,6}$/.test(String(value))) return;
+            if (seen.has(value)) return;
+            if (!accountMatches(account, evidence)) return;
+            const accountDigits = [...account.name.matchAll(/\d{4,}/g)].map((match) => match[0]);
+            if (!accountDigits.some((digits) => digits === value)) return;
+            seen.add(value);
+            pairs.push({ suffix: value, accountName: account.name });
+        };
+        // Source/destination are `own`/`other` swapped by direction. Only
+        // learn a suffix→account fact when the suffix belongs to the user's
+        // own account — never an external counterparty.
+        if (movement.direction === "outgoing") {
+            // source = own (always safe); destination = counterparty, which is
+            // the user's own account only on an internal transfer (confirmed
+            // by a transfer payee), never an external merchant.
+            consider(resolved.source_account, movement.own_account);
+            if (resolved.internal) consider(resolved.destination_account, movement.counterparty);
+        } else {
+            // incoming: the counterparty is an external sender — never learn
+            // its suffix. The own account is the recipient (destination).
+            consider(resolved.destination_account, movement.own_account);
+        }
+        return pairs;
     }
 
     async _llmExtractMovement(emailText, senderBank, receivedAt) {
@@ -611,7 +656,7 @@ export class AgentOrchestrator {
             reference_number: "",
             merchant_display_name: match[5].trim(),
             raw_merchant_descriptor: "",
-        });
+        }, { allowSuffixLearning: true });
     }
 
     async _runPhase1(emailText, { senderBank, receivedAt } = {}) {
@@ -806,6 +851,11 @@ export class AgentOrchestrator {
                     payee_name: "",
                     category_id: "",
                 };
+                // _suffix_mappings is set only by the deterministic
+                // movement / bill-payment parsers. Strip any LLM-injected
+                // field so untrusted Phase-1 output cannot persist a
+                // fabricated suffix→account fact.
+                delete output._suffix_mappings;
 
                 // Date fallback: if the email body contains no recognisable
                 // date and the LLM returned a date that differs from today,
@@ -1553,6 +1603,12 @@ export class AgentOrchestrator {
                     })(),
                 );
             }
+            const suffixMappings = Array.isArray(llmOutput._suffix_mappings)
+                ? llmOutput._suffix_mappings
+                : [];
+            for (const mapping of suffixMappings) {
+                learnPromises.push(this._learnSuffixFact(mapping));
+            }
             Promise.allSettled(learnPromises).catch(() => {});
 
             // Log decision
@@ -1572,6 +1628,55 @@ export class AgentOrchestrator {
     // ═══════════════════════════════════════════════════════════════
     // Helpers
     // ═══════════════════════════════════════════════════════════════
+
+    /**
+     * Build the canonical suffix→account fact. "Card ending X belongs to Y"
+     * for card-named accounts, "Account ending X belongs to Y" otherwise.
+     * The prefix is cosmetic — the safety net keys on suffix + account name.
+     */
+    _suffixFactText({ suffix, accountName }) {
+        const prefix = /\bcard\b/i.test(accountName) ? "Card" : "Account";
+        return `${prefix} ending ${suffix} belongs to ${accountName}`;
+    }
+
+    /**
+     * Persist a verified suffix→account mapping. Guarded to 4–6 digit
+     * suffixes; fire-and-forget with contradiction resolution.
+     */
+    async _learnSuffixFact({ suffix, accountName }) {
+        if (!suffix || !accountName) return;
+        const normalized = String(suffix).trim();
+        if (!/^\d{4,6}$/.test(normalized)) return;
+        const fact = this._suffixFactText({ suffix: normalized, accountName });
+        try {
+            const learned = await this._tools.executeTool("learn_fact", { fact });
+            if (learned?.reason === "contradiction" && learned?.existing) {
+                const existingMatch = learned.existing.match(SUFFIX_RE);
+                const existingAccount = existingMatch ? existingMatch[2].trim() : "";
+                const newBank = bankFromText(accountName);
+                const existingBank = bankFromText(existingAccount);
+                // Only overwrite on a same-bank rename. A cross-bank collision
+                // (same 4-digit suffix, different bank) cannot be represented by
+                // a single suffix->account key, so retain the existing fact
+                // rather than silently flip-flop the mapping on each alert.
+                if (newBank && existingBank && newBank === existingBank) {
+                    await this._tools.executeTool("update_fact", {
+                        old_text: learned.existing,
+                        new_text: fact,
+                    });
+                } else {
+                    logger.warn({
+                        event: "suffix_learn_conflict",
+                        suffix: normalized,
+                        existing: learned.existing,
+                        incoming: fact,
+                    });
+                }
+            }
+        } catch (e) {
+            logger.warn({ event: "suffix_learn_failed", error: e.message });
+        }
+    }
 
     /**
      * Returns true if the email body contains a recognisable date string.

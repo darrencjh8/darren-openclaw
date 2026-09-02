@@ -813,4 +813,491 @@ describe("resolveMovementAccounts", () => {
     expect(ambiguous.internal).toBe(false);
     expect(ambiguous.destination_account).toBeNull();
   });
+
+  it("does not cross-bank match a banked suffix fact (falls back to unique-bank)", () => {
+    const accounts = [
+      { id: "dbs-card", name: "DBS Visa 1234", closed: false },
+      { id: "ocbc-acct", name: "OCBC 365 Account", closed: false },
+    ];
+    const mappings = identityMappingsFromFacts(["Card ending 1234 belongs to DBS Visa 1234"], accounts);
+    const resolved = resolveMovementAccounts({
+      direction: "outgoing",
+      own_account: { bank: "OCBC", suffix: "1234" },
+      counterparty: { bank: "Citi", suffix: "9999" },
+    }, accounts, [], mappings);
+    expect(resolved.source_account.id).toBe("ocbc-acct");
+  });
+
+  it("does not cross-book an SC fact against OCBC evidence (SC now recognized)", () => {
+    const accounts = [
+      { id: "sc-card", name: "SC Visa 1234", closed: false },
+      { id: "ocbc-acct", name: "OCBC 365 Account", closed: false },
+    ];
+    const mappings = identityMappingsFromFacts(["Card ending 1234 belongs to SC Visa 1234"], accounts);
+    const resolved = resolveMovementAccounts({
+      direction: "outgoing",
+      own_account: { bank: "OCBC", suffix: "1234" },
+      counterparty: { bank: "Citi", suffix: "9999" },
+    }, accounts, [], mappings);
+    expect(resolved.source_account.id).toBe("ocbc-acct");
+  });
+});
+
+describe("suffix auto-learn", () => {
+  const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
+  const baseConfig = () => ({
+    primaryCurrency: "SGD", secondaryCurrency: "MYR",
+    primaryBudgetFile: "budget-sgd", secondaryBudgetFile: "budget-myr",
+    llmProvider: "deepseek", llmApiKey: "test", deepseekApiKey: "test",
+  });
+
+  it("learns a Card-prefixed fact for a card-named account", async () => {
+    const { AgentOrchestrator } = await import("../src/orchestrator.js");
+    const calls = [];
+    const tools = {
+      executeTool: vi.fn(async (name, args) => {
+        calls.push({ name, args });
+        return { added: true };
+      }),
+      getPhase1ToolSchemas: vi.fn(() => []),
+      setEmailContext: vi.fn(),
+    };
+    const orch = new AgentOrchestrator(baseConfig(), tools);
+
+    await orch._learnSuffixFact({ suffix: "3255", accountName: "DBS Yuu Card" });
+
+    const learn = calls.find((c) => c.name === "learn_fact");
+    expect(learn.args.fact).toBe("Card ending 3255 belongs to DBS Yuu Card");
+  });
+
+  it("learns an Account-prefixed fact for a bank account", async () => {
+    const { AgentOrchestrator } = await import("../src/orchestrator.js");
+    const calls = [];
+    const tools = {
+      executeTool: vi.fn(async (name, args) => {
+        calls.push({ name, args });
+        return { added: true };
+      }),
+      getPhase1ToolSchemas: vi.fn(() => []),
+      setEmailContext: vi.fn(),
+    };
+    const orch = new AgentOrchestrator(baseConfig(), tools);
+
+    await orch._learnSuffixFact({ suffix: "5750", accountName: "DBS Account" });
+
+    const learn = calls.find((c) => c.name === "learn_fact");
+    expect(learn.args.fact).toBe("Account ending 5750 belongs to DBS Account");
+  });
+
+  it("updates a contradictory fact via update_fact", async () => {
+    const { AgentOrchestrator } = await import("../src/orchestrator.js");
+    const tools = {
+      executeTool: vi.fn(async (name) => {
+        if (name === "learn_fact")
+          return { added: false, skipped: true, reason: "contradiction", existing: "Card ending 3255 belongs to DBS Altitude Card" };
+        return true;
+      }),
+      getPhase1ToolSchemas: vi.fn(() => []),
+      setEmailContext: vi.fn(),
+    };
+    const orch = new AgentOrchestrator(baseConfig(), tools);
+
+    await orch._learnSuffixFact({ suffix: "3255", accountName: "DBS Yuu Card" });
+
+    expect(tools.executeTool).toHaveBeenCalledWith("update_fact", {
+      old_text: "Card ending 3255 belongs to DBS Altitude Card",
+      new_text: "Card ending 3255 belongs to DBS Yuu Card",
+    });
+  });
+
+  it("does not overwrite a cross-bank suffix fact on contradiction", async () => {
+    const { AgentOrchestrator } = await import("../src/orchestrator.js");
+    const calls = [];
+    const tools = {
+      executeTool: vi.fn(async (name, args) => {
+        calls.push({ name, args });
+        if (name === "learn_fact")
+          return { added: false, skipped: true, reason: "contradiction", existing: "Card ending 1234 belongs to DBS Visa 1234" };
+        return true;
+      }),
+      getPhase1ToolSchemas: vi.fn(() => []),
+      setEmailContext: vi.fn(),
+    };
+    const orch = new AgentOrchestrator(baseConfig(), tools);
+
+    await orch._learnSuffixFact({ suffix: "1234", accountName: "OCBC Visa 1234" });
+
+    expect(calls.some((c) => c.name === "update_fact")).toBe(false);
+  });
+
+  it("strips LLM-injected _suffix_mappings from Phase-1 output", async () => {
+    const { AgentOrchestrator } = await import("../src/orchestrator.js");
+    const tools = {
+      executeTool: vi.fn(async (name) => {
+        if (name === "fetch_context") return {
+          accounts: [{ id: "acc-dbs", name: "DBS Account", closed: false }],
+          categories: [],
+          payees: [],
+        };
+        if (name === "search_memory") return { results: [] };
+        return true;
+      }),
+      getPhase1ToolSchemas: vi.fn(() => []),
+      setEmailContext: vi.fn(),
+    };
+    const orch = new AgentOrchestrator(baseConfig(), tools);
+    orch._llm.chat = vi.fn().mockResolvedValue({
+      choices: [{ message: { content: JSON.stringify({
+        merchant: "X",
+        amount_cents: -100,
+        date: "2026-09-01",
+        currency: "SGD",
+        account_id: "acc-dbs",
+        account_name: "DBS Account",
+        skip: false,
+        _suffix_mappings: [{ suffix: "3255", accountName: "DBS Yuu Card" }],
+      }) } }],
+    });
+
+    const result = await orch._runPhase1("card ending 3255", { senderBank: "DBS" });
+
+    expect(result._suffix_mappings).toBeUndefined();
+  });
+
+  it("rejects a non-4-to-6-digit suffix without learning", async () => {
+    const { AgentOrchestrator } = await import("../src/orchestrator.js");
+    const calls = [];
+    const tools = {
+      executeTool: vi.fn(async (name, args) => {
+        calls.push({ name, args });
+        return true;
+      }),
+      getPhase1ToolSchemas: vi.fn(() => []),
+      setEmailContext: vi.fn(),
+    };
+    const orch = new AgentOrchestrator(baseConfig(), tools);
+
+    await orch._learnSuffixFact({ suffix: "12", accountName: "DBS Yuu Card" });
+    await orch._learnSuffixFact({ suffix: "", accountName: "DBS Yuu Card" });
+
+    expect(calls.some((c) => c.name === "learn_fact")).toBe(false);
+  });
+
+  it("does not attach suffix mappings to LLM-extracted movements", async () => {
+    const { AgentOrchestrator } = await import("../src/orchestrator.js");
+    const tools = {
+      executeTool: vi.fn(async (name) => {
+        if (name === "fetch_context") return {
+          accounts: [{ id: "dbs-visa", name: "DBS Visa 1234", closed: false }],
+          categories: [],
+          payees: [],
+        };
+        if (name === "search_memory") return { results: [] };
+        return true;
+      }),
+      getPhase1ToolSchemas: vi.fn(() => []),
+      setEmailContext: vi.fn(),
+    };
+    const orch = new AgentOrchestrator(baseConfig(), tools);
+    orch._llm.chat = vi.fn().mockResolvedValue({
+      choices: [{ message: { content: JSON.stringify({
+        amount: 10,
+        currency: "SGD",
+        direction: "outgoing",
+        occurred_at: "2026-09-01T00:00:00.000Z",
+        from_account: "DBS Visa ending 1234",
+      }) } }],
+    });
+
+    const phase1 = await orch._llmExtractMovement("unstructured bank alert", "DBS");
+
+    expect(phase1._suffix_mappings).toEqual([]);
+  });
+
+  it("does not learn a longer alert suffix from shorter account-name digits", async () => {
+    const { AgentOrchestrator } = await import("../src/orchestrator.js");
+    const orch = new AgentOrchestrator(baseConfig(), {
+      executeTool: vi.fn(),
+      setEmailContext: vi.fn(),
+      getPhase1ToolSchemas: vi.fn(() => []),
+    });
+
+    const mappings = orch._collectSuffixMappings({
+      direction: "outgoing",
+      own_account: { bank: "DBS", suffix: "991234" },
+    }, {
+      source_account: { id: "dbs-visa", name: "DBS Visa 1234", closed: false },
+      destination_account: null,
+      internal: false,
+    });
+
+    expect(mappings).toEqual([]);
+  });
+
+  it("attaches _suffix_mappings for a name-digit matched destination", async () => {
+    const { AgentOrchestrator } = await import("../src/orchestrator.js");
+    const tools = {
+      executeTool: vi.fn(async (name) => {
+        if (name === "fetch_context") return {
+          accounts: [
+            { id: "dbs-altitude", name: "Altitude 9302", closed: false },
+            { id: "citi-card", name: "Citi Rewards 4756", closed: false },
+          ],
+          categories: [],
+          payees: [{ id: "transfer-citi", transfer_acct: "citi-card" }],
+        };
+        if (name === "search_memory") return { results: [
+          { text: "Card ending 9302 belongs to Altitude 9302", score: 1 },
+        ] };
+        return true;
+      }),
+      getPhase1ToolSchemas: vi.fn(() => []),
+      setEmailContext: vi.fn(),
+    };
+    const orch = new AgentOrchestrator(baseConfig(), tools);
+    orch._llm.chat = vi.fn();
+
+    const phase1 = await orch._runPhase1(`
+Transaction Ref: REF-DBS-1
+Date and Time: 01 Sep 01:05 (SGT)
+Amount: SGD 253.37
+From: Altitude (A/C ending 9302)
+To: CITI CREDIT CARDS (Ref ending 4756)
+`, { senderBank: "DBS" });
+
+    expect(phase1._suffix_mappings).toEqual([
+      { suffix: "4756", accountName: "Citi Rewards 4756" },
+    ]);
+  });
+
+  it("does not attach _suffix_mappings when resolution is memory-fact-only", async () => {
+    const { AgentOrchestrator } = await import("../src/orchestrator.js");
+    const tools = {
+      executeTool: vi.fn(async (name) => {
+        if (name === "fetch_context") return {
+          accounts: [
+            { id: "dbs-account", name: "DBS Account", closed: false },
+            { id: "dbs-yuu", name: "DBS Yuu Card", closed: false },
+          ],
+          categories: [],
+          payees: [{ id: "transfer-yuu", transfer_acct: "dbs-yuu" }],
+        };
+        if (name === "search_memory") return { results: [
+          { text: "Account ending 5750 belongs to DBS Account", score: 1 },
+          { text: "Card ending 3255 belongs to DBS Yuu Card", score: 1 },
+        ] };
+        return true;
+      }),
+      getPhase1ToolSchemas: vi.fn(() => []),
+      setEmailContext: vi.fn(),
+    };
+    const orch = new AgentOrchestrator(baseConfig(), tools);
+    orch._llm.chat = vi.fn();
+
+    const phase1 = await orch._runPhase1(`
+Transaction Ref: 17881954645475715284
+Date and Time: 01 Sep 00:57 (SGT)
+Amount: SGD 68.94
+From: My Account (A/C ending 5750)
+To: Yuu (Ref ending 3255)
+`, { senderBank: "DBS", receivedAt: "2026-09-01T01:10:00+08:00" });
+
+    expect(phase1._suffix_mappings).toEqual([]);
+  });
+
+  it("learns suffix mappings after a successful insert", async () => {
+    const { AgentOrchestrator } = await import("../src/orchestrator.js");
+    const calls = [];
+    const tools = {
+      executeTool: vi.fn(async (name, args) => {
+        calls.push({ name, args });
+        if (name === "check_duplicate") return false;
+        if (name === "insert_transaction") return { id: "actual-1" };
+        return true;
+      }),
+      getPhase1ToolSchemas: vi.fn(() => []),
+      setEmailContext: vi.fn(),
+    };
+    const orch = new AgentOrchestrator(baseConfig(), tools);
+
+    await orch._executePhase3({
+      action: "insert",
+      account_id: "dbs-yuu",
+      account_name: "DBS Yuu Card",
+      payee_name: "Misc",
+      amount_cents: -6894,
+      date: "2026-09-01",
+      currency: "SGD",
+      budget_id: "budget-sgd",
+      merchant: "BUS/MRT",
+      category_id: null,
+      _suffix_mappings: [{ suffix: "3255", accountName: "DBS Yuu Card" }],
+    });
+    await flush();
+
+    expect(calls.some((c) => c.name === "learn_fact" && c.args.fact === "Card ending 3255 belongs to DBS Yuu Card")).toBe(true);
+  });
+
+  it("does not learn suffix mappings when insert fails", async () => {
+    const { AgentOrchestrator } = await import("../src/orchestrator.js");
+    const calls = [];
+    const tools = {
+      executeTool: vi.fn(async (name, args) => {
+        calls.push({ name, args });
+        if (name === "check_duplicate") return false;
+        if (name === "insert_transaction") throw new Error("AB down");
+        return true;
+      }),
+      getPhase1ToolSchemas: vi.fn(() => []),
+      setEmailContext: vi.fn(),
+    };
+    const orch = new AgentOrchestrator(baseConfig(), tools);
+
+    const result = await orch._executePhase3({
+      action: "insert",
+      account_id: "dbs-yuu",
+      account_name: "DBS Yuu Card",
+      payee_name: "Misc",
+      amount_cents: -6894,
+      date: "2026-09-01",
+      currency: "SGD",
+      budget_id: "budget-sgd",
+      merchant: "BUS/MRT",
+      category_id: null,
+      _suffix_mappings: [{ suffix: "3255", accountName: "DBS Yuu Card" }],
+    });
+    await flush();
+
+    expect(result.action).toBe("error");
+    expect(calls.some((c) => c.name === "learn_fact")).toBe(false);
+  });
+
+  it("does not choose or learn an ambiguous same-bank bill-payment account", async () => {
+    const { AgentOrchestrator } = await import("../src/orchestrator.js");
+    const orch = new AgentOrchestrator(baseConfig(), {
+      executeTool: vi.fn(async (name) => {
+        if (name === "fetch_context") return {
+          accounts: [
+            { id: "altitude", name: "DBS Altitude 1234", closed: false },
+            { id: "visa", name: "DBS Visa 1234", closed: false },
+          ],
+          categories: [],
+          payees: [],
+        };
+        if (name === "search_memory") return { results: [] };
+        return true;
+      }),
+      getPhase1ToolSchemas: vi.fn(() => []),
+      setEmailContext: vi.fn(),
+    });
+    orch._llm.chat = vi.fn();
+
+    const phase1 = await orch._runPhase1(`
+Amount: SGD 12.00
+From: My Account (A/C ending 1234)
+To: Some Biller (Ref ending 5678)
+`, { senderBank: "DBS", receivedAt: "2026-09-01T01:10:00+08:00" });
+
+    expect(phase1).toBeNull();
+  });
+
+  it("resolves a unique tail-overlap bill-payment account without learning its suffix", async () => {
+    const { AgentOrchestrator } = await import("../src/orchestrator.js");
+    const tools = {
+      executeTool: vi.fn(async (name) => {
+        if (name === "fetch_context") return {
+          accounts: [{ id: "visa", name: "DBS Visa 15750", closed: false }],
+          categories: [],
+          payees: [],
+        };
+        if (name === "search_memory") return { results: [] };
+        return true;
+      }),
+      getPhase1ToolSchemas: vi.fn(() => []),
+      setEmailContext: vi.fn(),
+    };
+    const orch = new AgentOrchestrator(baseConfig(), tools);
+    orch._llm.chat = vi.fn();
+
+    const phase1 = await orch._runPhase1(`
+Amount: SGD 12.00
+From: My Account (A/C ending 5750)
+To: Some Biller (Ref ending 1234)
+`, { senderBank: "DBS", receivedAt: "2026-09-01T01:10:00+08:00" });
+
+    expect(phase1).not.toBeNull();
+    expect(phase1.account_id).toBe("visa");
+    expect(phase1._suffix_mappings).toEqual([]);
+  });
+
+  it("does not learn a suffix that only tails account-name digits", async () => {
+    const { AgentOrchestrator } = await import("../src/orchestrator.js");
+    const orch = new AgentOrchestrator(baseConfig(), {
+      executeTool: vi.fn(),
+      setEmailContext: vi.fn(),
+      getPhase1ToolSchemas: vi.fn(() => []),
+    });
+
+    const mappings = orch._collectSuffixMappings({
+      direction: "outgoing",
+      own_account: { bank: "DBS", suffix: "5750" },
+    }, {
+      source_account: { id: "visa", name: "DBS Visa 15750", closed: false },
+      destination_account: null,
+      internal: false,
+    });
+
+    expect(mappings).toEqual([]);
+  });
+
+  it("does not learn a cross-bank bill-payment mapping from substring bank collision", async () => {
+    const { AgentOrchestrator } = await import("../src/orchestrator.js");
+    const tools = {
+      executeTool: vi.fn(async (name) => {
+        if (name === "fetch_context") return {
+          accounts: [{ id: "discover", name: "Discover Card 5750", closed: false }],
+          categories: [],
+          payees: [],
+        };
+        if (name === "search_memory") return { results: [] };
+        return true;
+      }),
+      getPhase1ToolSchemas: vi.fn(() => []),
+      setEmailContext: vi.fn(),
+    };
+    const orch = new AgentOrchestrator(baseConfig(), tools);
+    orch._llm.chat = vi.fn();
+
+    const phase1 = await orch._runPhase1(`
+Amount: SGD 12.00
+From: My Account (A/C ending 5750)
+To: Some Biller (Ref ending 1234)
+`, { senderBank: "SC", receivedAt: "2026-09-01T01:10:00+08:00" });
+
+    expect(phase1).toBeNull();
+  });
+
+  it("does not learn the external counterparty suffix for an incoming transfer", async () => {
+    const { AgentOrchestrator } = await import("../src/orchestrator.js");
+    const orch = new AgentOrchestrator(baseConfig(), {
+      executeTool: vi.fn(),
+      setEmailContext: vi.fn(),
+      getPhase1ToolSchemas: vi.fn(() => []),
+    });
+
+    const mappings = orch._collectSuffixMappings({
+      direction: "incoming",
+      own_account: { bank: "Trust", suffix: "0980" },
+      counterparty: { bank: "OCBC", suffix: "9001" },
+    }, {
+      source_account: { id: "ocbc-360", name: "OCBC 360 9001", closed: false },
+      destination_account: { id: "trust-card", name: "Trust Card 0980", closed: false },
+      destination_payee: { id: "p", transfer_acct: "trust-card" },
+      internal: true,
+    });
+
+    expect(mappings).toEqual([
+      { suffix: "0980", accountName: "Trust Card 0980" },
+    ]);
+  });
 });
