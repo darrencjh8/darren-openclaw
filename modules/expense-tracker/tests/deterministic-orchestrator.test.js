@@ -149,6 +149,88 @@ describe("Phase 1: LLM Analysis (3-phase)", () => {
     expect(result.account_name).toBe("DBS Yuu");
   });
 
+  it("regression (#398): a DBS 'Card Transaction Alert' falls through to the generic LLM path and resolves BUS/MRT via memory", async () => {
+    // This email uses generic From:/To:/Amount: labels but "To: BUS/MRT" is
+    // a merchant, not an account — parseBankMovement must decline it (see
+    // bank-movement.test.js's matching unit test) so it reaches the fully
+    // generic Phase-1 LLM path here, where a pre-existing memory fact
+    // ("BUS/MRT maps to Public Transport payee") should let Phase 2 resolve
+    // the real payee/category instead of falling back to Misc.
+    //
+    // receivedAt is deliberately realistic and non-null: _emailReceivedAt()
+    // always supplies a real timestamp in production (parses the email's
+    // Date header, or falls back to "now") — a test that omits it doesn't
+    // faithfully exercise the code path that actually determines whether
+    // parseBankMovement's date/time branch succeeds or bails out.
+    const { AgentOrchestrator } = await import("../src/orchestrator.js");
+    const config = makeConfig();
+    const tools = makeTools({
+      getPhase1ToolSchemas: vi.fn(() => []),
+      executeTool: vi.fn(async (name, args) => {
+        if (name === "fetch_context")
+          return {
+            accounts: [{ id: "acc-yuu", name: "DBS Yuu Card", closed: false }],
+            categories: [{ id: "cat-transport", name: "Public Transport", group_id: "g1" }],
+            payees: [],
+          };
+        if (name === "search_memory") {
+          const query = String(args?.query || "");
+          if (query.includes("BUS/MRT"))
+            return { results: [{ text: "BUS/MRT maps to Public Transport payee", score: 1 }] };
+          if (query.includes("3255"))
+            return { results: [{ text: "Card ending 3255 belongs to DBS Yuu Card", score: 1 }] };
+          if (query.includes("Public Transport"))
+            return { results: [{ text: "Public Transport maps to Public Transport category", score: 1 }] };
+          return { results: [] };
+        }
+        return true;
+      }),
+    });
+    const orch = new AgentOrchestrator(config, tools);
+
+    orch._llm.chat = vi.fn().mockResolvedValue(
+      mockChatResponse({
+        merchant: "BUS/MRT",
+        amount_cents: -460,
+        date: "2026-09-03",
+        currency: "SGD",
+        account_id: "acc-yuu",
+        account_name: "DBS Yuu Card",
+        raw_description: "SGD 4.60 at BUS/MRT",
+        notes: "",
+        skip: false,
+        reasoning: "Matched DBS Yuu Card ending 3255",
+        notify_message: "",
+      }),
+    );
+
+    const emailText = `Card Transaction Alert
+Transaction Ref: SP1300673370000000053852
+
+Dear Sir / Madam,
+
+We refer to your card transaction request dated 03/09/26. We are pleased to confirm that the transaction was completed.
+
+Date & Time: 03 SEP 05:38 (SGT)
+Amount: SGD4.60
+From: DBS/POSB card ending 3255
+To: BUS/MRT`;
+
+    const phase1 = await orch._runPhase1(emailText, {
+      senderBank: "DBS",
+      receivedAt: "2026-09-03T05:39:00+08:00",
+    });
+
+    // The deterministic parser must have declined — confirms the LLM was
+    // actually reached, not just that the final merchant happens to match.
+    expect(orch._llm.chat).toHaveBeenCalled();
+    expect(phase1.merchant).toBe("BUS/MRT");
+
+    const phase2 = await orch._resolvePhase2(phase1);
+    expect(phase2.payee_name).toBe("Public Transport");
+    expect(phase2.category_name).toBe("Public Transport");
+  });
+
   it("derives budget_id from currency (SGD → primary)", async () => {
     const { AgentOrchestrator } = await import("../src/orchestrator.js");
     const config = makeConfig({
