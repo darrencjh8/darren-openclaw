@@ -1336,6 +1336,127 @@ describe("Phase 1: LLM-directed retrieval (multi-round tools)", () => {
     expect(feedbackText).toContain("BUS/MRT transactions belong to DBS Yuu Card");
   });
 
+  it("does not force a retry when the merchant is a legitimate cross-bank transfer destination (transfer-shaped email)", async () => {
+    // Regression test: a UOB FAST transfer alert to an OCBC account. The LLM
+    // correctly keeps account_id on the UOB source account per rule 4b
+    // (destination becomes the merchant name). The memory-aware account
+    // check must NOT treat "OCBC 360" naming a different tracked account as
+    // evidence of a wrong pick — for transfer/movement-shaped alerts, the
+    // merchant is *supposed* to name a different account. Forcing a retry
+    // here is unwinnable: the LLM was never shown OCBC 360's account id
+    // (domain_account_filter restricts fetch_context to UOB-named accounts
+    // for a UOB sender), so retrying can only exhaust and fail permanently.
+    const { AgentOrchestrator } = await import("../src/orchestrator.js");
+    const config = makeConfig();
+    const tools = multiRoundTools({
+      executeTool: vi.fn(async (name, args) => {
+        if (name === "fetch_context")
+          return {
+            accounts: [
+              { id: "acc-uob-one", name: "UOB One Account", closed: false },
+              { id: "acc-uob-ladies", name: "UOB Ladies Card", closed: false },
+              { id: "acc-ocbc-360", name: "OCBC 360", closed: false },
+            ],
+            categories: [],
+            payees: [],
+          };
+        if (name === "search_memory") {
+          if (args && String(args.query).includes("OCBC 360"))
+            return { results: [{ text: "Account ending 9001 belongs to OCBC 360", score: 1 }] };
+          return { results: [] };
+        }
+        return true;
+      }),
+    });
+    const orch = new AgentOrchestrator(config, tools);
+
+    const transferResult = {
+      merchant: "OCBC 360",
+      amount_cents: -23023,
+      date: "2026-09-03",
+      currency: "SGD",
+      account_id: "acc-uob-one",
+      account_name: "UOB One Account",
+      raw_description: "SGD 230.23 transfer to OCBC 360",
+      notes: "",
+      skip: false,
+      reasoning: "UOB FAST transfer; account_id kept as source per rule 4b",
+      notify_message: "",
+    };
+
+    orch._llm.chat = vi
+      .fn()
+      // 1st call: single-shot movement-extractor fallback (no tools) — return
+      // something unusable so it falls through to the generic Phase-1 loop.
+      // (Deterministic resolution also fails here: two same-bank UOB
+      // accounts make the source ambiguous, exactly as in production.)
+      .mockResolvedValueOnce({ choices: [{ message: { content: "{}" } }] })
+      // 2nd call: generic Phase-1 loop returns the correct output directly.
+      .mockResolvedValueOnce({ choices: [{ message: jsonMsg(transferResult) }] });
+
+    const emailText =
+      "You made/scheduled a funds transfer(s) of SGD 230.23 to OCBC a/c ending 9001 from your a/c ending 7694 at 12:37AM SGT, 3 Sep 26.";
+    const result = await orch._runPhase1(emailText, { senderBank: "UOB" });
+
+    expect(result?.account_id).toBe("acc-uob-one");
+    expect(orch._llm.chat).toHaveBeenCalledTimes(2);
+  });
+
+  it("still corrects a wrong account on a purchase alert phrased with movement-adjacent wording ('was paid'/'using your')", async () => {
+    // Coverage for the ACCOUNT_TRANSFER_SHAPE_RE / MOVEMENT_LIKE split: a
+    // real card/wallet purchase (not a transfer) can be phrased with words
+    // that MOVEMENT_LIKE also matches ("was paid", "using your" — see the
+    // Ryt Bank "RM200.00 was paid at MERCHANT using your Main Account"
+    // format in bank-movement.test.js). The merchant here names a real
+    // merchant, not another tracked account, so the memory-aware safety net
+    // must stay active and still correct a wrong LLM pick.
+    const { AgentOrchestrator } = await import("../src/orchestrator.js");
+    const config = makeConfig();
+    const tools = multiRoundTools({
+      executeTool: vi.fn(async (name, args) => {
+        if (name === "fetch_context")
+          return {
+            accounts: [
+              { id: "acc-dbs", name: "DBS Account", closed: false },
+              { id: "acc-yuu", name: "DBS Yuu Card", closed: false },
+            ],
+            categories: [],
+            payees: [],
+          };
+        if (name === "search_memory") {
+          if (args && String(args.query).includes("Toast Box"))
+            return { results: [{ text: "Toast Box purchases belong to DBS Yuu Card", score: 1 }] };
+          return { results: [] };
+        }
+        return true;
+      }),
+    });
+    const orch = new AgentOrchestrator(config, tools);
+    let retryMessages = null;
+
+    orch._llm.chat = vi
+      .fn()
+      // 1st call: single-shot movement-extractor fallback (no tools) —
+      // return nothing usable so it falls through to the generic Phase-1
+      // loop (this email is not intercepted by any deterministic parser:
+      // no "Amount:"/"From:" labels, not the Ryt "was paid at ... on
+      // DATE, TIME" shape either).
+      .mockResolvedValueOnce({ choices: [{ message: { content: "{}" } }] })
+      .mockResolvedValueOnce({
+        choices: [{ message: jsonMsg({ ...yuuResult, merchant: "Toast Box", account_id: "acc-dbs", account_name: "DBS Account" }) }],
+      })
+      .mockImplementationOnce(async (messages) => {
+        retryMessages = messages;
+        return { choices: [{ message: jsonMsg({ ...yuuResult, merchant: "Toast Box" }) }] };
+      });
+
+    const emailText = "Toast Box: SGD 12.80 was paid using your DBS Card just now, 2 Sep 2026 12:46 PM.";
+    const result = await orch._runPhase1(emailText, { senderBank: "DBS" });
+
+    expect(result.account_id).toBe("acc-yuu");
+    expect(retryMessages).not.toBeNull();
+  });
+
   it("overrides to a POSB-branded account for a DBS email (brand alias)", async () => {
     const { AgentOrchestrator } = await import("../src/orchestrator.js");
     const config = makeConfig();
