@@ -1570,24 +1570,30 @@ export class AgentOrchestrator {
             }
 
             if (!silent) {
+                // Always build the notification from Phase 2's resolved
+                // payee/category — never the Phase-1 LLM's notify_message,
+                // which is written BEFORE Phase 2 resolves those fields and
+                // so can never reflect what was actually booked (this also
+                // applies uniformly to deterministic bank-movement outputs,
+                // whose Phase-1 `merchant` is sometimes just a generic
+                // placeholder like "Bank payment"/"Unidentified deposit").
+                // "Misc" is a catch-all, not a real payee — fall back to the
+                // raw merchant text there so the message stays informative.
+                const sym = llmOutput.currency === "MYR" ? "RM" : "S$";
+                const amt = (
+                    Math.abs(llmOutput.amount_cents || 0) / 100
+                ).toFixed(2);
+                const acct = llmOutput.account_name || "unknown account";
+                const dt = llmOutput.date || "today";
+                const displayPayee =
+                    payeeName.trim().toLowerCase() === "misc"
+                        ? llmOutput.merchant || payeeName
+                        : payeeName;
+                const cat = llmOutput.category_name
+                    ? ` → ${llmOutput.category_name}`
+                    : "";
                 const notified = await this._tools.executeTool("notify_user", {
-                    message:
-                        llmOutput.notify_message ||
-                        (() => {
-                            const sym =
-                                llmOutput.currency === "MYR" ? "RM" : "S$";
-                            const amt = (
-                                Math.abs(llmOutput.amount_cents || 0) / 100
-                            ).toFixed(2);
-                            const acct =
-                                llmOutput.account_name || "unknown account";
-                            const dt = llmOutput.date || "today";
-                            const merchant = llmOutput.merchant || payeeName;
-                            const cat = llmOutput.category_name
-                                ? ` → ${llmOutput.category_name}`
-                                : "";
-                            return `${sym}${amt} at ${merchant} via ${acct} on ${dt}${cat}, logged`;
-                        })(),
+                    message: `${sym}${amt} at ${displayPayee} via ${acct} on ${dt}${cat}, logged`,
                 });
                 if (!notified) {
                     logger.error({

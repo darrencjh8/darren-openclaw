@@ -603,7 +603,7 @@ const TOOLS = [
         notify_message: {
           type: "string",
           description:
-            "Concise notification with merchant, amount, currency, account name, date, and result. Used for insert and no-account cases.",
+            "Used only when no account could be matched (account_id left blank). Leave empty otherwise — the system builds the insert confirmation itself from the resolved payee and category.",
         },
       },
       required: [

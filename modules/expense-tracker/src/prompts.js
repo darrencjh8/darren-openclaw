@@ -71,8 +71,10 @@ RULES:
     appears on the bank statement or transaction alert (e.g. "WWW.TADA.G* N01A04E712").
     This is the raw bank descriptor, NOT the cleaned merchant name. Leave it as an
     empty string if the email does not contain a distinct verbatim descriptor.
-7c. Write notify_message as a concise one-liner containing:
-    merchant, amount with currency symbol, account_name, and date.
+7c. Write notify_message: used ONLY if account_id is left blank (no matching
+    account, rule 4). Leave it as "" when account_id is set — the system
+    builds the confirmation itself from the resolved payee and category,
+    which are not known yet at this stage.
 8. Amount examples: S$12.80 spent = -1280, RM46.00 received = 4600. INTEGER cents.
 9. Date: extract from email timestamp or transaction mention.
 
@@ -89,7 +91,7 @@ Respond ONLY with valid JSON (no markdown, no code fences):
   "notes": "",
   "skip": false,
   "reasoning": "Matched DBS Yuu account ending 1234",
-  "notify_message": "S\$12.80 at Toast Box via DBS Yuu on <date>, logged!"
+  "notify_message": ""
 }`;
 }
 

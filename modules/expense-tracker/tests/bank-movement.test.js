@@ -245,6 +245,69 @@ describe("identityMappingsFromFacts", () => {
 });
 
 describe("structured movement orchestration", () => {
+  it("insert notification for a deterministic (non-LLM) movement includes the Phase-2-resolved payee and category", async () => {
+    // Deterministic bank-movement outputs always set notify_message: "" —
+    // the notification is built entirely from Phase 2's resolution, so it
+    // must reflect the real resolved payee/category, not just the raw
+    // PayNow merchant string ("Example LLP").
+    const { AgentOrchestrator } = await import("../src/orchestrator.js");
+    const calls = [];
+    const tools = {
+      executeTool: vi.fn(async (name, args) => {
+        calls.push({ name, args });
+        if (name === "fetch_context")
+          return {
+            accounts: [{ id: "ocbc-360", name: "OCBC 360 9001", closed: false }],
+            categories: [{ id: "cat-utilities", name: "Utilities", group_id: "g1" }],
+            payees: [],
+          };
+        if (name === "search_memory") {
+          if (String(args?.query || "").includes("Example LLP"))
+            return { results: [{ text: "Example LLP maps to Utilities Board payee", score: 1 }] };
+          if (String(args?.query || "").includes("Utilities Board"))
+            return { results: [{ text: "Utilities Board maps to Utilities category", score: 1 }] };
+          return { results: [] };
+        }
+        if (name === "check_duplicate") return false;
+        if (name === "insert_transaction") return { id: "actual-1" };
+        if (name === "notify_user") return true;
+        return true;
+      }),
+      getPhase1ToolSchemas: vi.fn(() => []),
+      setEmailContext: vi.fn(),
+    };
+    const orch = new AgentOrchestrator({
+      primaryCurrency: "SGD", secondaryCurrency: "MYR",
+      primaryBudgetFile: "budget-sgd", secondaryBudgetFile: "budget-myr",
+      llmProvider: "deepseek", llmApiKey: "test", deepseekApiKey: "test",
+    }, tools);
+    orch._llm.chat = vi.fn();
+
+    const phase1 = await orch._runPhase1(`
+The following PayNow transfer has been made to Example LLP using their Unique Entity Number (UEN) UEN123.
+Date : 01 Sep 2026
+Time : 19:34 PM SGT
+Amount : SGD 7.30
+From your account : 360 Account (-9001)
+Description : UEN123-REFERENCE
+`, { senderBank: "OCBC", receivedAt: "2026-09-01T19:35:00+08:00" });
+
+    expect(orch._llm.chat).not.toHaveBeenCalled();
+    expect(phase1).toMatchObject({
+      merchant: "Example LLP",
+      account_id: "ocbc-360",
+      notify_message: "",
+    });
+
+    const phase2 = await orch._resolvePhase2(phase1);
+    await orch._executePhase3(phase2);
+
+    const notifyCall = calls.find((c) => c.name === "notify_user");
+    const { message } = notifyCall.args;
+    expect(message).toContain("Utilities Board");
+    expect(message).toContain("→ Utilities");
+  });
+
   it("bypasses LLM and sends a transfer payee for DBS bill payment", async () => {
     const { AgentOrchestrator } = await import("../src/orchestrator.js");
     const calls = [];
