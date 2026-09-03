@@ -1,6 +1,4 @@
 #!/command/with-contenv sh
-# Copyright © 2022 Dell Inc. or its subsidiaries. All Rights Reserved.
-
 # shellcheck shell=sh
 # shellcheck disable=SC2015,SC2235
 # Seed baked-in config, SOUL, skills, and scripts on every boot.

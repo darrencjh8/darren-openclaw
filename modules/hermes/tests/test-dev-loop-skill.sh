@@ -1,6 +1,4 @@
 #!/bin/bash
-# Copyright © 2022 Dell Inc. or its subsidiaries. All Rights Reserved.
-
 # Contract tests for the baked-in dev-loop skill.
 set -euo pipefail
 
