@@ -332,6 +332,68 @@ describe("AgentOrchestrator", () => {
         expect(message).toContain("2026-06-19");
     });
 
+    it("insert notification is built from Phase 2's resolved payee/category, ignoring Phase 1's raw notify_message", async () => {
+        // Phase 1 writes notify_message BEFORE Phase 2 resolves payee_name
+        // and category_name, so it can never reflect what actually gets
+        // booked. The system must always build the confirmation itself.
+        const config = makeConfig();
+        const tools = makeTools({
+            executeTool: vi.fn(async (name) => {
+                if (name === "check_duplicate") return false;
+                return true;
+            }),
+        });
+        const orch = new AgentOrchestrator(config, tools);
+
+        const p1 = fakePhase1Output({
+            notify_message: "STALE PHASE-1 TEXT, ignore me",
+        });
+        const p2 = fakePhase2Output(p1, {
+            payee_name: "Green Bowl",
+            category_name: "Food",
+        });
+        orch._runPhase1 = vi.fn().mockResolvedValue(p1);
+        orch._resolvePhase2 = vi.fn().mockResolvedValue(p2);
+
+        await orch.processEmail("test-resolved-payee", "raw email");
+
+        const notifyCall = tools.executeTool.mock.calls.find(
+            (c) => c[0] === "notify_user",
+        );
+        const { message } = notifyCall[1] || {};
+        expect(message).toContain("Green Bowl");
+        expect(message).toContain("→ Food");
+        expect(message).not.toContain("STALE PHASE-1 TEXT");
+    });
+
+    it("falls back to the raw merchant text when the resolved payee is the generic Misc bucket", async () => {
+        const config = makeConfig();
+        const tools = makeTools({
+            executeTool: vi.fn(async (name) => {
+                if (name === "check_duplicate") return false;
+                return true;
+            }),
+        });
+        const orch = new AgentOrchestrator(config, tools);
+
+        const p1 = fakePhase1Output({ merchant: "Weird POS Descriptor 4471" });
+        const p2 = fakePhase2Output(p1, {
+            payee_name: "Misc",
+            category_name: undefined,
+        });
+        orch._runPhase1 = vi.fn().mockResolvedValue(p1);
+        orch._resolvePhase2 = vi.fn().mockResolvedValue(p2);
+
+        await orch.processEmail("test-misc-fallback", "raw email");
+
+        const notifyCall = tools.executeTool.mock.calls.find(
+            (c) => c[0] === "notify_user",
+        );
+        const { message } = notifyCall[1] || {};
+        expect(message).toContain("Weird POS Descriptor 4471");
+        expect(message).not.toContain("→");
+    });
+
     it("notify_user fallback includes account and date when notify_message is empty", async () => {
         const config = makeConfig();
         const tools = makeTools({
