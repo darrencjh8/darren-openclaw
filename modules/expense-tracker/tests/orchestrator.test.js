@@ -1465,6 +1465,103 @@ describe("DeepSeekClient", () => {
     });
 });
 
+describe("LLMClient truncation and reasoning-disabled handling", () => {
+    it("reasoning: 'disabled' actually suppresses adaptive thinking on the deepseek route with no explicit toolChoice", async () => {
+        const config = makeConfig();
+        const client = new LLMClient(config);
+        const createMock = vi.fn().mockResolvedValue({
+            choices: [{ message: { content: "{}" }, finish_reason: "stop" }],
+        });
+        client._client.chat.completions.create = createMock;
+
+        await client.chat(
+            [{ role: "user", content: "hi" }],
+            undefined,
+            undefined,
+            { reasoning: "disabled" },
+        );
+
+        expect(createMock).toHaveBeenCalledTimes(1);
+        expect(createMock.mock.calls[0][0].thinking).toBeUndefined();
+    });
+
+    it("still enables adaptive thinking on the deepseek route when reasoning is not disabled", async () => {
+        const config = makeConfig();
+        const client = new LLMClient(config);
+        const createMock = vi.fn().mockResolvedValue({
+            choices: [{ message: { content: "{}" }, finish_reason: "stop" }],
+        });
+        client._client.chat.completions.create = createMock;
+
+        await client.chat([{ role: "user", content: "hi" }], undefined, undefined, {
+            reasoning: "adaptive",
+        });
+
+        expect(createMock.mock.calls[0][0].thinking).toEqual({ type: "adaptive" });
+    });
+
+    it("retries when a response has empty content, no tool_calls, and a non-stop finish_reason (truncated)", async () => {
+        const config = makeConfig();
+        const client = new LLMClient(config);
+        const createMock = vi
+            .fn()
+            .mockResolvedValueOnce({
+                choices: [
+                    {
+                        message: {
+                            content: "",
+                            reasoning_content: "partial thinking, cut off before the final answer...",
+                        },
+                        finish_reason: "length",
+                    },
+                ],
+            })
+            .mockResolvedValueOnce({
+                choices: [{ message: { content: '{"ok":true}' }, finish_reason: "stop" }],
+            });
+        client._client.chat.completions.create = createMock;
+
+        const response = await client.chat([{ role: "user", content: "hi" }]);
+
+        expect(createMock).toHaveBeenCalledTimes(2);
+        expect(response.choices[0].message.content).toBe('{"ok":true}');
+    });
+
+    it("does not treat a healthy tool_calls response as truncated", async () => {
+        const config = makeConfig();
+        const client = new LLMClient(config);
+        const createMock = vi.fn().mockResolvedValue({
+            choices: [
+                {
+                    message: { tool_calls: [{ id: "tc-1", function: { name: "fetch_context", arguments: "{}" } }] },
+                    finish_reason: "tool_calls",
+                },
+            ],
+        });
+        client._client.chat.completions.create = createMock;
+
+        const response = await client.chat([{ role: "user", content: "hi" }], [{}]);
+
+        expect(createMock).toHaveBeenCalledTimes(1);
+        expect(response.choices[0].message.tool_calls).toHaveLength(1);
+    });
+
+    it("throws when every retry on the route returns a truncated response", async () => {
+        const config = makeConfig();
+        const client = new LLMClient(config);
+        const createMock = vi.fn().mockResolvedValue({
+            choices: [{ message: { content: "" }, finish_reason: "length" }],
+        });
+        client._client.chat.completions.create = createMock;
+
+        await expect(
+            client.chat([{ role: "user", content: "hi" }]),
+        ).rejects.toThrow(/truncated or incomplete/i);
+        // this._routes[0].retries defaults to 3 for the primary route
+        expect(createMock).toHaveBeenCalledTimes(3);
+    }, 10000);
+});
+
 // ── Statement routing tests ─────────────────────────────────────
 
 describe("dispatchEmail statement routing", () => {

@@ -423,9 +423,101 @@ describe("Phase 1: LLM Analysis (3-phase)", () => {
     );
 
     const result = await orch._runPhase1("S$12.80 at Toast Box");
-    // 1 initial + 1 retry = 2 calls, then exhausted → null
-    expect(orch._llm.chat).toHaveBeenCalledTimes(2);
+    // 1 initial + 2 retries (MAX_RETRIES=2) = 3 calls, then exhausted → null
+    expect(orch._llm.chat).toHaveBeenCalledTimes(3);
     expect(result).toBeNull();
+  });
+
+  it("retries when merchant is blank on an otherwise-valid response (issue #398)", async () => {
+    // A truncated/incomplete LLM response can still parse as valid JSON
+    // with account_id/date/amount correct but merchant empty. Without
+    // validating merchant, this used to sail through to Phase 2's "Misc"
+    // fallback with zero retry. Assert it now forces a retry instead.
+    const { AgentOrchestrator } = await import("../src/orchestrator.js");
+    const config = makeConfig();
+    const tools = makeTools({
+      getPhase1ToolSchemas: vi.fn(() => []),
+      executeTool: vi.fn(async (name) => {
+        if (name === "fetch_context")
+          return {
+            accounts: [{ id: "acc-dbs", name: "DBS Yuu", closed: false }],
+            categories: [],
+            payees: [],
+          };
+        return true;
+      }),
+    });
+    const orch = new AgentOrchestrator(config, tools);
+
+    orch._llm.chat = vi
+      .fn()
+      .mockResolvedValueOnce(
+        mockChatResponse({
+          merchant: "",
+          amount_cents: -460,
+          date: "2026-09-03",
+          currency: "SGD",
+          account_id: "acc-dbs",
+          account_name: "DBS Yuu",
+          raw_description: "",
+          notes: "",
+          skip: false,
+          reasoning: "",
+          notify_message: "",
+        }),
+      )
+      .mockImplementationOnce(async (messages) => {
+        const userMsgs = messages.filter((m) => m.role === "user");
+        expect(JSON.stringify(userMsgs)).toContain("merchant");
+        return mockChatResponse({
+          merchant: "BUS/MRT",
+          amount_cents: -460,
+          date: "2026-09-03",
+          currency: "SGD",
+          account_id: "acc-dbs",
+          account_name: "DBS Yuu",
+          raw_description: "SGD 4.60 at BUS/MRT",
+          notes: "",
+          skip: false,
+          reasoning: "",
+          notify_message: "",
+        });
+      });
+
+    const result = await orch._runPhase1("From: DBS/POSB card ending 3255\nTo: BUS/MRT");
+
+    expect(orch._llm.chat).toHaveBeenCalledTimes(2);
+    expect(result.merchant).toBe("BUS/MRT");
+  });
+
+  it("does not force a retry for a blank merchant on a skip response", async () => {
+    // {skip: true} responses never populate merchant (prompts.js rule 5) —
+    // a promotional/OTP/balance-alert email must not be penalized for it.
+    const { AgentOrchestrator } = await import("../src/orchestrator.js");
+    const config = makeConfig();
+    const tools = makeTools();
+    const orch = new AgentOrchestrator(config, tools);
+
+    orch._llm.chat = vi.fn().mockResolvedValue(
+      mockChatResponse({
+        merchant: "",
+        amount_cents: "",
+        date: "",
+        currency: "SGD",
+        account_id: "",
+        account_name: "",
+        raw_description: "",
+        notes: "",
+        skip: true,
+        reasoning: "Promotional email",
+        notify_message: "",
+      }),
+    );
+
+    const result = await orch._runPhase1("Get 20% off your next purchase!");
+
+    expect(orch._llm.chat).toHaveBeenCalledTimes(1);
+    expect(result.action).toBe("skip");
   });
 
   it("retries when memory suggests a different valid account (valid-but-wrong)", async () => {
@@ -781,8 +873,9 @@ describe("Phase 1: LLM-directed retrieval (multi-round tools)", () => {
 
     const result = await orch._runPhase1("card ending 3255", {});
 
-    // per attempt: 1 initial + 3 tool rounds + 1 JSON-only correction = 5; 2 attempts = 10
-    expect(orch._llm.chat).toHaveBeenCalledTimes(10);
+    // per attempt: 1 initial + 3 tool rounds + 1 JSON-only correction = 5;
+    // 3 attempts (MAX_RETRIES=2) = 15
+    expect(orch._llm.chat).toHaveBeenCalledTimes(15);
     expect(result).toBeNull();
   });
 
