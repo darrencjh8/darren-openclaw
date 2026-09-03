@@ -163,17 +163,17 @@ Reference :
 
   it("parses a UOB FAST transfer confirmation sentence (no labelled fields)", () => {
     const movement = parseBankMovement(
-      "You made/scheduled a funds transfer(s) of SGD 230.23 to OCBC a/c ending 9001 from your a/c ending 7694 at 12:37AM SGT, 3 Sep 26. If unauthorised, call UOB 24/7 Fraud Hotline.",
-      { senderBank: "UOB", receivedAt: "2026-09-03T01:00:00+08:00" },
+      "You made/scheduled a funds transfer(s) of SGD 84.50 to OCBC a/c ending 2468 from your a/c ending 1357 at 3:15AM SGT, 12 Aug 26. If unauthorised, call UOB 24/7 Fraud Hotline.",
+      { senderBank: "UOB", receivedAt: "2026-08-12T04:00:00+08:00" },
     );
 
     expect(movement).toMatchObject({
       direction: "outgoing",
-      amount_cents: -23023,
+      amount_cents: -8450,
       currency: "SGD",
-      occurred_at: "2026-09-03T00:37:00+08:00",
-      own_account: { bank: "UOB", suffix: "7694" },
-      counterparty: { bank: "OCBC", suffix: "9001" },
+      occurred_at: "2026-08-12T03:15:00+08:00",
+      own_account: { bank: "UOB", suffix: "1357" },
+      counterparty: { bank: "OCBC", suffix: "2468" },
     });
   });
 

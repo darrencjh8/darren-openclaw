@@ -1340,12 +1340,14 @@ describe("Phase 1: LLM-directed retrieval (multi-round tools)", () => {
     // Regression test: a UOB FAST transfer alert to an OCBC account. The LLM
     // correctly keeps account_id on the UOB source account per rule 4b
     // (destination becomes the merchant name). The memory-aware account
-    // check must NOT treat "OCBC 360" naming a different tracked account as
-    // evidence of a wrong pick — for transfer/movement-shaped alerts, the
+    // check must NOT treat "OCBC Savings" naming a different tracked account
+    // as evidence of a wrong pick — for transfer/movement-shaped alerts, the
     // merchant is *supposed* to name a different account. Forcing a retry
-    // here is unwinnable: the LLM was never shown OCBC 360's account id
+    // here is unwinnable: the LLM was never shown OCBC Savings' account id
     // (domain_account_filter restricts fetch_context to UOB-named accounts
     // for a UOB sender), so retrying can only exhaust and fail permanently.
+    // Fixture values (account names, amount, suffixes, timestamp) are
+    // synthetic and do not correspond to any real account.
     const { AgentOrchestrator } = await import("../src/orchestrator.js");
     const config = makeConfig();
     const tools = multiRoundTools({
@@ -1353,16 +1355,16 @@ describe("Phase 1: LLM-directed retrieval (multi-round tools)", () => {
         if (name === "fetch_context")
           return {
             accounts: [
-              { id: "acc-uob-one", name: "UOB One Account", closed: false },
-              { id: "acc-uob-ladies", name: "UOB Ladies Card", closed: false },
-              { id: "acc-ocbc-360", name: "OCBC 360", closed: false },
+              { id: "acc-uob-everyday", name: "UOB Everyday Account", closed: false },
+              { id: "acc-uob-rewards", name: "UOB Rewards Card", closed: false },
+              { id: "acc-ocbc-savings", name: "OCBC Savings", closed: false },
             ],
             categories: [],
             payees: [],
           };
         if (name === "search_memory") {
-          if (args && String(args.query).includes("OCBC 360"))
-            return { results: [{ text: "Account ending 9001 belongs to OCBC 360", score: 1 }] };
+          if (args && String(args.query).includes("OCBC Savings"))
+            return { results: [{ text: "Account ending 2468 belongs to OCBC Savings", score: 1 }] };
           return { results: [] };
         }
         return true;
@@ -1371,13 +1373,13 @@ describe("Phase 1: LLM-directed retrieval (multi-round tools)", () => {
     const orch = new AgentOrchestrator(config, tools);
 
     const transferResult = {
-      merchant: "OCBC 360",
-      amount_cents: -23023,
-      date: "2026-09-03",
+      merchant: "OCBC Savings",
+      amount_cents: -8450,
+      date: "2026-08-12",
       currency: "SGD",
-      account_id: "acc-uob-one",
-      account_name: "UOB One Account",
-      raw_description: "SGD 230.23 transfer to OCBC 360",
+      account_id: "acc-uob-everyday",
+      account_name: "UOB Everyday Account",
+      raw_description: "SGD 84.50 transfer to OCBC Savings",
       notes: "",
       skip: false,
       reasoning: "UOB FAST transfer; account_id kept as source per rule 4b",
@@ -1395,10 +1397,10 @@ describe("Phase 1: LLM-directed retrieval (multi-round tools)", () => {
       .mockResolvedValueOnce({ choices: [{ message: jsonMsg(transferResult) }] });
 
     const emailText =
-      "You made/scheduled a funds transfer(s) of SGD 230.23 to OCBC a/c ending 9001 from your a/c ending 7694 at 12:37AM SGT, 3 Sep 26.";
+      "You made/scheduled a funds transfer(s) of SGD 84.50 to OCBC a/c ending 2468 from your a/c ending 1357 at 3:15AM SGT, 12 Aug 26.";
     const result = await orch._runPhase1(emailText, { senderBank: "UOB" });
 
-    expect(result?.account_id).toBe("acc-uob-one");
+    expect(result?.account_id).toBe("acc-uob-everyday");
     expect(orch._llm.chat).toHaveBeenCalledTimes(2);
   });
 
