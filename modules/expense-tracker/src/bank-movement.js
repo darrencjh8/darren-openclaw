@@ -196,6 +196,32 @@ export function parseBankMovement(text, { senderBank = null, receivedAt } = {}) 
     };
   }
 
+  // UOB "You made/scheduled a funds transfer(s) of ... to X a/c ending N
+  // from your a/c ending M at TIME SGT, DATE" confirmation — a sentence-style
+  // alert with no labelled fields, unlike the OCBC/DBS "Amount:"/"From:" layouts.
+  const uobFast = body.match(
+    /transfer\(?s?\)?\s+of\s+(SGD|MYR)\s*([\d,.]+)\s+to\s+(.+?)\s+a\/c\s+ending\s+(\d{4,})\s+from\s+your\s+a\/c\s+ending\s+(\d{4,})\s+at\s+(\d{1,2}[:.]\d{2}\s*(?:AM|PM)?)\s*SGT,?\s*(\d{1,2}\s+[A-Za-z]{3}\s+\d{2,4})/i,
+  );
+  if (uobFast) {
+    const currency = /^MYR$/i.test(uobFast[1]) ? "MYR" : "SGD";
+    const toName = uobFast[3].trim();
+    const occurredAt = isoDateTime(uobFast[7], uobFast[6], receivedAt);
+    if (!occurredAt) return null;
+    return baseMovement({
+      direction: "outgoing",
+      amount: uobFast[2],
+      currency,
+      occurredAt,
+      ownAccount: { bank: senderBank || "UOB", suffix: uobFast[5] },
+      counterparty: {
+        name: toName,
+        bank: bankFromText(toName, senderBank),
+        suffix: uobFast[4],
+      },
+      reference,
+    });
+  }
+
   const currencyAmount = body.match(/Amount\s*:\s*(SGD|MYR)\s*([\d,.]+)/i);
   if (!currencyAmount) return null;
   const [, currency, amount] = currencyAmount;

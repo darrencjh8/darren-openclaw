@@ -253,6 +253,31 @@ export function hasUsableSuffixFact(facts, emailText, senderBank) {
 export const BILL_PAYMENT_SHAPE_RE =
     /\(A\/C\s+ending\s+\S+\)[\s\S]*\(Ref\s+ending\s+\S+\)/i;
 
+/**
+ * Bank-movement-shaped alerts (A/C/Ref ending, parenthesized account, or a
+ * movement verb) — bill payments and inter-account/inter-bank transfers.
+ * For these, the merchant is expected to name a DIFFERENT tracked account
+ * (the destination), so any "merchant name matches a different account"
+ * heuristic must not treat that as evidence of a wrong account_id pick.
+ */
+export const MOVEMENT_LIKE =
+    /(?:A\/C\s+ending|Ref\s+ending|account\s+ending|\(-\d{4,}\)|using\s+your|was paid|has been paid|you'?ve received|you have received|received a transfer|bill payment|scheduled payment|was transferred|made a transfer|transfer to|transfer from)/i;
+
+/**
+ * Narrower than MOVEMENT_LIKE: only phrases that unambiguously name a
+ * destination/source ACCOUNT (not a merchant) — "A/C ending", "Ref ending",
+ * an explicit transfer, or a parenthesized account digit suffix. Used to gate
+ * the memory-aware account check specifically, which SUPPRESSES a safety net
+ * rather than merely attempting an extra extraction pass. MOVEMENT_LIKE's
+ * broader purchase-adjacent phrases ("using your", "was paid", "you've
+ * received") also match ordinary card/wallet purchase alerts (e.g. Ryt Bank's
+ * "RM200.00 was paid at MERCHANT using your Main Account on ..."), where the
+ * merchant is a real merchant, not another tracked account — the memory
+ * check must stay active for those.
+ */
+export const ACCOUNT_TRANSFER_SHAPE_RE =
+    /(?:A\/C\s+ending|Ref\s+ending|account\s+ending|\(-\d{4,}\)|received a transfer|bill payment|scheduled payment|was transferred|made a transfer|transfer to|transfer from)/i;
+
 export class AgentOrchestrator {
     constructor(config, tools) {
         this._config = config;
@@ -678,7 +703,6 @@ export class AgentOrchestrator {
         // Only for bank-movement-shaped alerts (A/C/Ref ending, parenthesized
         // account, or a movement verb) — card purchase alerts keep going to the
         // full Phase-1 LLM.
-        const MOVEMENT_LIKE = /(?:A\/C\s+ending|Ref\s+ending|account\s+ending|\(-\d{4,}\)|using\s+your|was paid|has been paid|you'?ve received|you have received|received a transfer|bill payment|scheduled payment|was transferred|made a transfer|transfer to|transfer from)/i;
         if (MOVEMENT_LIKE.test(emailText)) {
             const extracted = await this._llmExtractMovement(emailText, senderBank, receivedAt);
             if (extracted) return extracted;
@@ -1026,13 +1050,21 @@ export class AgentOrchestrator {
 
                 // Memory-aware account check: if account is valid but memory
                 // suggests a different account for this merchant, force retry.
+                // Skipped for movement-shaped alerts (bill payments, transfers):
+                // the merchant is EXPECTED to name a different tracked account
+                // (the destination, per rule 4b) there, so a memory fact naming
+                // that account is not evidence of a wrong pick. Retrying would
+                // also be unwinnable — domain_account_filter never shows the
+                // LLM the destination account's id when it belongs to a
+                // different bank than the sender.
                 let memoryAccountHints = null;
                 if (
                     !output.skip &&
                     output.account_id &&
                     !invalidFields.includes("account_id") &&
                     output.merchant &&
-                    liveAccounts.length > 0
+                    liveAccounts.length > 0 &&
+                    !ACCOUNT_TRANSFER_SHAPE_RE.test(emailText)
                 ) {
                     try {
                         const hints = await this._tools.executeTool(

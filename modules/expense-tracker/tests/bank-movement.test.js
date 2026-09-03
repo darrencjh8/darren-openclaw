@@ -161,6 +161,22 @@ Reference :
     });
   });
 
+  it("parses a UOB FAST transfer confirmation sentence (no labelled fields)", () => {
+    const movement = parseBankMovement(
+      "You made/scheduled a funds transfer(s) of SGD 84.50 to OCBC a/c ending 2468 from your a/c ending 1357 at 3:15AM SGT, 12 Aug 26. If unauthorised, call UOB 24/7 Fraud Hotline.",
+      { senderBank: "UOB", receivedAt: "2026-08-12T04:00:00+08:00" },
+    );
+
+    expect(movement).toMatchObject({
+      direction: "outgoing",
+      amount_cents: -8450,
+      currency: "SGD",
+      occurred_at: "2026-08-12T03:15:00+08:00",
+      own_account: { bank: "UOB", suffix: "1357" },
+      counterparty: { bank: "OCBC", suffix: "2468" },
+    });
+  });
+
   it("parses PayNow UEN as external payment, not internal transfer", () => {
     const movement = parseBankMovement(`
 The following PayNow transfer has been made to Example LLP using their Unique Entity Number (UEN) UEN123.
