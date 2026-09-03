@@ -246,6 +246,16 @@ export function parseBankMovement(text, { senderBank = null, receivedAt } = {}) 
   const destination = namedAccount(to, bankFromText(to));
   const payNow = /PayNow\s+transfer/i.test(body) && !to;
   const merchantMatch = body.match(/made to\s+(.+?)\s+using their\s+Unique Entity Number/i);
+  // Decline rather than fabricate a movement when we cannot identify which
+  // tracked account (if any) "To:" refers to. This shape (generic From/To
+  // labels) is also used by ordinary card-purchase alerts where "To:" is a
+  // merchant, not an account — e.g. "To: BUS/MRT" (issue #398). Without this
+  // check, that silently collapses to counterparty:null/merchant:null and
+  // then a generic "Bank payment" placeholder downstream, destroying the
+  // real merchant before fetch_context/search_memory/the LLM are ever
+  // consulted. PayNow-UEN payments are the one case with a real merchant
+  // name (via merchantMatch) despite having no tracked destination account.
+  if (!destination?.suffix && !payNow) return null;
   const descriptor = field(body, ["Description"]);
   return baseMovement({
     direction: "outgoing", amount, currency,

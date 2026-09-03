@@ -196,6 +196,56 @@ Description : UEN123-REFERENCE
       raw_merchant_descriptor: "UEN123-REFERENCE",
     });
   });
+
+  it("declines an ordinary card-purchase alert whose 'To:' is a merchant, not an account (issue #398)", () => {
+    // Regression test: this DBS "Card Transaction Alert" happens to use
+    // generic From:/To:/Amount: labels, but "To: BUS/MRT" is a merchant
+    // name, not a destination account (no bank alias, no digit suffix).
+    // The generic From/To branch must decline (return null) rather than
+    // fabricate a movement with counterparty:null / merchant:null — that
+    // silently destroys the real merchant before fetch_context/search_memory
+    // /the LLM are ever consulted, permanently losing the ability to
+    // resolve it via the (pre-existing) "BUS/MRT maps to Public Transport
+    // payee" memory fact. Declining lets it fall through to the generic
+    // Phase-1 LLM path, which is the only place merchant/memory resolution
+    // for unrecognized shapes should happen.
+    const movement = parseBankMovement(
+      `Card Transaction Alert
+Transaction Ref: SP1300673370000000053852
+
+Dear Sir / Madam,
+
+We refer to your card transaction request dated 03/09/26. We are pleased to confirm that the transaction was completed.
+
+Date & Time: 03 SEP 05:38 (SGT)
+Amount: SGD4.60
+From: DBS/POSB card ending 3255
+To: BUS/MRT`,
+      { senderBank: "DBS", receivedAt: "2026-09-03T05:39:00+08:00" },
+    );
+
+    expect(movement).toBeNull();
+  });
+
+  it("also declines when the destination names a bank but has no resolvable digit suffix", () => {
+    // A destination identified only by bank name ("DBS Bank", no account
+    // digits) is just as unresolvable as a bare merchant name — it already
+    // produced counterparty: null today (`destination?.suffix ? ... : null`),
+    // which would otherwise hit the exact same "Bank payment" placeholder
+    // bug as #398. No special-casing by bank-alias-presence: the sole
+    // criterion for declining is "no way to identify which tracked account
+    // this refers to," so this also falls through to the LLM+memory path.
+    const movement = parseBankMovement(
+      `Amount : SGD 50.00
+From your account : 360 Account (-869001)
+To account : DBS Bank
+Date : 01 Sep 2026
+Time : 10:00 AM SGT`,
+      { senderBank: "OCBC", receivedAt: "2026-09-01T10:01:00+08:00" },
+    );
+
+    expect(movement).toBeNull();
+  });
 });
 
 describe("identityMappingsFromFacts", () => {
