@@ -95,7 +95,7 @@ export class LLMClient {
             }
             const reasoning = opts.reasoning || "auto";
             if (route.provider === "deepseek") {
-                if (reasoning === "adaptive" || (!toolChoice || toolChoice === "auto")) {
+                if (reasoning !== "disabled" && (reasoning === "adaptive" || !toolChoice || toolChoice === "auto")) {
                     kwargs.thinking = { type: "adaptive" };
                 }
             } else if (reasoning !== "disabled") {
@@ -109,6 +109,33 @@ export class LLMClient {
                             setTimeout(() => reject(new Error("timeout")), 60000),
                     )]);
                     this._mergeReasoning(response, route.provider);
+
+                    // Detect a truncated/incomplete response (e.g. DeepSeek's
+                    // adaptive-thinking mode cut off before emitting a final
+                    // answer, or hit a content filter). Without this check
+                    // an empty/partial reasoning trace can be silently
+                    // merged into `content` (via _mergeReasoning above) and
+                    // treated as a real answer downstream. Mirrors the
+                    // finish_reason invariant already enforced in
+                    // statement/orchestrator.js. "tool_calls" and "stop" are
+                    // the only expected terminations for a healthy response.
+                    const choice = (response.choices || [{}])[0];
+                    const finishReason = choice.finish_reason;
+                    const respMsg = choice.message || {};
+                    const hasUsableOutput = !!(
+                        respMsg.tool_calls?.length || respMsg.content
+                    );
+                    if (
+                        !hasUsableOutput ||
+                        (finishReason &&
+                            finishReason !== "stop" &&
+                            finishReason !== "tool_calls")
+                    ) {
+                        throw new Error(
+                            `LLM response truncated or incomplete (finish_reason: ${finishReason || "none"})`,
+                        );
+                    }
+
                     return response;
                 } catch (error) {
                     lastError = error;
@@ -717,7 +744,12 @@ export class AgentOrchestrator {
             { role: "user", content: emailText },
         ];
 
-        const MAX_RETRIES = 1;
+        // 2 (not 1): the retry budget now defends against three independent
+        // validation failure classes (amount/date, account_id, merchant)
+        // plus thrown errors (timeout, truncated response) that reset the
+        // conversation — 1 retry could exhaust on one failure class before
+        // ever giving the LLM feedback on another.
+        const MAX_RETRIES = 2;
         // Accumulates search_memory results the LLM retrieves via tool calls,
         // for deterministic post-validation (suffix override). Persists across
         // validation-retry attempts (facts do not change between attempts).
@@ -919,6 +951,16 @@ export class AgentOrchestrator {
                         invalidFields.push("date");
                     }
                 }
+                // A blank merchant on a real (non-skip) transaction usually
+                // means extraction failed silently (e.g. a truncated
+                // response) rather than the email genuinely having no
+                // payee/beneficiary — force a retry instead of falling
+                // through to Phase 2's "Misc" fallback with zero evidence.
+                // Skip responses never populate merchant and must not be
+                // penalized for it (see prompts.js rule 5).
+                if (!output.skip && !String(output.merchant || "").trim()) {
+                    invalidFields.push("merchant");
+                }
 
                 // Validate account — reuse cached fetch_context result if available
                 let liveAccounts = [];
@@ -1105,6 +1147,8 @@ export class AgentOrchestrator {
                                 return "amount_cents must be a valid integer";
                             if (f === "date")
                                 return "date must be valid and within 15 days of today";
+                            if (f === "merchant")
+                                return "merchant is required — extract the payee/beneficiary name from the email body (e.g. a \"To:\" line or transaction description), even if account/date/amount were already correct";
                             if (f === "account_id") {
                                 const names = liveAccounts
                                     .filter((a) => !a.closed)
