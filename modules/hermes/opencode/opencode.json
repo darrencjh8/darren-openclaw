@@ -1,0 +1,20 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "provider": {
+    "codex-router": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "Codex Router",
+      "options": {
+        "baseURL": "http://codex-router:4100/v1",
+        "apiKey": "local"
+      },
+      "models": {
+        "auto-thinking": { "name": "Auto (routed)" },
+        "gpt-5.6-terra": { "name": "GPT-5.6 Terra" },
+        "glm-5.2": { "name": "GLM 5.2" },
+        "deepseek-v4-flash": { "name": "DeepSeek V4 Flash" }
+      }
+    }
+  },
+  "model": "codex-router/gpt-5.6-terra"
+}

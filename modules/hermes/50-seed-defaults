@@ -12,6 +12,12 @@ mkdir -p /opt/data/scripts
 cp -r /opt/hermes-defaults/scripts/* /opt/data/scripts/
 chmod +x /opt/data/scripts/*.sh
 
+# Seed opencode CLI config into hermes HOME (/opt/data) on every boot so the
+# agent's `opencode` points at the codex-router provider (credentials live there).
+mkdir -p /opt/data/.config/opencode
+cp -f /opt/hermes-defaults/opencode/opencode.json /opt/data/.config/opencode/opencode.json
+chown -R hermes:hermes /opt/data/.config/opencode
+
 # Remove retired profile runtime state before seeding the managed profile set.
 for retired_profile in static-analyst qa-engineer quality-assurance; do
     rm -rf "/opt/data/profiles/$retired_profile"
