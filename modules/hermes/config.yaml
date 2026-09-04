@@ -33,7 +33,7 @@ fallback_providers:
     - provider: opencode-go
       model: glm-5.2
     - provider: opencode-zen
-      model: mimo-v2.5-free
+      model: opencode/mimo-v2.5-free
     - provider: deepseek
       model: deepseek-v4-pro
 
