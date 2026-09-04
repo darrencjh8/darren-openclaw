@@ -77,8 +77,8 @@ assert config["fallback_providers"] == [opencode_glm_fallback, mimo_fallback, de
 assert_route(config["delegation"], "gpt-5.6-luna", "delegation")
 
 assert_route(config["auxiliary"]["vision"], "gpt-5.6-terra", "auxiliary.vision")
-assert config["auxiliary"]["vision"].get("fallback_chain") == [opencode_glm_fallback, deepseek_vision_fallback], (
-    "auxiliary.vision.fallback_chain must start with opencode-go/glm-5.2, then deepseek-v4-flash-vision-exp"
+assert config["auxiliary"]["vision"].get("fallback_chain") == [deepseek_vision_fallback], (
+    "auxiliary.vision.fallback_chain must be deepseek-v4-flash-vision-exp"
 )
 
 for task, model in {
