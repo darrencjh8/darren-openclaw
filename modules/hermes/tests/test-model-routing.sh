@@ -111,7 +111,7 @@ assert "fallback_chain" not in decomposer, (
 
 for profile, (model, fallback_model) in {
     "architect": ("gpt-5.6-sol", "deepseek-v4-pro"),
-    "code-reviewer": ("glm-5.2", "deepseek-v4-pro"),
+    "code-reviewer": ("glm-5.2", "deepseek-v4-flash"),
     "spec-auditor": ("gpt-5.6-terra", "deepseek-v4-pro"),
     "project-manager": ("gpt-5.6-luna", "deepseek-v4-flash"),
 }.items():

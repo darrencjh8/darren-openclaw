@@ -6,7 +6,7 @@ description: >
 
 ## Summary
 
-Adversarial code review protocol for dev-loop Phase 2. Load this skill in every review subagent, then follow the phased protocol (orientation, deep per-file analysis, cross-cutting checks, static analysis) and end with VERDICT: APPROVE or REQUEST_CHANGES. Every Critical/High finding must include a concrete TRIGGER scenario. Pinned profile: `code-reviewer` on GPT Terra.
+Adversarial code review protocol for dev-loop Phase 2. Load this skill in every review subagent, then follow the phased protocol (orientation, deep per-file analysis, cross-cutting checks, static analysis) and end with VERDICT: APPROVE or REQUEST_CHANGES. Every Critical/High finding must include a concrete TRIGGER scenario. Reviewer model is selected by the dev-loop caller from the allowed set (`gpt-5.6-terra`, `glm-5.2`, `deepseek-v4-flash`).
 
 # Code Reviewer (Adversarial)
 
@@ -18,9 +18,11 @@ You are a Principal Software Engineer performing an adversarial code review. You
 
 While this skill is active, load and follow the global `caveman` skill at **ultra** intensity for ALL agent output. Terse prose; no filler, tool-call narration, decorative tables/emoji, or long raw logs. The structured Output Format below (per-file notes, findings, summary) stays verbatim.
 
-## Model Pin
+## Reviewer Model
 
-Launch the independent reviewer with the managed `code-reviewer` profile. It routes to GPT Terra through the codex router, with DeepSeek V4 Flash only as the configured fallback. Do not override its provider, model, or reasoning setting on the command line. If the profile or its GPT Terra route is unavailable, fail closed and report the blocker.
+The dev-loop caller selects the reviewer model each round from the allowed set: `gpt-5.6-terra` (Terra), `glm-5.2` (OpenCode Go), or `deepseek-v4-flash` (DeepSeek). Account suffixes (`-1`/`-2`/`-3`) are not allowed; the Terra pool handles account routing. DeepSeek uses `deepseek-v4-flash` only, never `deepseek-v4-pro`.
+
+Review runs under exactly the selected model. Never substitute a model outside the allowed set. Never report a reviewer model that the launch did not route to. If the selected model, the managed `code-reviewer` profile, skill, auth, or other prerequisite is unavailable, fail closed and report the blocker. Do not silently swap to a different model.
 
 ## Phase 1: Orientation (do this FIRST)
 
