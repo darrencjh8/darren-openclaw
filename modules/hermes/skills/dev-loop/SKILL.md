@@ -18,7 +18,7 @@ Use normal prose for user-facing PRs, issues, commits, docs, and other persisted
 
 - Repo rules override this skill.
 - One code-reviewer process maximum at any moment. Never parallelize reviewers.
-- Review profile: `code-reviewer`; its managed route is GPT Terra through the codex router.
+- Review profile: `code-reviewer`; the dev-loop caller selects the reviewer model each round from the allowed set `gpt-5.6-terra`, `glm-5.2`, `deepseek-v4-flash` (no account suffix; DeepSeek `deepseek-v4-flash` only, never `deepseek-v4-pro`).
 - If a relevant specification exists, it must pass the `spec-auditor` gate before code review.
 - No production code before a failing assertion test.
 - Any repository change resets review clean streak to zero.
@@ -149,7 +149,7 @@ HERMES_HOME=<hermes-home> hermes chat \
   --query-file <review-prompt-outside-repo>
 ```
 
-Before launch verify `hermes chat --help` supports the exact invocation, the `code-reviewer` profile resolves to its managed GPT Terra route, and `caveman`/`code-reviewer` skills exist in that profile.
+Before launch verify `hermes chat --help` supports the exact invocation, the `code-reviewer` profile resolves to a reviewer model from the allowed set (`gpt-5.6-terra`, `glm-5.2`, `deepseek-v4-flash`), and `caveman`/`code-reviewer` skills exist in that profile.
 Fail closed if unavailable; do not silently substitute a model or profile.
 
 Use alternating review lenses while retaining the required `code-reviewer` profile:
@@ -160,6 +160,7 @@ Round N and N+1 must use different lenses.
 Reviewer prompt must require:
 
 - Load `caveman`, ultra intensity; then load `code-reviewer`.
+- Run under the caller-selected reviewer model from the allowed set (`gpt-5.6-terra`, `glm-5.2`, `deepseek-v4-flash`); report the exact model as evidence. Do not substitute a model outside the allowed set.
 - Read-only isolation: no edits, commits, branches, config changes, external write APIs, or network writes.
 - Review exact `merge-base(base, HEAD)..HEAD`, surrounding callers, configuration, tests, and lifecycle paths.
 - Output stable finding IDs, severity, file/line, evidence, concrete trigger for Critical/High, remediation, and verdict.
