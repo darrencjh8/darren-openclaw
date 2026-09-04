@@ -34,6 +34,7 @@ fallback_providers:
       model: glm-5.2
     - provider: opencode-zen
       model: opencode/mimo-v2.5-free
+      base_url: https://opencode.ai/zen/v1
     - provider: deepseek
       model: deepseek-v4-pro
 
