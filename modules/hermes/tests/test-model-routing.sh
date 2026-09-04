@@ -71,8 +71,8 @@ assert config["model"].get("default") == "gpt-5.6-terra"
 assert "base_url" not in config["model"]
 assert "api_key" not in config["model"]
 assert config["agent"]["reasoning_effort"] == "medium"
-assert config["fallback_providers"] == [opencode_glm_fallback, mimo_fallback, deepseek_pro_fallback], (
-    "main fallback_providers must be opencode-go/glm-5.2, then opencode-zen/mimo-v2.5-free, then deepseek-v4-pro"
+assert config["fallback_providers"] == [opencode_glm_fallback, mimo_fallback, deepseek_flash_fallback], (
+    "main fallback_providers must be opencode-go/glm-5.2, then opencode-zen/mimo-v2.5-free, then deepseek-v4-flash"
 )
 assert_route(config["delegation"], "gpt-5.6-luna", "delegation")
 
