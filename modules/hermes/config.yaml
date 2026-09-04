@@ -10,6 +10,16 @@ model:
     provider: custom:codex-router
     default: gpt-5.6-terra
 
+compression:
+    enabled: true
+    threshold: 0.50
+    threshold_tokens: 150000
+    tail_mode: lean
+    protect_last_n: 20
+    in_place: true
+    idle_compact_after_seconds: 3600
+    proactive_prune_tokens: 48000
+
 agent:
     reasoning_effort: medium
     disabled_toolsets:
@@ -22,6 +32,8 @@ display:
 fallback_providers:
     - provider: opencode-go
       model: glm-5.2
+    - provider: opencode-zen
+      model: mimo-v2.5-free
     - provider: deepseek
       model: deepseek-v4-pro
 
