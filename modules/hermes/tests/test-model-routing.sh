@@ -33,6 +33,7 @@ deepseek_pro_fallback = {
 mimo_fallback = {
     "provider": "opencode-zen",
     "model": "opencode/mimo-v2.5-free",
+    "base_url": "https://opencode.ai/zen/v1"
 }
 deepseek_flash_fallback = {
     "provider": "deepseek",
