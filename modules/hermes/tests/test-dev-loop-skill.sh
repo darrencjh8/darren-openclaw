@@ -31,7 +31,7 @@ require "$DEV_LOOP_SKILL" "skill pulls origin main before planning" "git pull --
 require "$DEV_LOOP_SKILL" "skill creates a worktree from verified origin" "Create a new isolated \`feat/...\` or \`fix/...\` worktree and branch from that verified \`origin/<default-branch>\` SHA"
 require "$DEV_LOOP_SKILL" "skill uses the sole reviewer profile" "--profile code-reviewer"
 require "$DEV_LOOP_SKILL" "skill uses one reviewer per round" "One fresh isolated Hermes process per round."
-require "$DEV_LOOP_SKILL" "skill requires two consecutive clean rounds" "two clean rounds from fresh sessions on the **same unchanged HEAD SHA**"
+require "$DEV_LOOP_SKILL" "skill requires one clean round" "one clean round from a fresh session on the **same unchanged HEAD SHA**"
 require "$DEV_LOOP_SKILL" "skill resolves optional specifications" "If a relevant specification exists"
 require "$DEV_LOOP_SKILL" "skill invokes spec-auditor before code review" "--profile spec-auditor"
 require "$DEV_LOOP_SKILL" "skill verifies the launch routes to the caller-selected reviewer model" "the launch routes to the caller-selected reviewer model"
