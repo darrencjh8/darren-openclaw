@@ -23,7 +23,6 @@ compression:
 agent:
     reasoning_effort: medium
     disabled_toolsets:
-        - image_gen
         - moa
 
 display:
@@ -71,8 +70,6 @@ auxiliary:
         provider: custom:codex-router
         model: gpt-5.6-terra
         fallback_chain:
-            - provider: opencode-go
-              model: glm-5.2
             - provider: deepseek
               model: deepseek-v4-flash-vision-exp
     web_extract:
@@ -153,10 +150,6 @@ mcp_servers:
         tools:
             exclude: []
         supports_parallel_tool_calls: false
-    image-gen:
-        url: http://image-gen:8083/mcp
-        supports_parallel_tool_calls: false
-
 platforms:
     webhook:
         enabled: true

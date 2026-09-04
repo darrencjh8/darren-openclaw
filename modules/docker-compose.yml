@@ -96,22 +96,6 @@ services:
             retries: 3
             start_period: 30s
 
-    image-gen:
-        build:
-            context: ../modules/image-gen
-            dockerfile: Dockerfile
-        ports:
-            - "127.0.0.1:8083:8083"
-        volumes:
-            - ../modules/perchance-gen:/app/modules/perchance-gen:ro
-            - image_gen_media:/app/.openclaw/workspace/media
-        environment:
-            - CDP_URL=http://172.17.0.1:9223
-            - POLLINATIONS_API_KEY=${POLLINATIONS_API_KEY}
-        extra_hosts:
-            - "host.docker.internal:host-gateway"
-        restart: unless-stopped
-
     ktmb-booking:
         build:
             context: ../modules/ktmb
@@ -219,7 +203,6 @@ services:
 
 volumes:
     onedrive_data:
-    image_gen_media:
 
 networks:
     hermes_shared:
