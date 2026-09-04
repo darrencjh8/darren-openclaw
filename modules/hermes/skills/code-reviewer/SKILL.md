@@ -22,7 +22,7 @@ While this skill is active, load and follow the global `caveman` skill at **ultr
 
 The dev-loop caller selects the reviewer model each round from the allowed set: `gpt-5.6-terra` (Terra), `glm-5.2` (OpenCode Go), or `deepseek-v4-flash` (DeepSeek). Account suffixes (`-1`/`-2`/`-3`) are not allowed; the Terra pool handles account routing. DeepSeek uses `deepseek-v4-flash` only, never `deepseek-v4-pro`.
 
-Review runs under exactly the selected model. Never substitute a model outside the allowed set. If the selected model, the managed `code-reviewer` profile, skill, auth, or other prerequisite is unavailable, fail closed and report the blocker. Do not silently swap to a different model.
+Review runs under exactly the selected model. Never substitute a model outside the allowed set. Never report a reviewer model that the launch did not route to. If the selected model, the managed `code-reviewer` profile, skill, auth, or other prerequisite is unavailable, fail closed and report the blocker. Do not silently swap to a different model.
 
 ## Phase 1: Orientation (do this FIRST)
 

@@ -34,7 +34,7 @@ require "$DEV_LOOP_SKILL" "skill uses one reviewer per round" "One fresh isolate
 require "$DEV_LOOP_SKILL" "skill requires two consecutive clean rounds" "two clean rounds from fresh sessions on the **same unchanged HEAD SHA**"
 require "$DEV_LOOP_SKILL" "skill resolves optional specifications" "If a relevant specification exists"
 require "$DEV_LOOP_SKILL" "skill invokes spec-auditor before code review" "--profile spec-auditor"
-require "$DEV_LOOP_SKILL" "skill verifies the reviewer profile resolves to an allowed model" "resolves to a reviewer model from the allowed set"
+require "$DEV_LOOP_SKILL" "skill verifies the launch routes to the caller-selected reviewer model" "the launch routes to the caller-selected reviewer model"
 require "$DEV_LOOP_SKILL" "skill owns the loop through merge" "Own the loop through completion."
 require "$CODE_REVIEWER_SKILL" "reviewer skill pins the managed profile" "managed \`code-reviewer\` profile"
 require "$CODE_REVIEWER_SKILL" "reviewer skill allows the reviewer model set" "allowed set: \`gpt-5.6-terra\` (Terra), \`glm-5.2\` (OpenCode Go), or \`deepseek-v4-flash\`"

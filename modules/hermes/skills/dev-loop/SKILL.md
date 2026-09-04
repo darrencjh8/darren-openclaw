@@ -149,8 +149,8 @@ HERMES_HOME=<hermes-home> hermes chat \
   --query-file <review-prompt-outside-repo>
 ```
 
-Before launch verify `hermes chat --help` supports the exact invocation, the `code-reviewer` profile resolves to a reviewer model from the allowed set (`gpt-5.6-terra`, `glm-5.2`, `deepseek-v4-flash`), and `caveman`/`code-reviewer` skills exist in that profile.
-Fail closed if unavailable; do not silently substitute a model or profile.
+Before launch verify `hermes chat --help` supports the exact invocation, the launch routes to the caller-selected reviewer model (one of `gpt-5.6-terra`, `glm-5.2`, `deepseek-v4-flash`), and `caveman`/`code-reviewer` skills exist in that profile.
+Fail closed if the launch cannot be made to route to the selected model. The `code-reviewer` profile default is `glm-5.2`, so selecting `gpt-5.6-terra` or `deepseek-v4-flash` requires a per-run model override or a profile whose default equals the selection. Never run a different allowed model and record it as the selected model. Do not silently substitute a model or profile.
 
 Use alternating review lenses while retaining the required `code-reviewer` profile:
 - **A:** end-to-end behavior, callers, persistence, compatibility, and tests.
