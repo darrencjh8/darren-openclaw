@@ -31,7 +31,6 @@ on:
                     - portfolio-tracker
                     - expense-tracker
                     - actual-api
-                    - ktmb-booking
                     - codex-router
 
 concurrency:
@@ -95,7 +94,6 @@ jobs:
                   echo "$CHANGED" | grep -q "^modules/expense-tracker/" && COMPONENTS="$COMPONENTS expense-tracker"
                   echo "$CHANGED" | grep -q "^modules/portfolio-tracker/" && COMPONENTS="$COMPONENTS portfolio-tracker"
                   echo "$CHANGED" | grep -q "^modules/actual-api/"     && COMPONENTS="$COMPONENTS actual-api"
-                  echo "$CHANGED" | grep -qE "^modules/ktmb(/|$)"  && COMPONENTS="$COMPONENTS ktmb-booking"
                   echo "$CHANGED" | grep -q "^gateway/"                && COMPONENTS="$COMPONENTS hermes"
                   echo "$CHANGED" | grep -q "^\.github/"               && COMPONENTS="$COMPONENTS hermes"
                   echo "$CHANGED" | grep -qE "^(\.github/workflows/deploy\.yml|modules/(docker-compose\.yml|deploy\.sh))$" && COMPONENTS="$COMPONENTS codex-router"
