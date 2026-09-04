@@ -55,8 +55,4 @@ mcp_servers:
         tools:
             exclude: []
         supports_parallel_tool_calls: false
-    ktmb-booking:
-        url: http://ktmb-booking:8082/mcp
-        tools:
-            exclude: []
-        supports_parallel_tool_calls: false
+
