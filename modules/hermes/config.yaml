@@ -153,12 +153,6 @@ mcp_servers:
         tools:
             exclude: []
         supports_parallel_tool_calls: false
-    ktmb-booking:
-        url: http://ktmb-booking:8082/mcp
-        tools:
-            exclude:
-                - ktmb_reset_password
-        supports_parallel_tool_calls: false
     image-gen:
         url: http://image-gen:8083/mcp
         supports_parallel_tool_calls: false
