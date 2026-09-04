@@ -32,7 +32,7 @@ deepseek_pro_fallback = {
 }
 mimo_fallback = {
     "provider": "opencode-zen",
-    "model": "mimo-v2.5-free",
+    "model": "opencode/mimo-v2.5-free",
 }
 deepseek_flash_fallback = {
     "provider": "deepseek",
