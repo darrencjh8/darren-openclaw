@@ -1,4 +1,4 @@
-FROM nousresearch/hermes-agent:v2026.8.27
+FROM nousresearch/hermes-agent:v2026.8.31
 RUN apt-get update && apt-get install -y --no-install-recommends gh && rm -rf /var/lib/apt/lists/*
 RUN npm install --global ntn
 RUN npm install --global opencode-ai@latest
