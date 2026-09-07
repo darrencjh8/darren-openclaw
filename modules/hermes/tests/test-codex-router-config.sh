@@ -19,7 +19,7 @@ has_provider && ok "named Codex Router provider exists" || nope "named Codex Rou
 grep -Eq '^        api: http://codex-router:4100/v1$' "$CONFIG" && ok "provider uses internal router URL" || nope "provider URL" "missing or wrong"
 grep -Eq '^        transport: chat_completions$' "$CONFIG" && ok "provider pins Chat Completions transport" || nope "provider transport" "missing"
 grep -Eq '^    provider: custom:codex-router$' "$CONFIG" && ok "Hermes uses named Codex Router provider" || nope "Hermes provider" "missing"
-grep -Eq '^    default: gpt-5\.6-terra$' "$CONFIG" && ok "main model uses pooled Terra alias" || nope "main model" "missing"
+grep -Eq '^    default: auto-thinking$' "$CONFIG" && ok "main model routes via auto-thinking" || nope "main model" "missing"
 grep -Eq '^        model: gpt-5\.6-luna$' "$CONFIG" && ok "Luna consumers use pooled alias" || nope "Luna pool" "missing"
 
 if grep -REq 'gpt-5\.6-(terra|luna|sol)-[123]' "$SCRIPT_DIR/../config.yaml" "$SCRIPT_DIR/../profiles"; then

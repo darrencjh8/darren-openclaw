@@ -4,11 +4,11 @@ providers:
         api: http://codex-router:4100/v1
         api_key: local
         transport: chat_completions
-        default_model: gpt-5.6-terra
+        default_model: auto-thinking
 
 model:
     provider: custom:codex-router
-    default: gpt-5.6-terra
+    default: auto-thinking
 
 compression:
     enabled: true
