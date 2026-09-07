@@ -134,6 +134,8 @@ services:
             - OPENCODE_API_KEY=${OPENCODE_API_KEY:-}
         restart: unless-stopped
         mem_limit: 1536m
+        volumes:
+            - codex_router_state:/app/state
         healthcheck:
             test:
                 [
@@ -202,6 +204,7 @@ services:
         shm_size: 1g
 
 volumes:
+    codex_router_state:
     onedrive_data:
 
 networks:
