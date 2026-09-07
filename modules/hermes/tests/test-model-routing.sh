@@ -60,9 +60,9 @@ def assert_route(route, model, label):
     assert "api_key" not in route, f"{label} must use its named provider API key"
 
 
-assert_provider(config, "gpt-5.6-terra", "main")
+assert_provider(config, "auto-thinking", "main")
 assert config["model"].get("provider") == router_route
-assert config["model"].get("default") == "gpt-5.6-terra"
+assert config["model"].get("default") == "auto-thinking"
 assert "base_url" not in config["model"]
 assert "api_key" not in config["model"]
 assert config["agent"]["reasoning_effort"] == "medium"
