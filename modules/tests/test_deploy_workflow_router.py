@@ -77,10 +77,12 @@ class DeployWorkflowRouterTests(unittest.TestCase):
         compose = yaml.safe_load(COMPOSE_FILE.read_text(encoding="utf-8"))
         router_env = compose["services"]["codex-router"]["environment"]
         self.assertIn("OPENCODE_API_KEY=${OPENCODE_API_KEY:-}", router_env)
+        self.assertIn("OPENCODE_ZEN_API_KEY=${OPENCODE_ZEN_API_KEY:-}", router_env)
 
         deploy_script = DEPLOY_SCRIPT.read_text(encoding="utf-8")
         router_section = deploy_script.split("# ---- codex-router ----", 1)[1].split("# ---- pluggable modules", 1)[0]
         self.assertIn('check_var_optional "OPENCODE_API_KEY" ""', router_section)
+        self.assertIn('check_var_optional "OPENCODE_ZEN_API_KEY" ""', router_section)
 
     def test_opencode_go_key_is_passed_to_hermes(self):
         compose = yaml.safe_load(COMPOSE_FILE.read_text(encoding="utf-8"))
