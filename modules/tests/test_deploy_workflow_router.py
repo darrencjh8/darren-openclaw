@@ -148,9 +148,14 @@ class DeployWorkflowRouterTests(unittest.TestCase):
             {"model": "mimo-v2.5-free", "auth": "opencode_zen", "url": "https://opencode.ai/zen/v1/chat/completions"},
             {"model": "gpt-5.6-terra-3", "auth": "local", "url": "http://127.0.0.1:4000/v1/responses"},
         )
+        def bound_hops(candidate=hops):
+            return candidate
 
         redirected = launcher.redirect_opencode_go_hops(hops)
 
+        self.assertIs(redirected, hops)
+        self.assertIs(bound_hops(), hops)
+        self.assertEqual(bound_hops()[0]["url"], launcher.PROXY_URL)
         self.assertEqual(redirected[0]["url"], launcher.PROXY_URL)
         self.assertEqual(redirected[1], hops[1])
         self.assertEqual(redirected[2], hops[2])

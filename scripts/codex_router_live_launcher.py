@@ -10,10 +10,10 @@ SHIM_PATH = Path("/router/router/shim.py")
 
 
 def redirect_opencode_go_hops(hops):
-    return tuple(
-        {**hop, "url": PROXY_URL} if hop.get("auth") == "opencode_go" else hop
-        for hop in hops
-    )
+    for hop in hops:
+        if hop.get("auth") == "opencode_go":
+            hop["url"] = PROXY_URL
+    return hops
 
 
 def main():
