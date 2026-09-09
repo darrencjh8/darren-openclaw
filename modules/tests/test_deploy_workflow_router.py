@@ -77,12 +77,10 @@ class DeployWorkflowRouterTests(unittest.TestCase):
         compose = yaml.safe_load(COMPOSE_FILE.read_text(encoding="utf-8"))
         router_env = compose["services"]["codex-router"]["environment"]
         self.assertIn("OPENCODE_API_KEY=${OPENCODE_API_KEY:-}", router_env)
-        self.assertIn("OPENCODE_ZEN_API_KEY=${OPENCODE_ZEN_API_KEY:-}", router_env)
 
         deploy_script = DEPLOY_SCRIPT.read_text(encoding="utf-8")
         router_section = deploy_script.split("# ---- codex-router ----", 1)[1].split("# ---- pluggable modules", 1)[0]
         self.assertIn('check_var_optional "OPENCODE_API_KEY" ""', router_section)
-        self.assertIn('check_var_optional "OPENCODE_ZEN_API_KEY" ""', router_section)
 
     def test_opencode_go_key_is_passed_to_hermes(self):
         compose = yaml.safe_load(COMPOSE_FILE.read_text(encoding="utf-8"))
@@ -98,6 +96,10 @@ class DeployWorkflowRouterTests(unittest.TestCase):
 
     def test_public_workflow_runs_private_router_tests_at_an_explicit_ref(self):
         workflow = ROUTER_CI_WORKFLOW.read_text(encoding="utf-8")
+        config = yaml.safe_load(workflow)
+        unit_job = config["jobs"]["test"]
+        self.assertIn("live-opencode", config["jobs"])
+        live_job = config["jobs"]["live-opencode"]
         self.assertIn("workflow_dispatch:", workflow)
         self.assertIn("repository_dispatch:", workflow)
         self.assertIn("repository: darrencjh8/codex-router", workflow)
@@ -106,16 +108,15 @@ class DeployWorkflowRouterTests(unittest.TestCase):
         self.assertIn("persist-credentials: false", workflow)
         self.assertIn('python -m unittest discover -s tests -p "test_*.py"', workflow)
         self.assertIn("bash tests/test_docker.sh", workflow)
-        self.assertIn("environment: darren-prod", workflow)
+        self.assertNotIn("environment", unit_job)
+        self.assertEqual(live_job["environment"], "darren-prod")
+        self.assertEqual(live_job["if"], "github.ref == 'refs/heads/main'")
         self.assertIn("OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}", workflow)
         self.assertIn('test -n "$OPENCODE_API_KEY"', workflow)
-        self.assertIn("OPENCODE_ZEN_API_KEY: ${{ secrets.OPENCODE_ZEN_API_KEY }}", workflow)
-        self.assertIn("DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}", workflow)
-        self.assertIn("Smoke-test auto-thinking external providers", workflow)
-        self.assertIn("python tests/test_provider_smoke_live.py", workflow)
-        self.assertIn("python tests/test_opencode_glm_live.py", workflow)
+        self.assertIn("ref: main", workflow)
+        self.assertIn("python ci/scripts/test_opencode_glm_live.py", workflow)
         self.assertIn("name: glm-opencode-latency", workflow)
-        self.assertIn("path: codex-router/glm-opencode-latency.json", workflow)
+        self.assertIn("path: glm-opencode-latency.json", workflow)
 
     def test_public_test_workflow_discovers_all_module_contract_tests(self):
         workflow = TEST_WORKFLOW.read_text(encoding="utf-8")

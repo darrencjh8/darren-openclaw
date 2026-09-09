@@ -17,7 +17,6 @@ permissions:
 jobs:
     test:
         runs-on: ubuntu-latest
-        environment: darren-prod
         steps:
             - name: Check out private Codex Router
               uses: actions/checkout@v4
@@ -44,30 +43,36 @@ jobs:
               working-directory: codex-router
               run: bash tests/test_docker.sh
 
-            - name: Smoke-test auto-thinking external providers
-              working-directory: codex-router
-              env:
-                  OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
-                  OPENCODE_ZEN_API_KEY: ${{ secrets.OPENCODE_ZEN_API_KEY }}
-                  DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
-              run: |
-                  test -n "$OPENCODE_API_KEY"
-                  test -n "$OPENCODE_ZEN_API_KEY"
-                  test -n "$DEEPSEEK_API_KEY"
-                  python tests/test_provider_smoke_live.py
+    live-opencode:
+        if: github.ref == 'refs/heads/main'
+        runs-on: ubuntu-latest
+        environment: darren-prod
+        steps:
+            - name: Check out trusted CI probe
+              uses: actions/checkout@v4
+              with:
+                  ref: main
+                  persist-credentials: false
+                  path: ci
 
-            - name: Validate GLM OpenCode Go contract
-              working-directory: codex-router
+            - uses: actions/setup-python@v5
+              with:
+                  python-version: "3.12"
+
+            - name: Install probe dependency
+              run: python -m pip install httpx==0.28.1
+
+            - name: Validate GLM OpenCode Go contract and latency
               env:
                   OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
               run: |
                   test -n "$OPENCODE_API_KEY"
-                  python tests/test_opencode_glm_live.py
+                  python ci/scripts/test_opencode_glm_live.py
 
             - name: Upload GLM latency measurements
               if: always()
               uses: actions/upload-artifact@v4
               with:
                   name: glm-opencode-latency
-                   path: codex-router/glm-opencode-latency.json
-                   if-no-files-found: warn
+                  path: glm-opencode-latency.json
+                  if-no-files-found: warn
