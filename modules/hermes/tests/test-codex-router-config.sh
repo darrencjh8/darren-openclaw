@@ -10,6 +10,7 @@ nope() { echo -e "  ${RED}FAIL${NC} $1 — $2"; fail=$((fail+1)); }
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 CONFIG="$SCRIPT_DIR/../config.yaml"
+OPENCODE_JSON="$SCRIPT_DIR/../opencode/opencode.json"
 
 has_provider() {
     grep -Eq '^providers:$' "$CONFIG" && grep -Eq '^    codex-router:$' "$CONFIG"
@@ -27,6 +28,40 @@ if grep -REq 'gpt-5\.6-(terra|luna|sol)-[123]' "$SCRIPT_DIR/../config.yaml" "$SC
 else
     ok "no account-pinned GPT aliases"
 fi
+
+echo ""
+echo "=== canonical opencode.json (terminal/CLI default) ==="
+
+opencode_check=$(python3 - "$OPENCODE_JSON" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1]) as f:
+    config = json.load(f)
+
+default = config.get("model")
+models = config.get("provider", {}).get("codex-router", {}).get("models", {})
+
+problems = []
+if default != "codex-router/auto-thinking":
+    problems.append(f"default model = {default!r}, want codex-router/auto-thinking")
+for required in ("auto-thinking", "gpt-5.6-terra", "glm-5.2", "deepseek-v4-flash"):
+    if required not in models:
+        problems.append(f"missing model {required!r}")
+if "deepseek-v4-pro" in models:
+    problems.append("stale model deepseek-v4-pro still exposed")
+
+if problems:
+    print("FAIL: " + "; ".join(problems))
+else:
+    print("OK: default=codex-router/auto-thinking; models=auto-thinking,gpt-5.6-terra,glm-5.2,deepseek-v4-flash")
+PY
+)
+
+case "$opencode_check" in
+    OK*) ok "opencode default is codex-router/auto-thinking with expected models" ;;
+    *) nope "opencode.json default/model set" "$opencode_check" ;;
+esac
 
 printf '\n=========================================\n'
 echo -e " Results: ${GREEN}$pass passed${NC}, ${RED}$fail failed${NC}"

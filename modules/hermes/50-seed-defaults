@@ -12,11 +12,38 @@ mkdir -p /opt/data/scripts
 cp -r /opt/hermes-defaults/scripts/* /opt/data/scripts/
 chmod +x /opt/data/scripts/*.sh
 
-# Seed opencode CLI config into hermes HOME (/opt/data) on every boot so the
-# agent's `opencode` points at the codex-router provider (credentials live there).
-mkdir -p /opt/data/.config/opencode
-cp -f /opt/hermes-defaults/opencode/opencode.json /opt/data/.config/opencode/opencode.json
-chown -R hermes:hermes /opt/data/.config/opencode
+# Seed opencode CLI config into BOTH runtime homes on every boot. opencode reads
+# $HOME/.config/opencode/opencode.json, and HOME differs between the Hermes
+# daemon (/opt/data) and interactive terminal sessions (/opt/data/home). Merge,
+# don't clobber: canonical provider/models and the default model win (fixes
+# drift), while keys installed at runtime (instructions, plugin, agent) survive.
+python3 - /opt/hermes-defaults/opencode/opencode.json \
+    /opt/data/.config/opencode/opencode.json \
+    /opt/data/home/.config/opencode/opencode.json <<'PYOPENCODE'
+import json
+import sys
+from pathlib import Path
+
+canonical = json.loads(Path(sys.argv[1]).read_text())
+
+for target in (Path(p) for p in sys.argv[2:]):
+    target.parent.mkdir(parents=True, exist_ok=True)
+    merged = {}
+    if target.exists():
+        try:
+            merged = json.loads(target.read_text())
+        except ValueError:
+            merged = {}
+    for key, value in canonical.items():
+        if key in ("provider", "model"):
+            merged[key] = value
+        else:
+            merged.setdefault(key, value)
+    target.write_text(json.dumps(merged, indent=2) + "\n")
+PYOPENCODE
+chown hermes:hermes \
+    /opt/data/.config/opencode/opencode.json \
+    /opt/data/home/.config/opencode/opencode.json 2>/dev/null || true
 
 # Remove retired profile runtime state before seeding the managed profile set.
 for retired_profile in static-analyst qa-engineer quality-assurance; do

@@ -387,6 +387,112 @@ print('present' if profiles and fields else 'missing')
 [ "$managed_routing_migration" = "present" ] && ok "managed profile routing migrates provider and fallback fields on startup" || nope "managed profile routing migration" "got: $managed_routing_migration"
 
 echo ""
+echo "=== opencode config seeding (merge, not clobber) ==="
+
+# The seed script must target BOTH runtime homes that opencode may read.
+opencode_paths=$(python3 - "$SEED_SCRIPT" <<'PY'
+import sys
+with open(sys.argv[1]) as f:
+    content = f.read()
+home = "/opt/data/home/.config/opencode/opencode.json" in content
+data = "/opt/data/.config/opencode/opencode.json" in content
+print("present" if home and data else "missing")
+PY
+)
+[ "$opencode_paths" = "present" ] && ok "seed targets /opt/data and /opt/data/home opencode configs" || nope "seed targets both homes" "got: $opencode_paths"
+
+# Extract the actual PYOPENCODE merge block and run it against temp fixtures.
+merge_block=$(python3 - "$SEED_SCRIPT" <<'PY'
+import re
+import sys
+with open(sys.argv[1]) as f:
+    content = f.read()
+m = re.search(r"<<'PYOPENCODE'\n(.*?)\nPYOPENCODE", content, re.DOTALL)
+print(m.group(1) if m else '')
+PY
+)
+[ -n "$merge_block" ] && ok "seed script has opencode merge block" || nope "seed script has opencode merge block" "PYOPENCODE block missing"
+
+cat > "$TMPDIR/canonical.json" <<'EOF'
+{
+  "$schema": "https://opencode.ai/config.json",
+  "provider": {
+    "codex-router": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "Codex Router",
+      "options": {
+        "baseURL": "http://codex-router:4100/v1",
+        "apiKey": "local"
+      },
+      "models": {
+        "auto-thinking": { "name": "Auto (routed)" },
+        "gpt-5.6-terra": { "name": "GPT-5.6 Terra" },
+        "glm-5.2": { "name": "GLM 5.2" },
+        "deepseek-v4-flash": { "name": "DeepSeek V4 Flash" }
+      }
+    }
+  },
+  "model": "codex-router/auto-thinking"
+}
+EOF
+
+mkdir -p "$TMPDIR/home/.config/opencode"
+cat > "$TMPDIR/home/.config/opencode/opencode.json" <<'EOF'
+{
+  "provider": {
+    "codex-router": {
+      "npm": "@ai-sdk/openai-compatible",
+      "options": {
+        "baseURL": "http://codex-router:4100/v1",
+        "apiKey": "local"
+      },
+      "models": {
+        "deepseek-v4-pro": { "name": "DeepSeek V4 Pro" }
+      }
+    }
+  },
+  "instructions": ["custom instruction from install-agents.sh"],
+  "plugin": ["some-plugin@1.0.0"]
+}
+EOF
+echo "rules" > "$TMPDIR/home/.config/opencode/AGENTS.md"
+
+echo "$merge_block" > "$TMPDIR/merge.py"
+python3 "$TMPDIR/merge.py" \
+    "$TMPDIR/canonical.json" \
+    "$TMPDIR/data/.config/opencode/opencode.json" \
+    "$TMPDIR/home/.config/opencode/opencode.json"
+
+data_model=$(python3 -c "
+import json
+print(json.load(open('$TMPDIR/data/.config/opencode/opencode.json')).get('model'))
+")
+[ "$data_model" = "codex-router/auto-thinking" ] && ok "fresh data-home seeded with auto-thinking default" || nope "data-home default" "got: $data_model"
+
+home_result=$(python3 -c "
+import json
+c = json.load(open('$TMPDIR/home/.config/opencode/opencode.json'))
+models = c.get('provider', {}).get('codex-router', {}).get('models', {})
+checks = {
+    'model_auto': c.get('model') == 'codex-router/auto-thinking',
+    'no_pro': 'deepseek-v4-pro' not in models,
+    'has_flash': 'deepseek-v4-flash' in models,
+    'has_auto': 'auto-thinking' in models,
+    'kept_instructions': c.get('instructions') == ['custom instruction from install-agents.sh'],
+    'kept_plugin': c.get('plugin') == ['some-plugin@1.0.0'],
+}
+print('pass' if all(checks.values()) else 'fail ' + repr(checks))
+")
+case "$home_result" in
+    pass) ok "HOME config merged: canonical model/models win, instructions/plugin preserved" ;;
+    *) nope "HOME config merged" "$home_result" ;;
+esac
+
+[ "$(cat "$TMPDIR/home/.config/opencode/AGENTS.md")" = "rules" ] \
+    && ok "seed leaves sibling files (AGENTS.md) untouched" \
+    || nope "sibling files untouched" "AGENTS.md was modified"
+
+echo ""
 echo "========================================="
 echo -e " Results: ${GREEN}$pass passed${NC}, ${RED}$fail failed${NC}"
 echo "========================================="
