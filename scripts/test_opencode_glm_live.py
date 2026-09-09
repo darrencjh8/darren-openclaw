@@ -38,7 +38,7 @@ class OpenCodeGlmLiveTests(unittest.TestCase):
         self.assertTrue({FLASH_MODEL, BASELINE_MODEL} <= models)
 
     def test_supported_reasoning_efforts_and_forced_tool_calls(self):
-        for effort in ("high", "max"):
+        for effort in ("medium", "high", "max"):
             with self.subTest(effort=effort):
                 response = self.client.post(CHAT_URL, headers=self._headers(), json={
                     "model": FLASH_MODEL,

@@ -14,6 +14,7 @@ TEST_WORKFLOW = Path(__file__).parents[2] / ".github/workflows/test.yml"
 ROUTER_CI_WORKFLOW = Path(__file__).parents[2] / ".github/workflows/codex-router-ci.yml"
 ROUTER_LIVE_TEST = Path(__file__).parents[2] / "scripts/test_codex_router_glm_live.py"
 ROUTER_LIVE_LAUNCHER = Path(__file__).parents[2] / "scripts/codex_router_live_launcher.py"
+OPENCODE_LIVE_TEST = Path(__file__).parents[2] / "scripts/test_opencode_glm_live.py"
 DEPLOY_SCRIPT = Path(__file__).parents[1] / "deploy.sh"
 HERMES_CONFIG = Path(__file__).parents[1] / "hermes/config.yaml"
 
@@ -159,6 +160,12 @@ class DeployWorkflowRouterTests(unittest.TestCase):
         self.assertEqual(redirected[0]["url"], launcher.PROXY_URL)
         self.assertEqual(redirected[1], hops[1])
         self.assertEqual(redirected[2], hops[2])
+
+    def test_live_probe_covers_production_hermes_reasoning_effort(self):
+        reviewer = yaml.safe_load((Path(__file__).parents[1] / "hermes/profiles/code-reviewer/config.yaml").read_text(encoding="utf-8"))
+        self.assertEqual(reviewer["model"], {"provider": "opencode-go", "default": "glm-5.3-flash"})
+        self.assertEqual(reviewer["agent"]["reasoning_effort"], "medium")
+        self.assertIn('for effort in ("medium", "high", "max"):', OPENCODE_LIVE_TEST.read_text(encoding="utf-8"))
 
     def test_public_test_workflow_discovers_all_module_contract_tests(self):
         workflow = TEST_WORKFLOW.read_text(encoding="utf-8")
