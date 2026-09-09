@@ -1,6 +1,7 @@
 # Copyright © 2022 Dell Inc. or its subsidiaries. All Rights Reserved.
 
 from pathlib import Path
+import importlib.util
 import unittest
 
 import yaml
@@ -12,6 +13,7 @@ COMPOSE_FILE = Path(__file__).parents[1] / "docker-compose.yml"
 TEST_WORKFLOW = Path(__file__).parents[2] / ".github/workflows/test.yml"
 ROUTER_CI_WORKFLOW = Path(__file__).parents[2] / ".github/workflows/codex-router-ci.yml"
 ROUTER_LIVE_TEST = Path(__file__).parents[2] / "scripts/test_codex_router_glm_live.py"
+ROUTER_LIVE_LAUNCHER = Path(__file__).parents[2] / "scripts/codex_router_live_launcher.py"
 DEPLOY_SCRIPT = Path(__file__).parents[1] / "deploy.sh"
 HERMES_CONFIG = Path(__file__).parents[1] / "hermes/config.yaml"
 
@@ -136,6 +138,22 @@ class DeployWorkflowRouterTests(unittest.TestCase):
         self.assertNotIn('"OPENCODE_API_KEY=" + os.environ["OPENCODE_API_KEY"]', script)
         self.assertIn("codex_router_live_launcher.py", script)
         self.assertIn("opencode_credential_proxy.py", workflow_source)
+
+    def test_live_launcher_redirects_only_opencode_go_hops(self):
+        spec = importlib.util.spec_from_file_location("codex_router_live_launcher", ROUTER_LIVE_LAUNCHER)
+        launcher = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(launcher)
+        hops = (
+            {"model": "glm-5.3-flash", "auth": "opencode_go", "url": "https://opencode.ai/zen/go/v1/chat/completions"},
+            {"model": "mimo-v2.5-free", "auth": "opencode_zen", "url": "https://opencode.ai/zen/v1/chat/completions"},
+            {"model": "gpt-5.6-terra-3", "auth": "local", "url": "http://127.0.0.1:4000/v1/responses"},
+        )
+
+        redirected = launcher.redirect_opencode_go_hops(hops)
+
+        self.assertEqual(redirected[0]["url"], launcher.PROXY_URL)
+        self.assertEqual(redirected[1], hops[1])
+        self.assertEqual(redirected[2], hops[2])
 
     def test_public_test_workflow_discovers_all_module_contract_tests(self):
         workflow = TEST_WORKFLOW.read_text(encoding="utf-8")

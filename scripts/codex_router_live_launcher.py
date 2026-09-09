@@ -5,23 +5,27 @@
 import importlib.util
 from pathlib import Path
 
-import uvicorn
-
-
 PROXY_URL = "http://codex-router-provider-proxy:8080/v1/chat/completions"
 SHIM_PATH = Path("/router/router/shim.py")
 
-spec = importlib.util.spec_from_file_location("candidate_router_shim", SHIM_PATH)
-shim = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(shim)
 
-shim.AUTO_THINKING_HOPS = tuple(
-    {**hop, "url": PROXY_URL} if hop.get("auth") == "opencode" else hop
-    for hop in shim.AUTO_THINKING_HOPS
-)
-shim.GLM_HOPS = tuple(
-    {**hop, "url": PROXY_URL} if hop.get("auth") == "opencode" else hop
-    for hop in shim.GLM_HOPS
-)
+def redirect_opencode_go_hops(hops):
+    return tuple(
+        {**hop, "url": PROXY_URL} if hop.get("auth") == "opencode_go" else hop
+        for hop in hops
+    )
 
-uvicorn.run(shim.app, host="0.0.0.0", port=4100, log_level="warning")
+
+def main():
+    import uvicorn
+
+    spec = importlib.util.spec_from_file_location("candidate_router_shim", SHIM_PATH)
+    shim = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(shim)
+    shim.AUTO_THINKING_HOPS = redirect_opencode_go_hops(shim.AUTO_THINKING_HOPS)
+    shim.GLM_HOPS = redirect_opencode_go_hops(shim.GLM_HOPS)
+    uvicorn.run(shim.app, host="0.0.0.0", port=4100, log_level="warning")
+
+
+if __name__ == "__main__":
+    main()
