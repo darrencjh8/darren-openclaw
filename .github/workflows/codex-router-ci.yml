@@ -17,6 +17,7 @@ permissions:
 jobs:
     test:
         runs-on: ubuntu-latest
+        environment: darren-prod
         steps:
             - name: Check out private Codex Router
               uses: actions/checkout@v4
@@ -42,3 +43,19 @@ jobs:
             - name: Validate Docker contract
               working-directory: codex-router
               run: bash tests/test_docker.sh
+
+            - name: Validate GLM OpenCode Go contract
+              working-directory: codex-router
+              env:
+                  OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
+              run: |
+                  test -n "$OPENCODE_API_KEY"
+                  python tests/test_opencode_glm_live.py
+
+            - name: Upload GLM latency measurements
+              if: always()
+              uses: actions/upload-artifact@v4
+              with:
+                  name: glm-opencode-latency
+                  path: codex-router/glm-opencode-latency.json
+                  if-no-files-found: warn

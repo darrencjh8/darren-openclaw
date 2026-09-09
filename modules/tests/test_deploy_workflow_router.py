@@ -1,3 +1,5 @@
+# Copyright © 2022 Dell Inc. or its subsidiaries. All Rights Reserved.
+
 from pathlib import Path
 import unittest
 
@@ -102,6 +104,12 @@ class DeployWorkflowRouterTests(unittest.TestCase):
         self.assertIn("persist-credentials: false", workflow)
         self.assertIn('python -m unittest discover -s tests -p "test_*.py"', workflow)
         self.assertIn("bash tests/test_docker.sh", workflow)
+        self.assertIn("environment: darren-prod", workflow)
+        self.assertIn("OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}", workflow)
+        self.assertIn('test -n "$OPENCODE_API_KEY"', workflow)
+        self.assertIn("python tests/test_opencode_glm_live.py", workflow)
+        self.assertIn("name: glm-opencode-latency", workflow)
+        self.assertIn("path: codex-router/glm-opencode-latency.json", workflow)
 
     def test_public_test_workflow_discovers_all_module_contract_tests(self):
         workflow = TEST_WORKFLOW.read_text(encoding="utf-8")
