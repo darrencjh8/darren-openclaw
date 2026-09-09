@@ -880,6 +880,12 @@ describe("Phase 1: LLM-directed retrieval (multi-round tools)", () => {
   function jsonMsg(obj) {
     return { content: JSON.stringify(obj) };
   }
+  /** Format YYYY-MM-DD as a bank-alert style date, e.g. "7 Sep 2026". */
+  function formatEmailDate(isoDate) {
+    const [y, m, d] = isoDate.split("-").map(Number);
+    const MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+    return `${d} ${MONTHS[m - 1]} ${y}`;
+  }
 
   const yuuResult = {
     merchant: "BUS/MRT",
@@ -1611,6 +1617,10 @@ describe("Phase 1: LLM-directed retrieval (multi-round tools)", () => {
     const orch = new AgentOrchestrator(config, tools);
     let retryMessages = null;
 
+    const recentDate = new Date(Date.now() - 2 * 86400000)
+      .toISOString()
+      .slice(0, 10);
+
     orch._llm.chat = vi
       .fn()
       // 1st call: single-shot movement-extractor fallback (no tools) —
@@ -1620,14 +1630,14 @@ describe("Phase 1: LLM-directed retrieval (multi-round tools)", () => {
       // DATE, TIME" shape either).
       .mockResolvedValueOnce({ choices: [{ message: { content: "{}" } }] })
       .mockResolvedValueOnce({
-        choices: [{ message: jsonMsg({ ...yuuResult, merchant: "Toast Box", account_id: "acc-dbs", account_name: "DBS Account" }) }],
+        choices: [{ message: jsonMsg({ ...yuuResult, merchant: "Toast Box", account_id: "acc-dbs", account_name: "DBS Account", date: recentDate }) }],
       })
       .mockImplementationOnce(async (messages) => {
         retryMessages = messages;
-        return { choices: [{ message: jsonMsg({ ...yuuResult, merchant: "Toast Box" }) }] };
+        return { choices: [{ message: jsonMsg({ ...yuuResult, merchant: "Toast Box", date: recentDate }) }] };
       });
 
-    const emailText = "Toast Box: SGD 12.80 was paid using your DBS Card just now, 2 Sep 2026 12:46 PM.";
+    const emailText = "Toast Box: SGD 12.80 was paid using your DBS Card just now, " + formatEmailDate(recentDate) + ".";
     const result = await orch._runPhase1(emailText, { senderBank: "DBS" });
 
     expect(result.account_id).toBe("acc-yuu");
