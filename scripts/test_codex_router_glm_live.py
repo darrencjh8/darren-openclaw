@@ -6,7 +6,6 @@ import json
 import os
 from pathlib import Path
 import subprocess
-import sys
 import tempfile
 import time
 import unittest
@@ -18,6 +17,8 @@ import httpx
 FLASH_MODEL = "glm-5.3-flash"
 ROUTER_DIR = Path(os.environ["ROUTER_DIR"]).resolve()
 ROUTER_URL = "http://127.0.0.1:4100"
+CI_SCRIPTS = Path(__file__).resolve().parent
+CONTAINER_NAME = "codex-router-candidate"
 
 
 class CodexRouterGlmLiveTests(unittest.TestCase):
@@ -29,25 +30,33 @@ class CodexRouterGlmLiveTests(unittest.TestCase):
             "object": "list",
             "models": [{"slug": FLASH_MODEL, "display_name": "GLM 5.3 Flash"}],
         }), encoding="utf-8")
-        environment = os.environ.copy()
-        environment.update({
-            "CODEX_ROUTER_STATE_DIR": str(state),
-            "CODEX_ROUTER_UPSTREAM": "http://127.0.0.1:9",
-            "CODEX_ROUTER_AUTO_THINKING_TIMEOUT_SECONDS": "180",
-        })
-        cls.process = subprocess.Popen(
-            [sys.executable, str(ROUTER_DIR / "router/shim.py")],
-            cwd=ROUTER_DIR,
-            env=environment,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-        )
+        subprocess.run(["docker", "rm", "--force", CONTAINER_NAME], check=False, capture_output=True)
+        subprocess.run([
+            "docker", "run", "--detach", "--name", CONTAINER_NAME,
+            "--network", "codex-router-live-internal",
+            "--publish", "127.0.0.1:4100:4100",
+            "--env", "CODEX_ROUTER_STATE_DIR=/state",
+            "--env", "CODEX_ROUTER_UPSTREAM=http://127.0.0.1:9",
+            "--env", "CODEX_ROUTER_AUTO_THINKING_TIMEOUT_SECONDS=180",
+            "--env", "OPENCODE_API_KEY=dummy",
+            "--volume", f"{ROUTER_DIR}:/router:ro",
+            "--volume", f"{state}:/state:ro",
+            "--volume", f"{CI_SCRIPTS}/codex_router_live_launcher.py:/ci/codex_router_live_launcher.py:ro",
+            "codex-router-live-runtime",
+            "python", "/ci/codex_router_live_launcher.py",
+        ], check=True, capture_output=True, text=True)
         cls.client = httpx.Client(base_url=ROUTER_URL, timeout=180)
         deadline = time.monotonic() + 20
         while time.monotonic() < deadline:
-            if cls.process.poll() is not None:
-                raise RuntimeError(f"router exited during startup:\n{cls.process.stdout.read()}")
+            status = subprocess.run(
+                ["docker", "inspect", "--format", "{{.State.Running}}", CONTAINER_NAME],
+                check=False, capture_output=True, text=True,
+            )
+            if status.stdout.strip() != "true":
+                logs = subprocess.run(
+                    ["docker", "logs", CONTAINER_NAME], check=False, capture_output=True, text=True,
+                )
+                raise RuntimeError(f"router exited during startup:\n{logs.stdout}{logs.stderr}")
             try:
                 if cls.client.get("/v1/models").status_code == 200:
                     return
@@ -58,12 +67,7 @@ class CodexRouterGlmLiveTests(unittest.TestCase):
     @classmethod
     def tearDownClass(cls):
         cls.client.close()
-        cls.process.terminate()
-        try:
-            cls.process.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            cls.process.kill()
-            cls.process.wait(timeout=5)
+        subprocess.run(["docker", "rm", "--force", CONTAINER_NAME], check=False, capture_output=True)
         cls.state.cleanup()
 
     def test_catalog_exposes_glm_5_3_flash(self):

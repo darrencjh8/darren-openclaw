@@ -11,6 +11,7 @@ SYNC_WORKFLOW = Path(__file__).parents[2] / ".github/workflows/sync-codex-router
 COMPOSE_FILE = Path(__file__).parents[1] / "docker-compose.yml"
 TEST_WORKFLOW = Path(__file__).parents[2] / ".github/workflows/test.yml"
 ROUTER_CI_WORKFLOW = Path(__file__).parents[2] / ".github/workflows/codex-router-ci.yml"
+ROUTER_LIVE_TEST = Path(__file__).parents[2] / "scripts/test_codex_router_glm_live.py"
 DEPLOY_SCRIPT = Path(__file__).parents[1] / "deploy.sh"
 HERMES_CONFIG = Path(__file__).parents[1] / "hermes/config.yaml"
 
@@ -121,6 +122,20 @@ class DeployWorkflowRouterTests(unittest.TestCase):
         self.assertIn("ROUTER_DIR: ${{ github.workspace }}/codex-router", workflow)
         self.assertIn("name: glm-opencode-latency", workflow)
         self.assertIn("path: glm-opencode-latency.json", workflow)
+
+    def test_live_router_candidate_is_isolated_from_secret_and_egress(self):
+        workflow = yaml.safe_load(ROUTER_CI_WORKFLOW.read_text(encoding="utf-8"))
+        live_steps = {step["name"]: step for step in workflow["jobs"]["live-opencode"]["steps"] if "name" in step}
+        router_step = live_steps["Validate GLM through isolated Codex Router shim"]
+        self.assertNotIn("OPENCODE_API_KEY", router_step.get("env", {}))
+
+        script = ROUTER_LIVE_TEST.read_text(encoding="utf-8")
+        workflow_source = ROUTER_CI_WORKFLOW.read_text(encoding="utf-8")
+        self.assertIn("docker network create --internal codex-router-live-internal", workflow_source)
+        self.assertIn('"OPENCODE_API_KEY=dummy"', script)
+        self.assertNotIn('"OPENCODE_API_KEY=" + os.environ["OPENCODE_API_KEY"]', script)
+        self.assertIn("codex_router_live_launcher.py", script)
+        self.assertIn("opencode_credential_proxy.py", workflow_source)
 
     def test_public_test_workflow_discovers_all_module_contract_tests(self):
         workflow = TEST_WORKFLOW.read_text(encoding="utf-8")
