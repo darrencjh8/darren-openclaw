@@ -106,6 +106,8 @@ class DeployWorkflowRouterTests(unittest.TestCase):
         self.assertIn("ref: ${{", workflow)
         self.assertIn("token: ${{ secrets.SUBMODULE_PAT }}", workflow)
         self.assertIn("persist-credentials: false", workflow)
+        self.assertIn('[[ "$router_ref" =~ ^[0-9a-f]{40}$ ]]', workflow)
+        self.assertIn('test "$(git rev-parse HEAD)" = "$router_ref"', workflow)
         self.assertIn('python -m unittest discover -s tests -p "test_*.py"', workflow)
         self.assertIn("bash tests/test_docker.sh", workflow)
         self.assertNotIn("environment", unit_job)
@@ -115,6 +117,8 @@ class DeployWorkflowRouterTests(unittest.TestCase):
         self.assertIn('test -n "$OPENCODE_API_KEY"', workflow)
         self.assertIn("ref: main", workflow)
         self.assertIn("python ci/scripts/test_opencode_glm_live.py", workflow)
+        self.assertIn("python ci/scripts/test_codex_router_glm_live.py", workflow)
+        self.assertIn("ROUTER_DIR: ${{ github.workspace }}/codex-router", workflow)
         self.assertIn("name: glm-opencode-latency", workflow)
         self.assertIn("path: glm-opencode-latency.json", workflow)
 
