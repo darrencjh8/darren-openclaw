@@ -69,7 +69,7 @@ assert config["agent"]["reasoning_effort"] == "medium"
 assert config["fallback_providers"] == [opencode_glm_fallback, deepseek_flash_fallback], (
     "main fallback_providers must be opencode-go/glm-5.2, then deepseek-v4-flash"
 )
-assert_route(config["delegation"], "gpt-5.6-luna", "delegation")
+assert_route(config["delegation"], "auto-thinking", "delegation")
 
 assert_route(config["auxiliary"]["vision"], "gpt-5.6-terra", "auxiliary.vision")
 assert config["auxiliary"]["vision"].get("fallback_chain") == [deepseek_vision_fallback], (
