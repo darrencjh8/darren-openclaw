@@ -108,6 +108,9 @@ class DeployWorkflowRouterTests(unittest.TestCase):
         self.assertIn("OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}", workflow)
         self.assertIn('test -n "$OPENCODE_API_KEY"', workflow)
         self.assertIn("python tests/test_opencode_glm_live.py", workflow)
+        self.assertIn("OPENCODE_ZEN_API_KEY: ${{ secrets.OPENCODE_ZEN_API_KEY }}", workflow)
+        self.assertIn("DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}", workflow)
+        self.assertIn("python tests/test_provider_smoke_live.py", workflow)
         self.assertIn("name: glm-opencode-latency", workflow)
         self.assertIn("path: codex-router/glm-opencode-latency.json", workflow)
 
