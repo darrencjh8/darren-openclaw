@@ -24,7 +24,7 @@ router_provider = {
 router_route = "custom:codex-router"
 opencode_glm_fallback = {
     "provider": "opencode-go",
-    "model": "glm-5.2",
+    "model": "glm-5.3-flash",
 }
 deepseek_pro_fallback = {
     "provider": "deepseek",
@@ -67,7 +67,7 @@ assert "base_url" not in config["model"]
 assert "api_key" not in config["model"]
 assert config["agent"]["reasoning_effort"] == "medium"
 assert config["fallback_providers"] == [opencode_glm_fallback, deepseek_flash_fallback], (
-    "main fallback_providers must be opencode-go/glm-5.2, then deepseek-v4-flash"
+    "main fallback_providers must be opencode-go/glm-5.3-flash, then deepseek-v4-flash"
 )
 assert_route(config["delegation"], "auto-thinking", "delegation")
 
@@ -86,7 +86,7 @@ for task, model in {
     route = config["auxiliary"][task]
     assert_route(route, model, f"auxiliary.{task}")
     assert route.get("fallback_chain") == [opencode_glm_fallback, deepseek_flash_fallback], (
-        f"auxiliary.{task}.fallback_chain must start with opencode-go/glm-5.2, then deepseek-v4-flash"
+        f"auxiliary.{task}.fallback_chain must start with opencode-go/glm-5.3-flash, then deepseek-v4-flash"
     )
 
 assert config["kanban"]["default_assignee"] == "code-reviewer"
@@ -106,7 +106,7 @@ assert "fallback_chain" not in decomposer, (
 
 for profile, (model, fallback_model) in {
     "architect": ("gpt-5.6-sol", "deepseek-v4-pro"),
-    "code-reviewer": ("glm-5.2", "deepseek-v4-flash"),
+    "code-reviewer": ("glm-5.3-flash", "deepseek-v4-flash"),
     "spec-auditor": ("gpt-5.6-terra", "deepseek-v4-pro"),
     "project-manager": ("gpt-5.6-luna", "deepseek-v4-flash"),
 }.items():

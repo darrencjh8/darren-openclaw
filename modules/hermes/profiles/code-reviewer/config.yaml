@@ -8,7 +8,7 @@ providers:
 
 model:
     provider: opencode-go
-    default: glm-5.2
+    default: glm-5.3-flash
 
 fallback_providers:
     - provider: custom:codex-router
@@ -56,4 +56,3 @@ mcp_servers:
         tools:
             exclude: []
         supports_parallel_tool_calls: false
-
