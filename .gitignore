@@ -77,3 +77,6 @@ modules/onedrive-sync/config/onedrive-state/
 
 # dev-loop state
 .agents/dev-loop-state.json
+
+# dev-loop review artifacts (packs and reviewer output)
+.agents/dev-loop/
