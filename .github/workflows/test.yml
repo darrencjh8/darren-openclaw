@@ -92,6 +92,10 @@ jobs:
             - uses: actions/setup-python@v5
               with:
                   python-version: "3.12"
+            # Several tests below parse Hermes YAML. setup-python provisions a
+            # pristine interpreter, so PyYAML must be installed explicitly.
+            - name: Install PyYAML
+              run: python -m pip install --quiet PyYAML
             - name: Lint bash scripts
               run: |
                   sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck
@@ -111,9 +115,7 @@ jobs:
             - name: Test docker-compose hermes env vars
               run: bash modules/hermes/tests/test-docker-compose-env.sh
             - name: Test Hermes Slack platform wiring
-              run: |
-                  python -m pip install --quiet PyYAML
-                  python -m unittest modules.hermes.tests.test_slack_platform -v
+              run: python -m unittest modules.hermes.tests.test_slack_platform -v
 
     image-gen:
         runs-on: ubuntu-latest
