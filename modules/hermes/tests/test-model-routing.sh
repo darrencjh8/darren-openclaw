@@ -106,7 +106,7 @@ assert "fallback_chain" not in decomposer, (
 
 for profile, (model, fallback_model) in {
     "architect": ("gpt-5.6-sol", "deepseek-v4-pro"),
-    "code-reviewer": ("glm-5.3-flash", "deepseek-v4-flash"),
+    "code-reviewer": ("auto-thinking", None),
     "spec-auditor": ("gpt-5.6-terra", "deepseek-v4-pro"),
     "project-manager": ("gpt-5.6-luna", "deepseek-v4-flash"),
 }.items():
@@ -114,9 +114,8 @@ for profile, (model, fallback_model) in {
     assert profile_config_path.is_file(), f"{profile} profile config is missing"
     with open(profile_config_path) as f:
         profile_config = yaml.safe_load(f)
-    if profile != "code-reviewer":
-        assert_provider(profile_config, model, profile)
-    expected_provider = "opencode-go" if profile == "code-reviewer" else router_route
+    assert_provider(profile_config, model, profile)
+    expected_provider = router_route
     assert profile_config["model"].get("provider") == expected_provider, (
         f"{profile}.model.provider: expected {expected_provider!r}, got {profile_config['model'].get('provider')!r}"
     )
@@ -125,17 +124,7 @@ for profile, (model, fallback_model) in {
     assert "api_key" not in profile_config["model"]
     fallback = profile_config["fallback_providers"]
     if profile == "code-reviewer":
-        assert len(fallback) >= 2, (
-            f"{profile} fallback must have at least 2 entries (codex-router/terra + deepseek)"
-        )
-        assert fallback[0].get("provider") == "custom:codex-router", (
-            f"{profile} first fallback must use custom:codex-router/terra"
-        )
-        assert fallback[0].get("model") == "gpt-5.6-terra", (
-            f"{profile} first fallback model must be gpt-5.6-terra"
-        )
-        assert fallback[1].get("provider") == "deepseek"
-        assert fallback[1].get("model") == fallback_model
+        assert fallback == [], "code-reviewer must fail closed instead of switching review tiers"
     else:
         assert len(fallback) == 1
         assert fallback[0].get("provider") == "deepseek"

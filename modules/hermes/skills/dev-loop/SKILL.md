@@ -17,8 +17,8 @@ Use normal prose for user-facing PRs, issues, commits, docs, and other persisted
 ## Hard rules
 
 - Repo rules override this skill.
-- One code-reviewer process maximum at any moment. Never parallelize reviewers.
-- Review profile: `code-reviewer`; the dev-loop caller selects the reviewer model each round from the allowed set `gpt-5.6-terra`, `glm-5.3-flash`, `deepseek-v4-flash` (no account suffix; DeepSeek `deepseek-v4-flash` only, never `deepseek-v4-pro`).
+- Review profile: `code-reviewer`. Round 1 uses `auto-thinking` with one active reviewer. Rounds 2-15 use `auto-thinking-free` with at most two concurrent reviewers.
+- Never substitute the paid and free reviewer models. Missing model, profile, authentication, or evidence fails the round closed.
 - If a relevant specification exists, it must pass the `spec-auditor` gate before code review.
 - No production code before a failing assertion test.
 - Any repository change resets review clean streak to zero.
@@ -137,7 +137,7 @@ unchanged. Any auditor mutation is a hard failure.
 
 ### Reviewer process
 
-One fresh isolated Hermes process per round. No second reviewer until first exits.
+Every reviewer uses a fresh isolated Hermes process. Round 1 runs alone. For later rounds, assign consecutive round numbers and launch at most two concurrent reviewers against the same immutable HEAD. Consume verdicts in assigned round order.
 
 ```bash
 cd <worktree>
@@ -149,8 +149,7 @@ HERMES_HOME=<hermes-home> hermes chat \
   --query-file <review-prompt-outside-repo>
 ```
 
-Before launch verify `hermes chat --help` supports the exact invocation, the launch routes to the caller-selected reviewer model (one of `gpt-5.6-terra`, `glm-5.3-flash`, `deepseek-v4-flash`), and `caveman`/`code-reviewer` skills exist in that profile.
-Fail closed if the launch cannot be made to route to the selected model. The `code-reviewer` profile default is `glm-5.3-flash`, so selecting `gpt-5.6-terra` or `deepseek-v4-flash` requires a per-run model override or a profile whose default equals the selection. Never run a different allowed model and record it as the selected model. Do not silently substitute a model or profile.
+Before launch verify `hermes chat --help` supports the exact invocation, the launch routes to the model required for that round, and `caveman`/`code-reviewer` skills exist in that profile. The profile defaults to round-1 `auto-thinking`; later launches must override the model to `auto-thinking-free`. Its fallback chain is empty so model failure remains fail-closed.
 
 Run one review round using the required `code-reviewer` profile, choosing one lens:
 - **A:** end-to-end behavior, callers, persistence, compatibility, and tests.
@@ -159,7 +158,7 @@ Run one review round using the required `code-reviewer` profile, choosing one le
 Reviewer prompt must require:
 
 - Load `caveman`, ultra intensity; then load `code-reviewer`.
-- Run under the caller-selected reviewer model from the allowed set (`gpt-5.6-terra`, `glm-5.3-flash`, `deepseek-v4-flash`); report the exact model as evidence. Do not substitute a model outside the allowed set.
+- Run under `auto-thinking` for round 1 or `auto-thinking-free` for every later round; report the requested virtual model and returned model echo as evidence.
 - Read-only isolation: no edits, commits, branches, config changes, external write APIs, or network writes.
 - Review exact `merge-base(base, HEAD)..HEAD`, surrounding callers, configuration, tests, and lifecycle paths.
 - Output stable finding IDs, severity, file/line, evidence, concrete trigger for Critical/High, remediation, and verdict.
@@ -185,10 +184,10 @@ A round is clean only when all apply:
 - Required local test/lint/build/security gates pass.
 - State records exact base SHA and HEAD SHA.
 
-Gate passes after one clean round from a fresh session on the **same unchanged HEAD SHA**.
-Any file, commit, dependency, generated artifact, configuration, or Medium/Low fix after a review verdict resets streak to zero and requires applicable tests plus a new full gate.
+Gate passes after three continuous fresh-context approvals on the **same unchanged HEAD SHA**.
+Any disagreement, `REQUEST_CHANGES`, file change, commit, dependency, generated artifact, configuration, or Medium/Low fix resets the streak to zero. A mutation also invalidates unrecorded concurrent reviews for the old HEAD and requires applicable tests plus a new full gate.
 
-Maximum five total review rounds, including every re-review. Exhaustion is automatic NO-GO. No loop override.
+The paid tier retains a five-round safety cap, though this mixed protocol uses it only for round 1. Free rounds are capped at round 15. Reaching round 15 without three continuous approvals is automatic NO-GO. No loop override.
 
 ## Phase 3 - PR, CI, merge
 
@@ -197,7 +196,7 @@ Maximum five total review rounds, including every re-review. Exhaustion is autom
 3. Resolve required checks from live branch protection; save the protection/check snapshot and bind every observed check to exact PR HEAD SHA.
 4. Monitor required checks. Treat a newer workflow run, changed HEAD, or changed branch-protection snapshot as stale; re-resolve and re-evaluate or fail closed.
 5. On any failing required check, obtain logs, diagnose, fix locally, run equivalent local gates, commit, and push.
-6. Every CI-fix commit - behavioral or otherwise - resets review gate and requires full local gates plus Phase 2 within the same five-round total review budget.
+6. Every CI-fix commit - behavioral or otherwise - resets review gate and requires full local gates plus the complete round-aware Phase 2 gate.
 7. Maximum three CI fix attempts. On exhaustion, mark the PR draft when permitted, persist state and decisive logs, then halt and escalate to the user. Never merge.
 
 Merge only when exact PR HEAD SHA has:
@@ -220,8 +219,8 @@ Report TDD cycles, clean-review SHA rounds, finding dispositions, CI attempts, r
 
 | Condition | Action |
 |---|---|
-| One clean round, CI green, protected merge complete | Report success |
-| Review reaches five rounds | NO-GO; ask user |
+| Three continuous approvals, CI green, protected merge complete | Report success |
+| Free review reaches round 15 without three continuous approvals | NO-GO; ask user |
 | CI reaches three fix attempts | NO-GO; ask user |
 | Required check stalls about 30 min | Investigate then halt |
 | Prerequisite, auth, profile, skill, or infrastructure failure | Fail closed; ask user |

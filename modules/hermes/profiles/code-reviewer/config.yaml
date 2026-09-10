@@ -4,18 +4,13 @@ providers:
         api: http://codex-router:4100/v1
         api_key: local
         transport: chat_completions
-        default_model: gpt-5.6-terra
+        default_model: auto-thinking
 
 model:
-    provider: opencode-go
-    default: glm-5.3-flash
+    provider: custom:codex-router
+    default: auto-thinking
 
-fallback_providers:
-    - provider: custom:codex-router
-      model: gpt-5.6-terra
-    - provider: deepseek
-      model: deepseek-v4-flash
-      api_key: ${DEEPSEEK_API_KEY}
+fallback_providers: []
 
 agent:
     reasoning_effort: medium

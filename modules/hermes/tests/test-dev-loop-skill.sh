@@ -30,15 +30,19 @@ require() {
 require "$DEV_LOOP_SKILL" "skill pulls origin main before planning" "git pull --ff-only origin <default-branch>"
 require "$DEV_LOOP_SKILL" "skill creates a worktree from verified origin" "Create a new isolated \`feat/...\` or \`fix/...\` worktree and branch from that verified \`origin/<default-branch>\` SHA"
 require "$DEV_LOOP_SKILL" "skill uses the sole reviewer profile" "--profile code-reviewer"
-require "$DEV_LOOP_SKILL" "skill uses one reviewer per round" "One fresh isolated Hermes process per round."
-require "$DEV_LOOP_SKILL" "skill requires one clean round" "one clean round from a fresh session on the **same unchanged HEAD SHA**"
+require "$DEV_LOOP_SKILL" "skill pins paid round one" "Round 1 uses \`auto-thinking\`"
+require "$DEV_LOOP_SKILL" "skill pins later free rounds" "Rounds 2-15 use \`auto-thinking-free\`"
+require "$DEV_LOOP_SKILL" "skill caps free concurrency" "at most two concurrent reviewers"
+require "$DEV_LOOP_SKILL" "skill requires three approvals" "three continuous fresh-context approvals on the **same unchanged HEAD SHA**"
+require "$DEV_LOOP_SKILL" "skill disables cross-tier fallback" "Never substitute the paid and free reviewer models"
 require "$DEV_LOOP_SKILL" "skill resolves optional specifications" "If a relevant specification exists"
 require "$DEV_LOOP_SKILL" "skill invokes spec-auditor before code review" "--profile spec-auditor"
-require "$DEV_LOOP_SKILL" "skill verifies the launch routes to the caller-selected reviewer model" "the launch routes to the caller-selected reviewer model"
+require "$DEV_LOOP_SKILL" "skill verifies the launch routes to the round model" "the launch routes to the model required for that round"
 require "$DEV_LOOP_SKILL" "skill owns the loop through merge" "Own the loop through completion."
 require "$CODE_REVIEWER_SKILL" "reviewer skill pins the managed profile" "managed \`code-reviewer\` profile"
-require "$CODE_REVIEWER_SKILL" "reviewer skill allows the reviewer model set" "allowed set: \`gpt-5.6-terra\` (Terra), \`glm-5.3-flash\` (OpenCode Go), or \`deepseek-v4-flash\`"
-require "$REPO_RULES" "repo rules require one reviewer per round" "one independent fresh-context code-reviewer per round"
+require "$CODE_REVIEWER_SKILL" "reviewer skill pins round models" "Round 1 uses \`auto-thinking\`; every later round uses \`auto-thinking-free\`"
+require "$REPO_RULES" "repo rules permit free concurrency" "up to two concurrent fresh-context reviewers on free rounds"
+require "$REPO_RULES" "repo rules require three approvals" "three continuous approvals on the same unchanged HEAD"
 require "$REPO_RULES" "repo rules invoke spec-auditor when a spec exists" "invoke spec-auditor before code review"
 
 for profile_file in config.yaml profile.yaml SOUL.md; do
@@ -51,12 +55,6 @@ if grep -Fq -- "--provider deepseek" "$DEV_LOOP_SKILL" || grep -Fq -- "deepseek-
     nope "skills have no hardcoded DeepSeek reviewer invocation"
 else
     ok "skills have no hardcoded DeepSeek reviewer invocation"
-fi
-
-if grep -Fqi -- "two independent fresh-context review" "$REPO_RULES"; then
-    nope "repo rules do not require two reviewers per round"
-else
-    ok "repo rules do not require two reviewers per round"
 fi
 
 exit "$fail"
