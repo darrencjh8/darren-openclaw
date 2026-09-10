@@ -37,7 +37,7 @@ require "$DEV_LOOP_SKILL" "skill invokes spec-auditor before code review" "--pro
 require "$DEV_LOOP_SKILL" "skill verifies the launch routes to the caller-selected reviewer model" "the launch routes to the caller-selected reviewer model"
 require "$DEV_LOOP_SKILL" "skill owns the loop through merge" "Own the loop through completion."
 require "$CODE_REVIEWER_SKILL" "reviewer skill pins the managed profile" "managed \`code-reviewer\` profile"
-require "$CODE_REVIEWER_SKILL" "reviewer skill allows the reviewer model set" "allowed set: \`gpt-5.6-terra\` (Terra), \`glm-5.2\` (OpenCode Go), or \`deepseek-v4-flash\`"
+require "$CODE_REVIEWER_SKILL" "reviewer skill allows the reviewer model set" "allowed set: \`gpt-5.6-terra\` (Terra), \`glm-5.3-flash\` (OpenCode Go), or \`deepseek-v4-flash\`"
 require "$REPO_RULES" "repo rules require one reviewer per round" "one independent fresh-context code-reviewer per round"
 require "$REPO_RULES" "repo rules invoke spec-auditor when a spec exists" "invoke spec-auditor before code review"
 

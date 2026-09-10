@@ -4,9 +4,8 @@ on:
     workflow_dispatch:
         inputs:
             router_ref:
-                description: "Private Codex Router branch, tag, or commit SHA"
+                description: "Reviewed Codex Router commit SHA"
                 required: true
-                default: main
                 type: string
     repository_dispatch:
         types: [codex-router-ci]
@@ -17,7 +16,6 @@ permissions:
 jobs:
     test:
         runs-on: ubuntu-latest
-        environment: darren-prod
         steps:
             - name: Check out private Codex Router
               uses: actions/checkout@v4
@@ -44,8 +42,43 @@ jobs:
               working-directory: codex-router
               run: bash tests/test_docker.sh
 
+    live-opencode:
+        if: github.ref == 'refs/heads/main'
+        runs-on: ubuntu-latest
+        environment: darren-prod
+        steps:
+            - name: Require an immutable reviewed router commit
+              env:
+                  ROUTER_REF: ${{ github.event.inputs.router_ref || github.event.client_payload.router_ref }}
+              run: |
+                  router_ref="$ROUTER_REF"
+                  [[ "$router_ref" =~ ^[0-9a-f]{40}$ ]]
+
+            - name: Check out trusted CI probe
+              uses: actions/checkout@v4
+              with:
+                  ref: main
+                  persist-credentials: false
+                  path: ci
+
+            - name: Check out trusted Codex Router smoke tests
+              uses: actions/checkout@v4
+              with:
+                  repository: darrencjh8/codex-router
+                  ref: main
+                  token: ${{ secrets.SUBMODULE_PAT }}
+                  persist-credentials: false
+                  path: trusted-router
+
+            - uses: actions/setup-python@v5
+              with:
+                  python-version: "3.12"
+
+            - name: Install trusted probe dependency
+              run: python -m pip install httpx==0.28.1
+
             - name: Smoke-test auto-thinking external providers
-              working-directory: codex-router
+              working-directory: trusted-router
               env:
                   OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
                   OPENCODE_ZEN_API_KEY: ${{ secrets.OPENCODE_ZEN_API_KEY }}
@@ -55,3 +88,66 @@ jobs:
                   test -n "$OPENCODE_ZEN_API_KEY"
                   test -n "$DEEPSEEK_API_KEY"
                   python tests/test_provider_smoke_live.py
+
+            - name: Check out reviewed Codex Router commit
+              uses: actions/checkout@v4
+              with:
+                  repository: darrencjh8/codex-router
+                  ref: ${{ github.event.inputs.router_ref || github.event.client_payload.router_ref }}
+                  token: ${{ secrets.SUBMODULE_PAT }}
+                  persist-credentials: false
+                  path: codex-router
+
+            - name: Verify immutable router checkout
+              working-directory: codex-router
+              env:
+                  ROUTER_REF: ${{ github.event.inputs.router_ref || github.event.client_payload.router_ref }}
+              run: |
+                  router_ref="$ROUTER_REF"
+                  test "$(git rev-parse HEAD)" = "$router_ref"
+
+            - name: Build isolated live-test runtime
+              run: |
+                  docker build --file ci/scripts/codex-router-live.Dockerfile --tag codex-router-live-runtime ci/scripts
+                  docker network create codex-router-live-egress
+                  docker network create --internal codex-router-live-internal
+
+            - name: Start trusted OpenCode credential proxy
+              env:
+                  OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
+              run: |
+                  test -n "$OPENCODE_API_KEY"
+                  docker run --detach --name codex-router-provider-proxy \
+                    --network codex-router-live-egress \
+                    --env OPENCODE_API_KEY \
+                    --volume "$PWD/ci/scripts:/ci:ro" \
+                    codex-router-live-runtime \
+                    python /ci/opencode_credential_proxy.py
+                  docker network connect codex-router-live-internal codex-router-provider-proxy
+
+            - name: Validate GLM OpenCode Go contract and latency
+              env:
+                  OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
+              run: |
+                  test -n "$OPENCODE_API_KEY"
+                  python ci/scripts/test_opencode_glm_live.py
+
+            - name: Validate GLM through isolated Codex Router shim
+              env:
+                  ROUTER_DIR: ${{ github.workspace }}/codex-router
+              run: |
+                  python ci/scripts/test_codex_router_glm_live.py
+
+            - name: Clean up isolated live-test runtime
+              if: always()
+              run: |
+                  docker rm --force codex-router-candidate codex-router-provider-proxy 2>/dev/null || true
+                  docker network rm codex-router-live-internal codex-router-live-egress 2>/dev/null || true
+
+            - name: Upload GLM latency measurements
+              if: always()
+              uses: actions/upload-artifact@v4
+              with:
+                  name: glm-opencode-latency
+                  path: glm-opencode-latency.json
+                  if-no-files-found: warn

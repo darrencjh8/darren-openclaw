@@ -1,6 +1,7 @@
 # Copyright © 2022 Dell Inc. or its subsidiaries. All Rights Reserved.
 
 from pathlib import Path
+import importlib.util
 import unittest
 
 import yaml
@@ -11,6 +12,9 @@ SYNC_WORKFLOW = Path(__file__).parents[2] / ".github/workflows/sync-codex-router
 COMPOSE_FILE = Path(__file__).parents[1] / "docker-compose.yml"
 TEST_WORKFLOW = Path(__file__).parents[2] / ".github/workflows/test.yml"
 ROUTER_CI_WORKFLOW = Path(__file__).parents[2] / ".github/workflows/codex-router-ci.yml"
+ROUTER_LIVE_TEST = Path(__file__).parents[2] / "scripts/test_codex_router_glm_live.py"
+ROUTER_LIVE_LAUNCHER = Path(__file__).parents[2] / "scripts/codex_router_live_launcher.py"
+OPENCODE_LIVE_TEST = Path(__file__).parents[2] / "scripts/test_opencode_glm_live.py"
 DEPLOY_SCRIPT = Path(__file__).parents[1] / "deploy.sh"
 HERMES_CONFIG = Path(__file__).parents[1] / "hermes/config.yaml"
 
@@ -77,12 +81,10 @@ class DeployWorkflowRouterTests(unittest.TestCase):
         compose = yaml.safe_load(COMPOSE_FILE.read_text(encoding="utf-8"))
         router_env = compose["services"]["codex-router"]["environment"]
         self.assertIn("OPENCODE_API_KEY=${OPENCODE_API_KEY:-}", router_env)
-        self.assertIn("OPENCODE_ZEN_API_KEY=${OPENCODE_ZEN_API_KEY:-}", router_env)
 
         deploy_script = DEPLOY_SCRIPT.read_text(encoding="utf-8")
         router_section = deploy_script.split("# ---- codex-router ----", 1)[1].split("# ---- pluggable modules", 1)[0]
         self.assertIn('check_var_optional "OPENCODE_API_KEY" ""', router_section)
-        self.assertIn('check_var_optional "OPENCODE_ZEN_API_KEY" ""', router_section)
 
     def test_opencode_go_key_is_passed_to_hermes(self):
         compose = yaml.safe_load(COMPOSE_FILE.read_text(encoding="utf-8"))
@@ -98,23 +100,87 @@ class DeployWorkflowRouterTests(unittest.TestCase):
 
     def test_public_workflow_runs_private_router_tests_at_an_explicit_ref(self):
         workflow = ROUTER_CI_WORKFLOW.read_text(encoding="utf-8")
+        config = yaml.safe_load(workflow)
+        unit_job = config["jobs"]["test"]
+        self.assertIn("live-opencode", config["jobs"])
+        live_job = config["jobs"]["live-opencode"]
         self.assertIn("workflow_dispatch:", workflow)
         self.assertIn("repository_dispatch:", workflow)
         self.assertIn("repository: darrencjh8/codex-router", workflow)
         self.assertIn("ref: ${{", workflow)
         self.assertIn("token: ${{ secrets.SUBMODULE_PAT }}", workflow)
         self.assertIn("persist-credentials: false", workflow)
+        self.assertIn('[[ "$router_ref" =~ ^[0-9a-f]{40}$ ]]', workflow)
+        self.assertIn('test "$(git rev-parse HEAD)" = "$router_ref"', workflow)
         self.assertIn('python -m unittest discover -s tests -p "test_*.py"', workflow)
         self.assertIn("bash tests/test_docker.sh", workflow)
-        self.assertIn("environment: darren-prod", workflow)
+        self.assertNotIn("environment", unit_job)
+        self.assertEqual(live_job["environment"], "darren-prod")
+        self.assertEqual(live_job["if"], "github.ref == 'refs/heads/main'")
         self.assertIn("OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}", workflow)
         self.assertIn('test -n "$OPENCODE_API_KEY"', workflow)
-        self.assertNotIn("python tests/test_opencode_glm_live.py", workflow)
-        self.assertIn("OPENCODE_ZEN_API_KEY: ${{ secrets.OPENCODE_ZEN_API_KEY }}", workflow)
-        self.assertIn("DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}", workflow)
-        self.assertIn("Smoke-test auto-thinking external providers", workflow)
-        self.assertIn("python tests/test_provider_smoke_live.py", workflow)
-        self.assertNotIn("name: glm-opencode-latency", workflow)
+        self.assertIn("ref: main", workflow)
+        self.assertIn("python ci/scripts/test_opencode_glm_live.py", workflow)
+        self.assertIn("python ci/scripts/test_codex_router_glm_live.py", workflow)
+        self.assertIn("ROUTER_DIR: ${{ github.workspace }}/codex-router", workflow)
+        self.assertIn("name: glm-opencode-latency", workflow)
+        self.assertIn("path: glm-opencode-latency.json", workflow)
+
+    def test_live_router_candidate_is_isolated_from_secret_and_egress(self):
+        workflow = yaml.safe_load(ROUTER_CI_WORKFLOW.read_text(encoding="utf-8"))
+        live_steps = {step["name"]: step for step in workflow["jobs"]["live-opencode"]["steps"] if "name" in step}
+        router_step = live_steps["Validate GLM through isolated Codex Router shim"]
+        self.assertNotIn("OPENCODE_API_KEY", router_step.get("env", {}))
+
+        script = ROUTER_LIVE_TEST.read_text(encoding="utf-8")
+        workflow_source = ROUTER_CI_WORKFLOW.read_text(encoding="utf-8")
+        self.assertIn("docker network create --internal codex-router-live-internal", workflow_source)
+        self.assertIn('"OPENCODE_API_KEY=dummy"', script)
+        self.assertNotIn('"OPENCODE_API_KEY=" + os.environ["OPENCODE_API_KEY"]', script)
+        self.assertIn("codex_router_live_launcher.py", script)
+        self.assertIn("opencode_credential_proxy.py", workflow_source)
+
+    def test_external_provider_smoke_uses_trusted_router_main(self):
+        workflow = yaml.safe_load(ROUTER_CI_WORKFLOW.read_text(encoding="utf-8"))
+        live_steps = {step["name"]: step for step in workflow["jobs"]["live-opencode"]["steps"] if "name" in step}
+        checkout = live_steps["Check out trusted Codex Router smoke tests"]["with"]
+        self.assertEqual(checkout["repository"], "darrencjh8/codex-router")
+        self.assertEqual(checkout["ref"], "main")
+        self.assertEqual(checkout["path"], "trusted-router")
+        smoke = live_steps["Smoke-test auto-thinking external providers"]
+        self.assertEqual(smoke["working-directory"], "trusted-router")
+        self.assertEqual(
+            set(smoke["env"]),
+            {"OPENCODE_API_KEY", "OPENCODE_ZEN_API_KEY", "DEEPSEEK_API_KEY"},
+        )
+        self.assertIn("python tests/test_provider_smoke_live.py", smoke["run"])
+
+    def test_live_launcher_redirects_only_opencode_go_hops(self):
+        spec = importlib.util.spec_from_file_location("codex_router_live_launcher", ROUTER_LIVE_LAUNCHER)
+        launcher = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(launcher)
+        hops = (
+            {"model": "glm-5.3-flash", "auth": "opencode_go", "url": "https://opencode.ai/zen/go/v1/chat/completions"},
+            {"model": "mimo-v2.5-free", "auth": "opencode_zen", "url": "https://opencode.ai/zen/v1/chat/completions"},
+            {"model": "gpt-5.6-terra-3", "auth": "local", "url": "http://127.0.0.1:4000/v1/responses"},
+        )
+        def bound_hops(candidate=hops):
+            return candidate
+
+        redirected = launcher.redirect_opencode_go_hops(hops)
+
+        self.assertIs(redirected, hops)
+        self.assertIs(bound_hops(), hops)
+        self.assertEqual(bound_hops()[0]["url"], launcher.PROXY_URL)
+        self.assertEqual(redirected[0]["url"], launcher.PROXY_URL)
+        self.assertEqual(redirected[1], hops[1])
+        self.assertEqual(redirected[2], hops[2])
+
+    def test_live_probe_covers_production_hermes_reasoning_effort(self):
+        reviewer = yaml.safe_load((Path(__file__).parents[1] / "hermes/profiles/code-reviewer/config.yaml").read_text(encoding="utf-8"))
+        self.assertEqual(reviewer["model"], {"provider": "opencode-go", "default": "glm-5.3-flash"})
+        self.assertEqual(reviewer["agent"]["reasoning_effort"], "medium")
+        self.assertIn('for effort in ("medium", "high", "max"):', OPENCODE_LIVE_TEST.read_text(encoding="utf-8"))
 
     def test_public_test_workflow_discovers_all_module_contract_tests(self):
         workflow = TEST_WORKFLOW.read_text(encoding="utf-8")

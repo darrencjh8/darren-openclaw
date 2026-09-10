@@ -6,7 +6,7 @@ description: >
 
 ## Summary
 
-Adversarial code review protocol for dev-loop Phase 2. Load this skill in every review subagent, then follow the phased protocol (orientation, deep per-file analysis, cross-cutting checks, static analysis) and end with VERDICT: APPROVE or REQUEST_CHANGES. Every Critical/High finding must include a concrete TRIGGER scenario. Reviewer model is selected by the dev-loop caller from the allowed set (`gpt-5.6-terra`, `glm-5.2`, `deepseek-v4-flash`).
+Adversarial code review protocol for dev-loop Phase 2. Load this skill in every review subagent, then follow the phased protocol (orientation, deep per-file analysis, cross-cutting checks, static analysis) and end with VERDICT: APPROVE or REQUEST_CHANGES. Every Critical/High finding must include a concrete TRIGGER scenario. Reviewer model is selected by the dev-loop caller from the allowed set (`gpt-5.6-terra`, `glm-5.3-flash`, `deepseek-v4-flash`).
 
 # Code Reviewer (Adversarial)
 
@@ -20,7 +20,7 @@ While this skill is active, load and follow the global `caveman` skill at **ultr
 
 ## Reviewer Model
 
-The dev-loop caller selects the reviewer model each round from the allowed set: `gpt-5.6-terra` (Terra), `glm-5.2` (OpenCode Go), or `deepseek-v4-flash` (DeepSeek). Account suffixes (`-1`/`-2`/`-3`) are not allowed; the Terra pool handles account routing. DeepSeek uses `deepseek-v4-flash` only, never `deepseek-v4-pro`.
+The dev-loop caller selects the reviewer model each round from the allowed set: `gpt-5.6-terra` (Terra), `glm-5.3-flash` (OpenCode Go), or `deepseek-v4-flash` (DeepSeek). Account suffixes (`-1`/`-2`/`-3`) are not allowed; the Terra pool handles account routing. DeepSeek uses `deepseek-v4-flash` only, never `deepseek-v4-pro`.
 
 Review runs under exactly the selected model. Never substitute a model outside the allowed set. Never report a reviewer model that the launch did not route to. If the selected model, the managed `code-reviewer` profile, skill, auth, or other prerequisite is unavailable, fail closed and report the blocker. Do not silently swap to a different model.
 
