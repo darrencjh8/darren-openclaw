@@ -110,6 +110,40 @@ check_var_optional() {
   fi
 }
 
+# True when platforms.slack.enabled is truthy in the seeded Hermes config.
+# The config is parsed as real YAML so flow style, quoting, and YAML booleans
+# (yes/on/1) are all read correctly. A missing, unreadable, or unparseable
+# config counts as ENABLED: a required token must never be silently skipped
+# because detection failed.
+slack_platform_enabled() {
+  local config="$HERMES_DIR/config.yaml"
+  [ -f "$config" ] && [ -r "$config" ] || return 0
+  python3 - "$config" <<'PY'
+import sys
+
+try:
+    import yaml
+except ImportError:
+    # No YAML parser available: fall back to validation rather than skipping it.
+    sys.exit(0)
+
+try:
+    with open(sys.argv[1], encoding="utf-8") as handle:
+        config = yaml.safe_load(handle)
+    platforms = (config or {}).get("platforms") or {}
+    slack = platforms.get("slack") or {}
+    if not isinstance(slack, dict):
+        sys.exit(0)
+    enabled = slack.get("enabled", True)
+except Exception:
+    # Unparseable or unexpected shape: fail closed.
+    sys.exit(0)
+
+truthy = (True, "true", "yes", "on", 1)
+sys.exit(0 if enabled in truthy else 1)
+PY
+}
+
 check_file() {
   local path="$1"
   if [ ! -f "$path" ]; then
@@ -148,6 +182,20 @@ if $GITHUB_MODE || check_file "$HERMES_ENV"; then
   check_var "TELEGRAM_BOT_TOKEN" "$HERMES_ENV"
   check_var "TELEGRAM_ALLOWED_USERS" "$HERMES_ENV"
   check_var "TELEGRAM_HOME_CHANNEL" "$HERMES_ENV"
+
+  # Slack (Socket Mode). Tokens are required only while platforms.slack.enabled
+  # is true, so merging the wiring before the Slack app exists does not break
+  # deployment. The allowlist and home channel are always optional.
+  if slack_platform_enabled; then
+    echo "  [Slack]"
+    check_var "SLACK_BOT_TOKEN" "$HERMES_ENV"
+    check_var "SLACK_APP_TOKEN" "$HERMES_ENV"
+    check_var_optional "SLACK_ALLOWED_USERS" "$HERMES_ENV"
+    check_var_optional "SLACK_HOME_CHANNEL" "$HERMES_ENV"
+    check_var_optional "SLACK_HOME_CHANNEL_NAME" "$HERMES_ENV"
+  else
+    echo "  [Slack] disabled in config.yaml — skipping token validation"
+  fi
 
   # Webhook
   echo "  [Webhook]"
