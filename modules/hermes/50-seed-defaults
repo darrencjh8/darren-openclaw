@@ -219,6 +219,68 @@ with open(jobs_path, "w") as f:
     json.dump({"jobs": jobs, "updated_at": datetime.datetime.now(datetime.timezone.utc).isoformat()}, f, indent=2)
 PYEOF
 
+# Seed memory-triage cron job (idempotent — drains the memory write-approval queue).
+# The job's scripts and skill are baked into the image (/opt/hermes-defaults), so a
+# reinstall re-seeds all three together: cron job, /opt/data/scripts/*, and the
+# hermes-troubleshooting skill.
+python3 <<'PYEOF' || true
+import os, json, uuid, datetime
+jobs_path = "/opt/data/cron/jobs.json"
+os.makedirs(os.path.dirname(jobs_path), exist_ok=True)
+try:
+    with open(jobs_path) as f:
+        data = json.load(f)
+    jobs = data.get("jobs", []) if isinstance(data, dict) else data
+except (FileNotFoundError, json.JSONDecodeError):
+    jobs = []
+
+PROMPT = """Triage the Hermes memory write-approval queue on this machine (HERMES_HOME=/opt/data).
+
+CONTEXT: memory.write_approval is ON, so every memory write is staged to /opt/data/pending/memory/<id>.json and NOTHING drains it automatically. You are the judge that drains it. A backlog may exist on early runs; each run should only chew the OLDEST 40 records and leave the rest for the next run.
+
+SAFETY: the apply step is reversible by design. It takes a timestamped snapshot of the live memory files before mutating (rollback: bash /opt/data/scripts/memory-triage.sh restore --from <dir>), locks against concurrent runs, strictly validates the plan, caps it at 40 records, and appends an audit line to /opt/data/logs/memory-triage-audit.jsonl. Never bypass the script and never edit the memory files by hand.
+
+STEPS
+1. Run: bash /opt/data/scripts/memory-triage.sh list > /opt/data/tmp/triage-queue.json
+2. Read that JSON. It has one entry per staged record with id, target (memory|user), origin, age_days, and the op text.
+3. Decide for every record in the oldest 40: approve, discard, or hold.
+   - APPROVE — durable fact/preference useful in future sessions: user preferences and corrections, environment facts, account/passenger/infra identifiers, conventions, workflow rules.
+   - DISCARD (archived, not applied) — duplicates or paraphrases of a fact already present in /opt/data/memories/MEMORY.md or USER.md, or of another op you just approved; procedures/runbooks (those belong in a skill, not memory); raw task progress, completed-work logs, one-off dated state, anything superseded.
+   - HOLD (list in NEITHER array) — ambiguous, contradictory, or unverifiable. Contradictions get held, never resolved by guessing.
+4. Dedupe AGGRESSIVELY. When several ops carry the same fact, approve at most ONE consolidated version (clearest, most self-contained wording) and discard the other instances.
+5. Respect the store caps: memory ~2200 chars and user ~1375. If an add would overflow, prefer a replace/remove that frees room, discard lower-value adds, or hold.
+6. Write the verdict plan to /opt/data/tmp/triage-plan.json as {"approve": ["<id>", ...], "discard": ["<id>", ...]}
+7. Apply it: bash /opt/data/scripts/memory-triage.sh apply --plan /opt/data/tmp/triage-plan.json
+   This replays approved ops through apply_memory_pending (bypassing the gate), moves discards into /opt/data/pending/memory-archive/<date>/, and snapshots live memory first. Read the printed report: applied_n, discarded_n, failed, remaining_n, snapshot.
+8. Reply with a SHORT digest (Telegram style, no code blocks, no raw JSON, max 5 lines of bullets):
+   - counts: applied / discarded / held / still pending
+   - the 3-5 most valuable things now saved, one line each
+   - any FAILED ops with their error, and anything deliberately held with a one-line reason
+   If nothing was staged, reply exactly: Memory queue empty — nothing staged.
+
+Do not stop until the apply step has actually run and been verified. If a step fails, say so plainly rather than reporting success."""
+
+if not any(j.get("name") == "memory-triage" for j in jobs if isinstance(j, dict)):
+    jobs.append({
+        "id": uuid.uuid4().hex[:12],
+        "name": "memory-triage",
+        "prompt": PROMPT,
+        "skills": ["hermes-troubleshooting"],
+        "skill": "hermes-troubleshooting",
+        "schedule": {"kind": "cron", "expr": "0 9 * * *", "display": "0 9 * * *"},
+        "schedule_display": "0 9 * * *",
+        "enabled": True,
+        "deliver": "telegram",
+        "context_from": ["self"],
+        "next_run_at": None,
+        "created_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+    })
+    print("cron: memory-triage seeded")
+
+with open(jobs_path, "w") as f:
+    json.dump({"jobs": jobs, "updated_at": datetime.datetime.now(datetime.timezone.utc).isoformat()}, f, indent=2)
+PYEOF
+
 # Disable profile gateways (workers don't need their own gateways — they compete for Telegram token)
 for gw_dir in /run/service/gateway-*; do
     [ -d "$gw_dir" ] || continue
