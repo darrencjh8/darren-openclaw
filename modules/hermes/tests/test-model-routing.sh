@@ -22,10 +22,6 @@ router_provider = {
     "transport": "chat_completions",
 }
 router_route = "custom:codex-router"
-opencode_glm_fallback = {
-    "provider": "opencode-go",
-    "model": "glm-5.3-flash",
-}
 deepseek_pro_fallback = {
     "provider": "deepseek",
     "model": "deepseek-v4-pro",
@@ -66,8 +62,8 @@ assert config["model"].get("default") == "auto-thinking"
 assert "base_url" not in config["model"]
 assert "api_key" not in config["model"]
 assert config["agent"]["reasoning_effort"] == "medium"
-assert config["fallback_providers"] == [opencode_glm_fallback, deepseek_flash_fallback], (
-    "main fallback_providers must be opencode-go/glm-5.3-flash, then deepseek-v4-flash"
+assert config["fallback_providers"] == [deepseek_flash_fallback], (
+    "main fallback_providers must be deepseek-v4-flash"
 )
 assert_route(config["delegation"], "auto-thinking", "delegation")
 
@@ -85,8 +81,8 @@ for task, model in {
 }.items():
     route = config["auxiliary"][task]
     assert_route(route, model, f"auxiliary.{task}")
-    assert route.get("fallback_chain") == [opencode_glm_fallback, deepseek_flash_fallback], (
-        f"auxiliary.{task}.fallback_chain must start with opencode-go/glm-5.3-flash, then deepseek-v4-flash"
+    assert route.get("fallback_chain") == [deepseek_flash_fallback], (
+        f"auxiliary.{task}.fallback_chain must use deepseek-v4-flash"
     )
 
 assert config["kanban"]["default_assignee"] == "code-reviewer"
