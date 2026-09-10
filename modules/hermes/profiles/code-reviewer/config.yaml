@@ -25,7 +25,7 @@ approvals:
     timeout: 60
 
 memory:
-    memory_enabled: true
+    memory_enabled: false
     user_profile_enabled: false
     write_approval: true
 

@@ -1,4 +1,6 @@
 #!/bin/bash
+# Copyright © 2022 Dell Inc. or its subsidiaries. All Rights Reserved.
+
 # Contract test for durable Hermes model routing defaults.
 set -euo pipefail
 
@@ -121,6 +123,9 @@ for profile, (model, fallback_model) in {
     fallback = profile_config["fallback_providers"]
     if profile == "code-reviewer":
         assert fallback == [], "code-reviewer must fail closed instead of switching review tiers"
+        assert profile_config["memory"]["memory_enabled"] is False, (
+            "code-reviewer memory must be disabled so every review has a fresh context"
+        )
     else:
         assert len(fallback) == 1
         assert fallback[0].get("provider") == "deepseek"
