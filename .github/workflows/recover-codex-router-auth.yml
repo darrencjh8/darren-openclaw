@@ -1,0 +1,64 @@
+name: Recover Codex Router ChatGPT Auth
+run-name: Recover Codex Router ${{ inputs.account }} auth
+
+on:
+    workflow_dispatch:
+        inputs:
+            account:
+                description: "Router account slot to authorize"
+                required: true
+                type: choice
+                options:
+                    - acct1
+                    - acct2
+                    - acct3
+
+permissions:
+    contents: read
+
+concurrency:
+    group: codex-router-auth-recovery
+    cancel-in-progress: false
+
+jobs:
+    recover:
+        runs-on: self-hosted
+        environment: darren-prod
+        timeout-minutes: 20
+        steps:
+            - uses: actions/checkout@v4
+              with:
+                  clean: false
+                  persist-credentials: false
+
+            - name: Validate account slot
+              env:
+                  ACCOUNT: ${{ inputs.account }}
+              run: |
+                  case "$ACCOUNT" in
+                      acct1|acct2|acct3) ;;
+                      *) echo "Invalid account slot" >&2; exit 1 ;;
+                  esac
+
+            - name: Run interactive device login
+              env:
+                  ACCOUNT: ${{ inputs.account }}
+              run: |
+                  mapfile -t container_ids < <(
+                      docker ps \
+                          --filter label=com.docker.compose.service=codex-router \
+                          --filter status=running \
+                          --format '{{.ID}}'
+                  )
+                  if [ "${#container_ids[@]}" -ne 1 ]; then
+                      echo "Expected exactly one running codex-router container" >&2
+                      exit 1
+                  fi
+                  container_id="${container_ids[0]}"
+                  docker exec -i "$container_id" python -u - "$ACCOUNT" \
+                      < modules/codex-router-auth-recovery.py
+
+            - name: Verify safe Router status
+              run: |
+                  curl --fail --silent --show-error \
+                      http://127.0.0.1:4100/v1/codex-router/status
