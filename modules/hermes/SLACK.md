@@ -18,20 +18,38 @@ Reference: <https://hermes-agent.nousresearch.com/docs/user-guide/messaging/slac
 | Regression test | `modules/hermes/tests/test_slack_platform.py` | asserts all of the above |
 | Manifest helper | `modules/hermes/scripts/slack-manifest.sh` | generates the Slack app manifest |
 
-The integration stays dormant until the tokens exist. `platforms.slack.enabled`
-ships **`false`** in this repository for exactly that reason: the deploy gate
-validates the two tokens only while the flag is `true`, so this wiring can merge
-without breaking the production pipeline.
+Slack is **enabled** in `modules/hermes/config.yaml`
+(`platforms.slack.enabled: true`). The two tokens live in the `darren-prod`
+GitHub environment scope, so `modules/deploy.sh` validates both on every deploy.
+If either token is missing the deploy fails loudly with `MISSING:` naming it.
 
-Turn Slack on in two steps, in this order:
+The platform answers **without an `@mention`** in every channel the bot is
+invited to (`require_mention: false`, no `allowed_channels` whitelist). That
+makes `SLACK_ALLOWED_USERS` the only thing standing between a channel message
+and an agent turn, so keep it filled in.
 
-1. Create the Slack app and set `SLACK_BOT_TOKEN` + `SLACK_APP_TOKEN` (below).
-2. Set `platforms.slack.enabled: true` in `modules/hermes/config.yaml`.
+## Talking in multiple channels
 
-`modules/deploy.sh` then validates both tokens on every deploy. If the flag is
-`true` and a token is missing, the deploy fails loudly. Reversing the order — in
-a local `.env` deploy — flips the flag first, and the deploy stops with
-`MISSING: SLACK_BOT_TOKEN` until the token is supplied.
+Nothing per-channel is configured. The adapter runs one session per channel and
+thread, so each channel is an independent conversation, and the bot joins a
+channel only when it is invited:
+
+```
+/invite @friday
+```
+
+Repeat that in every channel the bot should answer in, then just type — no
+`@mention` needed. Thread replies stay threaded (`reply_in_thread: true`), and
+other bots are ignored (`allow_bots: "none"`).
+
+Two guards worth knowing:
+
+- `SLACK_ALLOWED_USERS` (repository variable, comma-separated Member IDs) covers
+  channels *and* DMs. Empty means nobody can reach the bot anywhere.
+- To make one busy channel mention-only again, list it in
+  `platforms.slack.extra.require_mention_channels`; that list overrides the
+  global free-response setting. `free_response_channels` does the reverse under
+  `require_mention: true`.
 
 ## Setup
 
@@ -39,16 +57,16 @@ a local `.env` deploy — flips the flag first, and the deploy stops with
 
 The manifest declares every Hermes slash command, OAuth scope, and event
 subscription, and enables Socket Mode in one paste. Generate it from the same
-Hermes version that runs the gateway:
+Hermes version that runs the gateway, passing the name the installed app
+already uses — the generator defaults to `Hermes` and would otherwise rename
+the bot on the next manifest apply:
 
 ```bash
-bash modules/hermes/scripts/slack-manifest.sh
+SLACK_MANIFEST_BOT_NAME=friday bash modules/hermes/scripts/slack-manifest.sh
 ```
 
 The script runs `hermes slack manifest --agent-view --write` inside the `hermes`
-container. If the container is not running yet, deploy this branch first (it
-still deploys fine with no Slack credentials because the flag ships `false`),
-then run the script.
+container.
 
 The Hermes CLI writes the manifest to `$HOME/.hermes/slack-manifest.json`. HOME
 differs inside the container — the daemon uses `/opt/data` while `docker exec`
@@ -103,12 +121,14 @@ Variables (**… → Variables**):
 
 | Name | Value | Required |
 | --- | --- | --- |
-| `SLACK_ALLOWED_USERS` | comma-separated Member IDs | recommended |
+| `SLACK_ALLOWED_USERS` | comma-separated Member IDs | required — `deploy.sh` fails without it while Slack is enabled |
 | `SLACK_HOME_CHANNEL` | channel ID for cron/scheduled delivery, e.g. `C01234567890` | optional |
 | `SLACK_HOME_CHANNEL_NAME` | human-readable label, e.g. `general` | optional |
 
-Leaving `SLACK_ALLOWED_USERS` unset means the gateway denies every Slack user —
-that is Hermes's fail-closed default, not an error.
+With free response enabled the allowlist is the only authorization gate, so the
+deploy hard-requires it. Leaving it empty would otherwise produce a bot that
+connects and answers nobody. Set it at the same scope the deploy job uses —
+environment `darren-prod`, not repository scope.
 
 For a local (non-CI) deployment, put the same five keys in the gitignored
 `modules/hermes/.env`:
@@ -123,32 +143,35 @@ SLACK_HOME_CHANNEL_NAME=general
 
 Never commit these values.
 
-### 6. Enable the platform and deploy
+### 6. Deploy
 
-Set `platforms.slack.enabled: true` in `modules/hermes/config.yaml`, then merge.
-CI/CD rebuilds and restarts the gateway, and `deploy.sh` verifies both tokens are
-present. Then invite the bot to each channel where it should respond:
+`platforms.slack.enabled: true` is already committed. Merge (or redeploy), and
+CI/CD rebuilds and restarts the gateway while `deploy.sh` verifies both tokens
+are present. Then invite the bot to each channel where it should respond:
 
 ```
-/invite @Hermes
+/invite @friday
 ```
 
-The bot never auto-joins channels.
+The bot never auto-joins channels, and it joins only the channels you invite it
+to. Once invited, it answers without an `@mention`.
 
 ### 7. Verify
 
 - DM the bot → it answers without an `@mention`.
-- In a channel, `@Hermes status` → it replies in a thread.
+- In a channel, just type `status` (no mention) → it replies in a thread.
 - Type `/` in Slack → Hermes slash commands appear in the autocomplete picker.
 
 If it answers in DMs but not channels, the event subscriptions in step 2 are
-missing. If nothing responds at all, confirm both tokens and that
-`SLACK_ALLOWED_USERS` contains a valid Member ID.
+missing, or it was never invited to that channel. If nothing responds at all,
+confirm both tokens and that `SLACK_ALLOWED_USERS` contains a valid Member ID.
 
 ## Behaviour notes
 
-- **Channels require an `@mention`.** Once the bot has an active thread session,
-  follow-up replies in that thread need no mention.
+- **No mention required in channels.** Every message from an allowlisted user
+  reaches the agent, in every invited channel. Re-gate a noisy channel with
+  `platforms.slack.extra.require_mention_channels` instead of changing the
+  global flag.
 - **Threading is on** (`reply_in_thread: true`), so channel conversations stay
   tidy. Multi-part replies attach to the user's message (`reply_to_mode: first`).
 - **Link previews are suppressed** (`unfurl_links`/`unfurl_media: false`). This

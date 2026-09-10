@@ -162,14 +162,19 @@ platforms:
     # file with a single-level-depth YAML reader; a nested mapping placed before
     # `webhook` desynchronises it and platform detection fails.
     slack:
-        # Disabled in the repo so the deploy gate does not require Slack tokens
-        # before the Slack app exists. Flip to `true` once SLACK_BOT_TOKEN and
-        # SLACK_APP_TOKEN are set; deploy.sh then validates them. See SLACK.md.
-        enabled: false
+        # Enabled: the Slack app exists and both tokens live in the
+        # `darren-prod` environment scope, so deploy.sh validates them on every
+        # deploy. See SLACK.md.
+        enabled: true
         # "first" threads the first chunk of a multi-part reply to the user's
         # message; later chunks follow in that same thread.
         reply_to_mode: "first"
         extra:
+            # Answer every message in every channel the bot is invited to,
+            # with no @mention required. Pair with SLACK_ALLOWED_USERS so only
+            # allowlisted humans can reach the agent. Set a
+            # `require_mention_channels` list to re-gate noisy channels.
+            require_mention: false
             reply_in_thread: true
             # Render replies as Slack Block Kit (headers, dividers, tables). A
             # plain-text fallback is always sent alongside for accessibility.

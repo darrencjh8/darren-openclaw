@@ -30,6 +30,7 @@ HERMES_CONFIG = REPO_ROOT / "modules" / "hermes" / "config.yaml"
 COMPOSE_FILE = REPO_ROOT / "modules" / "docker-compose.yml"
 DEPLOY_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "deploy.yml"
 DEPLOY_SCRIPT = REPO_ROOT / "modules" / "deploy.sh"
+MANIFEST_SCRIPT = REPO_ROOT / "modules" / "hermes" / "scripts" / "slack-manifest.sh"
 
 # Credential env vars the official Slack adapter reads.
 REQUIRED_CREDENTIALS = ("SLACK_BOT_TOKEN", "SLACK_APP_TOKEN")
@@ -54,7 +55,7 @@ probe_source = _extract_probe_source()
 
 
 class HermesSlackConfigTests(unittest.TestCase):
-    """platforms.slack must be declared, enabled, and schema-correct."""
+    """platforms.slack must be declared, schema-correct, and safe to enable."""
 
     def setUp(self) -> None:
         self.config = yaml.safe_load(HERMES_CONFIG.read_text(encoding="utf-8"))
@@ -67,12 +68,38 @@ class HermesSlackConfigTests(unittest.TestCase):
         self.assertIsInstance(slack, dict, "platforms.slack must be a mapping")
         return slack
 
-    def test_slack_platform_declares_a_boolean_enabled_flag(self) -> None:
-        """The block ships disabled; the flag must be explicit and boolean."""
+    def test_slack_platform_ships_enabled(self) -> None:
+        """The block ships enabled; the flag must be explicit and boolean."""
         self.assertIsInstance(
             self._slack().get("enabled"),
             bool,
             "platforms.slack.enabled must be an explicit YAML boolean",
+        )
+        self.assertTrue(
+            self._slack().get("enabled"),
+            "platforms.slack.enabled must ship true — the Slack app and its "
+            "tokens exist, and deploy.sh gates the tokens on this flag",
+        )
+
+    def test_slack_answers_without_a_mention_in_every_channel(self) -> None:
+        """Free response: no mention gate, and no channel whitelist.
+
+        ``allowed_channels`` set to any value silently drops messages from
+        every channel not listed, which would defeat the free-response mode
+        this configuration exists to provide.
+        """
+        extra = self._slack().get("extra") or {}
+        self.assertIn("require_mention", extra, "require_mention must be explicit")
+        self.assertIs(
+            extra.get("require_mention"),
+            False,
+            "require_mention must be false to answer without an @mention",
+        )
+        self.assertNotIn(
+            "allowed_channels",
+            extra,
+            "allowed_channels is a whitelist; leaving it unset is what lets the "
+            "bot answer in every channel it is invited to",
         )
 
     def test_slack_reply_mode_is_a_valid_value(self) -> None:
@@ -95,6 +122,7 @@ class HermesSlackConfigTests(unittest.TestCase):
             "allow_bots",
             "api_human_users",
             "cron_continuable_surface",
+            "require_mention",
         }
         unknown = set(extra) - allowed
         self.assertEqual(set(), unknown, f"undocumented platforms.slack.extra keys: {unknown}")
@@ -196,14 +224,24 @@ class HermesSlackDeployValidationTests(unittest.TestCase):
             "the Slack enabled probe does not read the repo config.yaml",
         )
 
-    def test_optional_slack_vars_are_not_hard_required(self) -> None:
-        """Allowlist and home channel stay optional so a DM-only install can deploy."""
-        for name in ("SLACK_ALLOWED_USERS", "SLACK_HOME_CHANNEL"):
+    def test_allowlist_is_hard_required_while_home_channel_stays_optional(self) -> None:
+        """The allowlist is the only authz gate in free-response mode.
+
+        With ``require_mention: false`` every message from an allowlisted user
+        becomes an agent turn, so an empty ``SLACK_ALLOWED_USERS`` means the bot
+        connects and silently answers nobody. Deploy must fail loudly instead.
+        The home channel stays optional because cron delivery does not need it.
+        """
+        self.assertRegex(
+            self.text,
+            r'check_var\s+"SLACK_ALLOWED_USERS"',
+            "SLACK_ALLOWED_USERS must be hard-required while Slack is enabled",
+        )
+        for name in ("SLACK_HOME_CHANNEL", "SLACK_HOME_CHANNEL_NAME"):
             with self.subTest(name=name):
-                hard = rf'check_var\s+"{name}"'
                 self.assertNotRegex(
                     self.text,
-                    hard,
+                    rf'check_var\s+"{name}"',
                     f"{name} should use check_var_optional, not check_var",
                 )
 
@@ -653,17 +691,20 @@ class SlackPlatformEnabledProbeTests(unittest.TestCase):
             "probe verdict disagrees with the committed platforms.slack.enabled",
         )
 
-    def test_committed_config_does_not_require_tokens_yet(self) -> None:
-        """H2 regression guard: merging must not break deploy before secrets exist.
+    def test_committed_config_requires_tokens_now_that_they_exist(self) -> None:
+        """The deploy gate must guard Slack credentials.
 
-        Keeps the Slack app creation (which mints the tokens) unblocked by the
-        deploy gate. Flip this test together with `enabled` once tokens exist.
+        The Slack app exists and SLACK_BOT_TOKEN/SLACK_APP_TOKEN live in the
+        `darren-prod` environment scope, so Slack ships enabled and the gate is
+        expected to hard-require both tokens. Flipping `enabled` back to false
+        would silently stop validating them.
         """
         committed = yaml.safe_load(HERMES_CONFIG.read_text(encoding="utf-8"))
 
-        self.assertFalse(
-            (committed.get("platforms") or {}).get("slack", {}).get("enabled", True),
-            "Slack is enabled while the deploy gate still hard-requires tokens",
+        self.assertTrue(
+            (committed.get("platforms") or {}).get("slack", {}).get("enabled", False),
+            "Slack must be enabled now that the tokens are configured, so the "
+            "deploy gate keeps validating them",
         )
 
 
@@ -758,6 +799,26 @@ class HermesSlackManifestHelperTests(unittest.TestCase):
         self.assertIn("--agent-view", text)
         self.assertIn("--write", text)
         self.assertRegex(text, r"^#!", "helper must declare a shebang")
+
+    def test_manifest_name_tracks_the_installed_bot_name(self) -> None:
+        """Re-applying a manifest must not rename the bot back to 'Hermes'.
+
+        The generator defaults ``--name`` to ``Hermes`` while the installed
+        Slack app is ``friday``. The script therefore has to forward an
+        explicit name rather than trusting the default.
+        """
+        text = MANIFEST_SCRIPT.read_text(encoding="utf-8")
+
+        self.assertIn(
+            "SLACK_MANIFEST_BOT_NAME",
+            text,
+            "manifest helper must accept SLACK_MANIFEST_BOT_NAME",
+        )
+        self.assertRegex(
+            text,
+            r'ARGS\+=\(--name "\$[A-Z_]*BOT_NAME"\)',
+            "manifest helper must forward the configured bot name as --name",
+        )
 
 
 if __name__ == "__main__":

@@ -17,6 +17,13 @@
 # Usage:
 #   bash modules/hermes/scripts/slack-manifest.sh
 #
+# Environment overrides:
+#   SLACK_MANIFEST_BOT_NAME             bot display name (default: Hermes)
+#   SLACK_MANIFEST_DESCRIPTION_FILE     file with Slack's long description
+#   HERMES_CONTAINER                    container name (default: hermes)
+#   HERMES_CONTAINER_DATA_DIR           mounted data dir (default: /opt/data)
+#   HERMES_DATA_DIR                     its host path
+#
 # See modules/hermes/SLACK.md for the full setup walkthrough.
 set -euo pipefail
 
@@ -29,6 +36,11 @@ HOST_DATA_DIR="${HERMES_DATA_DIR:-/home/runner/data/hermes/data}"
 # Long app description shown on the Slack app's About tab. Optional: the
 # command works without it, but Slack requires 175-4000 characters when set.
 DESCRIPTION_FILE="${SLACK_MANIFEST_DESCRIPTION_FILE:-}"
+
+# Bot display name baked into the manifest. The Hermes generator defaults to
+# "Hermes"; set this to the name the installed Slack app actually uses, or
+# re-applying the manifest renames the bot.
+BOT_NAME="${SLACK_MANIFEST_BOT_NAME:-Hermes}"
 
 if ! command -v docker >/dev/null 2>&1; then
     echo "error: docker not found; run this on a host with the hermes container" >&2
@@ -47,6 +59,8 @@ echo "Generating Slack app manifest inside '$CONTAINER'..."
 #   hermes slack manifest --agent-view --write
 # Executed as an argv array so no word splitting or globbing is applied.
 ARGS=(slack manifest --agent-view --write)
+# Keep the installed bot name instead of the generator's "Hermes" default.
+ARGS+=(--name "$BOT_NAME")
 if [ -n "$DESCRIPTION_FILE" ]; then
     # The description file must exist inside the container; mount it or copy it
     # into /opt/data first.
