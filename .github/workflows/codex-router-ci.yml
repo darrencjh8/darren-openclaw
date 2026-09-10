@@ -66,9 +66,7 @@ jobs:
             - name: Smoke-test auto-thinking external providers
               working-directory: trusted-router
               env:
-                  OPENCODE_ZEN_API_KEY: ${{ secrets.OPENCODE_ZEN_API_KEY }}
                   DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
               run: |
-                  test -n "$OPENCODE_ZEN_API_KEY"
                   test -n "$DEEPSEEK_API_KEY"
                   python tests/test_provider_smoke_live.py
