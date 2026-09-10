@@ -136,21 +136,6 @@ mcp_servers:
             exclude: []
         supports_parallel_tool_calls: false
 platforms:
-    slack:
-        enabled: true
-        # "first" threads the first chunk of a multi-part reply to the user's
-        # message; later chunks follow in that same thread.
-        reply_to_mode: "first"
-        extra:
-            reply_in_thread: true
-            # Render replies as Slack Block Kit (headers, dividers, tables). A
-            # plain-text fallback is always sent alongside for accessibility.
-            rich_blocks: true
-            # Keep channels clean: linked pages and media do not auto-preview.
-            unfurl_links: false
-            unfurl_media: false
-            # Ignore other Slack bots; Hermes only answers allowlisted humans.
-            allow_bots: "none"
     webhook:
         enabled: true
         extra:
@@ -171,6 +156,29 @@ platforms:
                     deliver: telegram
                     deliver_extra:
                         chat_id: "${TELEGRAM_HOME_CHANNEL}"
+
+    # Keep this block AFTER `webhook`. The webhook route nests three levels deep
+    # and modules/expense-tracker/__tests__/hermes-webhook.test.js parses this
+    # file with a single-level-depth YAML reader; a nested mapping placed before
+    # `webhook` desynchronises it and platform detection fails.
+    slack:
+        # Disabled in the repo so the deploy gate does not require Slack tokens
+        # before the Slack app exists. Flip to `true` once SLACK_BOT_TOKEN and
+        # SLACK_APP_TOKEN are set; deploy.sh then validates them. See SLACK.md.
+        enabled: false
+        # "first" threads the first chunk of a multi-part reply to the user's
+        # message; later chunks follow in that same thread.
+        reply_to_mode: "first"
+        extra:
+            reply_in_thread: true
+            # Render replies as Slack Block Kit (headers, dividers, tables). A
+            # plain-text fallback is always sent alongside for accessibility.
+            rich_blocks: true
+            # Keep channels clean: linked pages and media do not auto-preview.
+            unfurl_links: false
+            unfurl_media: false
+            # Ignore other Slack bots; Hermes only answers allowlisted humans.
+            allow_bots: "none"
 
 quick_commands:
     portfolio-sync:

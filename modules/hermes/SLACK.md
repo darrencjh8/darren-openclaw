@@ -18,14 +18,20 @@ Reference: <https://hermes-agent.nousresearch.com/docs/user-guide/messaging/slac
 | Regression test | `modules/hermes/tests/test_slack_platform.py` | asserts all of the above |
 | Manifest helper | `modules/hermes/scripts/slack-manifest.sh` | generates the Slack app manifest |
 
-The integration stays dormant until the tokens exist. With no `SLACK_BOT_TOKEN`,
-Hermes logs nothing and connects nothing.
+The integration stays dormant until the tokens exist. `platforms.slack.enabled`
+ships **`false`** in this repository for exactly that reason: the deploy gate
+validates the two tokens only while the flag is `true`, so this wiring can merge
+without breaking the production pipeline.
 
-`modules/deploy.sh` validates the two tokens **only while
-`platforms.slack.enabled` is `true`**. Merging this wiring before the Slack app
-exists is therefore safe. If you need to deploy with Slack enabled but no
-credentials yet, set `enabled: false` — validation is then skipped and the
-gateway starts without Slack.
+Turn Slack on in two steps, in this order:
+
+1. Create the Slack app and set `SLACK_BOT_TOKEN` + `SLACK_APP_TOKEN` (below).
+2. Set `platforms.slack.enabled: true` in `modules/hermes/config.yaml`.
+
+`modules/deploy.sh` then validates both tokens on every deploy. If the flag is
+`true` and a token is missing, the deploy fails loudly. Reversing the order — in
+a local `.env` deploy — flips the flag first, and the deploy stops with
+`MISSING: SLACK_BOT_TOKEN` until the token is supplied.
 
 ## Setup
 
@@ -41,7 +47,15 @@ bash modules/hermes/scripts/slack-manifest.sh
 
 The script runs `hermes slack manifest --agent-view --write` inside the `hermes`
 container. If the container is not running yet, deploy this branch first (it
-still deploys fine with no Slack credentials), then run the script.
+still deploys fine with no Slack credentials because the flag ships `false`),
+then run the script.
+
+The Hermes CLI writes the manifest to `$HOME/.hermes/slack-manifest.json`. HOME
+differs inside the container — the daemon uses `/opt/data` while `docker exec`
+defaults to `/opt/data/home` — and only `/opt/data` is the host-mounted volume.
+The script pins `HOME=/opt/data`, verifies the file, and prints the exact
+container and host paths to read. Do not assume a bare `/opt/data/...json`
+path: the file is under the `.hermes` subdirectory.
 
 ### 2. Create the Slack app
 
@@ -109,10 +123,11 @@ SLACK_HOME_CHANNEL_NAME=general
 
 Never commit these values.
 
-### 6. Deploy and invite the bot
+### 6. Enable the platform and deploy
 
-Merge to `main`; CI/CD rebuilds and restarts the gateway. Then invite the bot to
-each channel where it should respond:
+Set `platforms.slack.enabled: true` in `modules/hermes/config.yaml`, then merge.
+CI/CD rebuilds and restarts the gateway, and `deploy.sh` verifies both tokens are
+present. Then invite the bot to each channel where it should respond:
 
 ```
 /invite @Hermes
@@ -136,7 +151,11 @@ missing. If nothing responds at all, confirm both tokens and that
   follow-up replies in that thread need no mention.
 - **Threading is on** (`reply_in_thread: true`), so channel conversations stay
   tidy. Multi-part replies attach to the user's message (`reply_to_mode: first`).
-- **Link previews are suppressed** (`unfurl_links`/`unfurl_media: false`).
+- **Link previews are suppressed** (`unfurl_links`/`unfurl_media: false`). This
+  is not purely cosmetic: setting either key also switches native draft streaming
+  to edit-based delivery, and media captions are posted as a separate message
+  before the file (Slack's upload API cannot carry unfurl controls). Remove both
+  keys to restore Slack's defaults and native streaming.
 - **Block Kit rendering is on** (`rich_blocks: true`): tables and structured
   output render natively, with a plain-text fallback always sent alongside.
 - **Other bots are ignored** (`allow_bots: "none"`).

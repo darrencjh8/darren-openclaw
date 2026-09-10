@@ -111,13 +111,37 @@ check_var_optional() {
 }
 
 # True when platforms.slack.enabled is truthy in the seeded Hermes config.
-# Missing or unreadable config counts as enabled, so a required token is never
-# silently skipped.
+# The config is parsed as real YAML so flow style, quoting, and YAML booleans
+# (yes/on/1) are all read correctly. A missing, unreadable, or unparseable
+# config counts as ENABLED: a required token must never be silently skipped
+# because detection failed.
 slack_platform_enabled() {
   local config="$HERMES_DIR/config.yaml"
-  [ -f "$config" ] || return 0
-  grep -A1 '^[[:space:]]*slack:' "$config" 2>/dev/null \
-    | grep -qE 'enabled:[[:space:]]*true'
+  [ -f "$config" ] && [ -r "$config" ] || return 0
+  python3 - "$config" <<'PY'
+import sys
+
+try:
+    import yaml
+except ImportError:
+    # No YAML parser available: fall back to validation rather than skipping it.
+    sys.exit(0)
+
+try:
+    with open(sys.argv[1], encoding="utf-8") as handle:
+        config = yaml.safe_load(handle)
+    platforms = (config or {}).get("platforms") or {}
+    slack = platforms.get("slack") or {}
+    if not isinstance(slack, dict):
+        sys.exit(0)
+    enabled = slack.get("enabled", True)
+except Exception:
+    # Unparseable or unexpected shape: fail closed.
+    sys.exit(0)
+
+truthy = (True, "true", "yes", "on", 1)
+sys.exit(0 if enabled in truthy else 1)
+PY
 }
 
 check_file() {
