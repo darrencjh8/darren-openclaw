@@ -38,6 +38,8 @@ require "$DEV_LOOP_SKILL" "skill disables cross-tier fallback" "Never substitute
 require "$DEV_LOOP_SKILL" "skill resolves optional specifications" "If a relevant specification exists"
 require "$DEV_LOOP_SKILL" "skill invokes spec-auditor before code review" "--profile spec-auditor"
 require "$DEV_LOOP_SKILL" "skill verifies the launch routes to the round model" "the launch routes to the model required for that round"
+require "$DEV_LOOP_SKILL" "skill selects the free model for later launches" "REVIEWER_MODEL=auto-thinking-free"
+require "$DEV_LOOP_SKILL" "review command passes the selected model" '--model "$REVIEWER_MODEL"'
 require "$DEV_LOOP_SKILL" "skill owns the loop through merge" "Own the loop through completion."
 require "$CODE_REVIEWER_SKILL" "reviewer skill pins the managed profile" "managed \`code-reviewer\` profile"
 require "$CODE_REVIEWER_SKILL" "reviewer skill pins round models" "Round 1 uses \`auto-thinking\`; every later round uses \`auto-thinking-free\`"

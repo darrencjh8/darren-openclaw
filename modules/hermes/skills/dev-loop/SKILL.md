@@ -141,8 +141,14 @@ Every reviewer uses a fresh isolated Hermes process. Round 1 runs alone. For lat
 
 ```bash
 cd <worktree>
+if [ "$REVIEW_ROUND" -eq 1 ]; then
+  REVIEWER_MODEL=auto-thinking
+else
+  REVIEWER_MODEL=auto-thinking-free
+fi
 HERMES_HOME=<hermes-home> hermes chat \
   --profile code-reviewer \
+  --model "$REVIEWER_MODEL" \
   -t terminal \
   -Q \
   --max-turns 20 \
