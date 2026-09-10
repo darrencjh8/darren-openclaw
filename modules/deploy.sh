@@ -111,37 +111,405 @@ check_var_optional() {
 }
 
 # True when platforms.slack.enabled is truthy in the seeded Hermes config.
-# The config is parsed as real YAML so flow style, quoting, and YAML booleans
-# (yes/on/1) are all read correctly. A missing, unreadable, or unparseable
-# config counts as ENABLED: a required token must never be silently skipped
-# because detection failed.
+# A missing, unreadable, or unparseable config counts as ENABLED: a required
+# token must never be silently skipped because detection failed.
 slack_platform_enabled() {
   local config="$HERMES_DIR/config.yaml"
   [ -f "$config" ] && [ -r "$config" ] || return 0
-  python3 - "$config" <<'PY'
+
+  # A missing interpreter must not read as "Slack disabled".
+  if ! command -v python3 >/dev/null 2>&1; then
+    return 0
+  fi
+
+  local rc=0
+  python3 - "$config" <<'PY' || rc=$?
+"""Read only platforms.slack.enabled, using the standard library.
+
+The deploy host is not guaranteed to have PyYAML. Importing it and falling back
+to "enabled" when the import fails aborts production deployment, so the single
+boolean this gate needs is read directly instead of pulling in a YAML package.
+
+Fail-closed contract: only a value that is DEFINITELY false may disable the
+gate. Missing, unreadable, non-UTF8, malformed, empty, unrecognised, or
+ambiguous input always resolves to enabled, because the caller treats "enabled"
+as "require the tokens". Every exception is caught for the same reason.
+"""
+import re
 import sys
 
-try:
-    import yaml
-except ImportError:
-    # No YAML parser available: fall back to validation rather than skipping it.
-    sys.exit(0)
+# Key lines only; deliberately does not match "- item" or continuation text.
+KEY_RE = re.compile(r"^([ \t]*)([A-Za-z0-9_.-]+):[ \t]*(.*)$")
+# Like KEY_RE but also accepts a quoted key, so a block scalar under `"prompt":`
+# is recognised and its body masked out.
+MASK_KEY_RE = re.compile(
+    r"""^([ \t]*)(?:"[^"]*"|'[^']*'|[A-Za-z0-9_.-]+):[ \t]*(.*)$"""
+)
+QUOTES = "\"'"
+FALSEY = ("false", "no", "off", "0")
+
+
+class Quoted(str):
+    """A scalar written in quotes: always a string, never a YAML boolean."""
+
+
+# Typed tokens, so stripped quotes can never be confused with YAML null.
+MISSING = object()  # no usable scalar (empty / comment / nested block)
+NULL = object()  # YAML null: null, Null, NULL, ~
+
+# Result codes for the line walk.
+FOUND = "found"
+ABSENT = "absent"  # no definite answer yet; keep scanning
+AMBIGUOUS = "ambiguous"
+
+
+def scalar(raw):
+    """Return MISSING, NULL, a Quoted string, or a bare token.
+
+    Quote handling precedes comment stripping: `"false # x"` is the truthy
+    string `false # x`, not the value `false` plus a comment.
+    """
+    raw = raw.strip()
+    if not raw:
+        return MISSING
+    if raw[0] in QUOTES:
+        end = raw.find(raw[0], 1)
+        return Quoted(raw[1:] if end < 0 else raw[1:end])
+    raw = raw.split(" #", 1)[0].split("\t#", 1)[0].strip()
+    if not raw or raw.startswith("#"):
+        return MISSING
+    if raw.lower() in ("null", "~"):
+        return NULL
+    return raw
+
+
+def normalized(value):
+    """Map a parsed value to True (enabled/require) or False (disabled)."""
+    if value is MISSING or value is NULL:
+        return True
+    if isinstance(value, Quoted):
+        return str(value).strip().lower() not in FALSEY
+    if isinstance(value, str):
+        return str(value).strip().lower() not in FALSEY
+    return bool(value)
+
+
+def value_end(text, start):
+    """Index just past the value beginning at `start` (flow-aware)."""
+    i = start
+    level = 0
+    n = len(text)
+    while i < n:
+        char = text[i]
+        if char in QUOTES:
+            i += 1
+            while i < n and text[i] != char:
+                i += 1
+            i += 1
+            continue
+        if char in "[{":
+            level += 1
+        elif char in "]}":
+            if level == 0:
+                break
+            level -= 1
+        elif char == "," and level == 0:
+            break
+        i += 1
+    return i
+
+
+def flow_value(text, key, depth):
+    """Value text of `key` at `depth` in a flow mapping, or None.
+
+    Only a sibling at `depth` matches, so a `slack` key nested deeper (for
+    example `platforms.webhook.routes.slack`) is ignored.
+    """
+    i = 0
+    level = 0
+    n = len(text)
+    while i < n:
+        char = text[i]
+        if char in "[{":
+            level += 1
+            i += 1
+            continue
+        if char in "]}":
+            level -= 1
+            i += 1
+            continue
+        if char in QUOTES:
+            i += 1
+            while i < n and text[i] != char:
+                i += 1
+            i += 1
+            continue
+        if level == depth:
+            match = re.match(r"([A-Za-z0-9_.-]+)\s*:", text[i:])
+            if match:
+                if match.group(1) != key:
+                    # Skip this entry's value and continue with the next key.
+                    i = value_end(text, i + match.end()) + 1
+                    continue
+                start = i + match.end()
+                return text[start:value_end(text, start)].strip()
+        i += 1
+    return None
+
+
+def flow_key_seen(text, key, depth):
+    """Count occurrences of `key` at `depth` in a flow mapping."""
+    count = 0
+    i = 0
+    level = 0
+    n = len(text)
+    while i < n:
+        char = text[i]
+        if char in "[{":
+            level += 1
+            i += 1
+            continue
+        if char in "]}":
+            level -= 1
+            i += 1
+            continue
+        if char in QUOTES:
+            i += 1
+            while i < n and text[i] != char:
+                i += 1
+            i += 1
+            continue
+        if level == depth:
+            match = re.match(r"([A-Za-z0-9_.-]+)\s*:", text[i:])
+            if match:
+                if match.group(1) == key:
+                    count += 1
+                i = value_end(text, i + match.end()) + 1
+                continue
+        i += 1
+    return count
+
+
+def flow_enabled(raw):
+    """Handle `platforms: {slack: {enabled: true}}` on one line."""
+    inner = raw.strip()
+    if inner.startswith("{") and inner.endswith("}"):
+        inner = inner[1:-1]
+    # Duplicate keys in a flow mapping are as ambiguous as in block style.
+    if flow_key_seen(inner, "slack", 0) > 1:
+        return True
+    slack_value = flow_value(inner, "slack", 0)
+    if slack_value is None or not slack_value.startswith("{"):
+        return True
+    slack_inner = slack_value[1:-1]
+    if flow_key_seen(slack_inner, "enabled", 0) > 1:
+        return True
+    enabled_value = flow_value(slack_inner, "enabled", 0)
+    if enabled_value is None:
+        return True
+    return normalized(scalar(enabled_value))
+
+
+def quote_closes(line, quote):
+    """True when `line` contains the quote character that ends an open scalar.
+
+    Backslash escapes count only in double-quoted scalars, and a doubled single
+    quote is an escaped apostrophe rather than a terminator.
+    """
+    i = 0
+    n = len(line)
+    while i < n:
+        char = line[i]
+        if quote == '"' and char == "\\":
+            i += 2
+            continue
+        if char == quote:
+            if quote == "'" and i + 1 < n and line[i + 1] == "'":
+                i += 2
+                continue
+            return True
+        i += 1
+    return False
+
+
+def mask_opaque(text):
+    """Blank out region types whose body text is not configuration.
+
+    Removes comments, literal/folded block scalars (the webhook route prompt is
+    one, and deliberately precedes the `slack` block), and multi-line quoted
+    scalars, so their contents can never be mistaken for keys. Non-UTF8 bytes
+    are replaced rather than rejected, so surrounding keys are still read.
+    """
+    out = []
+    block_indent = None
+    quote = None
+    for line in text.splitlines():
+        stripped = line.lstrip()
+        if block_indent is not None:
+            if line.strip() and len(line) - len(stripped) > block_indent:
+                out.append("")
+                continue
+            block_indent = None
+        if quote is not None:
+            if quote_closes(line, quote):
+                quote = None
+            out.append("")
+            continue
+        if not stripped or stripped.startswith("#"):
+            out.append("")
+            continue
+
+        # The scalar value is everything after the first key colon. A
+        # multi-line quote can only open there, so an apostrophe or a `" #"`
+        # inside a plain or double-quoted value cannot start one.
+        key_match = MASK_KEY_RE.match(line)
+        value = "" if key_match is None else key_match.group(2).strip()
+        for ch in QUOTES:
+            if value.startswith(ch) and value.count(ch) % 2 == 1:
+                quote = ch
+                break
+        if key_match is not None and value[:1] in ("|", ">"):
+            block_indent = len(key_match.group(1))
+        out.append(line)
+    return "\n".join(out)
+
+
+def duplicate_top_level_key(text, name):
+    """True when `name` occurs more than once as a top-level mapping key.
+
+    Duplicate keys are invalid YAML and parsers disagree on which one wins, so
+    the gate must not pick either. Called on masked text, so prompt bodies
+    cannot contribute a phantom key.
+    """
+    seen = 0
+    for line in text.splitlines():
+        if not line.strip():
+            continue
+        match = KEY_RE.match(line)
+        if not match:
+            continue
+        indent, key = match.group(1), match.group(2)
+        if "\t" in indent or len(indent) != 0:
+            continue
+        if key == name:
+            seen += 1
+            if seen > 1:
+                return True
+    return False
+
+
+def scan_lines(text):
+    """Walk the masked text once and return (state, value).
+
+    Nothing is decided until the whole document has been read, because a
+    duplicate `slack` or `enabled` key appearing later makes an earlier one
+    untrustworthy.
+    """
+    count_platforms = 0
+    count_slack = 0
+    count_enabled = 0
+    enabled = MISSING
+    platforms_indent = None
+    platforms_child_indent = None
+    slack_indent = None
+    child_indent = None
+
+    for line in text.splitlines():
+        match = KEY_RE.match(line)
+        if not match:
+            continue
+        indent, key, raw = match.group(1), match.group(2), match.group(3)
+
+        # Only space indentation can start a YAML block mapping.
+        if "\t" in indent:
+            continue
+        width = len(indent)
+        value = raw.strip()
+
+        # A top-level key ends whatever block was open beneath it.
+        if width == 0:
+            if key == "platforms":
+                count_platforms += 1
+                platforms_indent = width
+                platforms_child_indent = None
+                slack_indent = None
+                if value.startswith("{"):
+                    enabled = flow_enabled(value)
+                    count_enabled += 1
+                continue
+            platforms_indent = None
+            slack_indent = None
+            continue
+
+        if platforms_indent is None:
+            continue
+
+        # Leaving the slack block must still allow a second `slack` sibling to
+        # be seen (a duplicate key), so this does not `continue`.
+        if slack_indent is not None and width <= slack_indent:
+            slack_indent = None
+
+        if width <= platforms_indent:
+            continue
+
+        # `slack` is the platform only as a direct child of `platforms`.
+        if slack_indent is None:
+            if platforms_child_indent is None:
+                platforms_child_indent = width
+            if width == platforms_child_indent and key == "slack":
+                count_slack += 1
+                slack_indent = width
+                child_indent = None
+                if value.startswith("{"):
+                    enabled = flow_enabled(value)
+                    count_enabled += 1
+            continue
+
+        # `enabled` is the flag only as a direct child of `slack`.
+        if child_indent is None:
+            child_indent = width
+        if width == child_indent and key == "enabled":
+            count_enabled += 1
+            enabled = normalized(scalar(raw))
+
+    # Any duplicate along the path makes the document ambiguous.
+    if count_platforms > 1 or count_slack > 1 or count_enabled > 1:
+        return AMBIGUOUS, None
+    if count_enabled == 0:
+        return ABSENT, None
+    return FOUND, enabled
+
+
+def main(path):
+    # errors="replace" so a stray non-UTF8 byte cannot abort the gate.
+    with open(path, encoding="utf-8", errors="replace") as handle:
+        text = handle.read()
+    masked = mask_opaque(text)
+    # Ambiguous documents are never trusted to disable the gate.
+    if duplicate_top_level_key(masked, "platforms"):
+        return True
+    state, value = scan_lines(masked)
+    if state == FOUND:
+        return bool(value)
+    # ABSENT (no flag) and AMBIGUOUS (duplicate keys) both mean "enabled".
+    return True
+
 
 try:
-    with open(sys.argv[1], encoding="utf-8") as handle:
-        config = yaml.safe_load(handle)
-    platforms = (config or {}).get("platforms") or {}
-    slack = platforms.get("slack") or {}
-    if not isinstance(slack, dict):
-        sys.exit(0)
-    enabled = slack.get("enabled", True)
+    result = main(sys.argv[1])
 except Exception:
-    # Unparseable or unexpected shape: fail closed.
-    sys.exit(0)
+    # Any unexpected failure must fail CLOSED (require tokens), never open.
+    result = True
 
-truthy = (True, "true", "yes", "on", 1)
-sys.exit(0 if enabled in truthy else 1)
+sys.exit(0 if result else 1)
 PY
+
+  # The probe only ever exits 0 (enabled/require) or 1 (disabled/skip). Any
+  # other code means the interpreter failed, which must fail closed.
+  if [ "$rc" -eq 1 ]; then
+    return 1
+  fi
+  return 0
 }
 
 check_file() {

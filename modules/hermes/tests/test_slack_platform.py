@@ -16,6 +16,7 @@ Socket Mode is a WebSocket client, so no published port is expected.
 
 from __future__ import annotations
 
+import os
 import re
 import subprocess
 import tempfile
@@ -215,13 +216,20 @@ class SlackPlatformEnabledProbeTests(unittest.TestCase):
     function from deploy.sh and run it.
     """
 
-    def _run_probe(self, config_text: str | None) -> bool:
-        """Return the probe's verdict for a config body; None means no file."""
+    def _run_probe(self, config_text: str | bytes | None) -> bool:
+        """Return the probe's verdict; None means no file.
+
+        Accepts bytes so tests can supply content that is not valid UTF-8.
+        """
         with tempfile.TemporaryDirectory() as tmp:
             module_dir = Path(tmp) / "hermes"
             module_dir.mkdir()
             if config_text is not None:
-                (module_dir / "config.yaml").write_text(config_text, encoding="utf-8")
+                target = module_dir / "config.yaml"
+                if isinstance(config_text, bytes):
+                    target.write_bytes(config_text)
+                else:
+                    target.write_text(config_text, encoding="utf-8")
 
             harness = "\n".join(
                 [
@@ -240,6 +248,77 @@ class SlackPlatformEnabledProbeTests(unittest.TestCase):
 
         self.assertIn(result.returncode, (0, 1), f"probe crashed: {result.stderr}")
         return result.returncode == 0
+
+    def _run_probe_without_pyyaml(self, config_text: str) -> bool:
+        """Run the probe with PyYAML unimportable, as on the deploy runner.
+
+        The deploy host has no PyYAML. A probe that falls back to "enabled" when
+        the import fails aborts production deployment, which is exactly what
+        happened when this integration first shipped.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            module_dir = tmp_path / "hermes"
+            module_dir.mkdir()
+            (module_dir / "config.yaml").write_text(config_text, encoding="utf-8")
+
+            # A directory holding a yaml module that raises on import, placed
+            # ahead of site-packages so it shadows any real PyYAML.
+            shim = tmp_path / "shim"
+            shim.mkdir()
+            (shim / "yaml.py").write_text(
+                'raise ImportError("simulated: runner has no PyYAML")\n',
+                encoding="utf-8",
+            )
+
+            harness = "\n".join(
+                [
+                    "set -euo pipefail",
+                    f'HERMES_DIR="{module_dir}"',
+                    probe_source,
+                    "slack_platform_enabled",
+                ]
+            )
+            env = dict(os.environ, PYTHONPATH=str(shim))
+            result = subprocess.run(
+                ["bash", "-c", harness],
+                capture_output=True,
+                text=True,
+                check=False,
+                env=env,
+            )
+
+        self.assertIn(result.returncode, (0, 1), f"probe crashed: {result.stderr}")
+        return result.returncode == 0
+
+    def test_disabled_config_skips_without_pyyaml(self) -> None:
+        """Regression: no PyYAML on the runner must not force token validation."""
+        body = "platforms:\n  slack:\n    enabled: false\n  webhook:\n    enabled: true\n"
+
+        self.assertFalse(
+            self._run_probe_without_pyyaml(body),
+            "disabled Slack must skip token validation even without PyYAML",
+        )
+
+    def test_enabled_config_requires_tokens_without_pyyaml(self) -> None:
+        body = "platforms:\n  slack:\n    enabled: true\n"
+
+        self.assertTrue(
+            self._run_probe_without_pyyaml(body),
+            "enabled Slack must still require tokens without PyYAML",
+        )
+
+    def test_capitalised_and_string_booleans_are_read(self) -> None:
+        """Reviewer finding: quoted/capitalised truthy forms must not read disabled."""
+        truthy = {
+            "quoted-capital": 'platforms:\n  slack:\n    enabled: "True"\n',
+            "quoted-upper": 'platforms:\n  slack:\n    enabled: "TRUE"\n',
+            "quoted-yes-capital": 'platforms:\n  slack:\n    enabled: "Yes"\n',
+            "quoted-one": 'platforms:\n  slack:\n    enabled: "1"\n',
+        }
+        for label, body in truthy.items():
+            with self.subTest(shape=label):
+                self.assertTrue(self._run_probe(body), f"{label} should require tokens")
 
     def test_enabled_shapes_require_token_validation(self) -> None:
         shapes = {
@@ -267,6 +346,301 @@ class SlackPlatformEnabledProbeTests(unittest.TestCase):
         """Detection failure must require tokens, never silently skip them."""
         self.assertTrue(self._run_probe(None), "missing config must fail closed")
         self.assertTrue(self._run_probe("not: [valid: yaml\n"), "bad YAML must fail closed")
+        # An empty or comment-only document has no disabled flag to honour.
+        self.assertTrue(self._run_probe(""), "empty config must fail closed")
+        self.assertTrue(self._run_probe("# nothing here\n"), "comment-only must fail closed")
+
+    def test_unexpected_parse_failures_fail_closed(self) -> None:
+        """A crash inside the probe must not read as 'Slack disabled'.
+
+        The caller treats a non-zero probe as permission to skip the token
+        check, so any exception escaping the parser would silently disable the
+        gate while Slack is enabled.
+        """
+        risky = {
+            "null-value": "platforms:\n  slack:\n    enabled:\n",
+            "comment-only-value": "platforms:\n  slack:\n    enabled: # c\n",
+            "tilde-null": "platforms:\n  slack:\n    enabled: ~\n",
+            "quoted-null": 'platforms:\n  slack:\n    enabled: "null"\n',
+            "tab-indented": "platforms:\n\tslack:\n\t\tenabled: false\n",
+            # Raw Latin-1 byte: genuinely invalid UTF-8, unlike a \u00e9 escape.
+            "non-utf8-byte": b"platforms:\n  slack:\n    enabled: true\n# caf\xe9\n",
+        }
+        for label, body in risky.items():
+            with self.subTest(case=label):
+                self.assertTrue(self._run_probe(body), f"{label} must fail closed")
+
+    def test_flow_style_platforms_mapping(self) -> None:
+        """`platforms: {slack: {enabled: false}}` is valid YAML and must be read."""
+        disabled = "platforms: {slack: {enabled: false}}\n"
+        enabled = "platforms: {slack: {enabled: true}}\n"
+        slack_not_first = "platforms: {webhook: {enabled: true}, slack: {enabled: false}}\n"
+        # `slack` nested inside another flow mapping is not the platform key.
+        nested_route = "platforms: {webhook: {routes: {slack: {enabled: false}}}}\n"
+
+        self.assertFalse(self._run_probe(disabled), "flow-style disabled must skip tokens")
+        self.assertTrue(self._run_probe(enabled), "flow-style enabled must require tokens")
+        self.assertFalse(self._run_probe(slack_not_first), "second flow key must be found")
+        self.assertTrue(self._run_probe(nested_route), "nested flow slack key must not match")
+
+    def test_slack_must_be_a_direct_child_of_platforms(self) -> None:
+        """A nested `slack:` mapping must not stand in for the platform block."""
+        nested_route = (
+            "platforms:\n"
+            "  webhook:\n"
+            "    routes:\n"
+            "      slack:\n"
+            "        enabled: false\n"
+            "  slack:\n"
+            "    enabled: true\n"
+        )
+        nested_only = (
+            "platforms:\n"
+            "  webhook:\n"
+            "    routes:\n"
+            "      slack:\n"
+            "        enabled: false\n"
+        )
+        fake_platforms = (
+            "other:\n"
+            "  platforms:\n"
+            "    slack:\n"
+            "      enabled: false\n"
+            "platforms:\n"
+            "  slack:\n"
+            "    enabled: true\n"
+        )
+
+        self.assertTrue(self._run_probe(nested_route), "nested slack key must not disable the gate")
+        self.assertTrue(self._run_probe(nested_only), "nested-only slack is not the platform")
+        self.assertTrue(self._run_probe(fake_platforms), "indented platforms is not the top level")
+
+    def test_duplicate_platforms_keys_fail_closed(self) -> None:
+        """Two top-level `platforms:` keys are invalid YAML; err on enabled.
+
+        Real parsers disagree on duplicate keys, so the gate must not guess in
+        the direction that skips token validation.
+        """
+        duplicated = (
+            "platforms:\n"
+            "  slack:\n"
+            "    enabled: false\n"
+            "platforms:\n"
+            "  slack:\n"
+            "    enabled: true\n"
+        )
+
+        self.assertTrue(self._run_probe(duplicated))
+
+    def test_duplicate_slack_or_enabled_keys_fail_closed(self) -> None:
+        """Duplicate `slack:` or `enabled:` keys are ambiguous, so err on enabled.
+
+        A first-wins read would skip token validation while the effective YAML
+        (last-wins) has Slack enabled.
+        """
+        dup_slack = (
+            "platforms:\n"
+            "  slack:\n"
+            "    enabled: false\n"
+            "  slack:\n"
+            "    enabled: true\n"
+        )
+        dup_enabled = (
+            "platforms:\n"
+            "  slack:\n"
+            "    enabled: false\n"
+            "    enabled: true\n"
+        )
+
+        self.assertTrue(self._run_probe(dup_slack), "duplicate slack key is ambiguous")
+        self.assertTrue(self._run_probe(dup_enabled), "duplicate enabled key is ambiguous")
+
+    def test_quoted_values_keep_their_literal_text(self) -> None:
+        """A quoted string is a string: comments inside quotes are not comments."""
+        cases = {
+            "quote-then-comment": 'platforms:\n  slack:\n    enabled: "false # x"\n',
+            "quote-with-comma-flow": 'platforms: {slack: {enabled: "false,true"}}\n',
+            "quote-with-comment-flow": 'platforms: {slack: {enabled: "false # x"}}\n',
+            "genuine-quoted-false": 'platforms:\n  slack:\n    enabled: "false"\n',
+        }
+        for label, body in cases.items():
+            with self.subTest(case=label):
+                expected = label == "genuine-quoted-false"
+                self.assertEqual(
+                    expected,
+                    not self._run_probe(body),
+                    f"{label}: probe disagreed with the quoted scalar's real value",
+                )
+
+    def test_quotes_elsewhere_do_not_hide_the_real_flag(self) -> None:
+        """A quote in an earlier scalar must not blank the `enabled:` line.
+
+        Opening a multi-line quote on any stray apostrophe or `" #"` would mask
+        every later line, which re-creates the production abort this change
+        fixes: the gate would read "enabled" and demand tokens for a disabled
+        platform.
+        """
+        cases = {
+            "apostrophe-plain": "platforms:\n  slack:\n    note: don't\n    enabled: false\n",
+            "hash-in-double-quotes": (
+                'platforms:\n  slack:\n    note: "a # b"\n    enabled: false\n'
+            ),
+            "apostrophe-at-top-level": (
+                'identity: "Darren\'s"\nplatforms:\n  slack:\n    enabled: false\n'
+            ),
+            "escaped-double-quote": (
+                'platforms:\n  slack:\n    note: "say \\"hi\\""\n    enabled: false\n'
+            ),
+            "doubled-single-quote": (
+                "platforms:\n  slack:\n    note: 'it''s'\n    enabled: false\n"
+            ),
+            "multi-line-value-inside-slack": (
+                'platforms:\n  slack:\n    note: "multi\n      line"\n    enabled: false\n'
+            ),
+        }
+        for label, body in cases.items():
+            with self.subTest(case=label):
+                self.assertFalse(
+                    self._run_probe(body),
+                    f"{label}: a genuine false flag must still disable the gate",
+                )
+
+    def test_quoted_block_scalar_key_is_masked(self) -> None:
+        """`"prompt": |` is a valid block scalar and its body is not config."""
+        enabled_after = (
+            "platforms:\n"
+            '  "prompt": |\n'
+            "    slack:\n"
+            "      enabled: false\n"
+            "  slack:\n"
+            "    enabled: true\n"
+        )
+        disabled_after = (
+            "platforms:\n"
+            "  'prompt': >\n"
+            "    slack:\n"
+            "      enabled: false\n"
+            "  slack:\n"
+            "    enabled: false\n"
+        )
+
+        self.assertTrue(self._run_probe(enabled_after), "quoted key block body must be masked")
+        self.assertFalse(self._run_probe(disabled_after), "real flag after the block still counts")
+
+    def test_duplicate_flow_keys_fail_closed(self) -> None:
+        """Flow mappings with repeated keys are as ambiguous as block style."""
+        dup_enabled = "platforms: {slack: {enabled: false, enabled: true}}\n"
+        dup_slack = "platforms: {slack: {enabled: false}, slack: {enabled: true}}\n"
+
+        self.assertTrue(self._run_probe(dup_enabled), "duplicate flow enabled is ambiguous")
+        self.assertTrue(self._run_probe(dup_slack), "duplicate flow slack is ambiguous")
+
+    def test_multiline_quoted_scalar_is_not_parsed_as_config(self) -> None:
+        """A quoted scalar can span lines; its continuation is not a key."""
+        body = (
+            "platforms:\n"
+            '  note: "text\n'
+            "  slack:\n"
+            "    enabled: false\n"
+            '  tail"\n'
+            "  slack:\n"
+            "    enabled: true\n"
+        )
+
+        self.assertTrue(self._run_probe(body), "multi-line quoted text must not disable the gate")
+
+    def test_only_a_direct_child_flag_counts(self) -> None:
+        """A nested or block-scalar `enabled:` must not stand in for slack's own flag."""
+        after_nested = (
+            "platforms:\n"
+            "  slack:\n"
+            "    enabled: false\n"
+            "    extra:\n"
+            "      enabled: true\n"
+        )
+        nested_before_flag = (
+            "platforms:\n"
+            "  slack:\n"
+            "    extra:\n"
+            "      sub:\n"
+            "        enabled: false\n"
+            "    enabled: true\n"
+        )
+        block_scalar = (
+            "platforms:\n"
+            "  slack:\n"
+            "    extra:\n"
+            "      prompt: |\n"
+            "        enabled: false\n"
+            "    enabled: true\n"
+        )
+        literal_under_slack = (
+            "platforms:\n"
+            "  slack:\n"
+            "    prompt: |\n"
+            "      enabled: true\n"
+            "    enabled: false\n"
+        )
+
+        self.assertFalse(self._run_probe(after_nested), "direct flag wins over a later nested one")
+        self.assertTrue(self._run_probe(nested_before_flag), "nested flag must not mask the real one")
+        self.assertTrue(self._run_probe(block_scalar), "block scalar text must not mask the real flag")
+        self.assertFalse(self._run_probe(literal_under_slack), "direct false still wins")
+
+    def test_block_scalar_body_is_not_parsed_as_config(self) -> None:
+        """A prompt block's free text must never be read as the platform flag.
+
+        The webhook route prompt is a `|` block that necessarily sits before the
+        `slack:` block, and its text can contain anything, including lines that
+        look exactly like `slack:` and `enabled: false`.
+        """
+        fake_slack_in_prompt = (
+            "platforms:\n"
+            "  webhook:\n"
+            "    extra:\n"
+            "      routes:\n"
+            "        notify:\n"
+            "          prompt: |\n"
+            "            slack:\n"
+            "              enabled: false\n"
+            "  slack:\n"
+            "    enabled: true\n"
+        )
+        folded_scalar = (
+            "platforms:\n"
+            "  webhook:\n"
+            "    extra:\n"
+            "      prompt: >\n"
+            "        platforms:\n"
+            "          slack:\n"
+            "            enabled: false\n"
+            "  slack:\n"
+            "    enabled: true\n"
+        )
+        fake_platforms_in_prompt = (
+            "platforms:\n"
+            "  webhook:\n"
+            "    extra:\n"
+            "      prompt: |\n"
+            "        platforms:\n"
+            "          slack:\n"
+            "            enabled: false\n"
+            "  slack:\n"
+            "    enabled: false\n"
+        )
+
+        self.assertTrue(
+            self._run_probe(fake_slack_in_prompt),
+            "a `slack:` line inside a prompt block must not disable the gate",
+        )
+        self.assertTrue(
+            self._run_probe(folded_scalar),
+            "a folded scalar body must not disable the gate",
+        )
+        self.assertFalse(
+            self._run_probe(fake_platforms_in_prompt),
+            "the real flag after a block scalar must still be honoured",
+        )
 
     def test_repo_config_matches_the_probe_verdict(self) -> None:
         """Whatever the repo ships, the probe must agree with the YAML."""
