@@ -1,3 +1,9 @@
+x-logging: &default-logging
+    driver: json-file
+    options:
+        max-size: "10m"
+        max-file: "3"
+
 services:
     signal-cli:
         image: ghcr.io/asamk/signal-cli:latest
@@ -10,6 +16,7 @@ services:
             - "127.0.0.1:8084:8080"
         networks:
             - hermes_shared
+        logging: *default-logging
 
 networks:
     hermes_shared:
