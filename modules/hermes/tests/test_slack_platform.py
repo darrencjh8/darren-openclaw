@@ -224,14 +224,24 @@ class HermesSlackDeployValidationTests(unittest.TestCase):
             "the Slack enabled probe does not read the repo config.yaml",
         )
 
-    def test_optional_slack_vars_are_not_hard_required(self) -> None:
-        """Allowlist and home channel stay optional so a DM-only install can deploy."""
-        for name in ("SLACK_ALLOWED_USERS", "SLACK_HOME_CHANNEL"):
+    def test_allowlist_is_hard_required_while_home_channel_stays_optional(self) -> None:
+        """The allowlist is the only authz gate in free-response mode.
+
+        With ``require_mention: false`` every message from an allowlisted user
+        becomes an agent turn, so an empty ``SLACK_ALLOWED_USERS`` means the bot
+        connects and silently answers nobody. Deploy must fail loudly instead.
+        The home channel stays optional because cron delivery does not need it.
+        """
+        self.assertRegex(
+            self.text,
+            r'check_var\s+"SLACK_ALLOWED_USERS"',
+            "SLACK_ALLOWED_USERS must be hard-required while Slack is enabled",
+        )
+        for name in ("SLACK_HOME_CHANNEL", "SLACK_HOME_CHANNEL_NAME"):
             with self.subTest(name=name):
-                hard = rf'check_var\s+"{name}"'
                 self.assertNotRegex(
                     self.text,
-                    hard,
+                    rf'check_var\s+"{name}"',
                     f"{name} should use check_var_optional, not check_var",
                 )
 

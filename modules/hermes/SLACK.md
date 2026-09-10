@@ -121,13 +121,14 @@ Variables (**… → Variables**):
 
 | Name | Value | Required |
 | --- | --- | --- |
-| `SLACK_ALLOWED_USERS` | comma-separated Member IDs | required — the bot answers everything, so this is the only gate |
+| `SLACK_ALLOWED_USERS` | comma-separated Member IDs | required — `deploy.sh` fails without it while Slack is enabled |
 | `SLACK_HOME_CHANNEL` | channel ID for cron/scheduled delivery, e.g. `C01234567890` | optional |
 | `SLACK_HOME_CHANNEL_NAME` | human-readable label, e.g. `general` | optional |
 
-Leaving `SLACK_ALLOWED_USERS` unset means the gateway denies every Slack user —
-that is Hermes's fail-closed default, not an error. With free response enabled,
-an empty list means the bot connects and answers nobody.
+With free response enabled the allowlist is the only authorization gate, so the
+deploy hard-requires it. Leaving it empty would otherwise produce a bot that
+connects and answers nobody. Set it at the same scope the deploy job uses —
+environment `darren-prod`, not repository scope.
 
 For a local (non-CI) deployment, put the same five keys in the gitignored
 `modules/hermes/.env`:

@@ -551,14 +551,15 @@ if $GITHUB_MODE || check_file "$HERMES_ENV"; then
   check_var "TELEGRAM_ALLOWED_USERS" "$HERMES_ENV"
   check_var "TELEGRAM_HOME_CHANNEL" "$HERMES_ENV"
 
-  # Slack (Socket Mode). Tokens are required only while platforms.slack.enabled
-  # is true, so merging the wiring before the Slack app exists does not break
-  # deployment. The allowlist and home channel are always optional.
+  # Slack (Socket Mode). Validated only while platforms.slack.enabled is true,
+  # so the wiring could merge before the Slack app existed. The allowlist is a
+  # hard requirement: free response makes it the only authorization gate, and an
+  # empty one yields a bot that connects but answers nobody.
   if slack_platform_enabled; then
     echo "  [Slack]"
     check_var "SLACK_BOT_TOKEN" "$HERMES_ENV"
     check_var "SLACK_APP_TOKEN" "$HERMES_ENV"
-    check_var_optional "SLACK_ALLOWED_USERS" "$HERMES_ENV"
+    check_var "SLACK_ALLOWED_USERS" "$HERMES_ENV"
     check_var_optional "SLACK_HOME_CHANNEL" "$HERMES_ENV"
     check_var_optional "SLACK_HOME_CHANNEL_NAME" "$HERMES_ENV"
   else
