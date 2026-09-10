@@ -1,4 +1,6 @@
 #!/bin/bash
+# Copyright © 2022 Dell Inc. or its subsidiaries. All Rights Reserved.
+
 # Contract test for durable Hermes model routing defaults.
 set -euo pipefail
 
@@ -102,7 +104,7 @@ assert "fallback_chain" not in decomposer, (
 
 for profile, (model, fallback_model) in {
     "architect": ("gpt-5.6-sol", "deepseek-v4-pro"),
-    "code-reviewer": ("gpt-5.6-terra", "deepseek-v4-flash"),
+    "code-reviewer": ("auto-thinking", None),
     "spec-auditor": ("gpt-5.6-terra", "deepseek-v4-pro"),
     "project-manager": ("gpt-5.6-luna", "deepseek-v4-flash"),
 }.items():
@@ -111,16 +113,23 @@ for profile, (model, fallback_model) in {
     with open(profile_config_path) as f:
         profile_config = yaml.safe_load(f)
     assert_provider(profile_config, model, profile)
-    assert profile_config["model"].get("provider") == router_route, (
-        f"{profile}.model.provider: expected {router_route!r}, got {profile_config['model'].get('provider')!r}"
+    expected_provider = router_route
+    assert profile_config["model"].get("provider") == expected_provider, (
+        f"{profile}.model.provider: expected {expected_provider!r}, got {profile_config['model'].get('provider')!r}"
     )
     assert profile_config["model"].get("default") == model
     assert "base_url" not in profile_config["model"]
     assert "api_key" not in profile_config["model"]
     fallback = profile_config["fallback_providers"]
-    assert len(fallback) == 1
-    assert fallback[0].get("provider") == "deepseek"
-    assert fallback[0].get("model") == fallback_model, (
-        f"{profile} fallback must use {fallback_model}, got {fallback[0].get('model')!r}"
-    )
+    if profile == "code-reviewer":
+        assert fallback == [], "code-reviewer must fail closed instead of switching review tiers"
+        assert profile_config["memory"]["memory_enabled"] is False, (
+            "code-reviewer memory must be disabled so every review has a fresh context"
+        )
+    else:
+        assert len(fallback) == 1
+        assert fallback[0].get("provider") == "deepseek"
+        assert fallback[0].get("model") == fallback_model, (
+            f"{profile} fallback must use {fallback_model}, got {fallback[0].get('model')!r}"
+        )
 PY

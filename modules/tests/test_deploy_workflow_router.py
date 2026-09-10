@@ -132,9 +132,11 @@ class DeployWorkflowRouterTests(unittest.TestCase):
         )
         self.assertIn("python tests/test_provider_smoke_live.py", smoke["run"])
 
-    def test_code_reviewer_uses_router_terra(self):
+    def test_code_reviewer_uses_round_aware_router_without_fallback(self):
         reviewer = yaml.safe_load((Path(__file__).parents[1] / "hermes/profiles/code-reviewer/config.yaml").read_text(encoding="utf-8"))
-        self.assertEqual(reviewer["model"], {"provider": "custom:codex-router", "default": "gpt-5.6-terra"})
+        self.assertEqual(reviewer["model"], {"provider": "custom:codex-router", "default": "auto-thinking"})
+        self.assertEqual(reviewer["fallback_providers"], [])
+        self.assertFalse(reviewer["memory"]["memory_enabled"])
         self.assertEqual(reviewer["agent"]["reasoning_effort"], "medium")
 
     def test_public_test_workflow_discovers_all_module_contract_tests(self):

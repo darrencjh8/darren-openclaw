@@ -4,16 +4,13 @@ providers:
         api: http://codex-router:4100/v1
         api_key: local
         transport: chat_completions
-        default_model: gpt-5.6-terra
+        default_model: auto-thinking
 
 model:
     provider: custom:codex-router
-    default: gpt-5.6-terra
+    default: auto-thinking
 
-fallback_providers:
-    - provider: deepseek
-      model: deepseek-v4-flash
-      api_key: ${DEEPSEEK_API_KEY}
+fallback_providers: []
 
 agent:
     reasoning_effort: medium
@@ -28,7 +25,7 @@ approvals:
     timeout: 60
 
 memory:
-    memory_enabled: true
+    memory_enabled: false
     user_profile_enabled: false
     write_approval: true
 
