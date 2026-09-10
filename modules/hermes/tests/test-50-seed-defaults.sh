@@ -1,4 +1,6 @@
 #!/bin/bash
+# Copyright © 2022 Dell Inc. or its subsidiaries. All Rights Reserved.
+
 # Unit tests for 50-seed-defaults cron job seeding.
 # Tests that jobs are seeded with proper parsed schedule dicts, not raw strings.
 set -euo pipefail
@@ -382,9 +384,51 @@ with open('$SEED_SCRIPT') as f:
     content = f.read()
 profiles = 'managed_routing_profiles = (\"architect\", \"code-reviewer\", \"project-manager\", \"spec-auditor\")' in content
 fields = 'for key in (\"providers\", \"model\", \"fallback_providers\")' in content
-print('present' if profiles and fields else 'missing')
+reviewer_isolation = 'target.setdefault(\"memory\", {})[\"memory_enabled\"] = False' in content and 'target[\"memory\"][\"user_profile_enabled\"] = False' in content
+print('present' if profiles and fields and reviewer_isolation else 'missing')
 ")
-[ "$managed_routing_migration" = "present" ] && ok "managed profile routing migrates provider and fallback fields on startup" || nope "managed profile routing migration" "got: $managed_routing_migration"
+[ "$managed_routing_migration" = "present" ] && ok "managed profile routing and reviewer isolation migrate on startup" || nope "managed profile migration" "got: $managed_routing_migration"
+
+migration_block=$(python3 - "$SEED_SCRIPT" <<'PY'
+import re
+import sys
+
+content = open(sys.argv[1], encoding="utf-8").read()
+match = re.search(r"# Migrate only routing fields.*?python3 - <<'PY'\n(.*?)\nPY\n", content, re.DOTALL)
+print(match.group(1) if match else "")
+PY
+)
+migration_defaults="$TMPDIR/hermes-defaults/profiles/code-reviewer"
+migration_target="$TMPDIR/data/profiles/code-reviewer"
+mkdir -p "$migration_defaults" "$migration_target"
+cp "$SCRIPT_DIR/../profiles/code-reviewer/config.yaml" "$migration_defaults/config.yaml"
+cat > "$migration_target/config.yaml" <<'YAML'
+model:
+  provider: stale
+  default: stale
+fallback_providers:
+  - provider: stale
+memory:
+  memory_enabled: true
+  user_profile_enabled: true
+approvals:
+  mode: custom-preserved
+YAML
+migration_block=${migration_block//\/opt\/hermes-defaults/$TMPDIR/hermes-defaults}
+migration_block=${migration_block//\/opt\/data/$TMPDIR/data}
+python3 -c "$migration_block"
+migration_result=$(python3 - "$migration_target/config.yaml" <<'PY'
+import sys
+import yaml
+
+config = yaml.safe_load(open(sys.argv[1], encoding="utf-8"))
+isolated = config["memory"]["memory_enabled"] is False and config["memory"]["user_profile_enabled"] is False
+preserved = config["approvals"]["mode"] == "custom-preserved"
+routed = config["model"] == {"provider": "custom:codex-router", "default": "auto-thinking"}
+print("pass" if isolated and preserved and routed and config["fallback_providers"] == [] else "fail")
+PY
+)
+[ "$migration_result" = "pass" ] && ok "existing reviewer profile migrates to isolated round routing" || nope "reviewer isolation fixture" "got: $migration_result"
 
 echo ""
 echo "=== opencode config seeding (merge, not clobber) ==="

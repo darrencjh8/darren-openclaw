@@ -1,4 +1,6 @@
 #!/command/with-contenv sh
+# Copyright © 2022 Dell Inc. or its subsidiaries. All Rights Reserved.
+
 # shellcheck shell=sh
 # shellcheck disable=SC2015,SC2235
 # Seed baked-in config, SOUL, skills, and scripts on every boot.
@@ -81,6 +83,9 @@ for name in managed_routing_profiles:
     for key in ("providers", "model", "fallback_providers"):
         if key in defaults:
             target[key] = defaults[key]
+    if name == "code-reviewer":
+        target.setdefault("memory", {})["memory_enabled"] = False
+        target["memory"]["user_profile_enabled"] = False
     target_path.write_text(yaml.safe_dump(target, sort_keys=False))
 PY
 
