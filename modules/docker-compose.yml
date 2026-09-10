@@ -131,7 +131,6 @@ services:
         environment:
             - CODEX_ROUTER_AUTH_PASSWORD=${CODEX_ROUTER_AUTH_PASSWORD}
             - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}
-            - OPENCODE_API_KEY=${OPENCODE_API_KEY:-}
             - OPENCODE_ZEN_API_KEY=${OPENCODE_ZEN_API_KEY:-}
         restart: unless-stopped
         mem_limit: 1536m
@@ -197,7 +196,6 @@ services:
             - FRIDAY_PAT=${FRIDAY_PAT}
             - GH_TOKEN=${FRIDAY_PAT}
             - EXPENSE_TRACKER_DATA=/opt/data/expense-tracker-data
-            - OPENCODE_GO_API_KEY=${OPENCODE_GO_API_KEY:-}
         mem_limit: 2g
         networks:
             - default

@@ -7,12 +7,10 @@ providers:
         default_model: gpt-5.6-terra
 
 model:
-    provider: opencode-go
-    default: glm-5.3-flash
+    provider: custom:codex-router
+    default: gpt-5.6-terra
 
 fallback_providers:
-    - provider: custom:codex-router
-      model: gpt-5.6-terra
     - provider: deepseek
       model: deepseek-v4-flash
       api_key: ${DEEPSEEK_API_KEY}
