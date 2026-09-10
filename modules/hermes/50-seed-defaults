@@ -84,8 +84,12 @@ for name in managed_routing_profiles:
         if key in defaults:
             target[key] = defaults[key]
     if name == "code-reviewer":
-        target.setdefault("memory", {})["memory_enabled"] = False
-        target["memory"]["user_profile_enabled"] = False
+        memory = target.get("memory")
+        if not isinstance(memory, dict):
+            memory = {}
+            target["memory"] = memory
+        memory["memory_enabled"] = False
+        memory["user_profile_enabled"] = False
     target_path.write_text(yaml.safe_dump(target, sort_keys=False))
 PY
 

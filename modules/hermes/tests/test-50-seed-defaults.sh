@@ -384,7 +384,7 @@ with open('$SEED_SCRIPT') as f:
     content = f.read()
 profiles = 'managed_routing_profiles = (\"architect\", \"code-reviewer\", \"project-manager\", \"spec-auditor\")' in content
 fields = 'for key in (\"providers\", \"model\", \"fallback_providers\")' in content
-reviewer_isolation = 'target.setdefault(\"memory\", {})[\"memory_enabled\"] = False' in content and 'target[\"memory\"][\"user_profile_enabled\"] = False' in content
+reviewer_isolation = 'if not isinstance(memory, dict):' in content and 'memory[\"memory_enabled\"] = False' in content and 'memory[\"user_profile_enabled\"] = False' in content
 print('present' if profiles and fields and reviewer_isolation else 'missing')
 ")
 [ "$managed_routing_migration" = "present" ] && ok "managed profile routing and reviewer isolation migrate on startup" || nope "managed profile migration" "got: $managed_routing_migration"
@@ -429,6 +429,32 @@ print("pass" if isolated and preserved and routed and config["fallback_providers
 PY
 )
 [ "$migration_result" = "pass" ] && ok "existing reviewer profile migrates to isolated round routing" || nope "reviewer isolation fixture" "got: $migration_result"
+
+cat > "$migration_target/config.yaml" <<'YAML'
+model:
+  provider: stale
+  default: stale
+fallback_providers:
+  - provider: stale
+memory:
+approvals:
+  mode: custom-preserved
+YAML
+null_memory_output=$(python3 -c "$migration_block" 2>&1) || null_memory_status=$?
+null_memory_status=${null_memory_status:-0}
+null_memory_result=$(python3 - "$migration_target/config.yaml" <<'PY'
+import sys
+import yaml
+
+config = yaml.safe_load(open(sys.argv[1], encoding="utf-8"))
+memory = config.get("memory")
+isolated = isinstance(memory, dict) and memory.get("memory_enabled") is False and memory.get("user_profile_enabled") is False
+preserved = config["approvals"]["mode"] == "custom-preserved"
+routed = config["model"] == {"provider": "custom:codex-router", "default": "auto-thinking"}
+print("pass" if isolated and preserved and routed and config["fallback_providers"] == [] else "fail")
+PY
+)
+[ "$null_memory_status" -eq 0 ] && [ "$null_memory_result" = "pass" ] && ok "null reviewer memory migrates safely" || nope "null reviewer memory migration" "status=$null_memory_status result=$null_memory_result output=$null_memory_output"
 
 echo ""
 echo "=== opencode config seeding (merge, not clobber) ==="
