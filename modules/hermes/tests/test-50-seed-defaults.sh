@@ -562,6 +562,71 @@ esac
     || nope "sibling files untouched" "AGENTS.md was modified"
 
 echo ""
+echo "=== memory-triage cron seeding (survives reinstall) ==="
+
+# The memory-triage job drains the memory write-approval queue. It must be seeded
+# so it survives a reinstall, along with the scripts + skill it depends on.
+mt_block=$(python3 - "$SEED_SCRIPT" <<'PY'
+import re, sys
+content = open(sys.argv[1], encoding="utf-8").read()
+blocks = re.findall(r"<<'PYEOF'[^\n]*\n(.*?)\nPYEOF", content, re.DOTALL)
+print(blocks[-1] if blocks else "")
+PY
+)
+[ -n "$mt_block" ] && ok "seed has a memory-triage PYEOF block" || nope "memory-triage block" "not found"
+
+rm -rf "$TMPDIR/cron"
+mkdir -p "$TMPDIR/cron"
+echo '{"jobs": []}' > "$TMPDIR/cron/jobs.json"
+mt_block_tmp=${mt_block//\/opt\/data\/cron\/jobs.json/$TMPDIR\/cron\/jobs.json}
+python3 -c "$mt_block_tmp" >/dev/null 2>&1
+
+mt_fields=$(python3 - "$TMPDIR/cron/jobs.json" <<'PY'
+import json, sys
+jobs = json.load(open(sys.argv[1]))["jobs"]
+if len(jobs) != 1:
+    print("fail count=%d" % len(jobs)); sys.exit()
+j = jobs[0]
+sched = j.get("schedule", {})
+prompt = j.get("prompt") or ""
+checks = {
+    "name": j.get("name") == "memory-triage",
+    "kind": sched.get("kind") == "cron",
+    "expr": sched.get("expr") == "0 9 * * *",
+    "display": j.get("schedule_display") == "0 9 * * *",
+    "enabled": j.get("enabled") is True,
+    "deliver": j.get("deliver") == "telegram",
+    "skills": j.get("skills") == ["hermes-troubleshooting"],
+    "prompt_len": len(prompt) > 500,
+    "safe_rollback": "memory-triage.sh restore" in prompt,
+    "cap": "--max-records" in prompt or "40 records" in prompt,
+    "audit": "memory-triage-audit.jsonl" in prompt,
+}
+bad = [k for k, v in checks.items() if not v]
+print("pass" if not bad else "fail " + repr(bad))
+PY
+)
+case "$mt_fields" in
+    pass) ok "job: cron 0 9 * * * · telegram · hermes-troubleshooting · safe prompt (snapshot/cap/audit)" ;;
+    *) nope "memory-triage fields" "$mt_fields" ;;
+esac
+
+# Idempotency: re-running the block must not duplicate the job.
+python3 -c "$mt_block_tmp" >/dev/null 2>&1
+mt2=$(python3 -c "import json;print(len(json.load(open('$TMPDIR/cron/jobs.json'))['jobs']))")
+[ "$mt2" = "1" ] && ok "idempotent: still 1 job on re-seed" || nope "memory-triage idempotent" "got $mt2"
+
+# Reinstall survival: scripts + skill must be baked in the repo (image) so the
+# seed can restore them.
+[ -f "$SCRIPT_DIR/../scripts/memory-triage.sh" ] && ok "baked: scripts/memory-triage.sh" || nope "scripts/memory-triage.sh" "missing"
+[ -f "$SCRIPT_DIR/../scripts/memory_triage.py" ] && ok "baked: scripts/memory_triage.py" || nope "scripts/memory_triage.py" "missing"
+[ -f "$SCRIPT_DIR/../skills/hermes-troubleshooting/SKILL.md" ] && ok "baked: skill SKILL.md" || nope "skill SKILL.md" "missing"
+[ -f "$SCRIPT_DIR/../skills/hermes-troubleshooting/scripts/memory_triage.py" ] && ok "baked: skill triage engine" || nope "skill triage engine" "missing"
+
+python3 -m py_compile "$SCRIPT_DIR/../scripts/memory_triage.py" 2>/dev/null \
+    && ok "memory_triage.py compiles" || nope "py compile" "syntax error"
+
+echo ""
 echo "========================================="
 echo -e " Results: ${GREEN}$pass passed${NC}, ${RED}$fail failed${NC}"
 echo "========================================="
