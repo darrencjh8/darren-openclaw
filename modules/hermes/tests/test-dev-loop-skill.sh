@@ -1,4 +1,6 @@
 #!/bin/bash
+# Copyright © 2022 Dell Inc. or its subsidiaries. All Rights Reserved.
+
 # Contract tests for the baked-in dev-loop skill.
 set -euo pipefail
 
@@ -46,6 +48,29 @@ require "$CODE_REVIEWER_SKILL" "reviewer skill pins round models" "Round 1 uses 
 require "$REPO_RULES" "repo rules permit free concurrency" "up to two concurrent fresh-context reviewers on free rounds"
 require "$REPO_RULES" "repo rules require three approvals" "three continuous approvals on the same unchanged HEAD"
 require "$REPO_RULES" "repo rules invoke spec-auditor when a spec exists" "invoke spec-auditor before code review"
+
+selector=$(sed -n '/^case "${REVIEW_ROUND-}" in$/,/^esac$/p' "$DEV_LOOP_SKILL")
+if [ -n "$selector" ]; then
+    ok "round selector is executable"
+else
+    nope "round selector is executable"
+fi
+for pair in "1:auto-thinking" "2:auto-thinking-free" "15:auto-thinking-free"; do
+    round=${pair%%:*}
+    expected=${pair#*:}
+    if actual=$(REVIEW_ROUND="$round" bash -c "$selector; printf '%s' \"\$REVIEWER_MODEL\"") && [ "$actual" = "$expected" ]; then
+        ok "round $round selects $expected"
+    else
+        nope "round $round selects $expected"
+    fi
+done
+for invalid_round in "" malformed 0 -1 16; do
+    if REVIEW_ROUND="$invalid_round" bash -c "$selector" >/dev/null 2>&1; then
+        nope "invalid round ${invalid_round:-unset} fails closed"
+    else
+        ok "invalid round ${invalid_round:-unset} fails closed"
+    fi
+done
 
 for profile_file in config.yaml profile.yaml SOUL.md; do
     [ -f "$SPEC_AUDITOR_PROFILE/$profile_file" ] \

@@ -141,11 +141,11 @@ Every reviewer uses a fresh isolated Hermes process. Round 1 runs alone. For lat
 
 ```bash
 cd <worktree>
-if [ "$REVIEW_ROUND" -eq 1 ]; then
-  REVIEWER_MODEL=auto-thinking
-else
-  REVIEWER_MODEL=auto-thinking-free
-fi
+case "${REVIEW_ROUND-}" in
+  1) REVIEWER_MODEL=auto-thinking ;;
+  2|3|4|5|6|7|8|9|10|11|12|13|14|15) REVIEWER_MODEL=auto-thinking-free ;;
+  *) printf 'invalid or exhausted review round: %s\n' "${REVIEW_ROUND-<unset>}" >&2; exit 1 ;;
+esac
 HERMES_HOME=<hermes-home> hermes chat \
   --profile code-reviewer \
   --model "$REVIEWER_MODEL" \
