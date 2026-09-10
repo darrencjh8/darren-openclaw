@@ -9,11 +9,7 @@ import yaml
 
 ROOT = Path(__file__).parents[2]
 DEPLOY_WORKFLOW = ROOT / ".github/workflows/deploy.yml"
-COMPOSE_FILES = (
-    ROOT / "modules/docker-compose.yml",
-    ROOT / "modules/kokoro-tts/docker-compose.yml",
-    ROOT / "modules/signal-cli/docker-compose.yml",
-)
+COMPOSE_FILES = tuple(sorted(ROOT.glob("modules/**/docker-compose.yml")))
 EXPECTED_LOG_DRIVER = "json-file"
 EXPECTED_LOG_OPTIONS = {"max-size": "10m", "max-file": "3"}
 
@@ -29,6 +25,7 @@ def detection_script():
 
 class ContainerLogRotationTests(unittest.TestCase):
     def test_every_service_caps_json_file_logs(self):
+        self.assertTrue(COMPOSE_FILES, "no compose files discovered")
         for compose_file in COMPOSE_FILES:
             compose = yaml.safe_load(compose_file.read_text(encoding="utf-8"))
             for name, service in compose["services"].items():
