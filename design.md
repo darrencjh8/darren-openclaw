@@ -47,9 +47,8 @@
 |---|---|---|
 | **expense-tracker** | Automated expense tracking via email → Actual Budget (Node.js tool backend) | Implemented |
 | **portfolio-tracker** | Investment portfolio sync: IBKR flex queries, PDF trade confirmations, AB → PP balance sync, taxonomy → Google Sheets. Notifications via Gateway webhook (Node.js + Java CLI) | Implemented |
-| **gateway** | OpenClaw Gateway deployment with expense-tracker + portfolio-tracker + ktmb-booking skills, Telegram channel, CDP browser relay, memory persistence | Implemented & Deployed |
+| **gateway** | OpenClaw Gateway deployment with expense-tracker + portfolio-tracker skills, Telegram channel, CDP browser relay, memory persistence | Implemented & Deployed |
 | **statement-reconciliation** | PDF credit card statement reconciliation + outlier detection | Specified, Planned, Tasked — Implementation Pending |
-| **ktmb-booking** | KTMB Shuttle Tebrau train booking + seat watcher (Python, Docker container) | Implemented |
 
 ---
 
@@ -223,7 +222,6 @@ OpenClaw uses the **LLM Agent Pattern**: expense-tracker tools are exposed as ty
 | **Expense-tracker** | Ubuntu laptop (Docker) | 21 typed plugin tools (budget_ prefix), IMAP IDLE | ~150MB RAM |
 | **Portfolio-tracker** | Ubuntu server (Docker) | Node.js agent + Java CLI subprocess; IMAP ingress (Trades folder); PP XML read/write; notifications via Gateway webhook | ~256MB RAM |
 | **actual-api** | Ubuntu laptop (Docker) | Official `@actual-app/api` (Node.js), WebSocket sync | ~100MB RAM |
-| **ktmb-booking** | Ubuntu laptop (Docker) | Python aiohttp API server + seat watcher worker; SQLite job store | ~150MB RAM |
 | **Email Burner** | Any IMAP provider | Public IMAP (imap.example.com:993) | Free tier, dedicated inbox |
 | **DeepSeek API** | DeepSeek Cloud | Public HTTPS (api.deepseek.com/v1) | Pay-per-token |
 | **Windows Companion** | Windows laptop | Windows Hub app connects via `ws://192.168.68.51:18789` + token. Canvas, camera, screen, voice, TTS/STT via node mode | Any modern Windows 10/11 PC |
@@ -398,7 +396,6 @@ graph TB
     subgraph Modules["MCP Servers"]
         ET["expense-tracker\n:8080/mcp"]
         PT["portfolio-tracker\n:8081/mcp"]
-        KTMB["ktmb-booking\n:8082/mcp"]
         IG["image-gen\n:8083/mcp"]
     end
 
@@ -407,14 +404,12 @@ graph TB
     CRON --> Hermes
     MCP <--> ET
     MCP <--> PT
-    MCP <--> KTMB
     MCP <--> IG
 
     ET --> AB["Actual Budget"]
     PT --> PP["Portfolio Performance"]
     PT --> GS["Google Sheets"]
     PT --> IBKR["IBKR Flex WS"]
-    KTMB --> KTMBAPI["KTMB API"]
 ```
 
 ### 6.3 MCP Servers
@@ -423,7 +418,6 @@ graph TB
 |---|---|---|
 | expense-tracker | `http://expense-tracker:8080/mcp` | 22 MCP tools — Actual Budget CRUD + dedup + extractors + memory + IMAP inbox |
 | portfolio-tracker | `http://portfolio-tracker:8081/mcp` | `portfolio_sync`, OneDrive IO, OneDrive auth |
-| ktmb-booking | `http://ktmb-booking:8082/mcp` | Train booking, schedule lookup |
 | image-gen | `http://image-gen:8083/mcp` | Image generation |
 
 ### 6.4 Cron Jobs (Hermes-managed)

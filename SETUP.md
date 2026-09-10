@@ -42,9 +42,6 @@ Both users are in the `docker` group — either can run `docker` commands.
         │   ├── onedrive_token/    # → /app/config/onedrive in portfolio-tracker
         │   │   └── refresh_token  # OneDrive OAuth refresh token (file)
         │   └── google-service-account.json  # → /app/config/ in portfolio-tracker (ro)
-        └── ktmb/
-            ├── .env               # → /app/.env in ktmb-booking container
-            └── data/              # → /app/data in ktmb-booking container
 ```
 
 ---
@@ -92,9 +89,7 @@ This changes the group to `runner` and adds group read permission without touchi
 | Expense Tracker | `modules-expense-tracker-1` | 127.0.0.1:8080 | 8080 | `/health` |
 | Portfolio Tracker | `modules-portfolio-tracker-1` | 127.0.0.1:8081 | 8081 | `/health` |
 | Actual API | `modules-actual-api-1` | 127.0.0.1:3000 | 3000 | — |
-| KTMB Booking | `modules-ktmb-booking-1` | 127.0.0.1:8082 | 8082 | `/health` |
 | Image Gen | `modules-image-gen-1` | 127.0.0.1:8083 | 8083 | — |
-| Kokoro TTS | `kokoro-tts` | 127.0.0.1:8880 | 8880 | — |
 
 All services except Hermes bind to `127.0.0.1` (localhost only) — not exposed to the network.
 

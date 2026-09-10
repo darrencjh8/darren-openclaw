@@ -7,7 +7,7 @@
 # Locally: reads .env files.
 #
 # Usage: ./modules/deploy.sh --component <name> [--component <name>...] [--non-interactive]
-#   --component <name>  Required. One of: all, hermes, portfolio-tracker, expense-tracker, actual-api, image-gen, ktmb-booking
+#   --component <name>  Required. One of: all, hermes, portfolio-tracker, expense-tracker, actual-api, image-gen
 #   --non-interactive    Skip OneDrive auth prompt
 # =============================================================================
 set -euo pipefail
@@ -26,6 +26,13 @@ while [[ $# -gt 0 ]]; do
   shift
 done
 
+# ktmb-booking is retired: refuse an explicit request instead of failing the
+# health gate after deploying a module that cannot start.
+if [[ " ${COMPONENTS[*]} " =~ " ktmb-booking " ]]; then
+  echo "ktmb-booking is retired and no longer deployable" >&2
+  exit 1
+fi
+
 if [[ ${#COMPONENTS[@]} -eq 0 ]]; then
   echo "Usage: ./modules/deploy.sh --component <name> [--component <name>...] [--non-interactive]"
   echo ""
@@ -36,7 +43,6 @@ if [[ ${#COMPONENTS[@]} -eq 0 ]]; then
   echo "  expense-tracker      Expense tracker"
   echo "  actual-api           Actual Budget API"
   echo "  image-gen            Image generation"
-  echo "  ktmb-booking         KTMB train booking"
   echo "  codex-router         LiteLLM proxy (ChatGPT/DeepSeek router)"
   echo ""
   echo "Example:"
@@ -720,8 +726,10 @@ echo "--- Pluggable Modules ---"
 MODULE_COUNT=0
 for mod_env in "$ROOT"/modules/*/module.env; do
   [ -f "$mod_env" ] || continue
-  MODULE_COUNT=$((MODULE_COUNT + 1))
   source "$mod_env"
+  # ktmb-booking is retired (the module targets mcp 1.x and is unused).
+  if [ "${MODULE_NAME:-}" = "ktmb-booking" ]; then continue; fi
+  MODULE_COUNT=$((MODULE_COUNT + 1))
   mod_dir="$(dirname "$mod_env")"
   echo -e "  ${GREEN}✓ Found: ${MODULE_NAME:-unknown} ($mod_dir)${NC}"
   if $GITHUB_MODE; then
@@ -843,13 +851,12 @@ echo "--- Git Pull ---"
 cd "$ROOT"
 git stash push -m "auto-deploy-stash-$(date +%s)" 2>/dev/null || true
 
-# Configure private submodule access
+# Configure private repository access
 if [ -n "${SUBMODULE_PAT:-}" ]; then
   git config --local url."https://x-access-token:${SUBMODULE_PAT}@github.com/".insteadOf "https://github.com/"
 fi
 
 if git pull; then
-  git submodule update --init --recursive 2>/dev/null || true
   echo -e "  ${GREEN}✓ code updated${NC}"
 else
   echo -e "  ${RED}✗ git pull failed${NC}"
@@ -864,7 +871,7 @@ cd "$MODULES_DIR"
 echo ""
 echo "--- Building & Deploying ---"
 
-# Ensure shared network exists (idempotent — needed for kokoro-tts)
+# Ensure shared network exists (idempotent — needed for signal-cli)
 docker network create hermes_shared --driver bridge 2>/dev/null || true
 
 export COMPOSE_DOCKER_CLI_BUILD=1 DOCKER_BUILDKIT=1
@@ -874,11 +881,8 @@ if [[ " ${COMPONENTS[*]} " =~ " all " ]] || [[ ${#COMPONENTS[@]} -eq 1 && "${COM
   # An empty TARGETS causes docker compose to silently ignore --force-recreate
   # and only touch services with changed images/configs.
   TARGETS=$($COMPOSE config --services | tr '\n' ' ')
-  # ktmb is a private submodule — exclude if not cloned
-  if $GITHUB_MODE && [ ! -d "$ROOT/modules/ktmb/docker" ]; then
-    TARGETS=$(echo "$TARGETS" | tr ' ' '\n' | grep -v ktmb-booking | tr '\n' ' ')
-    echo "  (excluding ktmb-booking — private submodule not cloned)"
-  fi
+  # ktmb-booking is retired: the module targets mcp 1.x and is unused.
+  TARGETS=$(echo "$TARGETS" | tr ' ' '\n' | grep -vx ktmb-booking | tr '\n' ' ')
 else
   TARGETS="${COMPONENTS[*]}"
 fi
@@ -892,30 +896,12 @@ fi
 # Deploy
 if [[ " ${COMPONENTS[*]} " =~ " all " ]]; then
   docker ps -q --filter name=gateway | xargs -r docker stop 2>/dev/null; true
-  docker stop hermes modules-portfolio-tracker-1 modules-expense-tracker-1 modules-actual-api-1 2>/dev/null; true
+  docker stop hermes modules-portfolio-tracker-1 modules-expense-tracker-1 modules-actual-api-1 kokoro-tts 2>/dev/null; true
+  # Retired ktmb-booking: signal any in-flight seat-watcher worker, then give the
+  # stop the same 11-minute grace the old drain provided.
+  docker exec modules-ktmb-booking-1 sh -c 'rm -f /etc/cron.d/ktmb-worker; pkill cron 2>/dev/null; touch /tmp/ktmb_worker.stop' 2>/dev/null || true
+  docker stop -t 660 modules-ktmb-booking-1 2>/dev/null; true
 fi
-
-# ── Graceful ktmb-booking shutdown ─────────────────────────────────
-if [[ " ${COMPONENTS[*]} " =~ " ktmb-booking " || " ${COMPONENTS[*]} " =~ " all " ]]; then
-  CONTAINER="modules-ktmb-booking-1"
-  if docker ps -q --filter name="$CONTAINER" | grep -q .; then
-    echo ""
-    echo "--- Graceful KTMB Shutdown ---"
-    echo "Stopping cron worker..."
-    docker exec "$CONTAINER" sh -c 'rm -f /etc/cron.d/ktmb-worker; pkill cron 2>/dev/null; touch /tmp/ktmb_worker.stop' 2>/dev/null || true
-
-    echo "Waiting for worker to finish (up to 11 min)..."
-    for i in $(seq 1 660); do
-      if ! docker exec "$CONTAINER" test -f /tmp/ktmb_worker.lock 2>/dev/null; then
-        echo "  Worker finished after ${i}s"
-        break
-      fi
-      sleep 1
-    done
-    echo "  Done"
-  fi
-fi
-# ────────────────────────────────────────────────────────────────────
 
 if [ "${FORCE_ALL:-false}" = "true" ]; then
     $COMPOSE up -d --force-recreate $TARGETS
@@ -977,6 +963,8 @@ for mod_env in "$ROOT"/modules/*/module.env; do
   [ -f "$mod_env" ] || continue
   source "$mod_env"
   should_deploy "${MODULE_NAME:-}" || continue
+  # Only health-check what was deployed; a retired module cannot answer.
+  [[ " $TARGETS " == *" ${MODULE_NAME} "* ]] || continue
   for port in "${MODULE_HEALTH_PORTS[@]}"; do
     health_ok "${MODULE_NAME:-unknown}" "http://localhost:$port/health" || failed=$((failed + 1))
   done

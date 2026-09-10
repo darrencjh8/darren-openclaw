@@ -15,7 +15,6 @@ graph TB
         subgraph Skills["Auto-discovered Skills"]
             SKILL_ET["expense-tracker<br/>SKILL.md"]
             SKILL_PT["portfolio-tracker<br/>SKILL.md"]
-            SKILL_KT["ktmb-booking<br/>SKILL.md"]
         end
 
         GW -->|"loads"| SKILL_ET
@@ -23,13 +22,10 @@ graph TB
 
         ET["expense-tracker<br/>Node.js :8080<br/>~18 tools"]
         PT["portfolio-tracker<br/>Node.js :8081<br/>~18 tools"]
-        KT["ktmb-booking<br/>Python :8082<br/>~13 tools"]
         API["actual-api<br/>Node.js :3000"]
 
         SKILL_ET -->|"HTTP /tools/*"| ET
         SKILL_PT -->|"HTTP /tools/*"| PT
-        GW -->|"loads"| KT
-        SKILL_KT -->|"HTTP /tools/*"| KT
         ET -->|"HTTP"| API
         PT -->|"HTTP"| API
     end
@@ -88,11 +84,6 @@ darren-openclaw/
 │   │   ├── src/                     # agent, client, extractors, pp_client, google
 │   │   ├── pp-cli/                  # Java CLI for Portfolio Performance XML
 │   │   ├── tests/                   # 27 test files, ~185 tests
-│   │   ├── docker/Dockerfile
-│   │   └── .env.example
-│   ├── ktmb-booking/                 # Python tool backend for KTMB train booking
-│   │   ├── src/                     # API server, seat watcher worker
-│   │   ├── tests/
 │   │   ├── docker/Dockerfile
 │   │   └── .env.example
 │   └── onedrive-sync/               # rclone config for OneDrive sync
