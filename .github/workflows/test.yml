@@ -107,6 +107,10 @@ jobs:
               run: bash modules/hermes/tests/test-deploy.sh
             - name: Test docker-compose hermes env vars
               run: bash modules/hermes/tests/test-docker-compose-env.sh
+            - name: Test Hermes Slack platform wiring
+              run: |
+                  python -m pip install --quiet PyYAML
+                  python -m unittest modules.hermes.tests.test_slack_platform -v
 
     image-gen:
         runs-on: ubuntu-latest

@@ -136,6 +136,21 @@ mcp_servers:
             exclude: []
         supports_parallel_tool_calls: false
 platforms:
+    slack:
+        enabled: true
+        # "first" threads the first chunk of a multi-part reply to the user's
+        # message; later chunks follow in that same thread.
+        reply_to_mode: "first"
+        extra:
+            reply_in_thread: true
+            # Render replies as Slack Block Kit (headers, dividers, tables). A
+            # plain-text fallback is always sent alongside for accessibility.
+            rich_blocks: true
+            # Keep channels clean: linked pages and media do not auto-preview.
+            unfurl_links: false
+            unfurl_media: false
+            # Ignore other Slack bots; Hermes only answers allowlisted humans.
+            allow_bots: "none"
     webhook:
         enabled: true
         extra:

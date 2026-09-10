@@ -110,6 +110,16 @@ check_var_optional() {
   fi
 }
 
+# True when platforms.slack.enabled is truthy in the seeded Hermes config.
+# Missing or unreadable config counts as enabled, so a required token is never
+# silently skipped.
+slack_platform_enabled() {
+  local config="$HERMES_DIR/config.yaml"
+  [ -f "$config" ] || return 0
+  grep -A1 '^[[:space:]]*slack:' "$config" 2>/dev/null \
+    | grep -qE 'enabled:[[:space:]]*true'
+}
+
 check_file() {
   local path="$1"
   if [ ! -f "$path" ]; then
@@ -148,6 +158,20 @@ if $GITHUB_MODE || check_file "$HERMES_ENV"; then
   check_var "TELEGRAM_BOT_TOKEN" "$HERMES_ENV"
   check_var "TELEGRAM_ALLOWED_USERS" "$HERMES_ENV"
   check_var "TELEGRAM_HOME_CHANNEL" "$HERMES_ENV"
+
+  # Slack (Socket Mode). Tokens are required only while platforms.slack.enabled
+  # is true, so merging the wiring before the Slack app exists does not break
+  # deployment. The allowlist and home channel are always optional.
+  if slack_platform_enabled; then
+    echo "  [Slack]"
+    check_var "SLACK_BOT_TOKEN" "$HERMES_ENV"
+    check_var "SLACK_APP_TOKEN" "$HERMES_ENV"
+    check_var_optional "SLACK_ALLOWED_USERS" "$HERMES_ENV"
+    check_var_optional "SLACK_HOME_CHANNEL" "$HERMES_ENV"
+    check_var_optional "SLACK_HOME_CHANNEL_NAME" "$HERMES_ENV"
+  else
+    echo "  [Slack] disabled in config.yaml — skipping token validation"
+  fi
 
   # Webhook
   echo "  [Webhook]"

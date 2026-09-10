@@ -123,6 +123,8 @@ jobs:
                   OPENCODE_ZEN_API_KEY: ${{ secrets.OPENCODE_ZEN_API_KEY }}
                   GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
                   TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+                  SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+                  SLACK_APP_TOKEN: ${{ secrets.SLACK_APP_TOKEN }}
                   HERMES_WEBHOOK_SECRET: ${{ secrets.HERMES_WEBHOOK_SECRET }}
                   GH_APP_PRIVATE_KEY: ${{ secrets.GH_APP_PRIVATE_KEY }}
                   HERMES_DASHBOARD_BASIC_AUTH_USERNAME: ${{ secrets.HERMES_DASHBOARD_BASIC_AUTH_USERNAME }}
@@ -153,6 +155,9 @@ jobs:
                   POLLINATIONS_API_KEY: ${{ secrets.POLLINATIONS_API_KEY }}
                   TELEGRAM_ALLOWED_USERS: ${{ vars.TELEGRAM_ALLOWED_USERS }}
                   TELEGRAM_HOME_CHANNEL: ${{ vars.TELEGRAM_HOME_CHANNEL }}
+                  SLACK_ALLOWED_USERS: ${{ vars.SLACK_ALLOWED_USERS }}
+                  SLACK_HOME_CHANNEL: ${{ vars.SLACK_HOME_CHANNEL }}
+                  SLACK_HOME_CHANNEL_NAME: ${{ vars.SLACK_HOME_CHANNEL_NAME }}
                   MEMORY_REPO_URL: ${{ vars.MEMORY_REPO_URL }}
                   GH_APP_ID: ${{ vars.GH_APP_ID }}
                   GH_APP_INSTALLATION_ID: ${{ vars.GH_APP_INSTALLATION_ID }}

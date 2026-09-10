@@ -175,6 +175,12 @@ services:
             - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
             - TELEGRAM_ALLOWED_USERS=${TELEGRAM_ALLOWED_USERS}
             - TELEGRAM_HOME_CHANNEL=${TELEGRAM_HOME_CHANNEL}
+            # Slack (Socket Mode — outbound WebSocket, no inbound port required)
+            - SLACK_BOT_TOKEN=${SLACK_BOT_TOKEN}
+            - SLACK_APP_TOKEN=${SLACK_APP_TOKEN}
+            - SLACK_ALLOWED_USERS=${SLACK_ALLOWED_USERS}
+            - SLACK_HOME_CHANNEL=${SLACK_HOME_CHANNEL}
+            - SLACK_HOME_CHANNEL_NAME=${SLACK_HOME_CHANNEL_NAME}
             - HERMES_WEBHOOK_SECRET=${HERMES_WEBHOOK_SECRET}
             - MEMORY_REPO_URL=${MEMORY_REPO_URL}
             - GH_APP_ID=${GH_APP_ID}
