@@ -140,6 +140,21 @@ class DeployWorkflowRouterTests(unittest.TestCase):
         self.assertIn("codex_router_live_launcher.py", script)
         self.assertIn("opencode_credential_proxy.py", workflow_source)
 
+    def test_external_provider_smoke_uses_trusted_router_main(self):
+        workflow = yaml.safe_load(ROUTER_CI_WORKFLOW.read_text(encoding="utf-8"))
+        live_steps = {step["name"]: step for step in workflow["jobs"]["live-opencode"]["steps"] if "name" in step}
+        checkout = live_steps["Check out trusted Codex Router smoke tests"]["with"]
+        self.assertEqual(checkout["repository"], "darrencjh8/codex-router")
+        self.assertEqual(checkout["ref"], "main")
+        self.assertEqual(checkout["path"], "trusted-router")
+        smoke = live_steps["Smoke-test auto-thinking external providers"]
+        self.assertEqual(smoke["working-directory"], "trusted-router")
+        self.assertEqual(
+            set(smoke["env"]),
+            {"OPENCODE_API_KEY", "OPENCODE_ZEN_API_KEY", "DEEPSEEK_API_KEY"},
+        )
+        self.assertIn("python tests/test_provider_smoke_live.py", smoke["run"])
+
     def test_live_launcher_redirects_only_opencode_go_hops(self):
         spec = importlib.util.spec_from_file_location("codex_router_live_launcher", ROUTER_LIVE_LAUNCHER)
         launcher = importlib.util.module_from_spec(spec)
