@@ -181,7 +181,6 @@ if $GITHUB_MODE || check_file "$HERMES_ENV"; then
   check_var_optional "BRAVE_SEARCH_API_KEY" "$HERMES_ENV"
   check_var_optional "FIRECRAWL_API_KEY" "$HERMES_ENV"
   check_var_optional "NOTION_API_KEY" "$HERMES_ENV"
-  check_var_optional "OPENCODE_GO_API_KEY" "$HERMES_ENV"
 fi
 fi
 
@@ -285,7 +284,6 @@ if should_deploy "codex-router" || should_deploy "all"; then
 echo ""
 echo "--- Codex Router ---"
   check_var "CODEX_ROUTER_AUTH_PASSWORD" ""
-  check_var_optional "OPENCODE_API_KEY" ""
   check_var_optional "OPENCODE_ZEN_API_KEY" ""
   echo "  [LLM Provider]"
   check_var_optional "LLM_PROVIDER" ""

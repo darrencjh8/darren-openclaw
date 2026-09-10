@@ -427,7 +427,6 @@ cat > "$TMPDIR/canonical.json" <<'EOF'
       "models": {
         "auto-thinking": { "name": "Auto (routed)" },
         "gpt-5.6-terra": { "name": "GPT-5.6 Terra" },
-        "glm-5.3-flash": { "name": "GLM 5.3 Flash" },
         "deepseek-v4-flash": { "name": "DeepSeek V4 Flash" }
       }
     }
