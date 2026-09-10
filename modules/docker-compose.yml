@@ -1,3 +1,9 @@
+x-logging: &default-logging
+    driver: json-file
+    options:
+        max-size: "10m"
+        max-file: "3"
+
 services:
     expense-tracker:
         build:
@@ -40,6 +46,7 @@ services:
             timeout: 5s
             retries: 3
             start_period: 20s
+        logging: *default-logging
 
     actual-api:
         build:
@@ -54,6 +61,7 @@ services:
             - ACTUAL_SECONDARY_BUDGET_FILE=${ACTUAL_SECONDARY_BUDGET_FILE}
             - BUDGET_SWITCH_DELAY_MS=5000
         restart: unless-stopped
+        logging: *default-logging
 
     portfolio-tracker:
         build:
@@ -95,6 +103,7 @@ services:
             timeout: 5s
             retries: 3
             start_period: 30s
+        logging: *default-logging
 
     ktmb-booking:
         build:
@@ -121,6 +130,7 @@ services:
             - KTMB_BOT_PASSPORT=${KTMB_BOT_PASSPORT:-}
             - KTMB_BOT_ALLOWED_CHAT_ID=${KTMB_BOT_ALLOWED_CHAT_ID:-}
         restart: unless-stopped
+        logging: *default-logging
 
     codex-router:
         build:
@@ -146,6 +156,7 @@ services:
             timeout: 10s
             retries: 3
             start_period: 60s
+        logging: *default-logging
 
     hermes:
         build:
@@ -207,6 +218,7 @@ services:
             - default
             - hermes_shared
         shm_size: 1g
+        logging: *default-logging
 
 volumes:
     codex_router_state:
