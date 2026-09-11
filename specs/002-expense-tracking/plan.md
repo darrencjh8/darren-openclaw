@@ -14,7 +14,7 @@
 | Layer | Choice | Version | Rationale |
 |---|---|---|---|
 | Runtime | Node.js | 22 (ESM) | Single runtime shared with actual-api and other modules; strong async I/O |
-| LLM Provider | DeepSeek | `deepseek-chat` | $0.14/1M input, $0.28/1M output, OpenAI-compatible API, strong at structured extraction |
+| LLM Provider | DeepSeek | `deepseek-flash` | $0.14/1M input, $0.28/1M output, OpenAI-compatible API, strong at structured extraction |
 | LLM Client | `openai` (Node SDK) | latest | DeepSeek is OpenAI-API-compatible (`baseURL: "https://api.deepseek.com/v1"`) |
 | IMAP Library | `imapflow` | latest | IMAP IDLE + inbox browsing (list/read) |
 | HTTP Client | `fetch` (built-in) | Node 22 | Native fetch for actual-api Node.js service |

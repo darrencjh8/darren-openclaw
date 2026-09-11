@@ -276,9 +276,9 @@ describe("Config — balance sync", () => {
     it("loads balance sync model", () => {
         const cfg = new Config({
             ...REQUIRED_ENV,
-            BALANCE_SYNC_MODEL: "deepseek-chat",
+            BALANCE_SYNC_MODEL: "deepseek-flash",
         });
-        expect(cfg.balanceSyncModel).toBe("deepseek-chat");
+        expect(cfg.balanceSyncModel).toBe("deepseek-flash");
     });
 
     it("defaults balance sync model to empty string", () => {

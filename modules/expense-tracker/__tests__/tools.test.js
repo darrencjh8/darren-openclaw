@@ -53,7 +53,7 @@ function mockConfig() {
         llmProvider: "deepseek",
         llmApiKey: "sk-test",
         llmBaseUrl: "https://api.deepseek.com/v1",
-        llmModel: "deepseek-v4-pro",
+        llmModel: "deepseek-flash",
         llmReasoningEffort: "low",
         actualBudgetUrl: "http://actual-api:3000",
         actualBudgetPassword: "pw",

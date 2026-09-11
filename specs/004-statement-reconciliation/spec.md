@@ -22,7 +22,7 @@ A **statement is authoritative** — it represents the bank's final record for a
 | **"No match"** | Insert new txn (cleared=false) | **Insert as outlier** (cleared=false, noted) |
 | **Result** | 1 txn inserted or skipped | Reconciliation report: X cleared, Y outliers inserted |
 | **Database** | dedup.db (prevent duplicates) | statement.db (prevent re-processing periods) |
-| **LLM Model** | deepseek-chat (thinking=off) | deepseek-chat (thinking=low) |
+| **LLM Model** | deepseek-flash (thinking=off) | deepseek-flash (thinking=low) |
 | **Email disposition** | Read on insert; unread on skip/fail | Always marked read |
 
 ---
@@ -36,7 +36,7 @@ A **statement is authoritative** — it represents the bank's final record for a
 **So that** statements enter the reconciliation pipeline and single alerts enter the insertion pipeline, regardless of format (PDF, HTML, or plain text).
 
 **Acceptance Criteria:**
-- [x] After content extraction, a lightweight LLM call (deepseek-chat, no tools) classifies the email
+- [x] After content extraction, a lightweight LLM call (deepseek-flash, no tools) classifies the email
 - [x] Classification input: Subject, From, and first 2000 characters of extracted body text
 - [x] Classification prompt: "Classify this email as 'statement', 'transaction', or 'skip'."
 - [x] "statement" → Statement reconciliation pipeline (US-2 through US-6)
@@ -158,7 +158,7 @@ A **statement is authoritative** — it represents the bank's final record for a
 | Statement in MYR | `ensureBudget` switches to MYR budget — all AB operations on MYR |
 | OCR extracts wrong amount (garbled) | fuzzy_match amount diffs → no match → inserted as outlier (safe) |
 | PDF is password-protected | `pdftotext` fails → `qpdf --password=... --decrypt` → `pdftotext`. Password sourced from: (1) `search-memory` for stored passwords, (2) email body patterns, (3) user prompt → saved via `learn-fact`. If all fail → `[PDF_EXTRACTION_ERROR]` → notify → mark read |
-| Statement text exceeds LLM context window | DeepSeek V4 has 1M context — 40-page statement fine. Text is truncated at 60K chars as safety. |
+| Statement text exceeds LLM context window | DeepSeek Flash has 1M context — 40-page statement fine. Text is truncated at 60K chars as safety. |
 | IBKR Activity Flex or trade confirmation email arrives | Pre-classification returns `"skip"` → email silently marked read, bypassed entirely. Handled by the portfolio-tracker module |
 | IMAP folder doesn't exist | Auto-create Trades folder on first connection |
 | Server-side filter not yet set up | Fallback: expense-tracker sees non-bank emails and classifies as skip |

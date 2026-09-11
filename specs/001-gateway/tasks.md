@@ -54,7 +54,7 @@
 **Purpose**: Docker Compose config for Hermes container on the same network as expense-tracker + actual-api. Email channel configured.
 
 - [ ] T015 [US1] Create `gateway/hermes/` directory for Hermes Docker config files
-- [ ] T016 [P] [US1] Create `gateway/hermes/config.yaml` — DeepSeek + Gemini providers, MCP server pointing to `expense-tracker:8080/mcp`, delegation settings (V4 Pro for thinker), cron enabled
+- [ ] T016 [P] [US1] Create `gateway/hermes/config.yaml` — DeepSeek + Gemini providers, MCP server pointing to `expense-tracker:8080/mcp`, delegation settings (`deepseek-flash` for thinker), cron enabled
 - [ ] T017 [P] [US1] Create `gateway/hermes/.env` — `DEEPSEEK_API_KEY`, `GEMINI_API_KEY`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_ALLOWED_USERS`, `EMAIL_*` vars
 - [ ] T018 [P] [US1] Create `gateway/hermes/SOUL.md` — agent personality: "Darren's expense tracker assistant. Concise. Proactive about debugging."
 - [ ] T019 [US1] Add Hermes service to `gateway/docker-compose.yml`:

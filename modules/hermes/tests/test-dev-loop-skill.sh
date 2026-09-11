@@ -78,7 +78,7 @@ for profile_file in config.yaml profile.yaml SOUL.md; do
         || nope "spec-auditor profile has $profile_file"
 done
 
-if grep -Fq -- "--provider deepseek" "$DEV_LOOP_SKILL" || grep -Fq -- "deepseek-v4-pro --reasoning" "$DEV_LOOP_SKILL" || grep -Fq -- "pinned to **DeepSeek" "$CODE_REVIEWER_SKILL"; then
+if grep -Fq -- "--provider deepseek" "$DEV_LOOP_SKILL" || grep -Fq -- "deepseek-flash --reasoning" "$DEV_LOOP_SKILL" || grep -Fq -- "pinned to **DeepSeek" "$CODE_REVIEWER_SKILL"; then
     nope "skills have no hardcoded DeepSeek reviewer invocation"
 else
     ok "skills have no hardcoded DeepSeek reviewer invocation"

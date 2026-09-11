@@ -61,7 +61,7 @@ export async function classifyEmail(rawEmail, subject, sender, config) {
         const provider = config.llmProvider || "deepseek";
         const routes = [{
             provider,
-            model: config.llmModel || "deepseek-v4-pro",
+            model: config.llmModel || "deepseek-flash",
             apiKey: config.llmApiKey || config.deepseekApiKey || "",
             baseURL: config.llmBaseUrl || "https://api.deepseek.com/v1",
         }];
@@ -69,7 +69,7 @@ export async function classifyEmail(rawEmail, subject, sender, config) {
             routes.push({ ...routes[0], model: config.llmFallbackModel });
             routes.push({
                 provider: config.llmFinalFallbackProvider || "deepseek",
-                model: config.llmFinalFallbackModel || "deepseek-v4-flash",
+                model: config.llmFinalFallbackModel || "deepseek-flash",
                 apiKey: config.deepseekApiKey || "",
                 baseURL: "https://api.deepseek.com/v1",
             });

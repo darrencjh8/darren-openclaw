@@ -350,11 +350,11 @@ Expense-tracker exposes an MCP server at `:8080/mcp`. Hermes handles email inges
 
 ### 5A.1 Purpose
 
-A parallel pipeline for processing monthly bank/credit card statements (PDF/HTML). Unlike receipt emails which insert new transactions, statements reconcile against existing entries: matching line items are marked cleared, unmatched are inserted as outliers. Uses DeepSeek v4-pro for higher accuracy on multi-line extraction.
+A parallel pipeline for processing monthly bank/credit card statements (PDF/HTML). Unlike receipt emails which insert new transactions, statements reconcile against existing entries: matching line items are marked cleared, unmatched are inserted as outliers. Uses `deepseek-flash` for higher accuracy on multi-line extraction.
 
 ### 5A.2 Architecture
 
-An email is pre-classified by Hermes as "statement" vs "transaction" before dispatch. Statements go to the StatementProcessor (separate orchestrator, v4-pro, max 20 iterations). The pipeline: extract content → LLM extracts line items → fuzzy match against unreconciled transactions → mark matched as cleared, insert outliers → notify user with summary. Full details in [spec 004](./specs/004-statement-reconciliation/spec.md).
+An email is pre-classified by Hermes as "statement" vs "transaction" before dispatch. Statements go to the StatementProcessor (separate orchestrator, `deepseek-flash`, max 20 iterations). The pipeline: extract content → LLM extracts line items → fuzzy match against unreconciled transactions → mark matched as cleared, insert outliers → notify user with summary. Full details in [spec 004](./specs/004-statement-reconciliation/spec.md).
 
 ### 5A.3 Key Design Decisions
 
@@ -447,7 +447,7 @@ A Node.js agent that manages investment portfolio data. It syncs IBKR trades via
 | Layer | Choice |
 |---|---|
 | Runtime | Node.js 22 + Java 21 |
-| LLM | DeepSeek v4 (PDF trade confirmation matching) |
+| LLM | DeepSeek Flash (PDF trade confirmation matching) |
 | MCP | @modelcontextprotocol/sdk (Streamable HTTP) |
 | IMAP | node-imap (PDF trade confirmations only) |
 | OneDrive | Microsoft Graph API |
@@ -648,8 +648,8 @@ The expense-tracker container exposes an HTTP health check on port 8080 (returns
 | Server #1 (Actual Budget, existing) | $0.00 (free tier) |
 | Ubuntu laptop (Docker, self-hosted) | $0.00 (existing hardware) |
 | DeepSeek API (~100 emails/month, expense-tracker internal LLM) | ~$0.10 |
-| DeepSeek API (Telegram chat — orchestrator v4-flash) | ~$0.05 |
-| DeepSeek API (Telegram chat — thinker v4-pro, ~20% of messages) | ~$0.05 |
+| DeepSeek API (Telegram chat — orchestrator `deepseek-flash`) | ~$0.05 |
+| DeepSeek API (Telegram chat — thinker `deepseek-flash`, ~20% of messages) | ~$0.05 |
 | Gemini API (embeddings + fallback, free tier) | $0.00 |
 | Email burner inbox | $0.00 (free tier) |
 | **Total incremental cost** | **~$0.20/month** |
@@ -657,8 +657,8 @@ The expense-tracker container exposes an HTTP health check on port 8080 (returns
 Token economics per email (expense-tracker internal): ~2000 input tokens + ~200 output tokens = ~$0.001 per email.
 
 Token economics per Telegram message: 
-- 80% simple (orchestrator v4-flash): ~500 tokens = ~$0.0001
-- 20% complex (thinker v4-pro): ~2000 tokens = ~$0.001
+- 80% simple (orchestrator `deepseek-flash`): ~500 tokens = ~$0.0001
+- 20% complex (thinker `deepseek-flash`): ~2000 tokens = ~$0.001
 - Weighted average per message: ~$0.0003
 
 ---

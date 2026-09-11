@@ -51,7 +51,7 @@ describe("Config", () => {
         expect(config.llmModel).toBe("auto-thinking");
         expect(config.llmFallbackModel).toBe("gpt-5.6-terra");
         expect(config.llmFinalFallbackProvider).toBe("deepseek");
-        expect(config.llmFinalFallbackModel).toBe("deepseek-v4-flash");
+        expect(config.llmFinalFallbackModel).toBe("deepseek-flash");
     });
 
     it("keeps the DeepSeek fallback credential separate from the router credential", () => {

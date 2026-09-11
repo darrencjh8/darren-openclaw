@@ -18,7 +18,7 @@
 
 An LLM-powered agent (Hermes) that monitors a dedicated Email burner inbox via IMAP IDLE. When a receipt or transaction alert email is forwarded to this inbox, the agent extracts structured transaction data and inserts it into the user's existing **Actual Budget** instance.
 
-The intelligence layer is a **DeepSeek LLM** (`deepseek-chat`). The Node.js host (`modules/expense-tracker`) provides deterministic tools — **26 REST `/tools/*` endpoints** and **22 MCP tools** — that the LLM/orchestrator calls to fetch live context and execute actions. No business rules (category mapping, account matching, currency detection) are hardcoded in the tool layer.
+The intelligence layer is a **DeepSeek LLM** (`deepseek-flash`). The Node.js host (`modules/expense-tracker`) provides deterministic tools — **26 REST `/tools/*` endpoints** and **22 MCP tools** — that the LLM/orchestrator calls to fetch live context and execute actions. No business rules (category mapping, account matching, currency detection) are hardcoded in the tool layer.
 
 Incoming emails are pre-classified by a lightweight LLM call into one of three categories before dispatch: `"transaction"` (alert pipeline, 3-phase orchestrator), `"statement"` (reconciliation pipeline), or `"skip"` (silently ignored — for trade/portfolio emails handled by a separate module).
 
@@ -154,8 +154,8 @@ Incoming emails are pre-classified by a lightweight LLM call into one of three c
 **So that** portfolio/trade emails are silently skipped (not processed by the expense-tracker) and expense-related emails reach the correct pipeline.
 
 **Acceptance Criteria:**
-- [x] Every inbound email is classified by a lightweight LLM call (deepseek-chat, no tools) as one of: `"statement"`, `"transaction"`, or `"skip"`
-- [x] `"statement"` → routed to the Statement Reconciliation pipeline (`src/statement/orchestrator.js`, deepseek-chat)
+- [x] Every inbound email is classified by a lightweight LLM call (deepseek-flash, no tools) as one of: `"statement"`, `"transaction"`, or `"skip"`
+- [x] `"statement"` → routed to the Statement Reconciliation pipeline (`src/statement/orchestrator.js`, deepseek-flash)
 - [x] `"transaction"` → routed to the Alert pipeline (`src/orchestrator.js`, 3-phase: LLM Analysis → code-driven Resolution → Execute)
 - [x] `"skip"` → email is silently marked as read with NO LLM processing and NO user notification. This covers: IBKR Activity Flex statements, trade confirmations, portfolio reports, investment summaries, securities transaction notices
 - [x] If the classification LLM fails (API error, timeout), the email defaults to `"transaction"` as a safe fallback

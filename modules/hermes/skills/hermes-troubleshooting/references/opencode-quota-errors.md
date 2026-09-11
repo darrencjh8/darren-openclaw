@@ -9,10 +9,10 @@ quota buckets are exhausted. Diagnose by probing, not by re-checking config.
 | Provider | base_url | Key env var | Models seen |
 |---|---|---|---|
 | opencode-zen | `https://opencode.ai/zen/v1` | `OPENCODE_ZEN_API_KEY` | `opencode/mimo-v2.5-free`, gemini-3.8-flash, muse-spark-*-free, ling-3.0-flash-fin-free, nemotron-3-ultra-free |
-| opencode-go | `https://opencode.ai/zen/go/v1` | `OPENCODE_GO_API_KEY` | glm-5.2, kimi-k2, deepseek-v4 |
-| deepseek | (provider default) | `DEEPSEEK_API_KEY` | deepseek-v4-flash |
+| opencode-go | `https://opencode.ai/zen/go/v1` | `OPENCODE_GO_API_KEY` | glm-5.2, kimi-k2 |
+| deepseek | (provider default) | `DEEPSEEK_API_KEY` | deepseek-flash |
 
-Fallback order (main model): glm-5.2 (go) → mimo-v2.5-free (zen) → deepseek-v4-flash.
+Fallback order (main model): glm-5.2 (go) → mimo-v2.5-free (zen) → deepseek-flash.
 Provider profiles live in `/opt/hermes/plugins/model-providers/opencode-zen/__init__.py`
 (per-model reasoning knobs, max_tokens caps, attribution headers).
 Config may ALSO override base_url per fallback entry — trust the config entry.

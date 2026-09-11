@@ -48,7 +48,7 @@ describe("DeepSeekClient", () => {
     });
 
     it("constructs with config", () => {
-        expect(client._model).toBe("deepseek-chat");
+        expect(client._model).toBe("deepseek-flash");
         expect(client._client).toBeDefined();
     });
 
@@ -65,7 +65,7 @@ describe("DeepSeekClient", () => {
 
         expect(client._client.chat.completions.create).toHaveBeenCalledWith(
             expect.objectContaining({
-                model: "deepseek-chat",
+                model: "deepseek-flash",
                 messages,
                 temperature: 0.1,
                 thinking: { type: "low" },

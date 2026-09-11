@@ -32,7 +32,7 @@ export class Config {
         : "http://localhost:4100/v1");
     this.llmModel =
       env.LLM_MODEL ||
-      (this.llmProvider === "deepseek" ? "deepseek-v4-pro" : "auto-thinking");
+      (this.llmProvider === "deepseek" ? "deepseek-flash" : "auto-thinking");
     this.llmApiKey = env.LLM_API_KEY || env.DEEPSEEK_API_KEY || "";
     this.llmReasoningEffort = env.LLM_REASONING_EFFORT || "low";
     this.llmFallbackModel =
@@ -40,7 +40,7 @@ export class Config {
       (this.llmProvider === "deepseek" ? "" : "gpt-5.6-terra");
     this.llmFinalFallbackProvider = env.LLM_FINAL_FALLBACK_PROVIDER || "deepseek";
     this.llmFinalFallbackModel =
-      env.LLM_FINAL_FALLBACK_MODEL || "deepseek-v4-flash";
+      env.LLM_FINAL_FALLBACK_MODEL || "deepseek-flash";
 
     // Direct DeepSeek credential stays available for cross-provider fallback.
     this.deepseekApiKey = env.DEEPSEEK_API_KEY || "";

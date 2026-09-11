@@ -25,7 +25,7 @@ function makeConfig(overrides = {}) {
     llmProvider: "deepseek",
     llmApiKey: "sk-test",
     llmBaseUrl: "https://api.deepseek.com/v1",
-    llmModel: "deepseek-v4-pro",
+    llmModel: "deepseek-flash",
     llmReasoningEffort: "low",
     systemPrompt: "You are a test agent.",
     actualBudgetFile: "test-budget",
@@ -549,7 +549,7 @@ describe("DeepSeekClient API format", () => {
     expect(kwargs.messages).toBeDefined();
     expect(kwargs.messages[0].content).toBe("hello");
     expect(kwargs.thinking).toEqual({ type: "low" });
-    expect(kwargs.model).toBe("deepseek-v4-pro");
+    expect(kwargs.model).toBe("deepseek-flash");
   });
 
   it("includes tools in kwargs with tool_choice auto", async () => {
