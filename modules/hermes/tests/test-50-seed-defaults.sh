@@ -460,12 +460,20 @@ echo ""
 echo "=== hermes config seeding ==="
 
 # The seed script copies the baked canonical config into the live data dir, so
-# the seeded copy inherits whatever compression settings are baked here.
-seed_config="$SCRIPT_DIR/../config.yaml"
-
-grep -qF 'cp /opt/hermes-defaults/config.yaml /opt/data/config.yaml' "$SEED_SCRIPT" \
+# the seeded copy inherits whatever compression settings are baked here. Run the
+# real copy line against a fixture and parse the COPIED file, so the assertion
+# fails if the seeded output ever loses the compaction block.
+seed_cp_line=$(grep -F 'cp /opt/hermes-defaults/config.yaml /opt/data/config.yaml' "$SEED_SCRIPT") || seed_cp_line=""
+[ -n "$seed_cp_line" ] \
     && ok "seed: copies baked config.yaml to /opt/data/config.yaml" \
     || nope "seed: baked config copy" "expected 'cp /opt/hermes-defaults/config.yaml /opt/data/config.yaml'"
+
+mkdir -p "$TMPDIR/seed/hermes-defaults" "$TMPDIR/seed/data"
+cp "$SCRIPT_DIR/../config.yaml" "$TMPDIR/seed/hermes-defaults/config.yaml"
+seed_cp_line=${seed_cp_line//\/opt\/hermes-defaults/$TMPDIR/seed/hermes-defaults}
+seed_cp_line=${seed_cp_line//\/opt\/data/$TMPDIR/seed/data}
+bash -c "$seed_cp_line"
+seed_config="$TMPDIR/seed/data/config.yaml"
 
 seeded_threshold_tokens=$(python3 - "$seed_config" <<'PY'
 import sys
