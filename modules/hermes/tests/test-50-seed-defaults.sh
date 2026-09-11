@@ -496,8 +496,7 @@ cat > "$TMPDIR/canonical.json" <<'EOF'
       },
       "models": {
         "auto-thinking": { "name": "Auto (routed)" },
-        "gpt-5.6-terra": { "name": "GPT-5.6 Terra" },
-        "deepseek-v4-flash": { "name": "DeepSeek V4 Flash" }
+        "gpt-5.6-terra": { "name": "GPT-5.6 Terra" }
       }
     }
   },
@@ -545,7 +544,9 @@ models = c.get('provider', {}).get('codex-router', {}).get('models', {})
 checks = {
     'model_auto': c.get('model') == 'codex-router/auto-thinking',
     'no_pro': 'deepseek-v4-pro' not in models,
-    'has_flash': 'deepseek-v4-flash' in models,
+    'no_flash': 'deepseek-v4-flash' not in models,
+    'no_auto_free': 'auto-thinking-free' not in models,
+    'has_terra': 'gpt-5.6-terra' in models,
     'has_auto': 'auto-thinking' in models,
     'kept_instructions': c.get('instructions') == ['custom instruction from install-agents.sh'],
     'kept_plugin': c.get('plugin') == ['some-plugin@1.0.0'],
