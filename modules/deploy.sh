@@ -934,11 +934,26 @@ health_ok() {
 
 failed=0
 
-# Hermes dashboard (always check if hermes being deployed)
-# Needs extra wait: config migration + profile seeding runs before port binds
+# Hermes gateway (the dashboard is disabled in compose, so its port would always fail)
+# Needs extra wait: config migration + profile seeding registers the supervised
+# gateway service after container start, so poll it with the same bounded budget
+# the HTTP health checks use instead of checking once.
 if should_deploy "hermes" || should_deploy "all"; then
   sleep 30
-  health_ok "hermes" "http://localhost:9119/" || failed=$((failed + 1))
+  gateway_up=false
+  for _ in $(seq 1 10); do
+    if docker exec hermes /package/admin/s6/command/s6-svstat -o up /run/service/gateway-default 2>/dev/null | grep -qx true; then
+      gateway_up=true
+      break
+    fi
+    sleep 6
+  done
+  if $gateway_up; then
+    echo -e "  ${GREEN}✓ hermes gateway${NC}"
+  else
+    echo -e "  ${RED}✗ hermes gateway (s6 service not up)${NC}"
+    failed=$((failed + 1))
+  fi
 fi
 
 if should_deploy "actual-api" || should_deploy "all"; then
