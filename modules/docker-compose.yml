@@ -178,14 +178,14 @@ services:
             - SOUL_VOICE_STYLE=${SOUL_VOICE_STYLE}
             - SOUL_VOICE_RULES=${SOUL_VOICE_RULES}
             - SOUL_DELEGATION=${SOUL_DELEGATION}
-            - HERMES_DASHBOARD=1
+            - HERMES_DASHBOARD=0
             - FIRECRAWL_API_KEY=${FIRECRAWL_API_KEY}
             - NOTION_API_KEY=${NOTION_API_KEY}
             - POLLINATIONS_API_KEY=${POLLINATIONS_API_KEY}
             - FRIDAY_PAT=${FRIDAY_PAT}
             - GH_TOKEN=${FRIDAY_PAT}
             - EXPENSE_TRACKER_DATA=/opt/data/expense-tracker-data
-        mem_limit: 2g
+        mem_limit: 3g
         networks:
             - default
             - hermes_shared

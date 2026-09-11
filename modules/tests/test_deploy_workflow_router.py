@@ -150,6 +150,29 @@ class DeployWorkflowRouterTests(unittest.TestCase):
         self.assertEqual(provider["transport"], "chat_completions")
         self.assertEqual(config["model"]["provider"], "custom:codex-router")
 
+    def test_hermes_deploy_health_gate_checks_gateway_not_retired_dashboard(self):
+        deploy_script = DEPLOY_SCRIPT.read_text(encoding="utf-8")
+
+        # The dashboard is disabled in compose, so probing its port would fail
+        # every hermes deploy. The supervised gateway s6 service is the gate.
+        self.assertNotIn("9119", deploy_script)
+        self.assertIn(
+            "/package/admin/s6/command/s6-svstat -o up /run/service/gateway-default",
+            deploy_script,
+        )
+
+    def test_hermes_deploy_health_gate_retries_before_failing(self):
+        deploy_script = DEPLOY_SCRIPT.read_text(encoding="utf-8")
+        gate = deploy_script.split("# Hermes gateway", 1)[1].split(
+            "# Pluggable module health checks", 1
+        )[0]
+
+        # A single check after the fixed sleep is not enough: cont-init registers
+        # the supervised gateway after container start, so the gate must poll it
+        # with the same bounded budget the HTTP health checks used.
+        self.assertRegex(gate, r"for _ in \$\(seq 1 10\)")
+        self.assertIn("sleep 6", gate)
+
 
 if __name__ == "__main__":
     unittest.main()
