@@ -45,16 +45,19 @@ models = config.get("provider", {}).get("codex-router", {}).get("models", {})
 problems = []
 if default != "codex-router/auto-thinking":
     problems.append(f"default model = {default!r}, want codex-router/auto-thinking")
-for required in ("auto-thinking", "auto-thinking-free", "gpt-5.6-terra", "deepseek-v4-flash"):
+for required in ("auto-thinking", "gpt-5.6-terra"):
     if required not in models:
         problems.append(f"missing model {required!r}")
-if "deepseek-v4-pro" in models:
-    problems.append("stale model deepseek-v4-pro still exposed")
+# The router serves nothing else of these; advertising a dead slug 400s every
+# client that picks it. Retired slugs must never come back.
+for dead in ("deepseek-v4-flash", "deepseek-v4-pro", "auto-thinking-free"):
+    if dead in models:
+        problems.append(f"stale model {dead!r} still exposed")
 
 if problems:
     print("FAIL: " + "; ".join(problems))
 else:
-    print("OK: default=codex-router/auto-thinking; models=auto-thinking,auto-thinking-free,gpt-5.6-terra,deepseek-v4-flash")
+    print("OK: default=codex-router/auto-thinking; models=auto-thinking,gpt-5.6-terra")
 PY
 )
 
