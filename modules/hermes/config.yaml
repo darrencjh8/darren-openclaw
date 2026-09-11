@@ -13,7 +13,7 @@ model:
 compression:
     enabled: true
     threshold: 0.50
-    threshold_tokens: 150000
+    threshold_tokens: 300000
     tail_mode: lean
     protect_last_n: 20
     in_place: true
