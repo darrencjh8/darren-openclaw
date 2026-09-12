@@ -73,7 +73,7 @@ const actual = require("@actual-app/api");
 const server = require("../server");
 
 // jest.setup.js sets ACTUAL_PRIMARY_BUDGET_FILE="test-budget", and init() picks
-// budgets.find((b) => b.name === PRIMARY_BUDGET_FILE) || budgets[0].
+// the budget whose name matches it.
 const SGD = { name: "test-budget", groupId: "sgd-sync" };
 const MYR = { name: "MYR", groupId: "myr-sync" };
 

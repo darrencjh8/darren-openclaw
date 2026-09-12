@@ -137,6 +137,31 @@ describe("init", () => {
         expect(api.downloadBudget).not.toHaveBeenCalled();
     });
 
+    test("a failed init resets so a later call retries and succeeds", async () => {
+        const api = actual();
+        process.env.ACTUAL_PRIMARY_BUDGET_FILE = "NonExistent";
+        api.init.mockResolvedValue(undefined);
+        api.getBudgets.mockResolvedValue([
+            makeBudget({ name: "First Budget", groupId: "first-1" }),
+        ]);
+        api.downloadBudget.mockResolvedValue(undefined);
+
+        const { init } = require("../server");
+        await expect(init()).rejects.toThrow('Budget "NonExistent" not found');
+
+        // The configured budget appears after the failed attempt; the reset in
+        // the rejection handler must let the next call initialise again instead
+        // of returning the cached rejected promise.
+        api.getBudgets.mockResolvedValue([
+            makeBudget({ name: "NonExistent", groupId: "retry-1" }),
+        ]);
+        await init();
+
+        expect(api.downloadBudget).toHaveBeenCalledWith("retry-1", {
+            password: undefined,
+        });
+    });
+
     test("throws when budgets array is empty", async () => {
         const api = actual();
         api.init.mockResolvedValue(undefined);
@@ -329,7 +354,7 @@ describe("ensureBudget", () => {
         expect(api.downloadBudget).toHaveBeenCalledTimes(3);
     });
 
-    test("matches a secondary budget by its configured name", async () => {
+    test("matches a budget by the secondary name", async () => {
         await primeInit("Test SGD");
         const api = actual();
         api.getBudgets.mockResolvedValue([
@@ -344,7 +369,7 @@ describe("ensureBudget", () => {
         );
     });
 
-    test("returns silently when the configured secondary name has no budget", async () => {
+    test("returns silently when the secondary name has no budget", async () => {
         await primeInit("Test SGD");
         const api = actual();
         api.getBudgets.mockResolvedValue([
