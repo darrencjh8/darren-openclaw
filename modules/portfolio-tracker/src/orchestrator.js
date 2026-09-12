@@ -23,7 +23,7 @@ export class DeepSeekClient {
             model: this._model,
             messages,
             temperature: 0.1,
-            thinking: { type: "adaptive" },
+            thinking: { type: "low" },
         };
         if (tools) {
             kwargs.tools = tools;

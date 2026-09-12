@@ -1500,6 +1500,19 @@ describe("LLMClient truncation and reasoning-disabled handling", () => {
         expect(createMock.mock.calls[0][0].thinking).toEqual({ type: "adaptive" });
     });
 
+    it("defaults the deepseek route to low thinking when no reasoning is requested", async () => {
+        const config = makeConfig();
+        const client = new LLMClient(config);
+        const createMock = vi.fn().mockResolvedValue({
+            choices: [{ message: { content: "{}" }, finish_reason: "stop" }],
+        });
+        client._client.chat.completions.create = createMock;
+
+        await client.chat([{ role: "user", content: "hi" }]);
+
+        expect(createMock.mock.calls[0][0].thinking).toEqual({ type: "low" });
+    });
+
     it("retries when a response has empty content, no tool_calls, and a non-stop finish_reason (truncated)", async () => {
         const config = makeConfig();
         const client = new LLMClient(config);

@@ -37,7 +37,7 @@ The spec 020 design (3 phases with deterministic Phase 1.5) was partially implem
 │  PHASE 1: LLM ANALYSIS                                     │
 │                                                             │
 │  Input: raw email text / Telegram alert                     │
-│  LLM: reasoning=adaptive, has fetch_context tool             │
+│  LLM: reasoning=low, has fetch_context tool                  │
 │  Output: { merchant, amount_cents, date, currency,         │
 │            account_id, account_name, notes, skip,          │
 │            reasoning, notify_message, raw_description }    │
@@ -135,7 +135,7 @@ The spec 020 design (3 phases with deterministic Phase 1.5) was partially implem
 
 ```
 Model: deepseek-chat
-Reasoning: adaptive (Phase 1 needs context for account matching)
+Reasoning: low (Phase 1 keeps fetch_context but runs at low depth for cost)
 Tools: [ fetch_context ]
 Temperature: 0.1
 ```
@@ -335,7 +335,7 @@ Same flow as email, but:
 | LLM returns malformed JSON | Phase 2 retries up to 3× | 1 retry, then stop |
 | Promotional email | Phase 1a skip → Phase 4 skip | Phase 1 skip → Phase 3 skip |
 | Positive amount (credit/refund) | Rejected by V2 gate (`n >= 0`) | Accepted (numeric, any sign) |
-| Phase 1 reasoning mode | Phase 1a: `disabled` (no tools, simple extract) | Phase 1: `adaptive` (has fetch_context tool, needs context) |
+| Phase 1 reasoning mode | Phase 1a: `disabled` (no tools, simple extract) | Phase 1: `low` (has fetch_context tool, runs shallow) |
 | `learn_fact` scope | 3 facts (payee, account, category) in Phase 4 | 1 fact (account_name) in Phase 3; payee handled by resolve_merchant, category by Phase 2 Step 2 |
 
 ---

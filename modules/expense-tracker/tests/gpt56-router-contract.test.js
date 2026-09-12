@@ -95,6 +95,6 @@ describe("GPT-5.6 LiteLLM contract", () => {
       "deepseek-v4-flash",
     ]);
     expect(create.mock.calls[4][0].temperature).toBe(0.1);
-    expect(create.mock.calls[4][0].thinking).toEqual({ type: "adaptive" });
+    expect(create.mock.calls[4][0].thinking).toEqual({ type: "low" });
   }, 15000);
 });

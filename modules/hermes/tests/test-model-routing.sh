@@ -63,7 +63,7 @@ assert config["model"].get("provider") == router_route
 assert config["model"].get("default") == "auto-thinking"
 assert "base_url" not in config["model"]
 assert "api_key" not in config["model"]
-assert config["agent"]["reasoning_effort"] == "medium"
+assert config["agent"]["reasoning_effort"] == "low"
 assert config["fallback_providers"] == [deepseek_flash_fallback], (
     "main fallback_providers must be deepseek-v4-flash"
 )
