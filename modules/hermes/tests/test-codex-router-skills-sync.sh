@@ -358,6 +358,25 @@ else
     nope "reclaimed a lock whose pid file is empty" "rc=$corrupt_rc out=$corrupt_output"
 fi
 
+echo "=== a lock dir with no pid file is reclaimed ==="
+# A holder killed between `mkdir` and writing its pid leaves an ownerless lock
+# directory; without a reclaim the fallback stays wedged until a manual rm.
+fresh_fixture
+mkdir -p "$PRIMARY/.codex-router-skills.lock.d"
+nopid_rc=0
+nopid_output=$(HERMES_SKILL_PRIMARY_HOME="$PRIMARY" \
+    HERMES_SKILL_SECONDARY_HOME="$SECONDARY" \
+    HERMES_MANIFEST_STATE_DIRS="$STATE" \
+    HERMES_SKILL_LOCK_MODE=mkdir \
+    HERMES_SKILL_LOCK_WAIT_SECONDS=6 \
+    sh "$SYNC" "$SOURCE" 2>&1) || nopid_rc=$?
+if [[ "$nopid_rc" -eq 0 && ! -e "$PRIMARY/.codex-router-skills.lock.d" \
+      && -f "$PRIMARY/skills/dev-loop/SKILL.md" ]]; then
+    ok "reclaimed a lock directory with no pid file"
+else
+    nope "reclaimed a lock directory with no pid file" "rc=$nopid_rc out=$nopid_output"
+fi
+
 echo "=== a padded pid file still names a live holder ==="
 # `kill -0 " 123"` honours the embedded pid, so the whitespace must be stripped
 # before the digit test or a padded pid file reads as corrupt and is stolen.

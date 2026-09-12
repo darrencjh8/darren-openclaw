@@ -108,6 +108,13 @@ if [ "$USE_FLOCK" = true ]; then
 fi
 
 attempts=0
+# Consecutive attempts that saw the lock directory without a pid file. A holder
+# writes the pid immediately after `mkdir`, so a pid still missing after a few
+# attempts means it was killed in that window; without this the lock is never
+# reclaimed and every later run waits out the timeout. The gap is seconds and a
+# holder needs microseconds, so a live holder is never raced.
+missing_pid=0
+MISSING_PID_LIMIT=3
 while [ "$attempts" -lt "$LOCK_WAIT_SECONDS" ]; do
     if [ "$USE_FLOCK" = true ]; then
         if flock -n 9; then
@@ -120,7 +127,13 @@ while [ "$attempts" -lt "$LOCK_WAIT_SECONDS" ]; do
             LOCK_OWNED=true
             break
         fi
-        if [ -f "$MKDIR_LOCK/pid" ]; then
+        if [ ! -f "$MKDIR_LOCK/pid" ]; then
+            missing_pid=$((missing_pid + 1))
+            if [ "$missing_pid" -ge "$MISSING_PID_LIMIT" ]; then
+                rm -rf "$MKDIR_LOCK" 2>/dev/null || true
+            fi
+        else
+            missing_pid=0
             # Reclaim only when the holder is provably gone. `kill -0` reports
             # both ESRCH (no such process) and EPERM (process alive, owned by
             # someone else) as a bare failure, so reclaiming on that failure
@@ -183,11 +196,13 @@ if [ ! -d "$SOURCE" ]; then
 fi
 
 # A run killed between creating $CURRENT and its EXIT trap leaves that staging
-# file behind. It is litter the next run would otherwise carry forever, so sweep
-# the family before creating the current one. A matched directory or a permission
-# failure makes rm return non-zero, which must not abort the reconcile, so the
-# sweep stays non-fatal. (`rm -f` already tolerates an unmatched glob.)
+# file behind, as does one killed while comparing modes. They are litter the next
+# run would otherwise carry forever, so sweep both families before creating the
+# current ones. A matched directory or a permission failure makes rm return
+# non-zero, which must not abort the reconcile, so the sweep stays non-fatal.
+# (`rm -f` already tolerates an unmatched glob.)
 rm -f "$PRIMARY_HOME"/.codex-router-managed-skills.new.* 2>/dev/null || true
+rm -f "$PRIMARY_HOME"/.codex-router-modes.* 2>/dev/null || true
 CURRENT="$PRIMARY_HOME/.codex-router-managed-skills.new.$$"
 : > "$CURRENT"
 MODES_TMP="$PRIMARY_HOME/.codex-router-modes.$$"
@@ -195,18 +210,24 @@ MODES_TMP="$PRIMARY_HOME/.codex-router-modes.$$"
 # Compare the permission bits of a canonical tree with an installed copy.
 # `diff -r` compares contents only, so without this a canonical permission
 # change would be skipped as identical and never reach the runtime root. Only
-# directories and regular files are compared, the two types `cp -a` restores.
+# directories and regular files are compared, the two types `cp -a` restores,
+# and each listing is sorted so a different readdir order is not read as drift.
 # ponytail: symlink modes are not compared — Linux cannot set them, and a
 # symlink that survives `cp -a` keeps the canonical target string anyway.
 same_modes() {
     src=$1
     dst=$2
+    # A symlinked root is the one shape where `diff -r` follows the link into a
+    # directory while `find` (no -L) sees a non-directory: the listings would
+    # compare a populated tree against a single root line. Treat that as
+    # different rather than guess.
+    [ -d "$src" ] && [ -d "$dst" ] || return 1
     srclist="$MODES_TMP.src"
     dstlist="$MODES_TMP.dst"
     printf '%s\n' "$(stat -c '%a' "$src")" > "$srclist"
-    find "$src" \( -type d -o -type f \) -printf '%P %m\n' >> "$srclist"
+    find "$src" \( -type d -o -type f \) -printf '%P %m\n' | sort >> "$srclist"
     printf '%s\n' "$(stat -c '%a' "$dst")" > "$dstlist"
-    find "$dst" \( -type d -o -type f \) -printf '%P %m\n' >> "$dstlist"
+    find "$dst" \( -type d -o -type f \) -printf '%P %m\n' | sort >> "$dstlist"
     diff "$srclist" "$dstlist" >/dev/null 2>&1
 }
 
