@@ -4,6 +4,11 @@ When model-fallback warnings show free/relay models failing (e.g. `mimo-v2.5-fre
 via opencode-zen), the key is usually VALID and the model EXISTS — the account's
 quota buckets are exhausted. Diagnose by probing, not by re-checking config.
 
+> Historical reference. This host no longer configures `opencode-zen` or
+> `opencode-go`; the current main fallback is the direct `deepseek` provider with
+> `deepseek-flash`. The relay diagnostics below apply only to hosts that still run
+> those relays.
+
 ## Relay routes (historical — no longer configured on this host)
 
 This host's current main fallback is the direct `deepseek` provider with

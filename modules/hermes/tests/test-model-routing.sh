@@ -70,10 +70,19 @@ assert config["fallback_providers"] == [deepseek_fallback], (
 )
 assert_route(config["delegation"], "auto-thinking", "delegation")
 
-assert_route(config["auxiliary"]["vision"], "gpt-5.6-terra", "auxiliary.vision")
-assert config["auxiliary"]["vision"].get("fallback_chain") == [deepseek_fallback], (
-    "auxiliary.vision.fallback_chain must be deepseek-flash"
+vision = config["auxiliary"]["vision"]
+assert vision.get("provider") == "deepseek", (
+    "auxiliary.vision.provider: expected 'deepseek' (direct API), got "
+    f"{vision.get('provider')!r}"
 )
+assert vision.get("model") == "deepseek-flash", (
+    f"auxiliary.vision.model: expected 'deepseek-flash', got {vision.get('model')!r}"
+)
+assert "fallback_chain" not in vision, (
+    "auxiliary.vision needs no fallback chain — deepseek-flash is natively multimodal"
+)
+assert "base_url" not in vision, "auxiliary.vision must use its named provider URL"
+assert "api_key" not in vision, "auxiliary.vision must use its named provider API key"
 
 for task, model in {
     "web_extract": "gpt-5.6-luna",

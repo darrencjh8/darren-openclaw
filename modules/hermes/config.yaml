@@ -62,11 +62,8 @@ web:
 
 auxiliary:
     vision:
-        provider: custom:codex-router
-        model: gpt-5.6-terra
-        fallback_chain:
-            - provider: deepseek
-              model: deepseek-flash
+        provider: deepseek
+        model: deepseek-flash
     web_extract:
         provider: custom:codex-router
         model: gpt-5.6-luna

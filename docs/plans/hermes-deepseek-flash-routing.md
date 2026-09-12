@@ -14,7 +14,7 @@ model is natively multimodal. See darrencjh8/darren-openclaw#428.
 | --- | --- | --- |
 | Main agent | codex-router / `auto-thinking` (reasoning low) | direct / `deepseek-flash` |
 | Delegation | codex-router / `auto-thinking` | none (not supported) |
-| Vision | codex-router / `gpt-5.6-terra` | direct / `deepseek-flash` |
+| Vision | direct / `deepseek-flash` | none — terminal direct route; the model is natively multimodal |
 | Web extract | codex-router / `gpt-5.6-luna` | direct / `deepseek-flash` |
 | Compression | codex-router / `gpt-5.6-luna` | direct / `deepseek-flash` |
 | Approval | codex-router / `gpt-5.6-terra` | direct / `deepseek-flash` |
@@ -26,10 +26,10 @@ model is natively multimodal. See darrencjh8/darren-openclaw#428.
 | spec-auditor profile | codex-router / `gpt-5.6-terra` | direct / `deepseek-flash` |
 | project-manager profile | codex-router / `gpt-5.6-luna` | direct / `deepseek-flash` |
 
-Hermes resolves `DEEPSEEK_API_KEY` automatically for the named `deepseek` provider.
-The `kanban_decomposer` uses that provider directly because it needs no router hop;
-no Hermes DeepSeek *fallback* traffic flows through codex-router. Codex-router still
-hops to DeepSeek itself inside the `auto-thinking` pool.
+Hermes resolves `DEEPSEEK_API_KEY` automatically for the named `deepseek` provider,
+which serves the direct routes (`vision` and `kanban_decomposer`). No Hermes DeepSeek
+*fallback* traffic flows through codex-router; codex-router still hops to DeepSeek
+itself inside the `auto-thinking` pool.
 
 ## Notes
 
