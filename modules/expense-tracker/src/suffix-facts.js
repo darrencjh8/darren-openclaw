@@ -171,7 +171,16 @@ export function resolveFactAccount(accountName, accounts, aliases) {
   };
 
   const placed = withoutAliases();
-  if (placed.matched || !aliases) return placed;
+  // Either "nothing matched" reason may be redirected: a product name whose
+  // words are all stopwords ("My Card") is exactly the case aliases exist for.
+  // Any other refusal — closed, duplicate, ambiguous — means the name is owned
+  // by a real account and must not be moved. Review round 4 on 449366d.
+  const nothingMatched = () =>
+    placed.reason === "no account matches those words" ||
+    placed.reason === "no distinctive words in the name";
+  if (placed.matched || !nothingMatched() || !aliases || !aliases.size) {
+    return placed;
+  }
   return matchAccountByName(accountName, accounts, aliases);
 }
 
@@ -278,8 +287,11 @@ export function matchAccountByName(nameText, accounts, aliases) {
   const direct = matchWithoutAliases(nameText, accounts);
   // Only a genuine "nothing matched" may be redirected. A refusal for a closed
   // or duplicate account means the name is owned by a real account, and an alias
-  // must never move that account's alerts to a sibling.
-  if (direct.matched || direct.reason !== "no account matches those words") {
+  // must never move that account's alerts to a sibling. Review rounds 2 and 4.
+  const nothingMatched =
+    direct.reason === "no account matches those words" ||
+    direct.reason === "no distinctive words in the name";
+  if (direct.matched || !nothingMatched) {
     return direct;
   }
   if (!aliases || !aliases.size) return direct;
