@@ -26,6 +26,7 @@ import {
     parseSuffixFact,
     resolveFactAccount as resolveFactAccountShared,
 } from "./suffix-facts.js";
+import { factNamesMerchant } from "./memory.js";
 import { logger } from "./logging.js";
 
 export class LLMClient {
@@ -1362,6 +1363,10 @@ export class AgentOrchestrator {
 
             let payeeMatch = null;
             for (const r of memResults) {
+                // Only a hit that actually names the merchant may supply its
+                // payee. Without this, a same-shaped neighbour's mapping books
+                // the neighbour's payee and then that payee's category. #471.
+                if (!factNamesMerchant(r.text, searchTerm)) continue;
                 const m = (r.text || "").match(/maps to (.+?) payee/i);
                 if (m) {
                     payeeMatch = m[1];
@@ -1468,7 +1473,20 @@ export class AgentOrchestrator {
                 const catMem = await this._tools.executeTool("search_memory", {
                     query: output.payee_name,
                 });
+                // A category fact is keyed by the entity it names, which is the
+                // payee in the auto-learned shape and the merchant in older
+                // facts. Either may name it; a fact naming neither must not
+                // supply the category. Issues #471, #420.
+                const categoryKeys = [output.payee_name, output.merchant].filter(
+                    Boolean,
+                );
                 for (const r of catMem?.results || []) {
+                    if (
+                        !categoryKeys.some((key) =>
+                            factNamesMerchant(r.text, key),
+                        )
+                    )
+                        continue;
                     const m = (r.text || "").match(/maps to (.+?) category/i);
                     if (m) {
                         const matched = liveCategories.find(
