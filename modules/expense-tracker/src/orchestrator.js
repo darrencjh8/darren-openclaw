@@ -1095,6 +1095,11 @@ export class AgentOrchestrator {
                     liveAccounts.length > 0
                 ) {
                     const candidates = new Map();
+                    // Built once for the list, not per fact.
+                    const suffixAliases = accountAliases(
+                        cachedSearchResults,
+                        liveAccounts,
+                    );
                     for (const fact of cachedSearchResults) {
                         if ((fact.score ?? 0) < 0.5) continue;
                         const parsed = parseSuffixFact(fact.text);
@@ -1107,7 +1112,7 @@ export class AgentOrchestrator {
                         const resolved = resolveFactAccount(
                             parsed.accountName,
                             liveAccounts,
-                            accountAliases(cachedSearchResults, liveAccounts),
+                            suffixAliases,
                         );
                         if (!resolved || !resolved.matched) {
                             logger.info({
