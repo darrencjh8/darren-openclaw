@@ -129,6 +129,10 @@ while [ "$attempts" -lt "$LOCK_WAIT_SECONDS" ]; do
             # is ESRCH. Anything else waits, and the bounded loop fails closed.
             # ponytail: Linux-only (this runs in the container); the mkdir
             # fallback is test-only, and flock is the production primitive.
+            # The EPERM branch itself is not reachable from the suite, which
+            # cannot re-mount /proc and cannot out-rank the lock holder's user;
+            # the tests pin the adjacent cases (a dead or empty pid is
+            # reclaimed, a live lock with no proof of death is left alone).
             holder=$(cat "$MKDIR_LOCK/pid" 2>/dev/null) || holder=""
             case $holder in
                 ''|*[!0-9]*)
