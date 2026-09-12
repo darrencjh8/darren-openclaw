@@ -194,8 +194,15 @@ export function matchAccountByName(nameText, accounts, aliases) {
   // An alert may name the product ("Main Account", "Trust Cashback card"),
   // which no account is called. Substitute the live account the alias points at
   // before matching; everything below then behaves exactly as before. #496.
+  //
+  // Only as a FALLBACK: a written name that already matches a live account is
+  // never redirected, so a fact cannot shadow a real account and send its alerts
+  // elsewhere. Review round 1 on c1e1d10.
   const written = accountTokens(stripParenthesisedId(nameText)).join(" ");
-  const aliased = aliases?.get(written);
+  const namesLiveAccount = all.some(
+    (a) => accountTokens(stripParenthesisedId(a.name)).join(" ") === written,
+  );
+  const aliased = namesLiveAccount ? undefined : aliases?.get(written);
   const raw = accountTokens(stripParenthesisedId(aliased || nameText));
   if (!raw.length) return refusal("empty account name");
 
@@ -266,7 +273,9 @@ export function matchAccountByName(nameText, accounts, aliases) {
  *
  * Only facts whose target is a LIVE account become aliases, which is what keeps
  * every type fact out of the map: `Citi Reward is a credit card account` targets
- * `credit card`, and no account is called that.
+ * `credit card`, and no account is called that. A target that is closed still
+ * becomes an alias; the closed-account refusal in `matchAccountByName` is what
+ * rejects it, so the behaviour is the same either way.
  *
  * @param {Array<{text?: string}|string>} facts records from `search_memory`
  * @param {Array<{name: string}>} accounts live accounts
@@ -274,19 +283,37 @@ export function matchAccountByName(nameText, accounts, aliases) {
  */
 export function accountAliases(facts, accounts) {
   const aliases = new Map();
+  // A product claimed for two different accounts is ambiguous. Remember it so a
+  // later fact cannot re-add it and let result order pick the winner.
+  const ambiguous = new Set();
   for (const record of facts || []) {
     const text = typeof record === "string" ? record : record?.text;
+    // Search results carry a score; an alias must be evidence for the merchant
+    // it was retrieved for, so the same floor the suffix path uses applies.
+    // Review round 1 on c1e1d10.
+    if (typeof record?.score === "number" && record.score < 0.5) continue;
     const m = String(text || "").match(
       /^(.+?)\s+is\s+(?:a|an)\s+(.+?)\s+account$/i,
     );
     if (!m) continue;
-    const alias = accountTokens(m[1]).join(" ");
+    // The lookup strips a parenthesised id, so the key must too, or the alias
+    // is silently unreachable. Review round 1 on c1e1d10.
+    const alias = accountTokens(stripParenthesisedId(m[1])).join(" ");
     const target = accountTokens(m[2]).join(" ");
     if (!alias || !target) continue;
+    if (ambiguous.has(alias)) continue;
     const live = (accounts || []).find(
       (a) => a && accountTokens(a.name).join(" ") === target,
     );
-    if (live) aliases.set(alias, live.name);
+    if (!live) continue;
+    if (aliases.has(alias)) {
+      if (aliases.get(alias) !== live.name) {
+        aliases.delete(alias);
+        ambiguous.add(alias);
+      }
+      continue;
+    }
+    aliases.set(alias, live.name);
   }
   return aliases;
 }

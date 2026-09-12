@@ -594,3 +594,82 @@ describe("account aliases (#496)", () => {
     expect(aliases.size).toBe(0);
   });
 });
+
+describe("account aliases in the orchestrator path (#496 review)", () => {
+  it("applies an alias through hasUsableSuffixFact", async () => {
+    const { hasUsableSuffixFact } = await import("../src/orchestrator.js");
+    const live = [{ id: "ryt", name: "Ryt Bank", closed: false }];
+    const facts = [
+      { text: "Main Account is a Ryt Bank account", score: 0.9 },
+      { text: "Card ending 1234 belongs to Main Account", score: 0.9 },
+    ];
+    // Round 1 on c1e1d10: the local wrapper dropped the aliases argument, so
+    // this returned false even though the alias map was correct.
+    expect(
+      hasUsableSuffixFact(facts, "card ending 1234 at Ryt", "Ryt", live),
+    ).toBe(true);
+  });
+
+  it("does not let a fact shadow a live account name", () => {
+    const live = [
+      { id: "dbs", name: "DBS Account", closed: false },
+      { id: "ryt", name: "Ryt Bank", closed: false },
+    ];
+    const aliases = accountAliases(
+      [{ text: "DBS Account is a Ryt Bank account" }],
+      live,
+    );
+    expect(matchAccountByName("DBS Account", live, aliases).name).toBe(
+      "DBS Account",
+    );
+  });
+
+  it("ignores an alias fact below the search score floor", () => {
+    const live = [{ id: "ryt", name: "Ryt Bank", closed: false }];
+    expect(
+      accountAliases(
+        [{ text: "Main Account is a Ryt Bank account", score: 0.1 }],
+        live,
+      ).size,
+    ).toBe(0);
+  });
+});
+
+describe("alias edge cases (#496 round 1)", () => {
+  const live = [
+    { id: "ryt", name: "Ryt Bank", closed: false },
+    { id: "trust", name: "Trust Bank", closed: false },
+    { id: "closed-eps", name: "Epsilon Account", closed: true },
+    { id: "nova", name: "Epsilon Nova Card", closed: false },
+  ];
+
+  it("refuses a product claimed for two different accounts", () => {
+    const aliases = accountAliases(
+      [
+        { text: "Main Account is a Ryt Bank account" },
+        { text: "Main Account is a Trust Bank account" },
+      ],
+      live,
+    );
+    expect(aliases.has("main account")).toBe(false);
+  });
+
+  it("keeps a parenthesised id out of the alias key", () => {
+    const aliases = accountAliases(
+      [{ text: "Main Account (abc123) is a Ryt Bank account" }],
+      live,
+    );
+    expect(aliases.get("main account")).toBe("Ryt Bank");
+  });
+
+  it("still refuses the closed-twin case with an aliases map present", () => {
+    const aliases = accountAliases(
+      [{ text: "Epsilon Account is a Epsilon Nova Card account" }],
+      live,
+    );
+    // The closed account still owns its own name, so it is never redirected.
+    expect(
+      matchAccountByName("Epsilon Account", live, aliases).matched,
+    ).toBe(false);
+  });
+});
