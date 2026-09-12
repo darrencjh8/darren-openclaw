@@ -971,10 +971,13 @@ if should_deploy "codex-router" || should_deploy "hermes"; then
       # the boot hook and this run can never race on the same tree.
       if docker cp "$SKILLS_SRC/." hermes:/opt/data/.codex-router-skills.new \
           && docker cp "$SKILLS_SYNC" hermes:/tmp/sync-codex-router-skills.sh \
-          && docker exec hermes sh /tmp/sync-codex-router-skills.sh /opt/data/.codex-router-skills /opt/data/.codex-router-skills.new \
-          && docker exec hermes rm -f /tmp/sync-codex-router-skills.sh; then
+          && docker exec hermes sh /tmp/sync-codex-router-skills.sh /opt/data/.codex-router-skills /opt/data/.codex-router-skills.new; then
         sync_ok=true
       fi
+      # Always clear the staged copies, including after a failure that left the
+      # tmp script or an unconsumed staging tree behind.
+      docker exec hermes rm -f /tmp/sync-codex-router-skills.sh 2>/dev/null || true
+      docker exec hermes rm -rf /opt/data/.codex-router-skills.new 2>/dev/null || true
     fi
     if [ "$sync_ok" = true ]; then
       echo -e "  ${GREEN}✓ codex-router skills reconciled into the Hermes roots${NC}"

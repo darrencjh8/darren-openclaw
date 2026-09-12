@@ -169,15 +169,17 @@ else
 fi
 
 echo "=== a whole skill dropped upstream is pruned ==="
+printf 'stale backup\n' > "$PRIMARY/skills/code-reviewer.codex-router.bak"
 rm -rf "$SOURCE/code-reviewer"
 run "$SOURCE" >/dev/null
 if [[ ! -e "$PRIMARY/skills/code-reviewer" \
       && ! -e "$PRIMARY/.agents/skills/code-reviewer" \
-      && ! -e "$SECONDARY/.agents/skills/code-reviewer" ]]; then
-    ok "pruned a skill the source no longer publishes"
+      && ! -e "$SECONDARY/.agents/skills/code-reviewer" \
+      && ! -e "$PRIMARY/skills/code-reviewer.codex-router.bak" ]]; then
+    ok "pruned a retired skill and its compatibility backup from every root"
 else
-    nope "pruned a skill the source no longer publishes" \
-        "$(find "$PRIMARY/skills" "$PRIMARY/.agents/skills" "$SECONDARY/.agents/skills" -maxdepth 1 -name code-reviewer 2>/dev/null)"
+    nope "pruned a retired skill and its compatibility backup from every root" \
+        "$(find "$PRIMARY/skills" "$PRIMARY/.agents/skills" "$SECONDARY/.agents/skills" -maxdepth 1 -name 'code-reviewer*' 2>/dev/null)"
 fi
 
 echo "=== a busy lock fails closed, not silently ==="
@@ -230,11 +232,33 @@ if [[ ! -e "$PRIMARY/.codex-router-skills.lock.d" ]]; then
 else
     nope "released the lock on exit" "lock dir survived: $(find "$PRIMARY/.codex-router-skills.lock.d" 2>/dev/null)"
 fi
+# The default (flock) path never creates .lock.d, so exercise the fallback
+# explicitly before asserting its release.
+HERMES_SKILL_LOCK_MODE=mkdir run "$SOURCE" >/dev/null
+if [[ ! -e "$PRIMARY/.codex-router-skills.lock.d" ]]; then
+    ok "released the mkdir fallback lock on exit"
+else
+    nope "released the mkdir fallback lock on exit" \
+        "$(find "$PRIMARY/.codex-router-skills.lock.d" 2>/dev/null)"
+fi
 # A second run must not stall on a lock the first run left behind.
 if run "$SOURCE" >/dev/null; then
     ok "a second run acquires the released lock immediately"
 else
     nope "a second run acquires the released lock immediately" "second run failed"
+fi
+
+echo "=== an empty source never prunes the managed set ==="
+fresh_fixture
+run "$SOURCE" >/dev/null
+rm -rf "$ROOT"/source/*
+empty_rc=0
+empty_output=$(run "$SOURCE" 2>&1) || empty_rc=$?
+if [[ "$empty_rc" -ne 0 && "$empty_output" == *"refusing to prune"* \
+      && -f "$PRIMARY/skills/dev-loop/SKILL.md" ]]; then
+    ok "an empty canonical source fails closed instead of deleting managed skills"
+else
+    nope "an empty canonical source fails closed instead of deleting managed skills" "rc=$empty_rc out=$empty_output"
 fi
 
 echo "=== a corrupt managed-name file cannot escape the roots ==="

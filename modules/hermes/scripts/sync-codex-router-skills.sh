@@ -159,6 +159,13 @@ done
 # Prune a skill the canonical source no longer publishes. The managed-name list
 # is kept outside the staged source, which the deploy replaces wholesale.
 if [ -f "$MANAGED_FILE" ]; then
+    # An empty or partial source must never be read as "every skill was
+    # retired": that would delete every managed skill and still exit 0. The
+    # canonical set is never empty, so refuse instead of pruning.
+    if [ ! -s "$CURRENT" ] && [ -s "$MANAGED_FILE" ]; then
+        echo "sync-codex-router-skills: source $SOURCE has no skills while $(wc -l < "$MANAGED_FILE") are managed; refusing to prune" >&2
+        exit 1
+    fi
     while IFS= read -r previous; do
         [ -n "$previous" ] || continue
         valid_name "$previous" || continue
@@ -167,6 +174,7 @@ if [ -f "$MANAGED_FILE" ]; then
         fi
         for target in $TARGETS; do
             rm -rf "${target:?}/${previous:?}"
+            rm -rf "${target:?}/${previous:?}.codex-router.bak"
         done
         for shadow in $SHADOWS; do
             rm -rf "${shadow:?}/${previous:?}"
