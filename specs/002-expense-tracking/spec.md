@@ -185,9 +185,11 @@ Exposed as MCP tool `resolve_merchant` (`src/mcp-server.js`). `budget_id` is req
 
 > Also folded from Spec 015.
 
-**API:** `POST /tools/update-transaction` — `{ id: string, budget_id?: string, payee_name?, notes?, amount?, date?, category_id?, account_id? }`. At least one optional field required.
+**API:** `POST /tools/update-transaction` — `{ id: string, budget_id?: string, payee_name?, payee_id?, notes?, amount?, date?, category_id?, account_id? }`. At least one optional field required.
 
 - `payee_name` is validated against live payee list → unknown payees rejected (not defaulted to Misc).
+- `payee_name` and `payee_id` are mutually exclusive; supplying both is rejected before any lookup.
+- When several payees share a name, the sole transfer payee (the one with `transfer_acct`) is selected. If the name matches several plain payees, or more than one transfer payee, the update is refused with the candidate IDs and `payee_id` must disambiguate.
 - `category_id` is validated against live category list → unknown categories rejected.
 - `insert_transaction` validation differs: unknown payee → `"Misc"`, unknown category → `"Fun Money"`.
 

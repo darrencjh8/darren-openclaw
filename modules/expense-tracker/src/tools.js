@@ -687,7 +687,7 @@ const TOOLS = [
   {
     name: "update_transaction",
     description:
-      "Update an existing transaction's fields. Payee and category are validated against live lists. When a transfer payee and a plain payee share a name, a bare payee_name selects the transfer payee; pass payee_id to select a specific one. category_id null clears the category only when the resulting payee is Misc.",
+      "Update an existing transaction's fields. Payee and category are validated against live lists. When a transfer payee and a plain payee share a name, a bare payee_name selects the transfer payee; pass payee_id to select a specific one. When several payees share the name and the transfer payee is not unique, the call is refused and lists the candidate IDs. category_id null clears the category only when the resulting payee is Misc.",
     schema: {
       type: "object",
       properties: {
@@ -1023,6 +1023,9 @@ export class ToolRegistry {
     try {
       const payees = await this._get("/payees", budget_id);
       if (Array.isArray(payees)) {
+        // ponytail: first name match wins. insert still picks by list order when
+        // payees share a name; update_transaction refuses that case (#487). Give
+        // this path the same ambiguity guard if insert collisions surface.
         const match = payees.find(
           (p) => p.name && p.name.toLowerCase() === payee_name.toLowerCase(),
         );
@@ -1669,13 +1672,15 @@ export class ToolRegistry {
     if (!budget_id) return { error: "budget_id is required" };
     const budgetId = budget_id;
 
+    // Reject the pair before any network call: the ID would win and the name
+    // would be ignored silently. A blank name counts as absent. Issue #421, #487.
+    if (payee_id !== undefined && payee_name) {
+      return { error: "Provide payee_id or payee_name, not both." };
+    }
+
     // Fetch payees once whenever validation or a category-clear guard needs it.
     let payees = null;
-    if (
-      payee_name !== undefined ||
-      payee_id !== undefined ||
-      category_id === null
-    ) {
+    if (payee_name || payee_id !== undefined || category_id === null) {
       const result = await this._get("/payees", budgetId);
       payees = Array.isArray(result) ? result : [];
     }
@@ -1683,11 +1688,6 @@ export class ToolRegistry {
     // Build fields to update
     const fields = {};
     let updatedPayee = null;
-    if (payee_id !== undefined && payee_name !== undefined) {
-      // The ID would win and the name would be ignored silently. Require one.
-      // Issue #421.
-      return { error: "Provide payee_id or payee_name, not both." };
-    }
     if (payee_id !== undefined) {
       // An explicit ID is the only way to pick the plain payee when a transfer
       // payee shares its name. Issue #421.
@@ -1695,7 +1695,7 @@ export class ToolRegistry {
       if (!updatedPayee)
         return { error: `Payee ID "${payee_id}" not found in payee list.` };
       fields.payee = updatedPayee.id;
-    } else if (payee_name !== undefined) {
+    } else if (payee_name) {
       // Validate payee exists (strict — reject unknown)
       const nameMatches = payees.filter(
         (p) => p.name && p.name.toLowerCase() === payee_name.toLowerCase(),
@@ -1707,7 +1707,21 @@ export class ToolRegistry {
       // A transfer payee and a plain payee can share a name. The transfer payee
       // is the only one that creates a transfer, so a bare name means that one;
       // pass payee_id to choose the plain payee. Issue #421.
-      updatedPayee = nameMatches.find((p) => p.transfer_acct) || nameMatches[0];
+      //
+      // That preference only holds when exactly one match is a transfer payee.
+      // Otherwise the pick would come from array order, so refuse and list every
+      // match ID — each one is a valid payee_id. Issue #487.
+      const transferMatches = nameMatches.filter((p) => p.transfer_acct);
+      if (nameMatches.length > 1 && transferMatches.length !== 1) {
+        const candidates = nameMatches
+          .map((p) => p.id)
+          .filter(Boolean)
+          .join(", ");
+        return {
+          error: `Payee "${payee_name}" is ambiguous; pass payee_id (candidates: ${candidates}).`,
+        };
+      }
+      updatedPayee = transferMatches[0] || nameMatches[0];
       fields.payee = updatedPayee.id;
     }
     if (notes !== undefined) fields.notes = notes;

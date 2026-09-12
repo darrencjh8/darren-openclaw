@@ -344,11 +344,6 @@ describe("ToolRegistry — budget_id validation", () => {
         });
 
         test("rejects supplying both payee_id and payee_name (#421)", async () => {
-            mockFetch.mockResolvedValueOnce({
-                ok: true,
-                json: () => [{ id: "payee-plain", name: "Deposit" }],
-            });
-
             const result = await registry.executeTool("update_transaction", {
                 id: "txn-1",
                 budget_id: "My Budget",
@@ -356,10 +351,70 @@ describe("ToolRegistry — budget_id validation", () => {
                 payee_name: "Deposit",
             });
 
-            // Silently preferring the ID would hide a caller mistake.
+            // Silently preferring the ID would hide a caller mistake. The guard
+            // runs before the payee fetch, so a misuse costs no round trip.
+            // Issue #487.
             expect(result).toEqual({
                 error: "Provide payee_id or payee_name, not both.",
             });
+            expect(mockFetch).not.toHaveBeenCalled();
+        });
+
+        test("refuses a bare name that matches several plain payees, naming candidates (#487)", async () => {
+            mockFetch.mockResolvedValueOnce({
+                ok: true,
+                json: () => [
+                    { id: "payee-a", name: "Deposit" },
+                    { id: "payee-b", name: "Deposit" },
+                ],
+            });
+
+            const result = await registry.executeTool("update_transaction", {
+                id: "txn-1",
+                budget_id: "My Budget",
+                payee_name: "Deposit",
+            });
+
+            // No transfer payee to prefer, so picking by array order would
+            // silently update the wrong one.
+            expect(result).toEqual({
+                error: 'Payee "Deposit" is ambiguous; pass payee_id (candidates: payee-a, payee-b).',
+            });
+            expect(mockFetch).toHaveBeenCalledTimes(1);
+        });
+
+        test("refuses a bare name that matches several transfer payees (#487)", async () => {
+            mockFetch.mockResolvedValueOnce({
+                ok: true,
+                json: () => [
+                    { id: "payee-t1", name: "Deposit", transfer_acct: "acct-1" },
+                    { id: "payee-t2", name: "Deposit", transfer_acct: "acct-2" },
+                ],
+            });
+
+            const result = await registry.executeTool("update_transaction", {
+                id: "txn-1",
+                budget_id: "My Budget",
+                payee_name: "Deposit",
+            });
+
+            expect(result).toEqual({
+                error: 'Payee "Deposit" is ambiguous; pass payee_id (candidates: payee-t1, payee-t2).',
+            });
+        });
+
+        test("a null payee_name does not throw (#487)", async () => {
+            const result = await registry.executeTool("update_transaction", {
+                id: "txn-1",
+                budget_id: "My Budget",
+                payee_name: null,
+            });
+
+            // Treated as absent: no payee field is set and no network call runs.
+            expect(result).toEqual({
+                error: "At least one field must be provided to update",
+            });
+            expect(mockFetch).not.toHaveBeenCalled();
         });
     });
 

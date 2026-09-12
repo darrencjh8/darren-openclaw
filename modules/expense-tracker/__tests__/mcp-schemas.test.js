@@ -1,64 +1,17 @@
 /**
  * Tests for MCP server Zod schemas — budget_id .min(1) enforcement.
+ *
+ * Shapes are imported from the server rather than mirrored by hand, so a
+ * production shape change can no longer drift past this suite. Issue #487.
  */
 import { describe, test, expect } from "vitest";
 import { z } from "zod";
+import { toolShapes } from "../src/mcp-server.js";
 
-// Replicate the Zod schemas from mcp-server.js for testing
-const schemas = {
-    fetch_context: z.object({ budget_id: z.string().min(1) }),
-    fetch_recent_transactions: z.object({
-        budget_id: z.string().min(1),
-        id: z.string().optional(),
-        account_id: z.string().optional(),
-        days: z.number().optional().default(30),
-    }),
-    insert_transaction: z.object({
-        budget_id: z.string().min(1),
-        account_id: z.string().min(1),
-        date: z.string().min(1),
-        amount_cents: z.number().int(),
-        imported_description: z.string().optional(),
-        category_id: z.string().optional(),
-        notes: z.string().optional(),
-    }),
-    update_transaction: z.object({
-        id: z.string().min(1),
-        budget_id: z.string().min(1),
-        payee_name: z.string().optional(),
-        payee_id: z.string().optional(),
-        notes: z.string().optional(),
-        amount: z.number().optional(),
-        date: z.string().optional(),
-        category_id: z.string().nullable().optional(),
-        account_id: z.string().optional(),
-    }),
-    resolve_merchant: z.object({
-        merchant: z.string().min(1),
-        budget_id: z.string().min(1),
-    }),
-    reconcile_transaction: z.object({
-        ab_transaction_ids: z.array(z.string().min(1)).min(1),
-        statement_ref: z.string().optional().default(""),
-        budget_id: z.string().min(1),
-    }),
-    unclear_transaction: z.object({
-        ab_transaction_ids: z.array(z.string().min(1)).min(1),
-        budget_id: z.string().min(1),
-    }),
-    fetch_unreconciled_transactions: z.object({
-        account_id: z.string().min(1),
-        date_from: z.string().min(1),
-        date_to: z.string().min(1),
-        budget_id: z.string().min(1),
-    }),
-    list_inbox_emails: z.object({
-        limit: z.number().int().min(1).max(500).optional().default(50),
-    }),
-    read_inbox_email: z.object({
-        uid: z.number().int().positive(),
-    }),
-};
+// The server registers raw shapes; wrap each the way the MCP SDK does.
+const schemas = Object.fromEntries(
+    Object.entries(toolShapes).map(([name, shape]) => [name, z.object(shape)]),
+);
 
 describe("MCP Zod schemas — budget_id rejects empty string", () => {
     describe("fetch_context", () => {
@@ -188,14 +141,23 @@ describe("MCP Zod schemas — budget_id rejects empty string", () => {
         test("keeps payee_id, which selects a payee when a name collides (#421)", () => {
             // Zod strips unknown keys, so a field missing from this shape never
             // reaches the handler — the disambiguator has to be listed here too.
+            // payee_name is omitted on purpose: the handler rejects both together.
             const r = schemas.update_transaction.safeParse({
                 id: "txn-1",
                 budget_id: "My Budget",
-                payee_name: "Deposit",
                 payee_id: "payee-plain",
             });
             expect(r.success).toBe(true);
             expect(r.data.payee_id).toBe("payee-plain");
+        });
+
+        test("rejects an empty payee_id (#487)", () => {
+            const r = schemas.update_transaction.safeParse({
+                id: "txn-1",
+                budget_id: "My Budget",
+                payee_id: "",
+            });
+            expect(r.success).toBe(false);
         });
 
         test("accepts a null category_id, which the handler uses to clear (#421)", () => {
