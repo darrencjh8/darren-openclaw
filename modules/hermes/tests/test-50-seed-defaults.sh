@@ -578,8 +578,10 @@ fi
 if [ -n "$seed_merge_block" ]; then
     printf 'hooks:\n  pre_llm_call:\n    - command: /x\n  bad: [unclosed\n' > "$TMPDIR/seed/data/config.yaml"
     cp "$TMPDIR/seed/data/config.yaml" "$TMPDIR/seed/data/broken.expected"
+    # `|| true` keeps a merge regression from aborting the suite under set -e;
+    # the cmp below then reports it as a named failure.
     python3 - "$TMPDIR/seed/hermes-defaults/config.yaml" "$TMPDIR/seed/data/config.yaml" \
-        < "$TMPDIR/seed/merge.py" 2>/dev/null
+        < "$TMPDIR/seed/merge.py" 2>/dev/null || true
     cmp -s "$TMPDIR/seed/data/config.yaml.invalid" "$TMPDIR/seed/data/broken.expected" \
         && ok "seed: an unparseable live config is backed up before reseeding" \
         || nope "seed backs up unparseable live config" "config.yaml.invalid missing or wrong"
@@ -636,11 +638,11 @@ echo ""
 echo "=== compaction trigger derivation ==="
 
 # threshold_tokens is a cap applied AFTER derivation, and Hermes floors the
-# ratio to 0.75 for windows under _SMALL_CTX_WINDOW_LIMIT (512000). Assert the
+# ratio to 0.75 for windows under its small-context limit (512000). Assert the
 # derived trigger for stubbed windows, not just the literals: a cap that stops
 # binding, or a threshold that no longer parses, must fail here. The compressor
-# lives in the Hermes image, so this mirrors its documented formula rather than
-# importing it and cannot see Hermes-side drift; that is the trade #466 asked
+# lives in the Hermes image, so this mirrors the documented formula rather than
+# importing it and cannot see Hermes-side drift; that is the tradeoff #466 asked
 # for over a literal restatement.
 derived_trigger=$(python3 - "$seed_config" <<'PY'
 import sys
@@ -650,13 +652,17 @@ config = yaml.safe_load(open(sys.argv[1], encoding="utf-8"))
 compression = config.get("compression") or {}
 cap = compression.get("threshold_tokens")
 ratio = compression.get("threshold")
-limit = 512_000
+# Mirrors agent/context_compressor.py in the Hermes image:
+# _SMALL_CTX_WINDOW_LIMIT and the 0.75 floor applied by
+# _effective_threshold_percent() below that limit.
+HERMES_SMALL_CTX_WINDOW_LIMIT = 512_000
+HERMES_SMALL_CTX_FLOOR_RATIO = 0.75
 
 
 def trigger(window):
     if not isinstance(cap, (int, float)) or not isinstance(ratio, (int, float)):
         raise ValueError("compression.threshold_tokens={!r} compression.threshold={!r}".format(cap, ratio))
-    effective = max(ratio, 0.75) if window < limit else ratio
+    effective = max(ratio, HERMES_SMALL_CTX_FLOOR_RATIO) if window < HERMES_SMALL_CTX_WINDOW_LIMIT else ratio
     return min(int(effective * window), int(cap))
 
 
