@@ -1962,7 +1962,7 @@ describe("suffix-override helpers (unit)", () => {
     const liveAccounts = [
       { id: "dbs-nova", name: "DBS Nova Card", closed: false },
       { id: "dbs-account", name: "DBS Account", closed: false },
-      { id: "uob-ladies", name: "UOB Extra Card", closed: false },
+      { id: "uob-extra", name: "UOB Extra Card", closed: false },
     ];
     const usable = [
       { text: "Card ending 3255 belongs to DBS Nova Card", score: 1 },

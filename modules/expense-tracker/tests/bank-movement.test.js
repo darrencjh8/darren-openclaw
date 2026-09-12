@@ -9,7 +9,7 @@ const accounts = [
   { id: "ocbc-111", name: "OCBC 111 9001", closed: false },
   { id: "trust-card", name: "Trust Card 0980", closed: false },
   { id: "dbs-vista", name: "Vista 9302", closed: false },
-  { id: "citi-card", name: "Citi Rewards 4756", closed: false },
+  { id: "citi-card", name: "Citi Points 4756", closed: false },
   { id: "ocbc-visa", name: "OCBC Visa 1149", closed: false },
 ];
 
@@ -367,7 +367,7 @@ Description : UEN123-REFERENCE
         if (name === "fetch_context") return {
           accounts: [
             { id: "dbs-vista", name: "Vista 9302", closed: false },
-            { id: "citi-card", name: "Citi Rewards 4756", closed: false },
+            { id: "citi-card", name: "Citi Points 4756", closed: false },
           ],
           categories: [],
           payees: [{ id: "transfer-citi", transfer_acct: "citi-card" }],
@@ -424,7 +424,7 @@ To: CITI CREDIT CARDS (Ref ending 4756)
         if (name === "fetch_context") return {
           accounts: [
             { id: "dbs-vista", name: "Vista 9302", closed: false },
-            { id: "citi-card", name: "Citi Rewards 4756", closed: false },
+            { id: "citi-card", name: "Citi Points 4756", closed: false },
           ],
           categories: [],
           payees: [{ id: "transfer-citi", transfer_acct: "citi-card" }],
@@ -775,7 +775,7 @@ Reference :
         if (name === "fetch_context") return {
           accounts: [
             { id: "dbs-vista", name: "Vista 9302", closed: false },
-            { id: "citi-card", name: "Citi Rewards 4756", closed: false },
+            { id: "citi-card", name: "Citi Points 4756", closed: false },
           ],
           categories: [],
           payees: [{ id: "transfer-citi", transfer_acct: "citi-card" }],
@@ -1170,7 +1170,7 @@ describe("suffix auto-learn", () => {
         if (name === "fetch_context") return {
           accounts: [
             { id: "dbs-vista", name: "Vista 9302", closed: false },
-            { id: "citi-card", name: "Citi Rewards 4756", closed: false },
+            { id: "citi-card", name: "Citi Points 4756", closed: false },
           ],
           categories: [],
           payees: [{ id: "transfer-citi", transfer_acct: "citi-card" }],
@@ -1195,7 +1195,7 @@ To: CITI CREDIT CARDS (Ref ending 4756)
 `, { senderBank: "DBS" });
 
     expect(phase1._suffix_mappings).toEqual([
-      { suffix: "4756", accountName: "Citi Rewards 4756" },
+      { suffix: "4756", accountName: "Citi Points 4756" },
     ]);
   });
 

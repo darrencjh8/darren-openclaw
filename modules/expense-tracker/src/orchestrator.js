@@ -1297,7 +1297,7 @@ export class AgentOrchestrator {
             // directions before: a stored short form ("Epsilon Nova" against
             // "Epsilon Nova Card") was refused, losing the sign flip, while a
             // sibling sharing one generic word ("Zeta Bank" vs "Zeta Card",
-            // both reducing to "trust") could be accepted.
+            // both reducing to "zeta") could be accepted.
             const wanted = accountTokens(
                 String(accountName).replace(/\s+account$/i, ""),
             );
