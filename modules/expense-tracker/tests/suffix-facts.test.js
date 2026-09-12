@@ -673,3 +673,40 @@ describe("alias edge cases (#496 round 1)", () => {
     ).toBe(false);
   });
 });
+
+describe("alias targets that cannot resolve (#496 round 5)", () => {
+  const live = [
+    { id: "eps", name: "Epsilon Account", closed: true },
+    { id: "ryt", name: "Ryt Bank", closed: false },
+  ];
+
+  it("ignores a rival claim from a target that could never resolve", () => {
+    const aliases = accountAliases(
+      [
+        { text: "Main Account is a Epsilon Account account", score: 0.9 },
+        { text: "Main Account is a Ryt Bank account", score: 0.9 },
+      ],
+      live,
+      );
+    expect(aliases.get("main account")).toBe("Ryt Bank");
+    expect(
+      matchAccountByName("Main Account", live, aliases).name,
+    ).toBe("Ryt Bank");
+  });
+
+  it("ignores a rival claim from a duplicate-named target", () => {
+    const dupes = [
+      { id: "a", name: "Shared Account", closed: false },
+      { id: "b", name: "Shared Account", closed: false },
+      { id: "ryt", name: "Ryt Bank", closed: false },
+    ];
+    const aliases = accountAliases(
+      [
+        { text: "Main Account is a Shared Account account", score: 0.9 },
+        { text: "Main Account is a Ryt Bank account", score: 0.9 },
+      ],
+      dupes,
+    );
+    expect(aliases.get("main account")).toBe("Ryt Bank");
+  });
+});

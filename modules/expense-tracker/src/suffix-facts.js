@@ -338,9 +338,14 @@ export function accountAliases(facts, accounts) {
     const target = accountTokens(m[2]).join(" ");
     if (!alias || !target) continue;
     if (ambiguous.has(alias)) continue;
-    const live = (accounts || []).find(
+    const targets = (accounts || []).filter(
       (a) => a && accountTokens(stripParenthesisedId(a.name)).join(" ") === target,
     );
+    // Only an account that can actually resolve may be a target. A closed or
+    // duplicate-named one never matches, and if it claimed the product the
+    // ambiguity guard below would drop a valid alias for the same key and the
+    // alias would be silently dead. Review round 5 on 493aad9.
+    const live = targets.length === 1 && !targets[0].closed ? targets[0] : null;
     if (!live) continue;
     if (aliases.has(alias)) {
       if (aliases.get(alias) !== live.name) {
