@@ -105,6 +105,9 @@ printf 'user-owned\n' > "$PRIMARY/.config/opencode/skills/user-skill/SKILL.md"
 mkdir -p "$PRIMARY/skills/dev-loop.codex-router.bak"
 printf 'stale dir backup\n' > "$PRIMARY/skills/dev-loop.codex-router.bak/SKILL.md"
 printf 'stale\n' > "$SECONDARY/.agents/skills/code-reviewer.codex-router.bak"
+# An unrelated user entry that merely carries the suffix must survive.
+mkdir -p "$PRIMARY/skills/user-thing.codex-router.bak"
+printf 'user-owned\n' > "$PRIMARY/skills/user-thing.codex-router.bak/SKILL.md"
 run "$SOURCE" >/dev/null
 if [[ ! -e "$PRIMARY/.config/opencode/skills/dev-loop" \
       && ! -e "$SECONDARY/.config/opencode/skills/code-reviewer" \
@@ -114,10 +117,13 @@ else
     nope "removed stale canonical copies from the shadow roots, kept user skills" \
         "$(find "$PRIMARY/.config/opencode/skills" "$SECONDARY/.config/opencode/skills" 2>/dev/null)"
 fi
-if [[ -z "$(find "$PRIMARY/skills" "$SECONDARY/.agents/skills" -name '*.codex-router.bak' 2>/dev/null)" ]]; then
-    ok "removed legacy compatibility backups"
+if [[ ! -e "$PRIMARY/skills/dev-loop.codex-router.bak" \
+      && ! -e "$SECONDARY/.agents/skills/code-reviewer.codex-router.bak" \
+      && -f "$PRIMARY/skills/user-thing.codex-router.bak/SKILL.md" ]]; then
+    ok "removed managed compatibility backups and kept an unrelated suffix entry"
 else
-    nope "removed legacy compatibility backups" "a .bak survived"
+    nope "removed managed compatibility backups and kept an unrelated suffix entry" \
+        "$(find "$PRIMARY/skills" -maxdepth 1 -name '*.codex-router.bak' 2>/dev/null)"
 fi
 
 echo "=== manifest ledger is refreshed, not left claiming drift ==="
@@ -176,28 +182,59 @@ fi
 
 echo "=== a busy lock fails closed, not silently ==="
 fresh_fixture
-mkdir -p "$PRIMARY/.codex-router-skills.lock"
-echo $$ > "$PRIMARY/.codex-router-skills.lock/pid"
+mkdir -p "$PRIMARY/.codex-router-skills.lock.d"
+echo $$ > "$PRIMARY/.codex-router-skills.lock.d/pid"
 lock_rc=0
 lock_output=$(HERMES_SKILL_PRIMARY_HOME="$PRIMARY" \
     HERMES_SKILL_SECONDARY_HOME="$SECONDARY" \
     HERMES_MANIFEST_STATE_DIRS="$STATE" \
+    HERMES_SKILL_LOCK_MODE=mkdir \
     HERMES_SKILL_LOCK_WAIT_SECONDS=1 \
     sh "$SYNC" "$SOURCE" 2>&1) || lock_rc=$?
-rm -rf "$PRIMARY/.codex-router-skills.lock"
+rm -rf "$PRIMARY/.codex-router-skills.lock.d"
 if [[ "$lock_rc" -ne 0 && "$lock_output" == *"could not acquire"* && ! -e "$PRIMARY/skills/dev-loop" ]]; then
-    ok "a lock that cannot be acquired exits non-zero without writing"
+    ok "a mkdir lock held by a live process exits non-zero without writing"
 else
-    nope "a lock that cannot be acquired exits non-zero without writing" "rc=$lock_rc out=$lock_output"
+    nope "a mkdir lock held by a live process exits non-zero without writing" "rc=$lock_rc out=$lock_output"
+fi
+
+echo "=== a live flock holder blocks a second writer ==="
+fresh_fixture
+mkdir -p "$PRIMARY"
+if command -v flock >/dev/null 2>&1; then
+    ( flock -n 9 || exit 1; sleep 5 ) 9>"$PRIMARY/.codex-router-skills.lock" &
+    holder=$!
+    sleep 1
+    flock_rc=0
+    flock_output=$(HERMES_SKILL_PRIMARY_HOME="$PRIMARY" \
+        HERMES_SKILL_SECONDARY_HOME="$SECONDARY" \
+        HERMES_MANIFEST_STATE_DIRS="$STATE" \
+        HERMES_SKILL_LOCK_WAIT_SECONDS=1 \
+        sh "$SYNC" "$SOURCE" 2>&1) || flock_rc=$?
+    kill "$holder" 2>/dev/null || true
+    wait "$holder" 2>/dev/null || true
+    if [[ "$flock_rc" -ne 0 && "$flock_output" == *"could not acquire"* && ! -e "$PRIMARY/skills/dev-loop" ]]; then
+        ok "a flock held by a live process exits non-zero without writing"
+    else
+        nope "a flock held by a live process exits non-zero without writing" "rc=$flock_rc out=$flock_output"
+    fi
+else
+    ok "flock unavailable; flock case skipped"
 fi
 
 echo "=== the lock is released after a successful run ==="
 fresh_fixture
 run "$SOURCE" >/dev/null
-if [[ ! -e "$PRIMARY/.codex-router-skills.lock" ]]; then
+if [[ ! -e "$PRIMARY/.codex-router-skills.lock.d" ]]; then
     ok "released the lock on exit"
 else
-    nope "released the lock on exit" "lock dir survived: $(find "$PRIMARY/.codex-router-skills.lock" 2>/dev/null)"
+    nope "released the lock on exit" "lock dir survived: $(find "$PRIMARY/.codex-router-skills.lock.d" 2>/dev/null)"
+fi
+# A second run must not stall on a lock the first run left behind.
+if run "$SOURCE" >/dev/null; then
+    ok "a second run acquires the released lock immediately"
+else
+    nope "a second run acquires the released lock immediately" "second run failed"
 fi
 
 echo "=== a corrupt managed-name file cannot escape the roots ==="
@@ -224,7 +261,7 @@ if HERMES_SKILL_PRIMARY_HOME="$PRIMARY" \
     && [[ -f "$ROOT/final/dev-loop/SKILL.md" ]] \
     && [[ ! -e "$ROOT/staged" ]] \
     && [[ -f "$PRIMARY/skills/dev-loop/SKILL.md" ]] \
-    && [[ ! -e "$PRIMARY/.codex-router-skills.lock" ]]; then
+    && [[ ! -e "$PRIMARY/.codex-router-skills.lock.d" ]]; then
     ok "swapped the staged tree, reconciled the roots, released the lock"
 else
     nope "swapped the staged tree, reconciled the roots, released the lock" \
