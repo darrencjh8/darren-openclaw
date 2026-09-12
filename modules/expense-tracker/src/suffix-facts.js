@@ -149,19 +149,30 @@ function refusal(reason) {
  * @returns the same shape as `matchAccountByName`.
  */
 export function resolveFactAccount(accountName, accounts, aliases) {
-  const first = matchAccountByName(accountName, accounts, aliases);
-  if (first.matched) return first;
-  const stripped = String(accountName || "")
-    .replace(/\s+accounts?$/i, "")
-    .trim();
-  if (stripped === String(accountName || "").trim()) return first;
-  const target = accountTokens(stripped).join(" ");
-  if (!target) return first;
-  const exact = (accounts || []).filter(
-    (a) => a && accountTokens(a.name).join(" ") === target,
-  );
-  if (exact.length !== 1) return first;
-  return matchAccountByName(exact[0].name, accounts, aliases);
+  // Aliases are a LAST RESORT. A name the resolver can place on its own —
+  // exactly, or through the bounded filler retry below — is never redirected.
+  // Review round 3 on 66d274d: substituting on the first call let an alias
+  // return an account the fact never named, bypassing the retry's
+  // exact-match-only invariant.
+  const withoutAliases = () => {
+    const first = matchAccountByName(accountName, accounts);
+    if (first.matched) return first;
+    const stripped = String(accountName || "")
+      .replace(/\s+accounts?$/i, "")
+      .trim();
+    if (stripped === String(accountName || "").trim()) return first;
+    const target = accountTokens(stripped).join(" ");
+    if (!target) return first;
+    const exact = (accounts || []).filter(
+      (a) => a && accountTokens(a.name).join(" ") === target,
+    );
+    if (exact.length !== 1) return first;
+    return matchAccountByName(exact[0].name, accounts);
+  };
+
+  const placed = withoutAliases();
+  if (placed.matched || !aliases) return placed;
+  return matchAccountByName(accountName, accounts, aliases);
 }
 
 /**
