@@ -86,7 +86,7 @@ async function init() {
                 dataDir: DATA_DIR,
             }),
         );
-        const budgets = await retryWithBackoff(() => actual.getBudgets());
+        const budgets = await getBudgets();
         const budget = budgets.find((b) => b.name === PRIMARY_BUDGET_FILE);
         if (!budget) {
             const notFound = new Error(
@@ -119,7 +119,7 @@ async function resolveBudgetTarget(budgetIdOrName) {
     await init();
     if (!budgetIdOrName) return null;
 
-    const budgets = await retryWithBackoff(() => actual.getBudgets());
+    const budgets = await getBudgets();
     const target = budgets.find(
         (b) =>
             (b.groupId || b.cloudFileId) === budgetIdOrName ||
@@ -130,6 +130,18 @@ async function resolveBudgetTarget(budgetIdOrName) {
 
 function syncIdOf(budget) {
     return budget.groupId || budget.cloudFileId;
+}
+
+/**
+ * The raw `actual.getBudgets()` list. It can list the same budget more than
+ * once — two DATA_DIR directories holding a copy under one sync id — and every
+ * entry must stay visible here: `init()` and `resolveBudgetTarget()` match with
+ * `.find()`, so dropping an entry whose name differs from an earlier twin's
+ * would hide the very name the caller asked for (#390). Deduplication is a
+ * display concern and lives only in the `GET /budgets` response.
+ */
+async function getBudgets() {
+    return retryWithBackoff(() => actual.getBudgets());
 }
 
 /**
@@ -164,17 +176,29 @@ async function applyBudgetSwitch(target) {
     console.log(`Switched to budget: ${target.name} (${syncId})`);
 }
 
+/** Returned by `withBudget` when the request named a budget that does not exist. */
+const UNKNOWN_BUDGET = Symbol("unknown-budget");
+
 /**
- * Assert the request's budget, then run `fn` while it stays asserted. Anything
- * that writes through `@actual-app/api` must run inside `fn`: a write outside
- * the lock can land in a budget a concurrent request switched to (#506).
+ * Assert the request's budget, then run `fn` while it stays asserted, returning
+ * `fn`'s value. Anything that reads or writes through `@actual-app/api` must run
+ * inside `fn`: the library keeps one module-global active budget, so a read
+ * outside the lock can observe a budget a concurrent request switched to
+ * (#390 reads, #506 writes).
  * `acquireLock` is not reentrant, so `fn` must not re-enter the lock on any
- * path: a `withBudget` call always takes it, and an `ensureBudget` call takes
- * it whenever the requested budget is not already active.
+ * path: a `withBudget` call always takes it, and an `ensureBudget` call takes it
+ * whenever the requested budget is not already active.
  *
- * Returns false when the request names a budget that does not exist, so the
- * caller answers 400 instead of writing into whichever budget is active. A
- * request that names no budget keeps the active-budget fallback.
+ * ponytail: one global mutex now covers every read, so every read serializes
+ * behind it. A cross-budget read waits at least one `BUDGET_SWITCH_DELAY_MS`
+ * cooldown plus the `downloadBudget` before it starts, and a read that
+ * subsequently needs the budget switched back pays a second cooldown
+ * (production sets `BUDGET_SWITCH_DELAY_MS=5000` in
+ * `modules/docker-compose.yml`). A slow or failing `downloadBudget` inside the
+ * lock delays unrelated reads too, because they queue on the same mutex. The
+ * accepted ceiling is that a multi-budget caller pays that latency; the upgrade
+ * path is one actual-api process per budget, each with its own `DATA_DIR` and
+ * port, because the library offers no per-budget context object.
  */
 async function withBudget(req, fn) {
     const requested = getBudgetId(req);
@@ -182,18 +206,25 @@ async function withBudget(req, fn) {
     // change while the process runs, and `applyBudgetSwitch` re-checks the
     // active budget inside the lock.
     const target = await resolveBudgetTarget(requested);
-    if (requested && !target) return false;
+    if (requested && !target) return UNKNOWN_BUDGET;
 
     const unlock = await acquireLock();
     try {
         await applyBudgetSwitch(target);
-        await fn();
-        return true;
+        // `return await`, not `return fn()`: a bare return would run the
+        // `finally` that releases the lock before `fn` settles.
+        return await fn();
     } finally {
         unlock();
     }
 }
 
+/**
+ * Test-only legacy helper; an integration test still calls it. Routes must use
+ * `withBudget` instead: this takes the lock only for the switch and leaves the
+ * subsequent read outside it, so a concurrent request can switch the active
+ * budget and the read can serve the wrong one (#390).
+ */
 async function ensureBudget(budgetIdOrName) {
     await init();
     if (!budgetIdOrName) return;
@@ -295,9 +326,53 @@ app.get("/budgets", async (req, res) => {
             // init() rejection is re-thrown and answered 500 below.
             if (e?.code !== "BUDGET_NOT_FOUND") throw e;
         }
-        const budgets = await retryWithBackoff(() => actual.getBudgets());
+        const budgets = await getBudgets();
+        // Display-only deduplication: the library can list one budget once per
+        // DATA_DIR copy, all sharing the sync id it switches on. Entries are
+        // keyed by `syncIdOf`; an entry with no id cannot be proven a duplicate
+        // and is kept. When a later entry is named `PRIMARY_BUDGET_FILE` and the
+        // kept entry of the same sync id is not, the later one replaces it, so
+        // the operator sees the name the process actually loads. Otherwise the
+        // first entry of the group is kept.
+        const seen = new Map(); // syncId -> index in `unique`
+        const unique = [];
+        const drops = [];
+        for (const b of budgets) {
+            const syncId = syncIdOf(b);
+            if (!syncId) {
+                unique.push(b);
+                continue;
+            }
+            if (!seen.has(syncId)) {
+                seen.set(syncId, unique.length);
+                unique.push(b);
+                continue;
+            }
+            const index = seen.get(syncId);
+            const kept = unique[index];
+            // The configured name is preferred only when it appears later in the
+            // same sync-id group; an entry already named `PRIMARY_BUDGET_FILE`
+            // stays kept, as does the first entry when neither is configured.
+            const preferLater =
+                kept.name !== PRIMARY_BUDGET_FILE &&
+                b.name === PRIMARY_BUDGET_FILE;
+            if (preferLater) {
+                unique[index] = b;
+            }
+            const dropped = preferLater ? kept : b;
+            drops.push(
+                `"${dropped.name}" (sync id ${syncId}, kept "${unique[index].name}")`,
+            );
+        }
+        if (drops.length > 0) {
+            console.log(
+                `getBudgets: dropped ${drops.length} duplicate budget ${
+                    drops.length === 1 ? "entry" : "entries"
+                } — ${drops.join("; ")}`,
+            );
+        }
         res.json(
-            budgets.map((b) => ({
+            unique.map((b) => ({
                 name: b.name,
                 groupId: b.groupId || null,
                 cloudFileId: b.cloudFileId || null,
@@ -310,8 +385,11 @@ app.get("/budgets", async (req, res) => {
 
 app.get("/accounts", async (req, res) => {
     try {
-        await ensureBudget(getBudgetId(req));
-        res.json(await actual.getAccounts());
+        const accounts = await withBudget(req, () => actual.getAccounts());
+        if (accounts === UNKNOWN_BUDGET) {
+            return res.status(400).json({ error: "Unknown budget" });
+        }
+        res.json(accounts);
     } catch (e) {
         res.status(500).json({ error: e.message });
     }
@@ -319,8 +397,11 @@ app.get("/accounts", async (req, res) => {
 
 app.get("/categories", async (req, res) => {
     try {
-        await ensureBudget(getBudgetId(req));
-        res.json(await actual.getCategories());
+        const categories = await withBudget(req, () => actual.getCategories());
+        if (categories === UNKNOWN_BUDGET) {
+            return res.status(400).json({ error: "Unknown budget" });
+        }
+        res.json(categories);
     } catch (e) {
         res.status(500).json({ error: e.message });
     }
@@ -328,9 +409,15 @@ app.get("/categories", async (req, res) => {
 
 app.get("/budget-month", async (req, res) => {
     try {
-        await ensureBudget(getBudgetId(req));
+        // The month is request-shaped, so it is settled before the lock.
         const month = req.query.month || new Date().toISOString().slice(0, 7);
-        res.json(await actual.getBudgetMonth(month));
+        const budgetMonth = await withBudget(req, () =>
+            actual.getBudgetMonth(month),
+        );
+        if (budgetMonth === UNKNOWN_BUDGET) {
+            return res.status(400).json({ error: "Unknown budget" });
+        }
+        res.json(budgetMonth);
     } catch (e) {
         res.status(500).json({ error: e.message });
     }
@@ -338,47 +425,53 @@ app.get("/budget-month", async (req, res) => {
 
 app.get("/budget-12m", async (req, res) => {
     try {
-        await ensureBudget(getBudgetId(req));
-        const now = new Date();
-        let total12m = 0,
-            emergency = 0,
-            invest = 0;
+        const payload = await withBudget(req, async () => {
+            const now = new Date();
+            let total12m = 0,
+                emergency = 0,
+                invest = 0;
 
-        // Current month balance
-        const curYM = now.toISOString().slice(0, 7);
-        try {
-            const curData = await actual.getBudgetMonth(curYM);
-            for (const g of curData.categoryGroups || [])
-                for (const c of g.categories || []) {
-                    if (c.name === "Emergency") emergency = c.balance || 0;
-                    if (c.name === "General Investment")
-                        invest = c.balance || 0;
-                }
-        } catch (e) {
-            /* ignore */
-        }
-
-        // Next 12 months budgeted
-        for (let i = 1; i <= 12; i++) {
-            const d = new Date(now.getFullYear(), now.getMonth() + i, 1);
-            const ym = d.toISOString().slice(0, 7);
+            // Current month balance
+            const curYM = now.toISOString().slice(0, 7);
             try {
-                const data = await actual.getBudgetMonth(ym);
-                for (const g of data.categoryGroups || [])
-                    for (const c of g.categories || [])
-                        total12m += c.budgeted || 0;
+                const curData = await actual.getBudgetMonth(curYM);
+                for (const g of curData.categoryGroups || [])
+                    for (const c of g.categories || []) {
+                        if (c.name === "Emergency")
+                            emergency = c.balance || 0;
+                        if (c.name === "General Investment")
+                            invest = c.balance || 0;
+                    }
             } catch (e) {
-                /* month may not exist yet */
+                /* ignore */
             }
-        }
-        res.json({
-            total_12_month_budgeted: total12m,
-            emergency_balance: emergency,
-            investment_balance: invest,
-            emergency_total: total12m + emergency,
-            investment_total: invest,
-            currency: "cents",
+
+            // Next 12 months budgeted
+            for (let i = 1; i <= 12; i++) {
+                const d = new Date(now.getFullYear(), now.getMonth() + i, 1);
+                const ym = d.toISOString().slice(0, 7);
+                try {
+                    const data = await actual.getBudgetMonth(ym);
+                    for (const g of data.categoryGroups || [])
+                        for (const c of g.categories || [])
+                            total12m += c.budgeted || 0;
+                } catch (e) {
+                    /* month may not exist yet */
+                }
+            }
+            return {
+                total_12_month_budgeted: total12m,
+                emergency_balance: emergency,
+                investment_balance: invest,
+                emergency_total: total12m + emergency,
+                investment_total: invest,
+                currency: "cents",
+            };
         });
+        if (payload === UNKNOWN_BUDGET) {
+            return res.status(400).json({ error: "Unknown budget" });
+        }
+        res.json(payload);
     } catch (e) {
         res.status(500).json({ error: e.message });
     }
@@ -386,10 +479,11 @@ app.get("/budget-12m", async (req, res) => {
 
 app.get("/accounts/balance/:id", async (req, res) => {
     try {
+        // Id and cutoff are request-shaped, so both are validated before the
+        // lock: a rejected request must not queue behind, or trigger, a switch.
         if (!req.params.id || req.params.id.trim() === "") {
             return res.status(400).json({ error: "Account id is required" });
         }
-        await ensureBudget(getBudgetId(req));
         let cutoff = undefined;
         if (req.query.cutoff) {
             const d = new Date(req.query.cutoff);
@@ -400,7 +494,12 @@ app.get("/accounts/balance/:id", async (req, res) => {
             }
             cutoff = d;
         }
-        const balance = await actual.getAccountBalance(req.params.id, cutoff);
+        const balance = await withBudget(req, () =>
+            actual.getAccountBalance(req.params.id, cutoff),
+        );
+        if (balance === UNKNOWN_BUDGET) {
+            return res.status(400).json({ error: "Unknown budget" });
+        }
         res.json({ id: req.params.id, balance: balance ?? null });
     } catch (e) {
         res.status(500).json({ error: e.message });
@@ -409,8 +508,11 @@ app.get("/accounts/balance/:id", async (req, res) => {
 
 app.get("/payees", async (req, res) => {
     try {
-        await ensureBudget(getBudgetId(req));
-        res.json(await actual.getPayees());
+        const payees = await withBudget(req, () => actual.getPayees());
+        if (payees === UNKNOWN_BUDGET) {
+            return res.status(400).json({ error: "Unknown budget" });
+        }
+        res.json(payees);
     } catch (e) {
         res.status(500).json({ error: e.message });
     }
@@ -527,7 +629,7 @@ app.post("/transactions", async (req, res) => {
                 }
             }
         });
-        if (!knownBudget) {
+        if (knownBudget === UNKNOWN_BUDGET) {
             return res.status(400).json({ error: "Unknown budget" });
         }
         // A synced or imported row can carry the amount as a string and a rule
@@ -561,12 +663,18 @@ app.post("/transactions", async (req, res) => {
 
 app.get("/transactions/:id", async (req, res) => {
     try {
-        await ensureBudget(getBudgetId(req));
-        const txn = (await actual.getTransactions(
-            undefined,
-            "1970-01-01",
-            new Date().toISOString().slice(0, 10),
-        )).find((transaction) => transaction.id === req.params.id);
+        const txn = await withBudget(req, async () =>
+            (
+                await actual.getTransactions(
+                    undefined,
+                    "1970-01-01",
+                    new Date().toISOString().slice(0, 10),
+                )
+            ).find((transaction) => transaction.id === req.params.id),
+        );
+        if (txn === UNKNOWN_BUDGET) {
+            return res.status(400).json({ error: "Unknown budget" });
+        }
         if (!txn)
             return res.status(404).json({ error: "Transaction not found" });
         res.json(txn);
@@ -577,18 +685,23 @@ app.get("/transactions/:id", async (req, res) => {
 
 app.get("/transactions", async (req, res) => {
     try {
-        await ensureBudget(getBudgetId(req));
         const { account_id, cleared, since_date, until_date } = req.query;
         const today = new Date().toISOString().slice(0, 10);
         const start = since_date || "2020-01-01";
         const end = until_date || today;
-        let txns = await actual.getTransactions(
-            account_id || undefined,
-            start,
-            end,
-        );
-        if (cleared === "false") {
-            txns = txns.filter((t) => !t.cleared);
+        const txns = await withBudget(req, async () => {
+            let rows = await actual.getTransactions(
+                account_id || undefined,
+                start,
+                end,
+            );
+            if (cleared === "false") {
+                rows = rows.filter((t) => !t.cleared);
+            }
+            return rows;
+        });
+        if (txns === UNKNOWN_BUDGET) {
+            return res.status(400).json({ error: "Unknown budget" });
         }
         res.json(txns);
     } catch (e) {
@@ -601,7 +714,7 @@ app.delete("/transactions/:id", async (req, res) => {
         const knownBudget = await withBudget(req, () =>
             actual.deleteTransaction(req.params.id),
         );
-        if (!knownBudget) {
+        if (knownBudget === UNKNOWN_BUDGET) {
             return res.status(400).json({ error: "Unknown budget" });
         }
         res.json({ status: "deleted", id: req.params.id });
@@ -618,7 +731,7 @@ app.post("/transactions/:id/clear", async (req, res) => {
         const knownBudget = await withBudget(req, () =>
             actual.updateTransaction(req.params.id, fields),
         );
-        if (!knownBudget) {
+        if (knownBudget === UNKNOWN_BUDGET) {
             return res.status(400).json({ error: "Unknown budget" });
         }
         res.json({ status: "cleared", id: req.params.id });
@@ -632,7 +745,7 @@ app.post("/transactions/:id/unclear", async (req, res) => {
         const knownBudget = await withBudget(req, () =>
             actual.updateTransaction(req.params.id, { cleared: false }),
         );
-        if (!knownBudget) {
+        if (knownBudget === UNKNOWN_BUDGET) {
             return res.status(400).json({ error: "Unknown budget" });
         }
         res.json({ status: "uncleared", id: req.params.id });
@@ -667,7 +780,7 @@ app.patch("/transactions/:id", async (req, res) => {
         const knownBudget = await withBudget(req, () =>
             actual.updateTransaction(req.params.id, fields),
         );
-        if (!knownBudget) {
+        if (knownBudget === UNKNOWN_BUDGET) {
             return res.status(400).json({ error: "Unknown budget" });
         }
         res.json({ status: "updated", id: req.params.id });
