@@ -1,0 +1,313 @@
+#!/bin/bash
+# Copyright © 2022 Dell Inc. or its subsidiaries. All Rights Reserved.
+
+# Tests for modules/hermes/scripts/sync-codex-router-skills.sh — the single
+# writer for codex-router-owned skills in the Hermes container.
+set -euo pipefail
+
+RED='\033[0;31m' GREEN='\033[0;32m' NC='\033[0m'
+pass=0 fail=0
+
+ok()   { echo -e "  ${GREEN}PASS${NC} $1"; pass=$((pass+1)); }
+nope() { echo -e "  ${RED}FAIL${NC} $1 — $2"; fail=$((fail+1)); }
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+SYNC="$SCRIPT_DIR/../scripts/sync-codex-router-skills.sh"
+TMPDIR=$(mktemp -d)
+trap 'rm -rf "$TMPDIR"' EXIT
+
+# run <source>  (isolated homes so nothing touches the real container)
+run() {
+    HERMES_SKILL_PRIMARY_HOME="$PRIMARY" \
+    HERMES_SKILL_SECONDARY_HOME="$SECONDARY" \
+    HERMES_MANIFEST_STATE_DIRS="$STATE" \
+    sh "$SYNC" "$1"
+}
+
+fresh_fixture() {
+    ROOT=$(mktemp -d "$TMPDIR/case.XXXXXX")
+    SOURCE="$ROOT/source"
+    PRIMARY="$ROOT/primary"
+    SECONDARY="$ROOT/secondary"
+    STATE="$ROOT/state"
+    mkdir -p "$SOURCE/dev-loop/scripts" "$SOURCE/code-reviewer" "$SOURCE/not-a-skill"
+    printf 'canonical dev-loop\n' > "$SOURCE/dev-loop/SKILL.md"
+    printf 'loop v1\n' > "$SOURCE/dev-loop/scripts/loop.py"
+    printf 'canonical code-reviewer\n' > "$SOURCE/code-reviewer/SKILL.md"
+    printf 'ignore me\n' > "$SOURCE/not-a-skill/README.md"
+    TARGETS=("$PRIMARY/skills" "$PRIMARY/.agents/skills" "$SECONDARY/.agents/skills")
+}
+
+echo "=== fresh sync reaches every root ==="
+fresh_fixture
+run "$SOURCE" >/dev/null
+for target in "${TARGETS[@]}"; do
+    if [[ -f "$target/dev-loop/scripts/loop.py" && -f "$target/code-reviewer/SKILL.md" ]]; then
+        ok "synced canonical skills into $target"
+    else
+        nope "synced canonical skills into $target" "$(find "$target" -maxdepth 3 2>/dev/null | head)"
+    fi
+done
+
+echo "=== non-skill directories are skipped ==="
+if [[ ! -e "$PRIMARY/skills/not-a-skill" ]]; then
+    ok "skipped a source directory without SKILL.md"
+else
+    nope "skipped a source directory without SKILL.md" "not-a-skill was copied"
+fi
+
+echo "=== idempotent rerun leaves no staging dirs ==="
+run "$SOURCE" >/dev/null
+if [[ -z "$(find "$PRIMARY" "$SECONDARY" -name '.*.staging.*' 2>/dev/null)" ]]; then
+    ok "rerun left no staging directories"
+else
+    nope "rerun left no staging directories" "$(find "$PRIMARY" "$SECONDARY" -name '.*.staging.*')"
+fi
+
+echo "=== drift is replaced with the canonical bytes ==="
+printf 'locally edited\n' > "$PRIMARY/skills/dev-loop/SKILL.md"
+run "$SOURCE" >/dev/null
+if [[ "$(cat "$PRIMARY/skills/dev-loop/SKILL.md")" == "canonical dev-loop" ]]; then
+    ok "overwrote a drifted copy"
+else
+    nope "overwrote a drifted copy" "$(cat "$PRIMARY/skills/dev-loop/SKILL.md")"
+fi
+
+echo "=== files dropped upstream are removed ==="
+rm "$SOURCE/dev-loop/scripts/loop.py"
+run "$SOURCE" >/dev/null
+if [[ ! -e "$PRIMARY/skills/dev-loop/scripts/loop.py" ]]; then
+    ok "removed a file the source dropped"
+else
+    nope "removed a file the source dropped" "loop.py still present"
+fi
+
+echo "=== siblings the sync does not own are preserved ==="
+mkdir -p "$PRIMARY/skills/hermes-troubleshooting"
+printf 'openclaw-owned\n' > "$PRIMARY/skills/hermes-troubleshooting/SKILL.md"
+run "$SOURCE" >/dev/null
+if [[ "$(cat "$PRIMARY/skills/hermes-troubleshooting/SKILL.md")" == "openclaw-owned" ]]; then
+    ok "preserved an openclaw-owned sibling skill"
+else
+    nope "preserved an openclaw-owned sibling skill" "sibling was modified"
+fi
+
+echo "=== stale shadow and legacy backups are removed ==="
+mkdir -p "$PRIMARY/.config/opencode/skills/dev-loop" \
+         "$SECONDARY/.config/opencode/skills/code-reviewer" \
+         "$PRIMARY/.config/opencode/skills/user-skill"
+printf 'stale shadow\n' > "$PRIMARY/.config/opencode/skills/dev-loop/SKILL.md"
+printf 'stale shadow\n' > "$SECONDARY/.config/opencode/skills/code-reviewer/SKILL.md"
+printf 'user-owned\n' > "$PRIMARY/.config/opencode/skills/user-skill/SKILL.md"
+# The merged installer writes the compatibility backup as a DIRECTORY
+# (copytree); older runs left a single file. Both must be handled without
+# aborting the run.
+mkdir -p "$PRIMARY/skills/dev-loop.codex-router.bak"
+printf 'stale dir backup\n' > "$PRIMARY/skills/dev-loop.codex-router.bak/SKILL.md"
+printf 'stale\n' > "$SECONDARY/.agents/skills/code-reviewer.codex-router.bak"
+# An unrelated user entry that merely carries the suffix must survive.
+mkdir -p "$PRIMARY/skills/user-thing.codex-router.bak"
+printf 'user-owned\n' > "$PRIMARY/skills/user-thing.codex-router.bak/SKILL.md"
+run "$SOURCE" >/dev/null
+if [[ ! -e "$PRIMARY/.config/opencode/skills/dev-loop" \
+      && ! -e "$SECONDARY/.config/opencode/skills/code-reviewer" \
+      && -f "$PRIMARY/.config/opencode/skills/user-skill/SKILL.md" ]]; then
+    ok "removed stale canonical copies from the shadow roots, kept user skills"
+else
+    nope "removed stale canonical copies from the shadow roots, kept user skills" \
+        "$(find "$PRIMARY/.config/opencode/skills" "$SECONDARY/.config/opencode/skills" 2>/dev/null)"
+fi
+if [[ ! -e "$PRIMARY/skills/dev-loop.codex-router.bak" \
+      && ! -e "$SECONDARY/.agents/skills/code-reviewer.codex-router.bak" \
+      && -f "$PRIMARY/skills/user-thing.codex-router.bak/SKILL.md" ]]; then
+    ok "removed managed compatibility backups and kept an unrelated suffix entry"
+else
+    nope "removed managed compatibility backups and kept an unrelated suffix entry" \
+        "$(find "$PRIMARY/skills" -maxdepth 1 -name '*.codex-router.bak' 2>/dev/null)"
+fi
+
+echo "=== manifest ledger is refreshed, not left claiming drift ==="
+IDENTITY=$(python3 - "$PRIMARY/.agents/skills" <<'PY'
+import hashlib, sys
+print(hashlib.sha256(str(__import__("pathlib").Path(sys.argv[1]).resolve()).encode()).hexdigest()[:16])
+PY
+)
+mkdir -p "$STATE/manifests/$IDENTITY"
+cat > "$STATE/manifests/$IDENTITY/dev-loop.json" <<JSON
+{
+  "skill_name": "dev-loop",
+  "canonical_source": "/old/source/dev-loop",
+  "canonical_hash": "stale",
+  "installed_path": "$PRIMARY/.agents/skills/dev-loop",
+  "installed_hash": "stale",
+  "managed_by": "codex-router"
+}
+JSON
+run "$SOURCE" >/dev/null
+if python3 - "$STATE/manifests/$IDENTITY/dev-loop.json" "$PRIMARY/.agents/skills/dev-loop" <<'PY'
+import hashlib, json, pathlib, sys
+
+record = json.loads(pathlib.Path(sys.argv[1]).read_text())
+target = pathlib.Path(sys.argv[2])
+
+
+def directory_hash(path):
+    digest = hashlib.sha256()
+    for file_path in sorted(p for p in path.rglob("*") if p.is_file()):
+        digest.update(file_path.relative_to(path).as_posix().encode() + b"\0")
+        digest.update(file_path.read_bytes())
+        digest.update(b"\0")
+    return digest.hexdigest()
+
+
+sys.exit(0 if record["installed_hash"] == directory_hash(target) else 1)
+PY
+then
+    ok "refreshed the manifest installed_hash"
+else
+    nope "refreshed the manifest installed_hash" "ledger still records drift"
+fi
+
+echo "=== a whole skill dropped upstream is pruned ==="
+printf 'stale backup\n' > "$PRIMARY/skills/code-reviewer.codex-router.bak"
+rm -rf "$SOURCE/code-reviewer"
+run "$SOURCE" >/dev/null
+if [[ ! -e "$PRIMARY/skills/code-reviewer" \
+      && ! -e "$PRIMARY/.agents/skills/code-reviewer" \
+      && ! -e "$SECONDARY/.agents/skills/code-reviewer" \
+      && ! -e "$PRIMARY/skills/code-reviewer.codex-router.bak" ]]; then
+    ok "pruned a retired skill and its compatibility backup from every root"
+else
+    nope "pruned a retired skill and its compatibility backup from every root" \
+        "$(find "$PRIMARY/skills" "$PRIMARY/.agents/skills" "$SECONDARY/.agents/skills" -maxdepth 1 -name 'code-reviewer*' 2>/dev/null)"
+fi
+
+echo "=== a busy lock fails closed, not silently ==="
+fresh_fixture
+mkdir -p "$PRIMARY/.codex-router-skills.lock.d"
+echo $$ > "$PRIMARY/.codex-router-skills.lock.d/pid"
+lock_rc=0
+lock_output=$(HERMES_SKILL_PRIMARY_HOME="$PRIMARY" \
+    HERMES_SKILL_SECONDARY_HOME="$SECONDARY" \
+    HERMES_MANIFEST_STATE_DIRS="$STATE" \
+    HERMES_SKILL_LOCK_MODE=mkdir \
+    HERMES_SKILL_LOCK_WAIT_SECONDS=1 \
+    sh "$SYNC" "$SOURCE" 2>&1) || lock_rc=$?
+rm -rf "$PRIMARY/.codex-router-skills.lock.d"
+if [[ "$lock_rc" -ne 0 && "$lock_output" == *"could not acquire"* && ! -e "$PRIMARY/skills/dev-loop" ]]; then
+    ok "a mkdir lock held by a live process exits non-zero without writing"
+else
+    nope "a mkdir lock held by a live process exits non-zero without writing" "rc=$lock_rc out=$lock_output"
+fi
+
+echo "=== a live flock holder blocks a second writer ==="
+fresh_fixture
+mkdir -p "$PRIMARY"
+if command -v flock >/dev/null 2>&1; then
+    ( flock -n 9 || exit 1; sleep 5 ) 9>"$PRIMARY/.codex-router-skills.lock" &
+    holder=$!
+    sleep 1
+    flock_rc=0
+    flock_output=$(HERMES_SKILL_PRIMARY_HOME="$PRIMARY" \
+        HERMES_SKILL_SECONDARY_HOME="$SECONDARY" \
+        HERMES_MANIFEST_STATE_DIRS="$STATE" \
+        HERMES_SKILL_LOCK_WAIT_SECONDS=1 \
+        sh "$SYNC" "$SOURCE" 2>&1) || flock_rc=$?
+    kill "$holder" 2>/dev/null || true
+    wait "$holder" 2>/dev/null || true
+    if [[ "$flock_rc" -ne 0 && "$flock_output" == *"could not acquire"* && ! -e "$PRIMARY/skills/dev-loop" ]]; then
+        ok "a flock held by a live process exits non-zero without writing"
+    else
+        nope "a flock held by a live process exits non-zero without writing" "rc=$flock_rc out=$flock_output"
+    fi
+else
+    ok "flock unavailable; flock case skipped"
+fi
+
+echo "=== the lock is released after a successful run ==="
+fresh_fixture
+run "$SOURCE" >/dev/null
+if [[ ! -e "$PRIMARY/.codex-router-skills.lock.d" ]]; then
+    ok "released the lock on exit"
+else
+    nope "released the lock on exit" "lock dir survived: $(find "$PRIMARY/.codex-router-skills.lock.d" 2>/dev/null)"
+fi
+# The default (flock) path never creates .lock.d, so exercise the fallback
+# explicitly before asserting its release.
+HERMES_SKILL_LOCK_MODE=mkdir run "$SOURCE" >/dev/null
+if [[ ! -e "$PRIMARY/.codex-router-skills.lock.d" ]]; then
+    ok "released the mkdir fallback lock on exit"
+else
+    nope "released the mkdir fallback lock on exit" \
+        "$(find "$PRIMARY/.codex-router-skills.lock.d" 2>/dev/null)"
+fi
+# A second run must not stall on a lock the first run left behind.
+if run "$SOURCE" >/dev/null; then
+    ok "a second run acquires the released lock immediately"
+else
+    nope "a second run acquires the released lock immediately" "second run failed"
+fi
+
+echo "=== an empty source never prunes the managed set ==="
+fresh_fixture
+run "$SOURCE" >/dev/null
+rm -rf "$ROOT"/source/*
+empty_rc=0
+empty_output=$(run "$SOURCE" 2>&1) || empty_rc=$?
+if [[ "$empty_rc" -ne 0 && "$empty_output" == *"refusing to prune"* \
+      && -f "$PRIMARY/skills/dev-loop/SKILL.md" ]]; then
+    ok "an empty canonical source fails closed instead of deleting managed skills"
+else
+    nope "an empty canonical source fails closed instead of deleting managed skills" "rc=$empty_rc out=$empty_output"
+fi
+
+echo "=== a corrupt managed-name file cannot escape the roots ==="
+fresh_fixture
+mkdir -p "$PRIMARY"
+printf '../escape\n' > "$PRIMARY/.codex-router-managed-skills"
+mkdir -p "$ROOT/escape"
+printf 'keep\n' > "$ROOT/escape/keep.txt"
+run "$SOURCE" >/dev/null
+if [[ -f "$ROOT/escape/keep.txt" ]]; then
+    ok "refused a managed name that is not a single path segment"
+else
+    nope "refused a managed name that is not a single path segment" "escaped the managed roots"
+fi
+
+echo "=== the staged swap and reconcile run in one call ==="
+fresh_fixture
+mkdir -p "$ROOT/staged/dev-loop"
+printf 'canonical dev-loop\n' > "$ROOT/staged/dev-loop/SKILL.md"
+if HERMES_SKILL_PRIMARY_HOME="$PRIMARY" \
+    HERMES_SKILL_SECONDARY_HOME="$SECONDARY" \
+    HERMES_SKILL_MANIFEST_STATE_DIRS="$STATE" \
+    sh "$SYNC" "$ROOT/final" "$ROOT/staged" >/dev/null 2>&1 \
+    && [[ -f "$ROOT/final/dev-loop/SKILL.md" ]] \
+    && [[ ! -e "$ROOT/staged" ]] \
+    && [[ -f "$PRIMARY/skills/dev-loop/SKILL.md" ]] \
+    && [[ ! -e "$PRIMARY/.codex-router-skills.lock.d" ]]; then
+    ok "swapped the staged tree, reconciled the roots, released the lock"
+else
+    nope "swapped the staged tree, reconciled the roots, released the lock" \
+        "$(find "$ROOT" -maxdepth 3 2>/dev/null | head)"
+fi
+if HERMES_SKILL_PRIMARY_HOME="$PRIMARY" \
+    HERMES_SKILL_SECONDARY_HOME="$SECONDARY" \
+    sh "$SYNC" "$ROOT/final2" "$ROOT/absent-staged" >/dev/null 2>&1; then
+    nope "a missing staged tree fails closed" "exit 0"
+else
+    ok "a missing staged tree fails closed"
+fi
+
+echo "=== absent source is a no-op ==="
+if run "$TMPDIR/does-not-exist" >/dev/null 2>&1; then
+    ok "absent source exits 0"
+else
+    nope "absent source exits 0" "non-zero exit"
+fi
+
+echo ""
+echo "================================"
+echo "  skills sync: $pass passed, $fail failed"
+echo "================================"
+[[ "$fail" -eq 0 ]]

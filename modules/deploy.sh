@@ -936,6 +936,58 @@ health_ok() {
 
 failed=0
 
+# ---- codex-router skill payload ----
+# codex-router owns the skills it publishes (dev-loop, code-reviewer, ...). The
+# deploy.yml checkout always provides modules/codex-router, so stage its
+# canonical tree onto the Hermes volume and reconcile every runtime skill root
+# on any deploy that touches either side. The same script runs at boot
+# (50-seed-defaults), so a restart cannot resurrect a stale copy.
+if should_deploy "codex-router" || should_deploy "hermes"; then
+  SKILLS_SRC="$ROOT/modules/codex-router/codex/skills"
+  SKILLS_SYNC="$ROOT/modules/hermes/scripts/sync-codex-router-skills.sh"
+  # In CI the codex-router checkout and this script are asserted to exist, so a
+  # missing one is a hard failure rather than a green deploy with stale skills.
+  if [ ! -d "$SKILLS_SRC" ]; then
+    echo "  (codex-router skills not checked out; skipping skill sync)" >&2
+    [ -n "${GITHUB_ACTIONS:-}" ] && failed=$((failed + 1))
+  elif [ ! -f "$SKILLS_SYNC" ]; then
+    echo "  (skill reconciler missing; skipping skill sync)" >&2
+    [ -n "${GITHUB_ACTIONS:-}" ] && failed=$((failed + 1))
+  elif ! docker inspect hermes >/dev/null 2>&1; then
+    echo "  (hermes container not present; skipping skill sync)" >&2
+    [ -n "${GITHUB_ACTIONS:-}" ] && failed=$((failed + 1))
+  else
+    ready=false
+    for _ in $(seq 1 15); do
+      if docker exec hermes true 2>/dev/null; then ready=true; break; fi
+      sleep 2
+    done
+    echo ""
+    echo "--- Codex Router Skills ---"
+    sync_ok=false
+    if [ "$ready" = true ]; then
+      docker exec hermes rm -rf /opt/data/.codex-router-skills.new 2>/dev/null || true
+      # The reconciler owns the staged swap and the reconcile under one lock, so
+      # the boot hook and this run can never race on the same tree.
+      if docker cp "$SKILLS_SRC/." hermes:/opt/data/.codex-router-skills.new \
+          && docker cp "$SKILLS_SYNC" hermes:/tmp/sync-codex-router-skills.sh \
+          && docker exec hermes sh /tmp/sync-codex-router-skills.sh /opt/data/.codex-router-skills /opt/data/.codex-router-skills.new; then
+        sync_ok=true
+      fi
+      # Always clear the staged copies, including after a failure that left the
+      # tmp script or an unconsumed staging tree behind.
+      docker exec hermes rm -f /tmp/sync-codex-router-skills.sh 2>/dev/null || true
+      docker exec hermes rm -rf /opt/data/.codex-router-skills.new 2>/dev/null || true
+    fi
+    if [ "$sync_ok" = true ]; then
+      echo -e "  ${GREEN}✓ codex-router skills reconciled into the Hermes roots${NC}"
+    else
+      echo -e "  ${RED}✗ codex-router skill sync failed${NC}"
+      failed=$((failed + 1))
+    fi
+  fi
+fi
+
 # Hermes gateway (the dashboard is disabled in compose, so its port would always fail)
 # Needs extra wait: config migration + profile seeding registers the supervised
 # gateway service after container start, so poll it with the same bounded budget

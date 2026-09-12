@@ -48,6 +48,13 @@ if default != "codex-router/auto-thinking":
 expected = {"auto-thinking", "gpt-5.6-terra"}
 if set(models) != expected:
     problems.append(f"models = {sorted(models)!r}, want {sorted(expected)!r}")
+for retired in ("auto-thinking-free", "deepseek-v4-flash", "deepseek-v4-pro"):
+    if retired in models:
+        problems.append(f"retired model {retired} still exposed")
+if "muse-spark-1.3-contributor-free" in models:
+    # The free reviewer tier is served by the opencode CLI, not codex-router,
+    # which returns HTTP 400 for it.
+    problems.append("opencode-only model muse-spark-1.3-contributor-free wired to codex-router")
 
 if problems:
     print("FAIL: " + "; ".join(problems))
