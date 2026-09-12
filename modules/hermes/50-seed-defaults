@@ -5,7 +5,67 @@
 # shellcheck disable=SC2015,SC2235
 # Seed baked-in config, SOUL, skills, and scripts on every boot.
 # Then resolve any remaining ${VAR} placeholders that Hermes doesn't auto-substitute.
-cp /opt/hermes-defaults/config.yaml /opt/data/config.yaml
+# Seed the baked config WITHOUT clobbering the whole live file. A raw copy
+# erased the codex-router `hooks.pre_llm_call` merge at every boot, so the
+# installer reported a global hook that never survived a restart. Merge, don't
+# clobber: every key the baked config defines wins, and a top-level key it does
+# not define (runtime-installed `hooks`, a hand-added `hooks_auto_accept`) is
+# carried over.
+#
+# ponytail: no retired-key drop list. A key the baked config drops lingers in
+# the live file until an operator removes it; Hermes ignores unknown keys, and
+# this matches the opencode.json merge below. Add a drop list only if a retired
+# key starts breaking boot.
+if ! python3 - /opt/hermes-defaults/config.yaml /opt/data/config.yaml <<'PYCONFIG'
+import os
+import shutil
+import sys
+from pathlib import Path
+
+import yaml
+
+canonical_path = Path(sys.argv[1])
+live_path = Path(sys.argv[2])
+
+canonical = yaml.safe_load(canonical_path.read_text()) or {}
+carried = {}
+if live_path.exists():
+    try:
+        live = yaml.safe_load(live_path.read_text()) or {}
+    except (OSError, UnicodeDecodeError, yaml.YAMLError) as exc:
+        # An unreadable live config parses as empty, so the reseed below would
+        # drop every carried key without trace. Keep a copy an operator can
+        # recover the hooks from before overwriting it.
+        live = {}
+        backup_path = live_path.with_name(live_path.name + ".invalid")
+        try:
+            shutil.copyfile(live_path, backup_path)
+            detail = f"backed up to {backup_path}"
+        except OSError as backup_exc:
+            detail = f"backup failed ({backup_exc})"
+        print(f"WARNING: {live_path} is unreadable or not valid YAML ({exc}); {detail}; reseeding it", file=sys.stderr)
+    if isinstance(canonical, dict) and isinstance(live, dict):
+        for key, value in live.items():
+            if key not in canonical:
+                carried[key] = value
+
+live_path.parent.mkdir(parents=True, exist_ok=True)
+# Write the baked bytes unchanged and graft the carried keys on the end, so the
+# baked file's comments and formatting survive the merge.
+text = canonical_path.read_text()
+if carried:
+    text = text.rstrip("\n") + "\n\n" + yaml.safe_dump(carried, sort_keys=False)
+# Atomic replace: a kill mid-write must not truncate the live config.
+tmp_path = live_path.with_name(live_path.name + ".tmp")
+tmp_path.write_text(text)
+os.replace(tmp_path, live_path)
+PYCONFIG
+then
+    # Merge failed (no python3, no PyYAML, unwritable target). Never fall back
+    # to the raw copy that caused this bug: only bootstrap a missing file.
+    echo "WARNING: hermes config merge failed; keeping the live config" >&2
+    [ -f /opt/data/config.yaml ] || cp /opt/hermes-defaults/config.yaml /opt/data/config.yaml
+fi
 [ ! -f /opt/data/SOUL.md ] && cp /opt/hermes-defaults/SOUL.md.template /opt/data/SOUL.md
 mkdir -p /opt/data/skills
 cp -r /opt/hermes-defaults/skills/* /opt/data/skills/
