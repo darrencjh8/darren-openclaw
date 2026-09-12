@@ -888,6 +888,10 @@ else
   TARGETS="${COMPONENTS[*]}"
 fi
 
+# Validate the compose config before stopping or rebuilding anything: a bad
+# config used to take the stack down first and only fail at `up`.
+$COMPOSE config -q >/dev/null
+
 # Build (skip if --skip-build)
 if ! $SKIP_BUILD; then
   echo "  Building $TARGETS..."
