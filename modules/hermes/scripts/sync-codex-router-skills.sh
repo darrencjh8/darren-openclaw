@@ -84,9 +84,13 @@ fi
 
 LOCK_OWNED=false
 CURRENT=""
+MODES_TMP=""
 cleanup() {
     if [ -n "$CURRENT" ]; then
         rm -f "$CURRENT"
+    fi
+    if [ -n "$MODES_TMP" ]; then
+        rm -f "$MODES_TMP.src" "$MODES_TMP.dst"
     fi
     if [ "$LOCK_OWNED" = true ] && [ "$USE_FLOCK" = false ]; then
         # Only the current owner may release the mkdir lock. After a fallback
@@ -104,6 +108,13 @@ if [ "$USE_FLOCK" = true ]; then
 fi
 
 attempts=0
+# Consecutive attempts that saw the lock directory without a pid file. A holder
+# writes the pid immediately after `mkdir`, so a pid still missing after a few
+# attempts means it was killed in that window; without this the lock is never
+# reclaimed and every later run waits out the timeout. The gap is seconds and a
+# holder needs microseconds, so a live holder is never raced.
+missing_pid=0
+MISSING_PID_LIMIT=3
 while [ "$attempts" -lt "$LOCK_WAIT_SECONDS" ]; do
     if [ "$USE_FLOCK" = true ]; then
         if flock -n 9; then
@@ -116,8 +127,49 @@ while [ "$attempts" -lt "$LOCK_WAIT_SECONDS" ]; do
             LOCK_OWNED=true
             break
         fi
-        if [ -f "$MKDIR_LOCK/pid" ] && ! kill -0 "$(cat "$MKDIR_LOCK/pid" 2>/dev/null)" 2>/dev/null; then
-            rm -rf "$MKDIR_LOCK" 2>/dev/null || true
+        if [ ! -f "$MKDIR_LOCK/pid" ]; then
+            missing_pid=$((missing_pid + 1))
+            if [ "$missing_pid" -ge "$MISSING_PID_LIMIT" ]; then
+                rm -rf "$MKDIR_LOCK" 2>/dev/null || true
+            fi
+        else
+            missing_pid=0
+            # Reclaim only when the holder is provably gone. `kill -0` reports
+            # both ESRCH (no such process) and EPERM (process alive, owned by
+            # someone else) as a bare failure, so reclaiming on that failure
+            # would steal a live lock. /proc distinguishes them: an existing
+            # /proc/<pid> that cannot be read is EPERM, and one that is absent
+            # is ESRCH. Anything else waits, and the bounded loop fails closed.
+            # ponytail: Linux-only (this runs in the container); the mkdir
+            # fallback is test-only, and flock is the production primitive.
+            # The EPERM branch itself is not reachable from the suite, which
+            # cannot re-mount /proc and cannot out-rank the lock holder's user;
+            # the tests pin the adjacent cases (a dead or empty pid is
+            # reclaimed, a live lock with no proof of death is left alone).
+            holder=$(cat "$MKDIR_LOCK/pid" 2>/dev/null) || holder=""
+            # Strip whitespace before the digit test: `kill -0 " 123"` honours
+            # the embedded pid, so reclaiming a padded pid file would steal a
+            # live lock.
+            holder=$(printf '%s' "$holder" | tr -d '[:space:]')
+            case $holder in
+                '')
+                    # A truncated pid file names no process. Reclaim it;
+                    # otherwise `/proc//stat` resolves to `/proc/stat`, which is
+                    # always readable, and the lock is stuck forever.
+                    rm -rf "$MKDIR_LOCK" 2>/dev/null || true
+                    ;;
+                *[!0-9]*)
+                    # Neither a pid nor empty (a hand-edited "abc" or "-1"):
+                    # leave it for the timeout and fail closed rather than guess.
+                    ;;
+                *)
+                    if kill -0 "$holder" 2>/dev/null; then
+                        :
+                    elif [ ! -r "/proc/$holder/stat" ]; then
+                        rm -rf "$MKDIR_LOCK" 2>/dev/null || true
+                    fi
+                    ;;
+            esac
         fi
     fi
     attempts=$((attempts + 1))
@@ -144,13 +196,40 @@ if [ ! -d "$SOURCE" ]; then
 fi
 
 # A run killed between creating $CURRENT and its EXIT trap leaves that staging
-# file behind. It is litter the next run would otherwise carry forever, so sweep
-# the family before creating the current one. A matched directory or a permission
-# failure makes rm return non-zero, which must not abort the reconcile, so the
-# sweep stays non-fatal. (`rm -f` already tolerates an unmatched glob.)
+# file behind, as does one killed while comparing modes. They are litter the next
+# run would otherwise carry forever, so sweep both families before creating the
+# current ones. A matched directory or a permission failure makes rm return
+# non-zero, which must not abort the reconcile, so the sweep stays non-fatal.
+# (`rm -f` already tolerates an unmatched glob.)
 rm -f "$PRIMARY_HOME"/.codex-router-managed-skills.new.* 2>/dev/null || true
+rm -f "$PRIMARY_HOME"/.codex-router-modes.* 2>/dev/null || true
 CURRENT="$PRIMARY_HOME/.codex-router-managed-skills.new.$$"
 : > "$CURRENT"
+MODES_TMP="$PRIMARY_HOME/.codex-router-modes.$$"
+
+# Compare the permission bits of a canonical tree with an installed copy.
+# `diff -r` compares contents only, so without this a canonical permission
+# change would be skipped as identical and never reach the runtime root. Only
+# directories and regular files are compared, the two types `cp -a` restores,
+# and each listing is sorted so a different readdir order is not read as drift.
+# ponytail: symlink modes are not compared — Linux cannot set them, and a
+# symlink that survives `cp -a` keeps the canonical target string anyway.
+same_modes() {
+    src=$1
+    dst=$2
+    # A symlinked root is the one shape where `diff -r` follows the link into a
+    # directory while `find` (no -L) sees a non-directory: the listings would
+    # compare a populated tree against a single root line. Treat that as
+    # different rather than guess.
+    [ -d "$src" ] && [ -d "$dst" ] || return 1
+    srclist="$MODES_TMP.src"
+    dstlist="$MODES_TMP.dst"
+    printf '%s\n' "$(stat -c '%a' "$src")" > "$srclist"
+    find "$src" \( -type d -o -type f \) -printf '%P %m\n' | sort >> "$srclist"
+    printf '%s\n' "$(stat -c '%a' "$dst")" > "$dstlist"
+    find "$dst" \( -type d -o -type f \) -printf '%P %m\n' | sort >> "$dstlist"
+    diff "$srclist" "$dstlist" >/dev/null 2>&1
+}
 
 # The canonical set for this run: only directories that carry SKILL.md. A stray
 # file or a non-skill directory in the source is never copied.
@@ -165,9 +244,14 @@ done
 # Prune a skill the canonical source no longer publishes. The managed-name list
 # is kept outside the staged source, which the deploy replaces wholesale.
 if [ -f "$MANAGED_FILE" ]; then
-    # An empty or partial source must never be read as "every skill was
-    # retired": that would delete every managed skill and still exit 0. The
-    # canonical set is never empty, so refuse instead of pruning.
+    # A *fully empty* staged source must never be read as "every skill was
+    # retired": that would delete every managed skill and still exit 0. A
+    # partial source (some managed skills present, others absent) would still
+    # retire the absent names, because the managed set is names, not a content
+    # manifest. That gap is accepted: today's deploy stages the whole canonical
+    # checkout in one `docker cp`, so a partial source is unreachable. Compare
+    # against the recorded managed set only if a future producer can stage a
+    # subset.
     if [ ! -s "$CURRENT" ] && [ -s "$MANAGED_FILE" ]; then
         echo "sync-codex-router-skills: source $SOURCE has no skills while $(wc -l < "$MANAGED_FILE") are managed; refusing to prune" >&2
         exit 1
@@ -196,9 +280,12 @@ for target in $TARGETS; do
         [ -f "$source_dir/SKILL.md" ] || continue
         valid_name "$name" || continue
         dest="$target/$name"
-        # `diff -r` is the content comparison: identical trees are skipped so a
-        # rerun is a no-op.
-        if [ -d "$dest" ] && diff -r "$source_dir" "$dest" >/dev/null 2>&1; then
+        # `diff -r` is the content comparison and `same_modes` the permission
+        # comparison: a tree is skipped only when both match, so a canonical
+        # permission change still propagates. The modes are only checked once
+        # the contents match, to keep the listing off the common drift path.
+        if [ -d "$dest" ] && diff -r "$source_dir" "$dest" >/dev/null 2>&1 \
+            && same_modes "$source_dir" "$dest"; then
             continue
         fi
         staging="$target/.$name.staging.$$"

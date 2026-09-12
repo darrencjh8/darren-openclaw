@@ -3,7 +3,10 @@
 
 # Tests for modules/hermes/scripts/sync-codex-router-skills.sh — the single
 # writer for codex-router-owned skills in the Hermes container.
-set -euo pipefail
+# No `set -e`: an unexpected failure must print a FAIL line and let the rest of
+# the suite run instead of aborting everything after it. The suite still exits
+# non-zero, because the final `[[ "$fail" -eq 0 ]]` decides the status.
+set -uo pipefail
 
 RED='\033[0;31m' GREEN='\033[0;32m' NC='\033[0m'
 pass=0 fail=0
@@ -71,6 +74,20 @@ if [[ "$(cat "$PRIMARY/skills/dev-loop/SKILL.md")" == "canonical dev-loop" ]]; t
     ok "overwrote a drifted copy"
 else
     nope "overwrote a drifted copy" "$(cat "$PRIMARY/skills/dev-loop/SKILL.md")"
+fi
+
+echo "=== a permission change in the source propagates ==="
+printf 'loop v1\n' > "$SOURCE/dev-loop/scripts/loop.py"
+chmod 755 "$SOURCE/dev-loop/scripts/loop.py"
+chmod 700 "$SOURCE/dev-loop/scripts"
+run "$SOURCE" >/dev/null
+file_mode=$(stat -c '%a' "$PRIMARY/skills/dev-loop/scripts/loop.py")
+dir_mode=$(stat -c '%a' "$PRIMARY/skills/dev-loop/scripts")
+if [[ "$file_mode" == 755 && "$dir_mode" == 700 ]]; then
+    ok "applied a source permission change to an identical tree (file and directory)"
+else
+    nope "applied a source permission change to an identical tree (file and directory)" \
+        "file=$(stat -c '%a' "$PRIMARY/skills/dev-loop/scripts/loop.py" 2>/dev/null) dir=$dir_mode"
 fi
 
 echo "=== files dropped upstream are removed ==="
@@ -278,6 +295,110 @@ if run "$SOURCE" >/dev/null; then
 else
     nope "a second run acquires the released lock immediately" "second run failed"
 fi
+
+echo "=== a lock left by a dead process is reclaimed ==="
+fresh_fixture
+mkdir -p "$PRIMARY/.codex-router-skills.lock.d"
+# 4194305 is one past /proc/sys/kernel/pid_max (4194304), so no live pid can
+# ever name it, and the reclaim path must clear the lock.
+echo 4194305 > "$PRIMARY/.codex-router-skills.lock.d/pid"
+stale_rc=0
+stale_output=$(HERMES_SKILL_PRIMARY_HOME="$PRIMARY" \
+    HERMES_SKILL_SECONDARY_HOME="$SECONDARY" \
+    HERMES_MANIFEST_STATE_DIRS="$STATE" \
+    HERMES_SKILL_LOCK_MODE=mkdir \
+    HERMES_SKILL_LOCK_WAIT_SECONDS=5 \
+    sh "$SYNC" "$SOURCE" 2>&1) || stale_rc=$?
+if [[ "$stale_rc" -eq 0 && -f "$PRIMARY/skills/dev-loop/SKILL.md" \
+      && ! -e "$PRIMARY/.codex-router-skills.lock.d" ]]; then
+    ok "reclaimed a fallback lock whose holder is gone"
+else
+    nope "reclaimed a fallback lock whose holder is gone" "rc=$stale_rc out=$stale_output"
+fi
+
+echo "=== a live lock the reconciler cannot probe is never reclaimed ==="
+fresh_fixture
+mkdir -p "$PRIMARY/.codex-router-skills.lock.d"
+echo $$ > "$PRIMARY/.codex-router-skills.lock.d/pid"
+ep_rc=0
+ep_output=$(HERMES_SKILL_PRIMARY_HOME="$PRIMARY" \
+    HERMES_SKILL_SECONDARY_HOME="$SECONDARY" \
+    HERMES_MANIFEST_STATE_DIRS="$STATE" \
+    HERMES_SKILL_LOCK_MODE=mkdir \
+    HERMES_SKILL_LOCK_WAIT_SECONDS=1 \
+    sh "$SYNC" "$SOURCE" 2>&1) || ep_rc=$?
+ep_pid=$(cat "$PRIMARY/.codex-router-skills.lock.d/pid" 2>/dev/null)
+if [[ "$ep_rc" -ne 0 && "$ep_pid" == "$$" \
+      && "$ep_output" == *"could not acquire"* ]]; then
+    ok "left a live lock in place instead of reclaiming it"
+else
+    nope "left a live lock in place instead of reclaiming it" \
+        "rc=$ep_rc pid=${ep_pid:-none} out=$ep_output"
+fi
+rm -rf "$PRIMARY/.codex-router-skills.lock.d"
+
+echo "=== a corrupt pid file is reclaimed ==="
+# A truncated write (`echo $$ > pid` failing on ENOSPC) leaves an empty file.
+# `/proc//stat` resolves to `/proc/stat`, which is readable, so the empty pid
+# must be handled before the /proc probe or the lock is stuck forever.
+fresh_fixture
+mkdir -p "$PRIMARY/.codex-router-skills.lock.d"
+: > "$PRIMARY/.codex-router-skills.lock.d/pid"
+corrupt_rc=0
+corrupt_output=$(HERMES_SKILL_PRIMARY_HOME="$PRIMARY" \
+    HERMES_SKILL_SECONDARY_HOME="$SECONDARY" \
+    HERMES_MANIFEST_STATE_DIRS="$STATE" \
+    HERMES_SKILL_LOCK_MODE=mkdir \
+    HERMES_SKILL_LOCK_WAIT_SECONDS=5 \
+    sh "$SYNC" "$SOURCE" 2>&1) || corrupt_rc=$?
+if [[ "$corrupt_rc" -eq 0 && ! -e "$PRIMARY/.codex-router-skills.lock.d" \
+      && -f "$PRIMARY/skills/dev-loop/SKILL.md" ]]; then
+    ok "reclaimed a lock whose pid file is empty"
+else
+    nope "reclaimed a lock whose pid file is empty" "rc=$corrupt_rc out=$corrupt_output"
+fi
+
+echo "=== a lock dir with no pid file is reclaimed ==="
+# A holder killed between `mkdir` and writing its pid leaves an ownerless lock
+# directory; without a reclaim the fallback stays wedged until a manual rm.
+fresh_fixture
+mkdir -p "$PRIMARY/.codex-router-skills.lock.d"
+nopid_rc=0
+nopid_output=$(HERMES_SKILL_PRIMARY_HOME="$PRIMARY" \
+    HERMES_SKILL_SECONDARY_HOME="$SECONDARY" \
+    HERMES_MANIFEST_STATE_DIRS="$STATE" \
+    HERMES_SKILL_LOCK_MODE=mkdir \
+    HERMES_SKILL_LOCK_WAIT_SECONDS=6 \
+    sh "$SYNC" "$SOURCE" 2>&1) || nopid_rc=$?
+if [[ "$nopid_rc" -eq 0 && ! -e "$PRIMARY/.codex-router-skills.lock.d" \
+      && -f "$PRIMARY/skills/dev-loop/SKILL.md" ]]; then
+    ok "reclaimed a lock directory with no pid file"
+else
+    nope "reclaimed a lock directory with no pid file" "rc=$nopid_rc out=$nopid_output"
+fi
+
+echo "=== a padded pid file still names a live holder ==="
+# `kill -0 " 123"` honours the embedded pid, so the whitespace must be stripped
+# before the digit test or a padded pid file reads as corrupt and is stolen.
+fresh_fixture
+mkdir -p "$PRIMARY/.codex-router-skills.lock.d"
+printf ' %s \n' "$$" > "$PRIMARY/.codex-router-skills.lock.d/pid"
+pad_rc=0
+pad_output=$(HERMES_SKILL_PRIMARY_HOME="$PRIMARY" \
+    HERMES_SKILL_SECONDARY_HOME="$SECONDARY" \
+    HERMES_MANIFEST_STATE_DIRS="$STATE" \
+    HERMES_SKILL_LOCK_MODE=mkdir \
+    HERMES_SKILL_LOCK_WAIT_SECONDS=1 \
+    sh "$SYNC" "$SOURCE" 2>&1) || pad_rc=$?
+pad_pid=$(cat "$PRIMARY/.codex-router-skills.lock.d/pid" 2>/dev/null)
+if [[ "$pad_rc" -ne 0 && "$pad_pid" == " $$ " \
+      && "$pad_output" == *"could not acquire"* ]]; then
+    ok "refused to reclaim a whitespace-padded live pid"
+else
+    nope "refused to reclaim a whitespace-padded live pid" \
+        "rc=$pad_rc pid=[${pad_pid:-none}] out=$pad_output"
+fi
+rm -rf "$PRIMARY/.codex-router-skills.lock.d"
 
 echo "=== an empty source never prunes the managed set ==="
 fresh_fixture
