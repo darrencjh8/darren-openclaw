@@ -583,6 +583,10 @@ describe("GET /transactions/:id", () => {
         actual.downloadBudget.mockReset();
         actual.getTransactions.mockReset();
         actual.init.mockResolvedValue(undefined);
+        actual.getBudgets.mockResolvedValue([
+            { name: "test-budget", groupId: "g1" },
+        ]);
+        actual.downloadBudget.mockResolvedValue(undefined);
     });
 
     test("returns single transaction by ID", async () => {
@@ -1800,6 +1804,15 @@ describe("GET /accounts/balance/:id", () => {
         actual.init.mockReset();
         actual.getAccountBalance.mockReset();
         actual.init.mockResolvedValue(undefined);
+        // withBudget() resolves the requested budget through getBudgets() and
+        // switches through downloadBudget(), so stub both here instead of
+        // relying on whichever block ran earlier in the file.
+        actual.getBudgets.mockReset();
+        actual.downloadBudget.mockReset();
+        actual.getBudgets.mockResolvedValue([
+            { name: "test-budget", groupId: "g1" },
+        ]);
+        actual.downloadBudget.mockResolvedValue(undefined);
     });
 
     test("returns account balance by id", async () => {
