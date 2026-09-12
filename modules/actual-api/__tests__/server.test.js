@@ -388,6 +388,70 @@ describe("Route handlers", () => {
             });
         });
 
+        it.each([
+            ["a fractional amount", 12.34],
+            ["an exponent string", "1e3"],
+            ["null", null],
+        ])(
+            "returns 400 and does not update for %s",
+            async (_label, amount) => {
+                const handler = findHandler("patch", "/transactions/:id");
+                const req = mockReq({
+                    params: { id: "txn-invalid-amount" },
+                    body: { amount },
+                });
+                const res = mockRes();
+
+                await handler(req, res);
+
+                expect(res.status).toHaveBeenCalledWith(400);
+                expect(res.json).toHaveBeenCalledWith({
+                    error: "Amount must be an integer number of cents",
+                });
+                expect(actual.updateTransaction).not.toHaveBeenCalled();
+            },
+        );
+
+        it("forwards a safe integer amount exactly", async () => {
+            const handler = findHandler("patch", "/transactions/:id");
+            const req = mockReq({
+                params: { id: "txn-safe-amount" },
+                body: { amount: Number.MAX_SAFE_INTEGER },
+            });
+            const res = mockRes();
+
+            await handler(req, res);
+
+            expect(actual.updateTransaction).toHaveBeenCalledWith(
+                "txn-safe-amount",
+                { amount: Number.MAX_SAFE_INTEGER },
+            );
+            expect(res.json).toHaveBeenCalledWith({
+                status: "updated",
+                id: "txn-safe-amount",
+            });
+        });
+
+        it("coerces a plain integer string amount before updating", async () => {
+            const handler = findHandler("patch", "/transactions/:id");
+            const req = mockReq({
+                params: { id: "txn-string-amount" },
+                body: { amount: "500" },
+            });
+            const res = mockRes();
+
+            await handler(req, res);
+
+            expect(actual.updateTransaction).toHaveBeenCalledWith(
+                "txn-string-amount",
+                { amount: 500 },
+            );
+            expect(res.json).toHaveBeenCalledWith({
+                status: "updated",
+                id: "txn-string-amount",
+            });
+        });
+
         it("returns { status: 'updated', id } on success", async () => {
             const handler = findHandler("patch", "/transactions/:id");
             const req = mockReq({
@@ -1063,8 +1127,8 @@ describe("POST /transactions enriched response", () => {
             res,
         );
 
-        // Zero is a legitimate persisted amount, so the fallback must key on
-        // "not a safe integer" rather than on falsiness.
+        // Regression guard: a future falsiness-based fallback must still echo
+        // zero, a legitimate persisted amount.
         expect(res.json.mock.calls[0][0].amount).toBe(0);
     });
 
@@ -1080,7 +1144,10 @@ describe("POST /transactions enriched response", () => {
         // The response is the amount a caller may report as booked, so a value
         // that is not a safe integer of cents must not be echoed as exact.
         ["a fractional number", 12.34],
-        ["a number outside the safe-integer range", 9007199254740993],
+        [
+            "a number outside the safe-integer range",
+            Number.MAX_SAFE_INTEGER + 1,
+        ],
         ["a digit string outside the safe-integer range", "9007199254740993"],
     ])(
         "falls back to the request amount when the persisted amount is %s",
@@ -1341,7 +1408,7 @@ describe("POST /transactions enriched response", () => {
         ["an exponent string", "1e3"],
         ["a bare plus string", "+5"],
         ["an unsafe integer string", "9007199254740993"],
-        ["an unsafe integer", 9007199254740993],
+        ["an unsafe integer", Number.MAX_SAFE_INTEGER + 1],
     ])(
         "returns 400 for the %s amount without inserting",
         async (_label, amount) => {

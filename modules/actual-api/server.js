@@ -216,10 +216,10 @@ function getBudgetId(req) {
 /**
  * True when `value` is an integer number of cents: a safe-integer number, or a
  * plain integer string whose value is a safe integer. Number() alone would also
- * accept true, [], [5], "0x10", and "1e3", which would book 1, 0, 5, 16, or
- * 1000 cents for input nobody sent as an amount. A nullish or blank value is
- * rejected too, because Number(null) and Number("") are both 0, and the value
- * must be a safe integer because a longer digit string coerces to a rounded
+ * accept true, an array like [5], "0x10", and "1e3", which would book 1, 5,
+ * 16, or 1000 cents for input nobody sent as an amount. A nullish or blank
+ * value is rejected too, because Number(null) and Number("") are both 0. The
+ * value must be a safe integer because a longer digit string coerces to a rounded
  * number. Both the request guard and the persisted-row parse use this, so the
  * two cannot drift apart.
  */
@@ -246,10 +246,10 @@ function buildTransaction(body) {
         date: date || new Date().toISOString().slice(0, 10),
         // Coerce here so a numeric string reaches addTransactions as a number
         // for a transfer counterpart, and so the response reports the same
-        // number whether it echoes the request or the persisted row. The route's
-        // amount guard rejects a missing or non-integer amount before the
-        // coerced amount is used, so the `|| 0` only serves a direct caller of
-        // this exported function.
+        // number whether it echoes the request or the persisted row. `|| 0`
+        // keeps a direct caller of this exported helper from receiving NaN for
+        // a missing or nonnumeric amount. Route validation runs after this
+        // helper, but before the coerced amount reaches the API or response.
         amount: Number(amount) || 0,
         payee_name: payee_name || imported_payee || undefined,
         imported_payee: imported_payee || payee_name || undefined,
@@ -632,10 +632,19 @@ app.post("/transactions/:id/unclear", async (req, res) => {
 
 app.patch("/transactions/:id", async (req, res) => {
     try {
+        if (
+            req.body.amount !== undefined &&
+            !isSafeIntegerAmount(req.body.amount)
+        ) {
+            return res
+                .status(400)
+                .json({ error: "Amount must be an integer number of cents" });
+        }
         const fields = {};
         if (req.body.payee !== undefined) fields.payee = req.body.payee;
         if (req.body.notes !== undefined) fields.notes = req.body.notes;
-        if (req.body.amount !== undefined) fields.amount = req.body.amount;
+        if (req.body.amount !== undefined)
+            fields.amount = Number(req.body.amount);
         if (req.body.date !== undefined) fields.date = req.body.date;
         if (req.body.category !== undefined)
             fields.category = req.body.category;
