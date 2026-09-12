@@ -213,6 +213,22 @@ function getBudgetId(req) {
     return req.query.budget_id || (req.body && req.body.budget_id) || "";
 }
 
+/**
+ * True when `value` is an integer number of cents: a safe-integer number, or a
+ * plain integer string whose value is a safe integer. Number() alone would also
+ * accept true, [], [5], "0x10", and "1e3", which would book 1, 0, 5, 16, or
+ * 1000 cents for input nobody sent as an amount. A nullish or blank value is
+ * rejected too, because Number(null) and Number("") are both 0, and the value
+ * must be a safe integer because a longer digit string coerces to a rounded
+ * number. Both the request guard and the persisted-row parse use this, so the
+ * two cannot drift apart.
+ */
+function isSafeIntegerAmount(value) {
+    if (typeof value === "number") return Number.isSafeInteger(value);
+    if (typeof value !== "string") return false;
+    return /^-?\d+$/.test(value.trim()) && Number.isSafeInteger(Number(value));
+}
+
 function buildTransaction(body) {
     const {
         account,
@@ -230,9 +246,10 @@ function buildTransaction(body) {
         date: date || new Date().toISOString().slice(0, 10),
         // Coerce here so a numeric string reaches addTransactions as a number
         // for a transfer counterpart, and so the response reports the same
-        // number whether it echoes the request or the persisted row. The route
-        // rejects a missing or non-integer amount before this value is used, so
-        // the `|| 0` only guards a direct caller of this exported function.
+        // number whether it echoes the request or the persisted row. The route's
+        // amount guard rejects a missing or non-integer amount before the
+        // coerced amount is used, so the `|| 0` only serves a direct caller of
+        // this exported function.
         amount: Number(amount) || 0,
         payee_name: payee_name || imported_payee || undefined,
         imported_payee: imported_payee || payee_name || undefined,
@@ -400,21 +417,10 @@ app.post("/transactions", async (req, res) => {
             return res.status(400).json({ error: "Account is required" });
         }
         // Amount is money at a trust boundary, so reject a missing or
-        // non-integer amount instead of booking it as 0 cents. Only a number or
-        // a plain integer string is accepted: Number() alone would also accept
-        // true, [], [5], "0x10", and "1e3", which would book 1, 0, 5, 16, or
-        // 1000 cents for input nobody sent as an amount. Blanks are rejected
-        // because Number("") and Number(null) are both 0, and the value must be
-        // a safe integer because a longer digit string coerces to a rounded
-        // number and would book cents the caller never sent.
-        const amount = req.body?.amount;
-        const amountIsNumber =
-            typeof amount === "number" && Number.isSafeInteger(amount);
-        const amountIsIntegerString =
-            typeof amount === "string" &&
-            /^-?\d+$/.test(amount.trim()) &&
-            Number.isSafeInteger(Number(amount));
-        if (!amountIsNumber && !amountIsIntegerString) {
+        // non-integer amount instead of booking it as 0 cents. The full rule,
+        // including why blanks and unsafe integers are rejected, lives on
+        // isSafeIntegerAmount above.
+        if (!isSafeIntegerAmount(req.body?.amount)) {
             return res
                 .status(400)
                 .json({ error: "Amount must be an integer number of cents" });
@@ -513,24 +519,15 @@ app.post("/transactions", async (req, res) => {
         if (!knownBudget) {
             return res.status(400).json({ error: "Unknown budget" });
         }
-        // A synced or imported row can carry the amount as a string, so parse
-        // the persisted value with the same rules as the request: a number, or a
-        // plain decimal string. Number() alone would accept true, [5], "0x10",
-        // and "1e3" and report cents the request never booked, and a nullish or
-        // blank amount must not be trusted either, because Number(null) and
-        // Number("") are a finite 0. Everything else falls back to the request
-        // amount.
+        // A synced or imported row can carry the amount as a string and a rule
+        // can rewrite it, so the persisted value is held to the same rule as the
+        // request: a number, or a plain integer string whose value is a safe
+        // integer. Anything else -- a nullish or blank value, a fraction, or a
+        // value outside the safe-integer range -- falls back to the amount the
+        // request asked for rather than being reported as exact cents.
         const persistedAmount = created?.amount;
-        const persistedLooksNumeric =
-            (typeof persistedAmount === "number" &&
-                Number.isFinite(persistedAmount)) ||
-            (typeof persistedAmount === "string" &&
-                /^-?\d+$/.test(persistedAmount.trim()));
-        const parsedPersisted = persistedLooksNumeric
+        const responseAmount = isSafeIntegerAmount(persistedAmount)
             ? Number(persistedAmount)
-            : NaN;
-        const responseAmount = Number.isFinite(parsedPersisted)
-            ? parsedPersisted
             : txn.amount;
         res.json({
             id: created ? created.id : null,

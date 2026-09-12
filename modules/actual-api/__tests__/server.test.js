@@ -1036,6 +1036,38 @@ describe("POST /transactions enriched response", () => {
         expect(body.amount).toBe(-425);
     });
 
+    test("echoes a persisted zero instead of falling back to the request", async () => {
+        readBack(
+            [],
+            [
+                {
+                    id: "only-new",
+                    account: "acc-1",
+                    date: "2026-06-17",
+                    amount: 0,
+                    sort_order: 1,
+                },
+            ],
+        );
+        const handler = findHandler("post", "/transactions");
+        const res = mockRes();
+
+        await handler(
+            mockReq({
+                body: {
+                    account: "acc-1",
+                    date: "2026-06-17",
+                    amount: -425,
+                },
+            }),
+            res,
+        );
+
+        // Zero is a legitimate persisted amount, so the fallback must key on
+        // "not a safe integer" rather than on falsiness.
+        expect(res.json.mock.calls[0][0].amount).toBe(0);
+    });
+
     test.each([
         ["a non-numeric string", "n/a"],
         ["null", null],
@@ -1045,6 +1077,11 @@ describe("POST /transactions enriched response", () => {
         ["an exponent string", "1e3"],
         ["a boolean", true],
         ["an array", [5]],
+        // The response is the amount a caller may report as booked, so a value
+        // that is not a safe integer of cents must not be echoed as exact.
+        ["a fractional number", 12.34],
+        ["a number outside the safe-integer range", 9007199254740993],
+        ["a digit string outside the safe-integer range", "9007199254740993"],
     ])(
         "falls back to the request amount when the persisted amount is %s",
         async (_label, amount) => {
