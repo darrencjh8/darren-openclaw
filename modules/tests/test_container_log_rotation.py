@@ -37,8 +37,8 @@ class ContainerLogRotationTests(unittest.TestCase):
 
 
 class DeployChangeDetectionTests(unittest.TestCase):
-    def components_for_change(self, changed_path):
-        """Run the real detection script against a repo whose last commit touched changed_path."""
+    def components_for_change(self, *changed_paths):
+        """Run the real detection script against a repo whose last commit touched changed_paths."""
         with tempfile.TemporaryDirectory() as tmp:
             repo = Path(tmp) / "repo"
             repo.mkdir()
@@ -51,9 +51,10 @@ class DeployChangeDetectionTests(unittest.TestCase):
             subprocess.run(git + ["add", "-A"], cwd=repo, check=True)
             subprocess.run(git + ["commit", "-q", "-m", "base"], cwd=repo, check=True)
 
-            target = repo / changed_path
-            target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_text("changed\n", encoding="utf-8")
+            for changed_path in changed_paths:
+                target = repo / changed_path
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_text("changed\n", encoding="utf-8")
             subprocess.run(git + ["add", "-A"], cwd=repo, check=True)
             subprocess.run(git + ["commit", "-q", "-m", "change"], cwd=repo, check=True)
 
@@ -84,6 +85,24 @@ class DeployChangeDetectionTests(unittest.TestCase):
 
     def test_single_module_change_still_deploys_only_that_module(self):
         self.assertEqual("hermes", self.components_for_change("modules/hermes/config.yaml"))
+
+    def test_compose_backup_file_does_not_force_full_redeploy(self):
+        # The compose rule must match the exact filename, so a sibling like
+        # modules/docker-compose.yml.bak cannot drag in a full redeploy.
+        self.assertEqual(
+            "hermes",
+            self.components_for_change(
+                "modules/hermes/config.yaml", "modules/docker-compose.yml.bak"
+            ),
+        )
+
+    def test_compose_backup_change_alone_still_redeploys_everything(self):
+        # No component prefix matches, so the empty-components fallback keeps
+        # the safe "deploy everything" default.
+        self.assertEqual("all", self.components_for_change("modules/docker-compose.yml.bak"))
+
+    def test_deploy_script_change_redeploys_everything(self):
+        self.assertEqual("all", self.components_for_change("modules/deploy.sh"))
 
 
 if __name__ == "__main__":

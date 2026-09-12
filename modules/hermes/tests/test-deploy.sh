@@ -272,6 +272,19 @@ echo "$cmd_single" | grep -q "force-recreate" && ok "hermes + FORCE_ALL=true -> 
 echo "$cmd_single" | grep -q "hermes" && ok "single component only deploys hermes" || nope "single component only deploys hermes" "other services in cmd"
 
 echo ""
+echo "=== deploy.sh: compose preflight ==="
+
+# The compose file must be validated before any container is stopped, so a bad
+# config aborts the deploy instead of taking the stack down first.
+config_line=$(grep -n 'COMPOSE config -q' "$DEPLOY_SCRIPT" | head -1 | cut -d: -f1 || true)
+stop_line=$(grep -n 'docker stop hermes' "$DEPLOY_SCRIPT" | head -1 | cut -d: -f1 || true)
+if [ -n "$config_line" ] && [ -n "$stop_line" ] && [ "$config_line" -lt "$stop_line" ]; then
+    ok "compose config validated before containers stop"
+else
+    nope "compose config validated before containers stop" "config_line=$config_line stop_line=$stop_line"
+fi
+
+echo ""
 echo "=== deploy.sh: retired modules ==="
 # ktmb-booking must never enter the resolved service list for "all"
 if grep -q "grep -vx ktmb-booking" "$DEPLOY_SCRIPT"; then
