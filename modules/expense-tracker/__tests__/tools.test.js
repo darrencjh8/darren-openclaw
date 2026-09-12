@@ -489,6 +489,30 @@ describe("ToolRegistry — budget_id validation", () => {
             expect(result).toEqual({ error: "budget_id is required" });
         });
 
+        test("treats a blank payee_name as absent when another field is present (#511)", async () => {
+            // This HTTP route stays tolerant: the MCP schema rejects a blank
+            // name, but a caller that sends "" here still updates the other
+            // fields instead of failing.
+            mockFetch.mockResolvedValueOnce({
+                ok: true,
+                json: () => ({ status: "updated", id: "txn-1" }),
+            });
+
+            const result = await registry.executeTool("update_transaction", {
+                id: "txn-1",
+                budget_id: "My Budget",
+                payee_name: "",
+                notes: "corrected",
+            });
+
+            expect(result).toEqual({ status: "updated", id: "txn-1" });
+            const patchBody = JSON.parse(mockFetch.mock.calls[0][1].body);
+            expect(patchBody).toEqual({
+                budget_id: "My Budget",
+                notes: "corrected",
+            });
+        });
+
         test("payee_name resolves to payee ID in PATCH body", async () => {
             // Mock GET /payees — returns a payee with id and name
             mockFetch
@@ -720,7 +744,10 @@ describe("ToolRegistry — budget_id validation", () => {
             expect(mockFetch).toHaveBeenCalledTimes(1);
         });
 
-        test("refuses a bare name that matches several transfer payees (#487)", async () => {
+        test("refuses a name matching two different transfer payees (#487)", async () => {
+            // Two payees for one account name cannot exist in Actual, so this
+            // pins the multiple-transfer branch rather than a realistic
+            // collision; the two-plain-payee test covers the reachable case.
             mockFetch.mockResolvedValueOnce({
                 ok: true,
                 json: () => [

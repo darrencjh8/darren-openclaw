@@ -745,7 +745,7 @@ const TOOLS = [
   {
     name: "update_transaction",
     description:
-      "Update an existing transaction's fields. Payee and category are validated against live lists. When a transfer payee and a plain payee share a name, a bare payee_name selects the transfer payee; pass payee_id to select a specific one. When several payees share the name and the transfer payee is not unique, the call is refused and lists the candidate IDs. category_id null clears the category only when the resulting payee is Misc.",
+      "Update an existing transaction's fields. Payee and category are validated against live lists. When a transfer payee and a plain payee share a name, a bare payee_name selects the transfer payee; pass payee_id to select a specific one. When several payees share the name and no single transfer payee disambiguates it, the call is refused and lists the candidate IDs. category_id null clears the category only when the resulting payee is Misc.",
     schema: {
       type: "object",
       properties: {

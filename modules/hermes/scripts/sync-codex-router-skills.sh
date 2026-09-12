@@ -228,6 +228,11 @@ MODES_TMP="$PRIMARY_HOME/.codex-router-modes.$$"
 # and each listing is sorted so a different readdir order is not read as drift.
 # Symlinks are omitted deliberately: Linux cannot set their modes, and a changed
 # target is already caught by the `--no-dereference` content comparison.
+# GNU userland is required, as the image already satisfies for the `stat -c`
+# and `find -printf` below: `diff -r --no-dereference` is GNU diffutils only,
+# and a `diff` that rejects the flag exits non-zero, which reads as drift and
+# re-copies the tree. That fail direction is safe (the bytes written are still
+# canonical), so a missing flag costs I/O rather than correctness.
 same_modes() {
     src=$1
     dst=$2
