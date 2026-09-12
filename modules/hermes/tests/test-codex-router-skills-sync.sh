@@ -99,6 +99,26 @@ else
     nope "removed a file the source dropped" "loop.py still present"
 fi
 
+echo "=== a symlink whose target drifted is reconciled ==="
+# `diff -r` follows symlinks and compares target contents, so a link retargeted
+# to a different file with identical bytes reads as equal, and the mode listing
+# skips symlinks entirely. Without `--no-dereference` the runtime link points at
+# the stale target forever.
+fresh_fixture
+printf 'same bytes\n' > "$SOURCE/dev-loop/t1"
+printf 'same bytes\n' > "$SOURCE/dev-loop/t2"
+ln -s t1 "$SOURCE/dev-loop/thing"
+run "$SOURCE" >/dev/null
+rm "$PRIMARY/skills/dev-loop/thing"
+ln -s t2 "$PRIMARY/skills/dev-loop/thing"
+run "$SOURCE" >/dev/null
+if [[ "$(readlink "$PRIMARY/skills/dev-loop/thing")" == "t1" ]]; then
+    ok "restored a symlink whose target drifted while the target bytes matched"
+else
+    nope "restored a symlink whose target drifted while the target bytes matched" \
+        "thing -> $(readlink "$PRIMARY/skills/dev-loop/thing" 2>/dev/null)"
+fi
+
 echo "=== siblings the sync does not own are preserved ==="
 mkdir -p "$PRIMARY/skills/hermes-troubleshooting"
 printf 'openclaw-owned\n' > "$PRIMARY/skills/hermes-troubleshooting/SKILL.md"
