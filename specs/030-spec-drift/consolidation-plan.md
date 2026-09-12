@@ -43,7 +43,7 @@ A future agent reading 002 first gets a Python, 4-phase, keyword-based mental mo
 - Canonical baseline = `specs/003-portfolio-tracker/spec.md` (already mostly code-accurate).
 - Fix internal contradictions (SSE wrapper wording, 19 vs 20 REST, 6 vs 10 MCP tools, token_path, AB→PP wording, budget_id, response shape).
 - `CONTEXT.md` → align transport (Streamable HTTP) and tool count (10).
-- `README.md` / spec.md → reconcile `GOOGLE_SERVICE_ACCOUNT_JSON` optional-vs-required. **Resolved (#261): docs say required, guard unchanged.**
+- `README.md` / spec.md → reconcile `GOOGLE_SERVICE_ACCOUNT_JSON` optional-vs-required. **Resolved: the docs already said required; no #261 change (verified).**
 
 ---
 
