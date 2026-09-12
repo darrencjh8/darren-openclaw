@@ -803,12 +803,54 @@ describe("auto-learn contradiction resolution", () => {
         // booking: doing so let the stored type oscillate with the alert
         // stream, which flips the sign of the next purchase and would undo the
         // cleanup of a wrong type fact. A contradiction is logged instead.
+        const learnCalls = tools.executeTool.mock.calls.filter(
+            (c) => c[0] === "learn_fact",
+        );
+        // Positive control. Without it this test also passes when no fact is
+        // learned at all, which is the regression it exists to catch.
+        expect(learnCalls).toHaveLength(1);
+        expect(learnCalls[0][1]).toEqual({ fact: "DBS Yuu is a bank account" });
         expect(tools.executeTool).not.toHaveBeenCalledWith(
             "update_fact",
             expect.objectContaining({
                 old_text: "DBS Yuu is a debit card account",
             }),
         );
+    });
+
+    it("learns a credit-card account type when the sign was flipped (issue #331)", async () => {
+        const config = makeConfig();
+        const tools = makeTools({
+            executeTool: vi.fn(async (name) => {
+                if (name === "check_duplicate") return false;
+                if (name === "fetch_context")
+                    return { categories: [{ id: "cat-misc", name: "Misc" }] };
+                return { added: true };
+            }),
+        });
+        const orch = new AgentOrchestrator(config, tools);
+
+        // The derived type drives the sign of the next booking, so it is pinned
+        // separately from the sign-preserving case above.
+        const p1 = fakePhase1Output({
+            account_name: "DBS Yuu",
+            payee_name: "Toast Box",
+            category_id: "cat-misc",
+            _sign_flipped: true,
+        });
+        const p2 = fakePhase2Output(p1);
+        orch._runPhase1 = vi.fn().mockResolvedValue(p1);
+        orch._resolvePhase2 = vi.fn().mockResolvedValue(p2);
+
+        await orch.processEmail("test-al4", "raw email");
+
+        const learnCalls = tools.executeTool.mock.calls.filter(
+            (c) => c[0] === "learn_fact",
+        );
+        expect(learnCalls).toHaveLength(1);
+        expect(learnCalls[0][1]).toEqual({
+            fact: "DBS Yuu is a credit card account",
+        });
     });
 
     it("silently swallows errors from learn_fact/update_fact without crashing", async () => {
