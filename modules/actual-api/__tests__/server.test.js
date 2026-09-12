@@ -1143,7 +1143,7 @@ describe("POST /transactions enriched response", () => {
         },
     );
 
-    test.each(["2026-01-01", "2026-12-31", "2026-06-17", "2026-02-28"])(
+    test.each(["2026-01-01", "2026-12-31", "2026-06-17", "2026-02-28", "1000-01-01"])(
         "still inserts a valid date %s",
         async (date) => {
             readBack([], []);
@@ -1197,6 +1197,94 @@ describe("POST /transactions enriched response", () => {
         );
 
         expect(res.json.mock.calls[0][0].id).toBe("inserted");
+    });
+
+    test("echoes the request fields when two new rows make the pick ambiguous", async () => {
+        readBack(
+            [],
+            [
+                {
+                    id: "inserted",
+                    account: "acc-1",
+                    date: "2026-06-17",
+                    amount: -425,
+                    notes: "Transport",
+                    category: "cat-transport",
+                    sort_order: 100,
+                },
+                {
+                    id: "rule-created",
+                    account: "acc-1",
+                    date: "2026-06-16",
+                    amount: -10,
+                    notes: "rule note",
+                    category: null,
+                    sort_order: 200,
+                },
+            ],
+        );
+        const handler = findHandler("post", "/transactions");
+        const res = mockRes();
+
+        await handler(
+            mockReq({
+                body: {
+                    account: "acc-1",
+                    date: "2026-06-17",
+                    amount: -425,
+                    notes: "Transport",
+                    category: "cat-transport",
+                },
+            }),
+            res,
+        );
+
+        const body = res.json.mock.calls[0][0];
+        // Only a unique new row can be attributed, so the response must not
+        // report the ambiguous pick's amount and date as the inserted values.
+        expect(body.amount).toBe(-425);
+        expect(body.date).toBe("2026-06-17");
+        expect(body.notes).toBe("Transport");
+        expect(body.category).toBe("cat-transport");
+    });
+
+    test("prefers the persisted fields when the new row is unique", async () => {
+        readBack(
+            [],
+            [
+                {
+                    id: "only-new",
+                    account: "acc-1",
+                    date: "2026-06-18",
+                    amount: -999,
+                    notes: "rewritten",
+                    category: null,
+                    sort_order: 200,
+                },
+            ],
+        );
+        const handler = findHandler("post", "/transactions");
+        const res = mockRes();
+
+        await handler(
+            mockReq({
+                body: {
+                    account: "acc-1",
+                    date: "2026-06-17",
+                    amount: -425,
+                    notes: "Transport",
+                    category: "cat-transport",
+                },
+            }),
+            res,
+        );
+
+        const body = res.json.mock.calls[0][0];
+        expect(body.id).toBe("only-new");
+        expect(body.amount).toBe(-999);
+        expect(body.date).toBe("2026-06-18");
+        expect(body.notes).toBe("rewritten");
+        expect(body.category).toBeNull();
     });
 });
 
