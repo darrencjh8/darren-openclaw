@@ -143,6 +143,11 @@ if [ ! -d "$SOURCE" ]; then
     exit 0
 fi
 
+# A run killed between creating $CURRENT and its EXIT trap leaves that staging
+# file behind. It is litter the next run would otherwise carry forever, so sweep
+# the family before creating the current one. Non-fatal: an unmatched glob under
+# `set -e` would otherwise abort the reconcile.
+rm -f "$PRIMARY_HOME"/.codex-router-managed-skills.new.* 2>/dev/null || true
 CURRENT="$PRIMARY_HOME/.codex-router-managed-skills.new.$$"
 : > "$CURRENT"
 
@@ -166,7 +171,7 @@ if [ -f "$MANAGED_FILE" ]; then
         echo "sync-codex-router-skills: source $SOURCE has no skills while $(wc -l < "$MANAGED_FILE") are managed; refusing to prune" >&2
         exit 1
     fi
-    while IFS= read -r previous; do
+    while IFS= read -r previous || [ -n "$previous" ]; do
         [ -n "$previous" ] || continue
         valid_name "$previous" || continue
         if grep -qxF -- "$previous" "$CURRENT"; then
@@ -206,7 +211,7 @@ for target in $TARGETS; do
     # them as a directory (`copytree`), older ones as a single file, so the
     # removal must handle both shapes. Only a backup of a managed skill is
     # touched; an unrelated entry that happens to carry the suffix is kept.
-    while IFS= read -r name; do
+    while IFS= read -r name || [ -n "$name" ]; do
         [ -n "$name" ] || continue
         bak="$target/$name.codex-router.bak"
         if [ -e "$bak" ]; then
@@ -215,7 +220,7 @@ for target in $TARGETS; do
     done < "$CURRENT"
 done
 
-while IFS= read -r name; do
+while IFS= read -r name || [ -n "$name" ]; do
     [ -n "$name" ] || continue
     valid_name "$name" || continue
     for shadow in $SHADOWS; do

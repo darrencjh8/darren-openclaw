@@ -182,6 +182,37 @@ else
         "$(find "$PRIMARY/skills" "$PRIMARY/.agents/skills" "$SECONDARY/.agents/skills" -maxdepth 1 -name 'code-reviewer*' 2>/dev/null)"
 fi
 
+echo "=== a managed file without a trailing newline still prunes its last entry ==="
+fresh_fixture
+run "$SOURCE" >/dev/null
+# Hand-edited state: no trailing newline after the final name. The last entry
+# must still take part in the retirement sweep.
+printf 'dev-loop\ncode-reviewer' > "$PRIMARY/.codex-router-managed-skills"
+rm -rf "$SOURCE/code-reviewer"
+run "$SOURCE" >/dev/null
+if [[ ! -e "$PRIMARY/skills/code-reviewer" \
+      && ! -e "$PRIMARY/.agents/skills/code-reviewer" \
+      && ! -e "$SECONDARY/.agents/skills/code-reviewer" ]]; then
+    ok "pruned the last managed name when the file had no trailing newline"
+else
+    nope "pruned the last managed name when the file had no trailing newline" \
+        "$(find "$PRIMARY" "$SECONDARY" -maxdepth 4 -name 'code-reviewer*' 2>/dev/null)"
+fi
+
+echo "=== stale staging litter is swept before the next run ==="
+fresh_fixture
+mkdir -p "$PRIMARY"
+printf 'orphan\n' > "$PRIMARY/.codex-router-managed-skills.new.99999"
+printf 'orphan\n' > "$PRIMARY/.codex-router-managed-skills.new.88888.tmp"
+run "$SOURCE" >/dev/null
+if [[ -z "$(find "$PRIMARY" -maxdepth 1 -name '*.new.*' 2>/dev/null)" \
+      && -s "$PRIMARY/.codex-router-managed-skills" ]]; then
+    ok "swept stale .new staging files and kept the current managed-name file"
+else
+    nope "swept stale .new staging files and kept the current managed-name file" \
+        "$(find "$PRIMARY" -maxdepth 1 -name '*.new.*' 2>/dev/null)"
+fi
+
 echo "=== a busy lock fails closed, not silently ==="
 fresh_fixture
 mkdir -p "$PRIMARY/.codex-router-skills.lock.d"
@@ -280,7 +311,7 @@ mkdir -p "$ROOT/staged/dev-loop"
 printf 'canonical dev-loop\n' > "$ROOT/staged/dev-loop/SKILL.md"
 if HERMES_SKILL_PRIMARY_HOME="$PRIMARY" \
     HERMES_SKILL_SECONDARY_HOME="$SECONDARY" \
-    HERMES_SKILL_MANIFEST_STATE_DIRS="$STATE" \
+    HERMES_MANIFEST_STATE_DIRS="$STATE" \
     sh "$SYNC" "$ROOT/final" "$ROOT/staged" >/dev/null 2>&1 \
     && [[ -f "$ROOT/final/dev-loop/SKILL.md" ]] \
     && [[ ! -e "$ROOT/staged" ]] \
