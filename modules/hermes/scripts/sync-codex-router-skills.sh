@@ -233,7 +233,10 @@ done < "$CURRENT"
 # let the boot hook's redirect keep the breadcrumb.
 chown_error=$(chown -R hermes:hermes \
     "$PRIMARY_HOME/skills" "$PRIMARY_HOME/.agents/skills" "$SECONDARY_HOME/.agents/skills" \
-    2>&1) || echo "sync-codex-router-skills: chown failed on the skill roots: $chown_error" >&2
+    2>&1) || {
+    rc=$?
+    echo "sync-codex-router-skills: chown failed (exit $rc) on the skill roots: $chown_error" >&2
+}
 
 for state in $STATE_DIRS; do
     [ -d "$state/manifests" ] || continue
