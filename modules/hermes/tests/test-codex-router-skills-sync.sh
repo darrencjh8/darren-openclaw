@@ -99,6 +99,26 @@ else
     nope "removed a file the source dropped" "loop.py still present"
 fi
 
+echo "=== a symlink whose target drifted is reconciled ==="
+# `diff -r` follows symlinks and compares target contents, so a link retargeted
+# to a different file with identical bytes reads as equal, and the mode listing
+# skips symlinks entirely. Without `--no-dereference` the runtime link points at
+# the stale target forever.
+fresh_fixture
+printf 'same bytes\n' > "$SOURCE/dev-loop/t1"
+printf 'same bytes\n' > "$SOURCE/dev-loop/t2"
+ln -s t1 "$SOURCE/dev-loop/thing"
+run "$SOURCE" >/dev/null
+rm "$PRIMARY/skills/dev-loop/thing"
+ln -s t2 "$PRIMARY/skills/dev-loop/thing"
+run "$SOURCE" >/dev/null
+if [[ "$(readlink "$PRIMARY/skills/dev-loop/thing")" == "t1" ]]; then
+    ok "restored a symlink whose target drifted while the target bytes matched"
+else
+    nope "restored a symlink whose target drifted while the target bytes matched" \
+        "thing -> $(readlink "$PRIMARY/skills/dev-loop/thing" 2>/dev/null)"
+fi
+
 echo "=== siblings the sync does not own are preserved ==="
 mkdir -p "$PRIMARY/skills/hermes-troubleshooting"
 printf 'openclaw-owned\n' > "$PRIMARY/skills/hermes-troubleshooting/SKILL.md"
@@ -316,7 +336,12 @@ else
     nope "reclaimed a fallback lock whose holder is gone" "rc=$stale_rc out=$stale_output"
 fi
 
-echo "=== a live lock the reconciler cannot probe is never reclaimed ==="
+echo "=== a live lock is never reclaimed ==="
+# The holder here is this test shell's own live pid, so `kill -0` succeeds and
+# the lock is left alone for that reason. This pins the live-holder case, not
+# the EPERM/`/proc`-hidden branch the script comments on: reaching that branch
+# needs privilege to out-rank the holder's user or to hide /proc, neither of
+# which the suite has.
 fresh_fixture
 mkdir -p "$PRIMARY/.codex-router-skills.lock.d"
 echo $$ > "$PRIMARY/.codex-router-skills.lock.d/pid"
@@ -330,9 +355,9 @@ ep_output=$(HERMES_SKILL_PRIMARY_HOME="$PRIMARY" \
 ep_pid=$(cat "$PRIMARY/.codex-router-skills.lock.d/pid" 2>/dev/null)
 if [[ "$ep_rc" -ne 0 && "$ep_pid" == "$$" \
       && "$ep_output" == *"could not acquire"* ]]; then
-    ok "left a live lock in place instead of reclaiming it"
+    ok "left a live holder's lock in place instead of reclaiming it"
 else
-    nope "left a live lock in place instead of reclaiming it" \
+    nope "left a live holder's lock in place instead of reclaiming it" \
         "rc=$ep_rc pid=${ep_pid:-none} out=$ep_output"
 fi
 rm -rf "$PRIMARY/.codex-router-skills.lock.d"
@@ -378,8 +403,10 @@ else
 fi
 
 echo "=== a padded pid file still names a live holder ==="
-# `kill -0 " 123"` honours the embedded pid, so the whitespace must be stripped
-# before the digit test or a padded pid file reads as corrupt and is stolen.
+# A padded live pid must not be reclaimed. The whitespace strip is what lets the
+# script see the embedded pid at all; the case that pins the strip is the padded
+# dead pid below, since this padded live pid is refused by the non-digit branch
+# even without it.
 fresh_fixture
 mkdir -p "$PRIMARY/.codex-router-skills.lock.d"
 printf ' %s \n' "$$" > "$PRIMARY/.codex-router-skills.lock.d/pid"
@@ -400,6 +427,72 @@ else
 fi
 rm -rf "$PRIMARY/.codex-router-skills.lock.d"
 
+echo "=== a padded dead pid is recognised as dead ==="
+# This is the case that pins the whitespace strip: a padded *live* pid is left
+# alone by the non-digit branch either way, but only a stripped dead pid can be
+# probed and reclaimed, so removing the strip turns this into a timeout.
+fresh_fixture
+mkdir -p "$PRIMARY/.codex-router-skills.lock.d"
+printf ' 4194305 \n' > "$PRIMARY/.codex-router-skills.lock.d/pid"
+pdead_rc=0
+pdead_output=$(HERMES_SKILL_PRIMARY_HOME="$PRIMARY" \
+    HERMES_SKILL_SECONDARY_HOME="$SECONDARY" \
+    HERMES_MANIFEST_STATE_DIRS="$STATE" \
+    HERMES_SKILL_LOCK_MODE=mkdir \
+    HERMES_SKILL_LOCK_WAIT_SECONDS=5 \
+    sh "$SYNC" "$SOURCE" 2>&1) || pdead_rc=$?
+if [[ "$pdead_rc" -eq 0 && ! -e "$PRIMARY/.codex-router-skills.lock.d" \
+      && -f "$PRIMARY/skills/dev-loop/SKILL.md" ]]; then
+    ok "reclaimed a whitespace-padded dead pid"
+else
+    nope "reclaimed a whitespace-padded dead pid" "rc=$pdead_rc out=$pdead_output"
+fi
+
+echo "=== the ownerless-lock debounce restarts for each new lock ==="
+# The debounce must be re-armed per observation, not latched. Two ownerless
+# locks are presented, the first at start and the second once the run has
+# reclaimed the first. `sh -x` logs each arithmetic expansion's result, so the
+# counter's trace separates the two behaviours exactly: a latched counter counts
+# 0 1 2 3 4 before the second reclaim and stops (one value above the limit), a
+# re-armed counter counts 0 1 2 3 then 0 1 2 3 again (two values below it).
+# Timing is not asserted, so this cannot flake on a slow machine.
+fresh_fixture
+mkdir -p "$PRIMARY/.codex-router-skills.lock.d"
+# The watcher recreates the ownerless lock the instant this run frees it, so the
+# run meets a second pid-less lock immediately instead of acquiring the freed
+# directory first.
+(
+    while [ -d "$PRIMARY/.codex-router-skills.lock.d" ]; do sleep 0.2; done
+    mkdir -p "$PRIMARY/.codex-router-skills.lock.d"
+) &
+dbg_watch=$!
+dbg_rc=0
+HERMES_SKILL_PRIMARY_HOME="$PRIMARY" \
+    HERMES_SKILL_SECONDARY_HOME="$SECONDARY" \
+    HERMES_MANIFEST_STATE_DIRS="$STATE" \
+    HERMES_SKILL_LOCK_MODE=mkdir \
+    HERMES_SKILL_LOCK_WAIT_SECONDS=20 \
+    sh -x "$SYNC" "$SOURCE" >/dev/null 2>"$ROOT/trace" || dbg_rc=$?
+wait "$dbg_watch" 2>/dev/null || true
+dbg_looks=$(awk '/^\+ missing_pid=[0-9]+$/ {v=$0; sub(/.*=/, "", v); if (v < 3) c++} END {print c+0}' \
+    "$ROOT/trace" 2>/dev/null)
+rm -rf "$PRIMARY/.codex-router-skills.lock.d"
+if [[ "$dbg_rc" -eq 0 && "$dbg_looks" -ge 5 && -f "$PRIMARY/skills/dev-loop/SKILL.md" ]]; then
+    ok "re-armed the ownerless-lock debounce for a later lock (${dbg_looks} debounced looks)"
+else
+    nope "re-armed the ownerless-lock debounce for a later lock" \
+        "rc=$dbg_rc debounced_looks=${dbg_looks:-0}"
+fi
+
+# Not covered here, and not coverable on the CI runner: a preempted fallback
+# writer whose cleanup must not delete its successor's lock (the `cat pid = $$`
+# guard in the script's trap). Driving that end to end needs the writer to lose
+# the lock while it is still alive, and the pid-file path only reclaims a lock
+# the reconciler cannot prove live — which needs either privilege to out-rank
+# the holder's user (so `kill -0` fails with EPERM) or the ability to make
+# /proc/<pid>/stat unreadable. Neither is available in CI. The adjacent pieces
+# are pinned instead: a live lock is left alone, a dead, padded-dead, or empty
+# pid is reclaimed, and the ownerless-lock debounce re-arms per lock.
 echo "=== an empty source never prunes the managed set ==="
 fresh_fixture
 run "$SOURCE" >/dev/null
