@@ -108,9 +108,10 @@ async function init() {
     return initPromise;
 }
 
-async function ensureBudget(budgetIdOrName) {
+/** Resolve the requested budget, or null. Read-only; takes no lock. */
+async function resolveBudgetTarget(budgetIdOrName) {
     await init();
-    if (!budgetIdOrName) return;
+    if (!budgetIdOrName) return null;
 
     const budgets = await retryWithBackoff(() => actual.getBudgets());
     let target = budgets.find(
@@ -123,34 +124,86 @@ async function ensureBudget(budgetIdOrName) {
             target = budgets.find((b) => b.name === SECONDARY_BUDGET_FILE);
         }
     }
-    if (!target) return;
+    return target || null;
+}
 
-    const syncId = target.groupId || target.cloudFileId;
+function syncIdOf(budget) {
+    return budget.groupId || budget.cloudFileId;
+}
+
+/**
+ * Switch the active budget when `target` differs. The caller MUST hold the
+ * lock: `activeSyncId` is what every write resolves against, so changing it
+ * outside the lock is the race in issue #506.
+ */
+async function applyBudgetSwitch(target) {
+    if (!target) return;
+    const syncId = syncIdOf(target);
     if (syncId === activeSyncId) return;
 
-    // Serialize budget switching to prevent race conditions
+    // Enforce minimum delay between budget switches for preemptible server stability
+    const now = Date.now();
+    const timeSinceSwitch = now - lastSwitchTime;
+    if (timeSinceSwitch < BUDGET_SWITCH_DELAY_MS) {
+        const waitMs = BUDGET_SWITCH_DELAY_MS - timeSinceSwitch;
+        console.log(`Waiting ${waitMs}ms before budget switch (cooldown)`);
+        await new Promise((r) => setTimeout(r, waitMs));
+    }
+
+    // Re-check in case another request already switched
+    if (syncId === activeSyncId) return;
+
+    // Always download when switching — @actual-app/api needs it to change active budget
+    await retryWithBackoff(() =>
+        actual.downloadBudget(syncId, { password: PASSWORD }),
+    );
+    budgetCache[syncId] = true;
+    activeSyncId = syncId;
+    lastSwitchTime = Date.now();
+    console.log(`Switched to budget: ${target.name} (${syncId})`);
+}
+
+/**
+ * Assert the request's budget, then run `fn` while it stays asserted. Anything
+ * that writes through `@actual-app/api` must run inside `fn`: a write outside
+ * the lock can land in a budget a concurrent request switched to (#506).
+ * `acquireLock` is not reentrant, so `fn` must not call `ensureBudget` or
+ * `withBudget`.
+ *
+ * Returns false when the request names a budget that does not exist, so the
+ * caller answers 400 instead of writing into whichever budget is active. A
+ * request that names no budget keeps the active-budget fallback.
+ */
+async function withBudget(req, fn) {
+    const requested = getBudgetId(req);
+    // Resolution is read-only, so it stays outside the lock; existence cannot
+    // change while the process runs, and `applyBudgetSwitch` re-checks the
+    // active budget inside the lock.
+    const target = await resolveBudgetTarget(requested);
+    if (requested && !target) return false;
+
     const unlock = await acquireLock();
     try {
-        // Enforce minimum delay between budget switches for preemptible server stability
-        const now = Date.now();
-        const timeSinceSwitch = now - lastSwitchTime;
-        if (timeSinceSwitch < BUDGET_SWITCH_DELAY_MS) {
-            const waitMs = BUDGET_SWITCH_DELAY_MS - timeSinceSwitch;
-            console.log(`Waiting ${waitMs}ms before budget switch (cooldown)`);
-            await new Promise((r) => setTimeout(r, waitMs));
-        }
+        await applyBudgetSwitch(target);
+        await fn();
+        return true;
+    } finally {
+        unlock();
+    }
+}
 
-        // Re-check in case another request already switched
-        if (syncId === activeSyncId) return;
+async function ensureBudget(budgetIdOrName) {
+    await init();
+    if (!budgetIdOrName) return;
 
-        // Always download when switching — @actual-app/api needs it to change active budget
-        await retryWithBackoff(() =>
-            actual.downloadBudget(syncId, { password: PASSWORD }),
-        );
-        budgetCache[syncId] = true;
-        activeSyncId = syncId;
-        lastSwitchTime = Date.now();
-        console.log(`Switched to budget: ${target.name} (${syncId})`);
+    // Reads stay lock-free when the budget is already active; only a switch
+    // needs the lock, so a read never queues behind another request's write.
+    const target = await resolveBudgetTarget(budgetIdOrName);
+    if (!target || syncIdOf(target) === activeSyncId) return;
+
+    const unlock = await acquireLock();
+    try {
+        await applyBudgetSwitch(target);
     } finally {
         unlock();
     }
@@ -337,7 +390,11 @@ app.get("/payees", async (req, res) => {
 
 app.post("/transactions", async (req, res) => {
     try {
-        await ensureBudget(getBudgetId(req));
+        // Input validation stays outside the lock: it is pure, and a rejected
+        // request should not switch budgets. The budget the request names is
+        // asserted inside the critical section below instead, because a
+        // concurrent request can switch the active budget between the check and
+        // the insert (#506).
         const txn = buildTransaction(req.body);
         if (!txn.account) {
             return res.status(400).json({ error: "Account is required" });
@@ -396,10 +453,12 @@ app.post("/transactions", async (req, res) => {
         // not cover it. ponytail: a global lock, so inserts queue behind each
         // other and behind a budget switch; key it per account if either the
         // insert rate or the budget-switch cooldown ever makes that visible.
-        const unlock = await acquireLock();
         let beforeIds = null;
         let created = null;
-        try {
+        // withBudget serializes the budget assertion, the snapshot, the insert
+        // and the read-back, and answers 400 for a budget that does not exist
+        // instead of writing into whichever budget is active.
+        const knownBudget = await withBudget(req, async () => {
             // Snapshot the account's rows first so the insert can be identified
             // unambiguously afterwards, even if a rule rewrites its amount, date,
             // or payee.
@@ -450,8 +509,9 @@ app.post("/transactions", async (req, res) => {
                     // Read-back is best-effort; the insert already committed.
                 }
             }
-        } finally {
-            unlock();
+        });
+        if (!knownBudget) {
+            return res.status(400).json({ error: "Unknown budget" });
         }
         // A synced or imported row can carry the amount as a string, so parse
         // the persisted value with the same rules as the request: a number, or a
@@ -530,8 +590,12 @@ app.get("/transactions", async (req, res) => {
 
 app.delete("/transactions/:id", async (req, res) => {
     try {
-        await ensureBudget(getBudgetId(req));
-        await actual.deleteTransaction(req.params.id);
+        const knownBudget = await withBudget(req, () =>
+            actual.deleteTransaction(req.params.id),
+        );
+        if (!knownBudget) {
+            return res.status(400).json({ error: "Unknown budget" });
+        }
         res.json({ status: "deleted", id: req.params.id });
     } catch (e) {
         res.status(500).json({ error: e.message });
@@ -540,11 +604,15 @@ app.delete("/transactions/:id", async (req, res) => {
 
 app.post("/transactions/:id/clear", async (req, res) => {
     try {
-        await ensureBudget(getBudgetId(req));
         const { notes } = req.body || {};
         const fields = { cleared: true };
         if (notes) fields.notes = notes;
-        await actual.updateTransaction(req.params.id, fields);
+        const knownBudget = await withBudget(req, () =>
+            actual.updateTransaction(req.params.id, fields),
+        );
+        if (!knownBudget) {
+            return res.status(400).json({ error: "Unknown budget" });
+        }
         res.json({ status: "cleared", id: req.params.id });
     } catch (e) {
         res.status(500).json({ error: e.message });
@@ -553,8 +621,12 @@ app.post("/transactions/:id/clear", async (req, res) => {
 
 app.post("/transactions/:id/unclear", async (req, res) => {
     try {
-        await ensureBudget(getBudgetId(req));
-        await actual.updateTransaction(req.params.id, { cleared: false });
+        const knownBudget = await withBudget(req, () =>
+            actual.updateTransaction(req.params.id, { cleared: false }),
+        );
+        if (!knownBudget) {
+            return res.status(400).json({ error: "Unknown budget" });
+        }
         res.json({ status: "uncleared", id: req.params.id });
     } catch (e) {
         res.status(500).json({ error: e.message });
@@ -563,7 +635,6 @@ app.post("/transactions/:id/unclear", async (req, res) => {
 
 app.patch("/transactions/:id", async (req, res) => {
     try {
-        await ensureBudget(getBudgetId(req));
         const fields = {};
         if (req.body.payee !== undefined) fields.payee = req.body.payee;
         if (req.body.notes !== undefined) fields.notes = req.body.notes;
@@ -576,7 +647,12 @@ app.patch("/transactions/:id", async (req, res) => {
         if (Object.keys(fields).length === 0) {
             return res.status(400).json({ error: "No fields to update" });
         }
-        await actual.updateTransaction(req.params.id, fields);
+        const knownBudget = await withBudget(req, () =>
+            actual.updateTransaction(req.params.id, fields),
+        );
+        if (!knownBudget) {
+            return res.status(400).json({ error: "Unknown budget" });
+        }
         res.json({ status: "updated", id: req.params.id });
     } catch (e) {
         res.status(500).json({ error: e.message });
