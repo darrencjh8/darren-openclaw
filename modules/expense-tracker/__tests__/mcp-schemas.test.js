@@ -8,7 +8,9 @@ import { describe, test, expect } from "vitest";
 import { z } from "zod";
 import { toolShapes } from "../src/mcp-server.js";
 
-// The server registers raw shapes; wrap each the way the MCP SDK does.
+// The server registers raw shapes; wrap each the way the MCP SDK does. The SDK
+// special-cases a fully empty shape as a Zod v4 mini object, while this builds a
+// Zod v3 object for it; the two agree on every accept/reject case below.
 const schemas = Object.fromEntries(
     Object.entries(toolShapes).map(([name, shape]) => [name, z.object(shape)]),
 );
@@ -134,6 +136,26 @@ describe("MCP Zod schemas — budget_id rejects empty string", () => {
             const r = schemas.update_transaction.safeParse({
                 id: "txn-1",
                 budget_id: "My Budget",
+            });
+            expect(r.success).toBe(true);
+        });
+
+        test("rejects empty payee_name (#511)", () => {
+            // A blank name reached the handler as a supplied-but-empty field and
+            // came back as "At least one field must be provided to update".
+            const r = schemas.update_transaction.safeParse({
+                id: "txn-1",
+                budget_id: "My Budget",
+                payee_name: "",
+            });
+            expect(r.success).toBe(false);
+        });
+
+        test("accepts a non-empty payee_name (#511)", () => {
+            const r = schemas.update_transaction.safeParse({
+                id: "txn-1",
+                budget_id: "My Budget",
+                payee_name: "Deposit",
             });
             expect(r.success).toBe(true);
         });

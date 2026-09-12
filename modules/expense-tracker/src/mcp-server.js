@@ -35,7 +35,7 @@ export const toolShapes = {
   update_transaction: {
     id: z.string().min(1),
     budget_id: z.string().min(1),
-    payee_name: z.string().optional(),
+    payee_name: z.string().min(1).optional(),
     payee_id: z.string().min(1).optional(),
     notes: z.string().optional(),
     amount: z.number().optional(),
@@ -127,7 +127,7 @@ function createTools(server, registry) {
   );
   server.tool(
     "update_transaction",
-    "Update existing transaction. Payee and category are validated against live lists. When a transfer payee and a plain payee share a name, a bare payee_name selects the transfer payee; pass payee_id to select a specific one. When several payees share the name and the transfer payee is not unique, the call is refused and lists the candidate IDs. Set category_id to null only to clear the category when the resulting payee is Misc.",
+    "Update existing transaction. Payee and category are validated against live lists. When a transfer payee and a plain payee share a name, a bare payee_name selects the transfer payee; pass payee_id to select a specific one. When several payees share the name and no single transfer payee disambiguates it, the call is refused and lists the candidate IDs. Set category_id to null only to clear the category when the resulting payee is Misc.",
     toolShapes.update_transaction,
     async (a) => tx(await registry.executeTool("update_transaction", a)),
   );
