@@ -557,6 +557,49 @@ describe("AgentOrchestrator", () => {
         expect(markCalls.length).toBe(0);
     });
 
+    it("treats a returned insert error as a failed insert (#483)", async () => {
+        const config = makeConfig();
+        const tools = makeTools({
+            executeTool: vi.fn(async (name) => {
+                if (name === "check_duplicate") return false;
+                if (name === "reserve_transfer")
+                    return { status: "reserved", entry: { id: "resv-1" } };
+                if (name === "insert_transaction")
+                    return {
+                        error: 'Payee ID "p-transfer" not found in payee list.',
+                    };
+                return true;
+            }),
+        });
+        const orch = new AgentOrchestrator(config, tools);
+
+        const p1 = fakePhase1Output();
+        // A transfer carries a reservation, so the failure must not complete it.
+        const p2 = fakePhase2Output(p1, {
+            payee_id: "p-transfer",
+            _transfer: { source_account_id: "a-1", amount_cents: 3000 },
+        });
+        orch._runPhase1 = vi.fn().mockResolvedValue(p1);
+        orch._resolvePhase2 = vi.fn().mockResolvedValue(p2);
+
+        const result = await orch.processEmail("test-inserr", "raw email");
+
+        expect(result.action).toBe("error");
+        expect(result.details).toContain("p-transfer");
+        const notifyCall = tools.executeTool.mock.calls.find(
+            (c) => c[0] === "notify_user",
+        );
+        expect(notifyCall[1].message).toContain("Failed to insert");
+        const markCalls = tools.executeTool.mock.calls.filter(
+            (c) => c[0] === "mark_email_read",
+        );
+        expect(markCalls.length).toBe(0);
+        const completeCalls = tools.executeTool.mock.calls.filter(
+            (c) => c[0] === "complete_transfer",
+        );
+        expect(completeCalls.length).toBe(0);
+    });
+
     // ── Sender / Subject header prepending for Phase 1 account matching ──
 
     it("prepends Email-Sender and Subject headers to emailText for Phase 1", async () => {

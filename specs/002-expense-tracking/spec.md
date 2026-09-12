@@ -189,9 +189,9 @@ Exposed as MCP tool `resolve_merchant` (`src/mcp-server.js`). `budget_id` is req
 
 - `payee_name` is validated against live payee list → unknown payees rejected (not defaulted to Misc).
 - `payee_name` and `payee_id` are mutually exclusive; supplying both is rejected before any lookup.
-- When several payees share a name, the sole transfer payee (the one with `transfer_acct`) is selected. If the name matches several plain payees, or more than one transfer payee, the update is refused with the candidate IDs and `payee_id` must disambiguate.
+- When several payees share a name, the sole transfer payee (the one with `transfer_acct`) is selected. If the name matches several plain payees, or more than one transfer payee, the update is refused with the candidate IDs and `payee_id` must disambiguate. `insert_transaction` applies the same duplicate-name rule.
 - `category_id` is validated against live category list → unknown categories rejected.
-- `insert_transaction` validation differs: unknown payee → `"Misc"`, unknown category → `"Fun Money"`.
+- `insert_transaction` validation differs: an unknown payee becomes `"Misc"` and an unknown category becomes `"Fun Money"`, but an ambiguous payee name is refused with the candidate IDs rather than resolved by list order.
 
 ---
 

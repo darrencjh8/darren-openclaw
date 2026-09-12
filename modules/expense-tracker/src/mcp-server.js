@@ -28,6 +28,7 @@ export const toolShapes = {
     date: z.string().min(1),
     amount_cents: z.number().int(),
     imported_description: z.string().optional(),
+    payee_id: z.string().min(1).optional(),
     category_id: z.string().optional(),
     notes: z.string().optional(),
   },
@@ -120,7 +121,7 @@ function createTools(server, registry) {
   );
   server.tool(
     "insert_transaction",
-    "Insert transaction into AB. Dedup checked internally — returns {status: duplicate} if exists. Returns the created transaction with id; the id is null when the inserted row cannot be attributed.",
+    "Insert transaction into AB. Dedup checked internally — returns {status: duplicate} if exists. Returns the created transaction with id; the id is null when the inserted row cannot be attributed. An imported_description that matches several payees is refused and lists the candidate IDs; pass payee_id to select one.",
     toolShapes.insert_transaction,
     async (a) => tx(await registry.executeTool("insert_transaction", a)),
   );
