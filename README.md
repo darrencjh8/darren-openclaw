@@ -127,7 +127,7 @@ darren-openclaw/
 ├── .github/workflows/                # deploy, test, signal deploy, codex-router sync/recovery, secrets scan
 ├── .agents/skills/full-deploy/       # Operator runbook skill
 ├── design.md                         # Current architecture document
-├── DEPLOY.md  SETUP.md               # Deployment and host setup (partly pre-Hermes)
+├── DEPLOY.md  SETUP.md               # Deployment flow and production host setup
 ├── SPECKIT.md
 └── AGENTS.md                         # Instructions for agents working in this repo
 ```

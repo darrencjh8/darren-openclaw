@@ -239,7 +239,7 @@ graph TB
 
 ### 5.1 Purpose
 
-An LLM-powered agent that handles receipt emails, extracts structured transactions, and inserts them into Actual Budget. Exposes 32 tools via MCP to Hermes (and REST `/tools/*` endpoints). The LLM orchestrator, IMAP handling, and memory are now owned by Hermes — expense-tracker is a tool server.
+An LLM-powered agent that handles receipt emails, extracts structured transactions, and inserts them into Actual Budget. The tool registry exposes 32 tools; 23 of them are registered on the MCP server for Hermes, and the rest are reachable over REST `/tools/*`. The LLM orchestrator, IMAP handling, and memory are now owned by Hermes — expense-tracker is a tool server.
 
 ### 5.2 Technology Stack
 
@@ -269,7 +269,7 @@ Expense-tracker exposes an MCP server at `:8080/mcp`. Hermes handles email inges
 
 ### 5.5 Implementation Status
 
-- ✅ 32 tools registered as MCP server (plus REST `/tools/*` endpoints)
+- ✅ 23 tools registered on the MCP server (32 tools in the registry; the remainder are REST-only)
 - ✅ Dedup journal (dedup.db + statement.db)
 - ✅ PDF extraction (pdftotext)
 - ✅ WASM embeddings baked into Docker image
