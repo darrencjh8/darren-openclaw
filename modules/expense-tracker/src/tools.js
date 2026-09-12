@@ -694,6 +694,7 @@ const TOOLS = [
         id: { type: "string" },
         budget_id: { type: "string" },
         payee_name: { type: "string" },
+        payee_id: { type: "string" },
         notes: { type: "string" },
         amount: { type: "number" },
         date: { type: "string" },
@@ -1657,6 +1658,7 @@ export class ToolRegistry {
     const {
       id,
       budget_id,
+      payee_id,
       payee_name,
       notes,
       amount,
@@ -1669,7 +1671,11 @@ export class ToolRegistry {
 
     // Fetch payees once whenever validation or a category-clear guard needs it.
     let payees = null;
-    if (payee_name !== undefined || category_id === null) {
+    if (
+      payee_name !== undefined ||
+      payee_id !== undefined ||
+      category_id === null
+    ) {
       const result = await this._get("/payees", budgetId);
       payees = Array.isArray(result) ? result : [];
     }
@@ -1677,17 +1683,27 @@ export class ToolRegistry {
     // Build fields to update
     const fields = {};
     let updatedPayee = null;
-    if (payee_name !== undefined) {
+    if (payee_id !== undefined) {
+      // An explicit ID is the only way to pick the plain payee when a transfer
+      // payee shares its name. Issue #421.
+      updatedPayee = payees.find((p) => p.id === payee_id);
+      if (!updatedPayee)
+        return { error: `Payee ID "${payee_id}" not found in payee list.` };
+      fields.payee = updatedPayee.id;
+    } else if (payee_name !== undefined) {
       // Validate payee exists (strict — reject unknown)
-      const payeeMatch = payees.find(
+      const nameMatches = payees.filter(
         (p) => p.name && p.name.toLowerCase() === payee_name.toLowerCase(),
       );
-      if (!payeeMatch)
+      if (!nameMatches.length)
         return {
           error: `Payee "${payee_name}" not found in payee list. Use a valid payee from fetch_payees.`,
         };
-      fields.payee = payeeMatch.id;
-      updatedPayee = payeeMatch;
+      // A transfer payee and a plain payee can share a name. The transfer payee
+      // is the only one that creates a transfer, so a bare name means that one;
+      // pass payee_id to choose the plain payee. Issue #421.
+      updatedPayee = nameMatches.find((p) => p.transfer_acct) || nameMatches[0];
+      fields.payee = updatedPayee.id;
     }
     if (notes !== undefined) fields.notes = notes;
     if (amount !== undefined) fields.amount = amount;
