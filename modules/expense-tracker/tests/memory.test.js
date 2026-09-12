@@ -1973,6 +1973,15 @@ describe("merchant mapping lookup", () => {
     expect(factNamesMerchant("TAOBAO maps to Food payee", "taobao")).toBe(true);
   });
 
+  it("matches an exact short key, which the length floor must not block (round-3 Medium)", () => {
+    expect(factNamesMerchant("KP maps to Misc payee", "KP")).toBe(true);
+    expect(factNamesMerchant("KP maps to Misc payee", "kp")).toBe(true);
+    // The floor still stops a short key matching inside a longer merchant.
+    expect(factNamesMerchant("KP maps to Misc payee", "SKP Station")).toBe(
+      false,
+    );
+  });
+
   it("never reaches a structured mapping by similarity (#420, #471)", () => {
     const path = tempFile(
       ".md",

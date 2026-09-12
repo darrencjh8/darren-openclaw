@@ -114,8 +114,11 @@ export function factNamesMerchant(fact, merchant) {
   const query = String(merchant || "").toLowerCase().trim();
   if (!query) return false;
   const entity = mappingEntity(fact);
-  if (!entity || entity.length < MIN_ENTITY_LENGTH) return false;
+  if (!entity) return false;
+  // An exact key is unambiguous at any length. The length floor exists only to
+  // stop a short key matching inside a longer merchant.
   if (query === entity) return true;
+  if (entity.length < MIN_ENTITY_LENGTH) return false;
   return containsWord(query, entity);
 }
 
