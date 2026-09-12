@@ -84,9 +84,13 @@ fi
 
 LOCK_OWNED=false
 CURRENT=""
+MODES_TMP=""
 cleanup() {
     if [ -n "$CURRENT" ]; then
         rm -f "$CURRENT"
+    fi
+    if [ -n "$MODES_TMP" ]; then
+        rm -f "$MODES_TMP.src" "$MODES_TMP.dst"
     fi
     if [ "$LOCK_OWNED" = true ] && [ "$USE_FLOCK" = false ]; then
         # Only the current owner may release the mkdir lock. After a fallback
@@ -116,8 +120,21 @@ while [ "$attempts" -lt "$LOCK_WAIT_SECONDS" ]; do
             LOCK_OWNED=true
             break
         fi
-        if [ -f "$MKDIR_LOCK/pid" ] && ! kill -0 "$(cat "$MKDIR_LOCK/pid" 2>/dev/null)" 2>/dev/null; then
-            rm -rf "$MKDIR_LOCK" 2>/dev/null || true
+        if [ -f "$MKDIR_LOCK/pid" ]; then
+            # Reclaim only when the holder is provably gone. `kill -0` reports
+            # both ESRCH (no such process) and EPERM (process alive, owned by
+            # someone else) as a bare failure, so reclaiming on that failure
+            # would steal a live lock. /proc distinguishes them: an existing
+            # /proc/<pid> that cannot be read is EPERM, and one that is absent
+            # is ESRCH. Anything else waits, and the bounded loop fails closed.
+            # ponytail: Linux-only (this runs in the container); the mkdir
+            # fallback is test-only, and flock is the production primitive.
+            holder=$(cat "$MKDIR_LOCK/pid" 2>/dev/null) || holder=""
+            if kill -0 "$holder" 2>/dev/null; then
+                :
+            elif [ ! -r "/proc/$holder/stat" ]; then
+                rm -rf "$MKDIR_LOCK" 2>/dev/null || true
+            fi
         fi
     fi
     attempts=$((attempts + 1))
@@ -151,6 +168,25 @@ fi
 rm -f "$PRIMARY_HOME"/.codex-router-managed-skills.new.* 2>/dev/null || true
 CURRENT="$PRIMARY_HOME/.codex-router-managed-skills.new.$$"
 : > "$CURRENT"
+MODES_TMP="$PRIMARY_HOME/.codex-router-modes.$$"
+
+# Compare the permission bits of a canonical tree with an installed copy.
+# `diff -r` compares contents only, so without this a canonical permission
+# change would be skipped as identical and never reach the runtime root. Only
+# directories and regular files are compared, the two types `cp -a` restores.
+# ponytail: symlink modes are not compared — Linux cannot set them, and a
+# symlink that survives `cp -a` keeps the canonical target string anyway.
+same_modes() {
+    src=$1
+    dst=$2
+    srclist="$MODES_TMP.src"
+    dstlist="$MODES_TMP.dst"
+    printf '%s\n' "$(stat -c '%a' "$src")" > "$srclist"
+    find "$src" -type d -o -type f -printf '%P %m\n' >> "$srclist"
+    printf '%s\n' "$(stat -c '%a' "$dst")" > "$dstlist"
+    find "$dst" -type d -o -type f -printf '%P %m\n' >> "$dstlist"
+    diff "$srclist" "$dstlist" >/dev/null 2>&1
+}
 
 # The canonical set for this run: only directories that carry SKILL.md. A stray
 # file or a non-skill directory in the source is never copied.
@@ -165,9 +201,14 @@ done
 # Prune a skill the canonical source no longer publishes. The managed-name list
 # is kept outside the staged source, which the deploy replaces wholesale.
 if [ -f "$MANAGED_FILE" ]; then
-    # An empty or partial source must never be read as "every skill was
-    # retired": that would delete every managed skill and still exit 0. The
-    # canonical set is never empty, so refuse instead of pruning.
+    # A *fully empty* staged source must never be read as "every skill was
+    # retired": that would delete every managed skill and still exit 0. A
+    # partial source (some managed skills present, others absent) would still
+    # retire the absent names, because the managed set is names, not a content
+    # manifest. That gap is accepted: today's deploy stages the whole canonical
+    # checkout in one `docker cp`, so a partial source is unreachable. Compare
+    # against the recorded managed set only if a future producer can stage a
+    # subset.
     if [ ! -s "$CURRENT" ] && [ -s "$MANAGED_FILE" ]; then
         echo "sync-codex-router-skills: source $SOURCE has no skills while $(wc -l < "$MANAGED_FILE") are managed; refusing to prune" >&2
         exit 1
@@ -196,9 +237,12 @@ for target in $TARGETS; do
         [ -f "$source_dir/SKILL.md" ] || continue
         valid_name "$name" || continue
         dest="$target/$name"
-        # `diff -r` is the content comparison: identical trees are skipped so a
-        # rerun is a no-op.
-        if [ -d "$dest" ] && diff -r "$source_dir" "$dest" >/dev/null 2>&1; then
+        # `diff -r` is the content comparison and `same_modes` the permission
+        # comparison: a tree is skipped only when both match, so a canonical
+        # permission change still propagates. The modes are only checked once
+        # the contents match, to keep the listing off the common drift path.
+        if [ -d "$dest" ] && diff -r "$source_dir" "$dest" >/dev/null 2>&1 \
+            && same_modes "$source_dir" "$dest"; then
             continue
         fi
         staging="$target/.$name.staging.$$"

@@ -3,7 +3,10 @@
 
 # Tests for modules/hermes/scripts/sync-codex-router-skills.sh — the single
 # writer for codex-router-owned skills in the Hermes container.
-set -euo pipefail
+# No `set -e`: an unexpected failure must print a FAIL line and let the rest of
+# the suite run instead of aborting everything after it. The suite still exits
+# non-zero, because the final `[[ "$fail" -eq 0 ]]` decides the status.
+set -uo pipefail
 
 RED='\033[0;31m' GREEN='\033[0;32m' NC='\033[0m'
 pass=0 fail=0
@@ -71,6 +74,17 @@ if [[ "$(cat "$PRIMARY/skills/dev-loop/SKILL.md")" == "canonical dev-loop" ]]; t
     ok "overwrote a drifted copy"
 else
     nope "overwrote a drifted copy" "$(cat "$PRIMARY/skills/dev-loop/SKILL.md")"
+fi
+
+echo "=== a permission change in the source propagates ==="
+printf 'loop v1\n' > "$SOURCE/dev-loop/scripts/loop.py"
+chmod 755 "$SOURCE/dev-loop/scripts/loop.py"
+run "$SOURCE" >/dev/null
+if [[ "$(stat -c '%a' "$PRIMARY/skills/dev-loop/scripts/loop.py")" == 755 ]]; then
+    ok "applied a source permission change to an identical tree"
+else
+    nope "applied a source permission change to an identical tree" \
+        "got mode $(stat -c '%a' "$PRIMARY/skills/dev-loop/scripts/loop.py" 2>/dev/null)"
 fi
 
 echo "=== files dropped upstream are removed ==="
@@ -277,6 +291,62 @@ if run "$SOURCE" >/dev/null; then
     ok "a second run acquires the released lock immediately"
 else
     nope "a second run acquires the released lock immediately" "second run failed"
+fi
+
+echo "=== a lock left by a dead process is reclaimed ==="
+fresh_fixture
+mkdir -p "$PRIMARY/.codex-router-skills.lock.d"
+# 4194304 exceeds /proc/sys/kernel/pid_max on a 64-bit Linux host, so the pid
+# can never name a live process.
+echo 4194304 > "$PRIMARY/.codex-router-skills.lock.d/pid"
+stale_rc=0
+stale_output=$(HERMES_SKILL_PRIMARY_HOME="$PRIMARY" \
+    HERMES_SKILL_SECONDARY_HOME="$SECONDARY" \
+    HERMES_MANIFEST_STATE_DIRS="$STATE" \
+    HERMES_SKILL_LOCK_MODE=mkdir \
+    HERMES_SKILL_LOCK_WAIT_SECONDS=5 \
+    sh "$SYNC" "$SOURCE" 2>&1) || stale_rc=$?
+if [[ "$stale_rc" -eq 0 && -f "$PRIMARY/skills/dev-loop/SKILL.md" \
+      && ! -e "$PRIMARY/.codex-router-skills.lock.d" ]]; then
+    ok "reclaimed a fallback lock whose holder is gone"
+else
+    nope "reclaimed a fallback lock whose holder is gone" "rc=$stale_rc out=$stale_output"
+fi
+
+echo "=== a preempted writer cannot delete its successor's lock ==="
+# Simulate the fallback reclaim race: our own shell owns the lock and its pid is
+# live, but the reconciler runs as a different user whose non-destructive
+# `kill -0` probe fails with EPERM instead of ESRCH. EPERM means "still alive",
+# so the holder must leave the lock alone and fail closed on the timeout. Needs
+# passwordless sudo to drop privileges; skipped otherwise.
+fresh_fixture
+mkdir -p "$PRIMARY/.codex-router-skills.lock.d"
+echo $$ > "$PRIMARY/.codex-router-skills.lock.d/pid"
+same_pid=0
+if command -v sudo >/dev/null 2>&1 && sudo -n true 2>/dev/null; then
+    holder_rc=0
+    holder_output=$(sudo -n env HERMES_SKILL_PRIMARY_HOME="$PRIMARY" \
+        HERMES_SKILL_SECONDARY_HOME="$SECONDARY" \
+        HERMES_MANIFEST_STATE_DIRS="$STATE" \
+        HERMES_SKILL_LOCK_MODE=mkdir \
+        HERMES_SKILL_LOCK_WAIT_SECONDS=1 \
+        sh "$SYNC" "$SOURCE" 2>&1) || holder_rc=$?
+    survivor_pid=$(cat "$PRIMARY/.codex-router-skills.lock.d/pid" 2>/dev/null)
+    [ "$survivor_pid" = "$$" ] && same_pid=1
+    # The holder must not have reclaimed the lock: the pid file is still ours
+    # (proving the live lock survived), and it reported the timeout.
+    if [[ "$holder_rc" -ne 0 && "$same_pid" -eq 1 \
+          && "$holder_output" == *"could not acquire"* ]]; then
+        ok "left the live holder's lock in place when the pid probe failed with EPERM"
+    else
+        nope "left the live holder's lock in place when the pid probe failed with EPERM" \
+            "rc=$holder_rc pid=${survivor_pid:-none} out=$holder_output"
+    fi
+else
+    ok "preempted-holder case skipped (no passwordless sudo; EPERM cannot be simulated)"
+fi
+if [ "$same_pid" -eq 0 ]; then
+    rm -rf "$PRIMARY/.codex-router-skills.lock.d"
 fi
 
 echo "=== an empty source never prunes the managed set ==="

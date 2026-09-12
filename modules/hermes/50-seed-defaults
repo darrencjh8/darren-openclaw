@@ -74,6 +74,11 @@ chown -R hermes:hermes /opt/data/skills 2>/dev/null || true
 # deploy stages its canonical tree at /opt/data/.codex-router-skills and this
 # reconciliation replaces whatever copy an older seed or hand-install left in
 # any runtime skill root. A no-op until a deploy has staged a source.
+# ponytail: the canonical source lives in the codex-router repository, which is
+# absent from this image's build context (deploy.yml checks it out only in the
+# deploy job), so a fresh volume has these skills absent until the first deploy
+# stages the tree and the next boot reconciles it. Bake the payload in only if
+# codex-router ever enters the build context.
 # A reconcile that refuses (partial source) or times out on the lock must not
 # fail the boot, but it must not vanish either: keep stderr in the boot log so
 # stale skills leave a breadcrumb instead of only being visible to the deploy.
