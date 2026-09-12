@@ -49,11 +49,18 @@ describe("MemoryStore", () => {
   let tempMemoryPath;
   let emptyMemoryPath;
   let mappingsPath;
+  let semanticMemoryPath;
 
   beforeEach(() => {
     tempMemoryPath = tempFile(
       ".md",
       "# Long-Term Memory\n\n## Facts\n\n- Epsilon Nova is a debit card account\n- Toast Box merchant maps to Food payee\n- Grab merchant maps to Transport payee\n",
+    );
+    // Structured mappings are matched by key and never embedded (#473), so the
+    // semantic/caching tests need a free-form fact to have anything to embed.
+    semanticMemoryPath = tempFile(
+      ".md",
+      "# Long-Term Memory\n\n## Facts\n\n- Prefers DBS for groceries\n- Toast Box merchant maps to Food payee\n- Epsilon Nova is a debit card account\n",
     );
     emptyMemoryPath = tempFile(".md", "# Long-Term Memory\n\n## Facts\n\n");
     mappingsPath = tempFile(
@@ -143,6 +150,39 @@ describe("MemoryStore", () => {
       expect(results).toEqual([]);
     });
 
+    it("embeds free-form facts but not structured mappings (#473)", async () => {
+      const mixedPath = tempFile(
+        ".md",
+        "# Long-Term Memory\n\n## Facts\n\n- Prefers DBS for groceries\n- Toast Box merchant maps to Food payee\n- Epsilon Nova is a debit card account\n",
+      );
+      const store = new MemoryStore(mixedPath);
+      const loaded = await store.ready();
+      if (!loaded) {
+        console.warn(
+          "Skipping semantic test: model not available in this environment",
+        );
+        return;
+      }
+
+      const embedSpy = vi.spyOn(store, "_getOrComputeEmbedding");
+      // Call the semantic path directly: search() answers substring hits first
+      // and would never reach the embed loop for this query.
+      await store._semanticSearch("groceries", 3);
+
+      const embedded = embedSpy.mock.calls.map((c) => c[0]);
+      expect(embedded).toContain("Prefers DBS for groceries");
+      for (const fact of embedded) {
+        // Mappings are matched by key, never by similarity: embedding them only
+        // to discard the hit is the waste this issue tracks.
+        expect(fact).not.toMatch(/maps to/i);
+        expect(fact).not.toMatch(/is a .*account$/i);
+      }
+
+      try {
+        unlinkSync(mixedPath);
+      } catch (_) {}
+    });
+
     it("returns results with scores in [0,1] range", async () => {
       const store = new MemoryStore(tempMemoryPath);
       await store.ready();
@@ -155,17 +195,17 @@ describe("MemoryStore", () => {
     });
 
     it("embeddings are cached and reused", async () => {
-      const store = new MemoryStore(tempMemoryPath);
+      const store = new MemoryStore(semanticMemoryPath);
       const loaded = await store.ready();
       if (!loaded) return;
 
       // First search: populates cache
-      await store.search("bank account");
+      await store.search("banking");
       const cacheSize1 = store._embeddingCache.size;
       expect(cacheSize1).toBeGreaterThan(0);
 
       // Second search: should use cache (same facts, no new embeddings computed)
-      await store.search("transport payee");
+      await store.search("preference");
       const cacheSize2 = store._embeddingCache.size;
       expect(cacheSize2).toBe(cacheSize1);
     });
@@ -201,7 +241,7 @@ describe("MemoryStore", () => {
   // Cache invalidation tests
   describe("cache invalidation", () => {
     it("invalidates cache for removed facts", async () => {
-      const store = new MemoryStore(tempMemoryPath);
+      const store = new MemoryStore(semanticMemoryPath);
       const loaded = await store.ready();
       if (!loaded) {
         console.warn(
@@ -217,52 +257,56 @@ describe("MemoryStore", () => {
       expect(store._embeddingCache.size).toBeGreaterThan(0);
 
       // Verify the fact is cached
-      const dbsFact = factsBefore.find((f) => f.includes("Epsilon Nova"));
+      const dbsFact = factsBefore.find((f) => f.includes("Prefers DBS"));
       expect(store._embeddingCache.has(dbsFact)).toBe(true);
 
       // Remove the fact
-      store.remove("Epsilon Nova");
+      store.remove("Prefers DBS");
 
       // Cache should no longer contain the removed fact
       expect(store._embeddingCache.has(dbsFact)).toBe(false);
     });
 
     it("invalidates cache for updated facts", async () => {
-      const store = new MemoryStore(tempMemoryPath);
+      const store = new MemoryStore(semanticMemoryPath);
       const loaded = await store.ready();
       if (!loaded) return;
 
       // Populate cache (non-substring query forces the semantic path)
-      await store.search("dining");
+      await store.search("banking");
       expect(store._embeddingCache.size).toBeGreaterThan(0);
 
-      // Find the Toast Box fact
-      const oldFact = store.listFacts().find((f) => f.includes("Toast Box"));
+      // Find the free-form fact
+      const oldFact = store
+        .listFacts()
+        .find((f) => f.includes("Prefers DBS"));
       expect(store._embeddingCache.has(oldFact)).toBe(true);
 
       // Update the fact
-      store.update("Toast Box", "Toast Box merchant maps to Coffee payee");
+      store.update("Prefers DBS", "Prefers DBS for dining");
 
       // Old fact should be removed from cache
       expect(store._embeddingCache.has(oldFact)).toBe(false);
 
       // New fact will be embedded on next search
-      const newFact = store.listFacts().find((f) => f.includes("Toast Box"));
-      expect(newFact).toContain("Coffee");
+      const newFact = store
+        .listFacts()
+        .find((f) => f.includes("Prefers DBS"));
+      expect(newFact).toContain("dining");
       expect(store._embeddingCache.has(newFact)).toBe(false); // not yet cached
 
       // After a search, new fact should be cached (non-substring query forces
       // the semantic path that populates _embeddingCache)
-      await store.search("caffeine");
+      await store.search("banking");
       expect(store._embeddingCache.has(newFact)).toBe(true);
     });
 
     it("add does not clear unrelated cache entries", async () => {
-      const store = new MemoryStore(tempMemoryPath);
+      const store = new MemoryStore(semanticMemoryPath);
       await store.ready();
 
       // Populate cache (non-substring query forces the semantic path)
-      await store.search("transit");
+      await store.search("banking");
       const cacheSizeBefore = store._embeddingCache.size;
       expect(cacheSizeBefore).toBeGreaterThan(0);
 
