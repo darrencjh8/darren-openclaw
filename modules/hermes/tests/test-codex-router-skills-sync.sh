@@ -182,6 +182,37 @@ else
         "$(find "$PRIMARY/skills" "$PRIMARY/.agents/skills" "$SECONDARY/.agents/skills" -maxdepth 1 -name 'code-reviewer*' 2>/dev/null)"
 fi
 
+echo "=== a managed file without a trailing newline still prunes its last entry ==="
+fresh_fixture
+run "$SOURCE" >/dev/null
+# Hand-edited state: no trailing newline after the final name. The last entry
+# must still take part in the retirement sweep.
+printf 'dev-loop\ncode-reviewer' > "$PRIMARY/.codex-router-managed-skills"
+rm -rf "$SOURCE/code-reviewer"
+run "$SOURCE" >/dev/null
+if [[ ! -e "$PRIMARY/skills/code-reviewer" \
+      && ! -e "$PRIMARY/.agents/skills/code-reviewer" \
+      && ! -e "$SECONDARY/.agents/skills/code-reviewer" ]]; then
+    ok "pruned the last managed name when the file had no trailing newline"
+else
+    nope "pruned the last managed name when the file had no trailing newline" \
+        "$(find "$PRIMARY" "$SECONDARY" -maxdepth 4 -name 'code-reviewer*' 2>/dev/null)"
+fi
+
+echo "=== stale staging litter is swept before the next run ==="
+fresh_fixture
+mkdir -p "$PRIMARY"
+printf 'orphan\n' > "$PRIMARY/.codex-router-managed-skills.new.99999"
+printf 'orphan\n' > "$PRIMARY/.codex-router-managed-skills.new.88888.tmp"
+run "$SOURCE" >/dev/null
+if [[ -z "$(find "$PRIMARY" -maxdepth 1 -name '*.new.*' 2>/dev/null)" \
+      && -s "$PRIMARY/.codex-router-managed-skills" ]]; then
+    ok "swept stale .new staging files and kept the current managed-name file"
+else
+    nope "swept stale .new staging files and kept the current managed-name file" \
+        "$(find "$PRIMARY" -maxdepth 1 -name '*.new.*' 2>/dev/null)"
+fi
+
 echo "=== a busy lock fails closed, not silently ==="
 fresh_fixture
 mkdir -p "$PRIMARY/.codex-router-skills.lock.d"
@@ -278,9 +309,29 @@ echo "=== the staged swap and reconcile run in one call ==="
 fresh_fixture
 mkdir -p "$ROOT/staged/dev-loop"
 printf 'canonical dev-loop\n' > "$ROOT/staged/dev-loop/SKILL.md"
+# Seed a ledger record under the isolated STATE dir. Without this the swapped
+# run passes whether or not it honours HERMES_MANIFEST_STATE_DIRS, so the case
+# would not cover the ledger isolation it claims to. The identity directory name
+# is arbitrary: the reconciler globs manifests/*/*.json and never reads the hash.
+SWAP_IDENTITY=$(python3 - "$PRIMARY/skills" <<'PY'
+import hashlib, sys
+print(hashlib.sha256(str(__import__("pathlib").Path(sys.argv[1]).resolve()).encode()).hexdigest()[:16])
+PY
+)
+mkdir -p "$STATE/manifests/$SWAP_IDENTITY"
+cat > "$STATE/manifests/$SWAP_IDENTITY/dev-loop.json" <<JSON
+{
+  "skill_name": "dev-loop",
+  "canonical_source": "$ROOT/staged/dev-loop",
+  "canonical_hash": "stale",
+  "installed_path": "$PRIMARY/skills/dev-loop",
+  "installed_hash": "stale",
+  "managed_by": "codex-router"
+}
+JSON
 if HERMES_SKILL_PRIMARY_HOME="$PRIMARY" \
     HERMES_SKILL_SECONDARY_HOME="$SECONDARY" \
-    HERMES_SKILL_MANIFEST_STATE_DIRS="$STATE" \
+    HERMES_MANIFEST_STATE_DIRS="$STATE" \
     sh "$SYNC" "$ROOT/final" "$ROOT/staged" >/dev/null 2>&1 \
     && [[ -f "$ROOT/final/dev-loop/SKILL.md" ]] \
     && [[ ! -e "$ROOT/staged" ]] \
@@ -290,6 +341,24 @@ if HERMES_SKILL_PRIMARY_HOME="$PRIMARY" \
 else
     nope "swapped the staged tree, reconciled the roots, released the lock" \
         "$(find "$ROOT" -maxdepth 3 2>/dev/null | head)"
+fi
+if python3 - "$STATE/manifests/$SWAP_IDENTITY/dev-loop.json" "$PRIMARY/skills/dev-loop" "$ROOT/final/dev-loop" <<'PY'
+import json, pathlib, sys
+
+record = json.loads(pathlib.Path(sys.argv[1]).read_text())
+installed, canonical = pathlib.Path(sys.argv[2]), pathlib.Path(sys.argv[3])
+
+if record["installed_path"] != str(installed) or record["installed_hash"] == "stale":
+    sys.exit(1)
+if record["canonical_source"] != str(canonical) or record["canonical_hash"] == "stale":
+    sys.exit(1)
+sys.exit(0)
+PY
+then
+    ok "the swapped run refreshed the ledger under the isolated state dir"
+else
+    nope "the swapped run refreshed the ledger under the isolated state dir" \
+        "$(cat "$STATE/manifests/$SWAP_IDENTITY/dev-loop.json" 2>/dev/null | head -12)"
 fi
 if HERMES_SKILL_PRIMARY_HOME="$PRIMARY" \
     HERMES_SKILL_SECONDARY_HOME="$SECONDARY" \

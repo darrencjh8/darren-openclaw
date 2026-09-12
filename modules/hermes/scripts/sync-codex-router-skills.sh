@@ -143,6 +143,12 @@ if [ ! -d "$SOURCE" ]; then
     exit 0
 fi
 
+# A run killed between creating $CURRENT and its EXIT trap leaves that staging
+# file behind. It is litter the next run would otherwise carry forever, so sweep
+# the family before creating the current one. A matched directory or a permission
+# failure makes rm return non-zero, which must not abort the reconcile, so the
+# sweep stays non-fatal. (`rm -f` already tolerates an unmatched glob.)
+rm -f "$PRIMARY_HOME"/.codex-router-managed-skills.new.* 2>/dev/null || true
 CURRENT="$PRIMARY_HOME/.codex-router-managed-skills.new.$$"
 : > "$CURRENT"
 
@@ -166,7 +172,7 @@ if [ -f "$MANAGED_FILE" ]; then
         echo "sync-codex-router-skills: source $SOURCE has no skills while $(wc -l < "$MANAGED_FILE") are managed; refusing to prune" >&2
         exit 1
     fi
-    while IFS= read -r previous; do
+    while IFS= read -r previous || [ -n "$previous" ]; do
         [ -n "$previous" ] || continue
         valid_name "$previous" || continue
         if grep -qxF -- "$previous" "$CURRENT"; then
@@ -206,7 +212,7 @@ for target in $TARGETS; do
     # them as a directory (`copytree`), older ones as a single file, so the
     # removal must handle both shapes. Only a backup of a managed skill is
     # touched; an unrelated entry that happens to carry the suffix is kept.
-    while IFS= read -r name; do
+    while IFS= read -r name || [ -n "$name" ]; do
         [ -n "$name" ] || continue
         bak="$target/$name.codex-router.bak"
         if [ -e "$bak" ]; then
@@ -215,7 +221,7 @@ for target in $TARGETS; do
     done < "$CURRENT"
 done
 
-while IFS= read -r name; do
+while IFS= read -r name || [ -n "$name" ]; do
     [ -n "$name" ] || continue
     valid_name "$name" || continue
     for shadow in $SHADOWS; do
@@ -223,9 +229,15 @@ while IFS= read -r name; do
     done
 done < "$CURRENT"
 
-chown -R hermes:hermes \
+# Ownership is what makes the refreshed tree readable by the hermes daemon, so a
+# failure must not be swallowed like the lock bookkeeping above: report it and
+# let the boot hook's redirect keep the breadcrumb.
+chown_error=$(chown -R hermes:hermes \
     "$PRIMARY_HOME/skills" "$PRIMARY_HOME/.agents/skills" "$SECONDARY_HOME/.agents/skills" \
-    2>/dev/null || true
+    2>&1) || {
+    rc=$?
+    echo "sync-codex-router-skills: chown failed (exit $rc) on the skill roots: $chown_error" >&2
+}
 
 for state in $STATE_DIRS; do
     [ -d "$state/manifests" ] || continue

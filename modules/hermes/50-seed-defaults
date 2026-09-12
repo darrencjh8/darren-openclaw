@@ -74,7 +74,21 @@ chown -R hermes:hermes /opt/data/skills 2>/dev/null || true
 # deploy stages its canonical tree at /opt/data/.codex-router-skills and this
 # reconciliation replaces whatever copy an older seed or hand-install left in
 # any runtime skill root. A no-op until a deploy has staged a source.
-/opt/hermes-defaults/scripts/sync-codex-router-skills.sh 2>/dev/null || true
+# A reconcile that refuses (partial source) or times out on the lock must not
+# fail the boot, but it must not vanish either: keep stderr in the boot log so
+# stale skills leave a breadcrumb instead of only being visible to the deploy.
+# Truncated each boot, so the file stays bounded and still shows the latest run.
+# The log path is probed with `true`, a regular command: in dash a failed
+# redirection on a special builtin like `:` exits the shell outright, which
+# `if` and `|| true` both fail to catch. This hook has no `set -e` of its own,
+# but it runs under `with-contenv`, so the guard must hold either way. The probe
+# decides only where stderr goes; the reconcile runs on either branch.
+mkdir -p /opt/data/logs 2>/dev/null || true
+if true 2>/opt/data/logs/codex-router-skills-sync.log; then
+    /opt/hermes-defaults/scripts/sync-codex-router-skills.sh 2>>/opt/data/logs/codex-router-skills-sync.log || true
+else
+    /opt/hermes-defaults/scripts/sync-codex-router-skills.sh 2>/dev/null || true
+fi
 mkdir -p /opt/data/scripts
 cp -r /opt/hermes-defaults/scripts/* /opt/data/scripts/
 chmod +x /opt/data/scripts/*.sh
