@@ -10,6 +10,8 @@
  *   ACTUAL_BUDGET_PASSWORD    — Server password
  *   ACTUAL_PRIMARY_BUDGET_FILE — SGD budget name
  *   ACTUAL_SECONDARY_BUDGET_FILE — MYR budget name (optional; MYR tests skipped)
+ *     Read here only as a name string to pass to ensureBudget; the server no
+ *     longer reads this variable itself.
  */
 
 const path = require("path");

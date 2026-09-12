@@ -216,7 +216,7 @@ describe("Route handlers", () => {
 
         actual.init.mockResolvedValue(undefined);
         actual.getBudgets.mockResolvedValue([
-            { name: "TestBudget", groupId: "g1" },
+            { name: "test-budget", groupId: "g1" },
         ]);
         actual.downloadBudget.mockResolvedValue(undefined);
         actual.getTransactions.mockResolvedValue([]);
@@ -715,7 +715,7 @@ describe("POST /transactions enriched response", () => {
         actual.getTransactions.mockReset();
         actual.init.mockResolvedValue(undefined);
         actual.getBudgets.mockResolvedValue([
-            { name: "TestBudget", groupId: "g1" },
+            { name: "test-budget", groupId: "g1" },
         ]);
         actual.downloadBudget.mockResolvedValue(undefined);
         // @actual-app/api resolves addTransactions to the string "ok", so the

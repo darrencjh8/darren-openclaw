@@ -1,5 +1,16 @@
 jest.mock("fs", () => ({ mkdirSync: jest.fn() }));
 
+// `ACTUAL_PRIMARY_BUDGET_FILE` is read when the server module loads, and these
+// tests change it per case. Restore the shared value so a later file in the
+// same jest worker still sees the configured name.
+const previousPrimaryBudgetFile = process.env.ACTUAL_PRIMARY_BUDGET_FILE;
+
+afterAll(() => {
+    if (previousPrimaryBudgetFile === undefined)
+        delete process.env.ACTUAL_PRIMARY_BUDGET_FILE;
+    else process.env.ACTUAL_PRIMARY_BUDGET_FILE = previousPrimaryBudgetFile;
+});
+
 const mockApp = {
     get: jest.fn(),
     post: jest.fn(),
@@ -41,6 +52,7 @@ function makeBudget(overrides = {}) {
 
 describe("init", () => {
     beforeEach(() => {
+        process.env.ACTUAL_PRIMARY_BUDGET_FILE = "TestBudget";
         jest.resetModules();
         const api = actual();
         api.init.mockReset();
@@ -123,20 +135,40 @@ describe("init", () => {
         });
     });
 
-    test("falls back to first budget when name does not match", async () => {
+    test("rejects a configured primary budget that does not exist", async () => {
         const api = actual();
         process.env.ACTUAL_PRIMARY_BUDGET_FILE = "NonExistent";
         api.init.mockResolvedValue(undefined);
         api.getBudgets.mockResolvedValue([
             makeBudget({ name: "First Budget", groupId: "first-1" }),
-            makeBudget({ name: "Second Budget", groupId: "second-1" }),
+        ]);
+
+        const { init } = require("../server");
+        await expect(init()).rejects.toThrow('Budget "NonExistent" not found');
+        expect(api.downloadBudget).not.toHaveBeenCalled();
+    });
+
+    test("a failed init resets so a later call retries and succeeds", async () => {
+        const api = actual();
+        process.env.ACTUAL_PRIMARY_BUDGET_FILE = "NonExistent";
+        api.init.mockResolvedValue(undefined);
+        api.getBudgets.mockResolvedValue([
+            makeBudget({ name: "First Budget", groupId: "first-1" }),
         ]);
         api.downloadBudget.mockResolvedValue(undefined);
 
         const { init } = require("../server");
+        await expect(init()).rejects.toThrow('Budget "NonExistent" not found');
+
+        // The configured budget appears after the failed attempt; the reset in
+        // the rejection handler must let the next call initialise again instead
+        // of returning the cached rejected promise.
+        api.getBudgets.mockResolvedValue([
+            makeBudget({ name: "NonExistent", groupId: "retry-1" }),
+        ]);
         await init();
 
-        expect(api.downloadBudget).toHaveBeenCalledWith("first-1", {
+        expect(api.downloadBudget).toHaveBeenCalledWith("retry-1", {
             password: undefined,
         });
     });
@@ -190,6 +222,7 @@ describe("ensureBudget", () => {
     }
 
     async function primeInit(budgetName = "SGD") {
+        process.env.ACTUAL_PRIMARY_BUDGET_FILE = budgetName;
         const api = actual();
         api.init.mockResolvedValue(undefined);
         api.getBudgets
@@ -276,10 +309,9 @@ describe("ensureBudget", () => {
         );
     });
 
-    test("returns silently when budget not found and no secondary fallback", async () => {
+    test("returns silently when the budget is not found", async () => {
         await primeInit();
         const api = actual();
-        process.env.ACTUAL_SECONDARY_BUDGET_FILE = "";
         api.getBudgets.mockResolvedValue([
             makeBudget({ name: "SGD", groupId: "sgd-1" }),
         ]);
@@ -333,8 +365,7 @@ describe("ensureBudget", () => {
         expect(api.downloadBudget).toHaveBeenCalledTimes(3);
     });
 
-    test("secondary fallback via exact ACTUAL_SECONDARY_BUDGET_FILE name", async () => {
-        process.env.ACTUAL_SECONDARY_BUDGET_FILE = "Test MYR";
+    test("matches a budget by name when groupId differs", async () => {
         await primeInit("Test SGD");
         const api = actual();
         api.getBudgets.mockResolvedValue([
@@ -347,17 +378,5 @@ describe("ensureBudget", () => {
             "myr-sync",
             expect.any(Object),
         );
-    });
-
-    test("secondary fallback triggered but budget not found — returns silently", async () => {
-        process.env.ACTUAL_SECONDARY_BUDGET_FILE = "Test MYR";
-        await primeInit("Test SGD");
-        const api = actual();
-        api.getBudgets.mockResolvedValue([
-            makeBudget({ name: "Test SGD", groupId: "sgd-sync" }),
-        ]);
-        const { ensureBudget } = loadServer();
-        await ensureBudget("Test MYR");
-        expect(api.downloadBudget).not.toHaveBeenCalled();
     });
 });
