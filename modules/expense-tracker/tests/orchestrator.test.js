@@ -810,12 +810,14 @@ describe("auto-learn contradiction resolution", () => {
         // learned at all, which is the regression it exists to catch.
         expect(learnCalls).toHaveLength(1);
         expect(learnCalls[0][1]).toEqual({ fact: "DBS Yuu is a bank account" });
-        expect(tools.executeTool).not.toHaveBeenCalledWith(
-            "update_fact",
-            expect.objectContaining({
-                old_text: "DBS Yuu is a debit card account",
-            }),
+        // Filter form, not `not.toHaveBeenCalledWith`: the account-type block
+        // cannot call `update_fact` at all, and a specific `old_text` matcher
+        // would also pass for any other argument. This is the assertion the
+        // sibling category test already uses.
+        const updateCalls = tools.executeTool.mock.calls.filter(
+            (c) => c[0] === "update_fact",
         );
+        expect(updateCalls).toHaveLength(0);
     });
 
     it("learns a credit-card account type when the sign was flipped (issue #331)", async () => {
