@@ -1114,27 +1114,53 @@ describe("POST /transactions enriched response", () => {
         expect(actual.addTransactions).not.toHaveBeenCalled();
     });
 
-    test("returns 400 for a date outside YYYY-MM-DD without inserting", async () => {
-        const handler = findHandler("post", "/transactions");
-        const res = mockRes();
+    test.each([
+        "2026-6-7",
+        "2026-13-01",
+        "2026-06-32",
+        "0000-01-01",
+        "9999-12-31",
+        "not-a-date",
+    ])(
+        "returns 400 for the invalid date %s without inserting",
+        async (date) => {
+            const handler = findHandler("post", "/transactions");
+            const res = mockRes();
 
-        await handler(
-            mockReq({
-                body: {
-                    account: "acc-1",
-                    date: "2026-6-7",
-                    amount: -425,
-                },
-            }),
-            res,
-        );
+            await handler(
+                mockReq({
+                    body: { account: "acc-1", date, amount: -425 },
+                }),
+                res,
+            );
 
-        expect(res.status).toHaveBeenCalledWith(400);
-        expect(res.json).toHaveBeenCalledWith({
-            error: "Invalid date (use YYYY-MM-DD)",
-        });
-        expect(actual.addTransactions).not.toHaveBeenCalled();
-    });
+            expect(res.status).toHaveBeenCalledWith(400);
+            expect(res.json).toHaveBeenCalledWith({
+                error: "Invalid date (use YYYY-MM-DD)",
+            });
+            expect(actual.addTransactions).not.toHaveBeenCalled();
+            expect(actual.getTransactions).not.toHaveBeenCalled();
+        },
+    );
+
+    test.each(["2026-01-01", "2026-12-31", "2026-06-17", "2026-02-28"])(
+        "still inserts a valid date %s",
+        async (date) => {
+            readBack([], []);
+            const handler = findHandler("post", "/transactions");
+            const res = mockRes();
+
+            await handler(
+                mockReq({
+                    body: { account: "acc-1", date, amount: -425 },
+                }),
+                res,
+            );
+
+            expect(actual.addTransactions).toHaveBeenCalled();
+            expect(res.status).not.toHaveBeenCalled();
+        },
+    );
 
     test("picks the newest of two new rows on the window", async () => {
         readBack(

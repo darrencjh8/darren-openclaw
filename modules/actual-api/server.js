@@ -336,9 +336,19 @@ app.post("/transactions", async (req, res) => {
         }
         // The snapshot is account-scoped, so the account must be present or the
         // read-back could match a row in a different account.
-        // readWindow parses the date, so an out-of-contract date would fail the
-        // request before the insert; reject it explicitly instead.
-        if (!/^\d{4}-\d{2}-\d{2}$/.test(txn.date)) {
+        // readWindow parses the date and shifts it to the neighbouring days, so
+        // an out-of-contract date would either throw inside readWindow or emit a
+        // window outside YYYY-MM-DD; reject it explicitly instead. The round
+        // trip rejects impossible calendar dates such as 2026-13-01 that a shape
+        // check alone accepts, and the year range keeps the shifted dates
+        // four-digit ("0000-01-01" would otherwise read back a year -000001).
+        const parsedDate = new Date(`${txn.date}T00:00:00Z`);
+        if (
+            Number.isNaN(parsedDate.getTime()) ||
+            parsedDate.toISOString().slice(0, 10) !== txn.date ||
+            txn.date < "1000-01-01" ||
+            txn.date > "9999-12-30"
+        ) {
             return res
                 .status(400)
                 .json({ error: "Invalid date (use YYYY-MM-DD)" });
