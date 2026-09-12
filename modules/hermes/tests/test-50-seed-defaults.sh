@@ -625,6 +625,8 @@ checks = {
     "safe_rollback": "memory-triage.sh restore" in prompt,
     "cap": "--max-records" in prompt or "40 records" in prompt,
     "audit": "memory-triage-audit.jsonl" in prompt,
+    "topic_rule": "memories/topics" in prompt,
+    "untruncated_list": "list --full" in prompt,
 }
 bad = [k for k, v in checks.items() if not v]
 print("pass" if not bad else "fail " + repr(bad))
@@ -639,6 +641,68 @@ esac
 python3 -c "$mt_block_tmp" >/dev/null 2>&1
 mt2=$(python3 -c "import json;print(len(json.load(open('$TMPDIR/cron/jobs.json'))['jobs']))")
 [ "$mt2" = "1" ] && ok "idempotent: still 1 job on re-seed" || nope "memory-triage idempotent" "got $mt2"
+
+# Migration: an install that already has the job must get the managed fields updated
+# in place. The seed only appends when the job is missing, so a prompt change that
+# relied on the append path would never reach a running deployment.
+echo ""
+echo "=== memory-triage prompt migration (existing installs) ==="
+
+rm -rf "$TMPDIR/cron-legacy"
+mkdir -p "$TMPDIR/cron-legacy"
+python3 - "$TMPDIR/cron-legacy/jobs.json" <<'PY'
+import json, sys
+legacy = "Triage the Hermes memory write-approval queue on this machine (HERMES_HOME=/opt/data).\n\nlegacy prompt without the topic-file rule"
+json.dump({"jobs": [{
+    "id": "legacy1234",
+    "name": "memory-triage",
+    "prompt": legacy,
+    "skills": ["hermes-troubleshooting"],
+    "skill": "hermes-troubleshooting",
+    "schedule": {"kind": "cron", "expr": "0 9 * * *", "display": "0 9 * * *"},
+    "schedule_display": "0 9 * * *",
+    "enabled": True,
+    "deliver": "telegram",
+    "context_from": ["self"],
+    "created_at": "2026-01-01T00:00:00+00:00",
+    "user_note": "keep me",
+}]}, open(sys.argv[1], "w"))
+PY
+
+mt_legacy_tmp=${mt_block//\/opt\/data\/cron\/jobs.json/$TMPDIR\/cron-legacy\/jobs.json}
+mt_migrate_out=$(python3 -c "$mt_legacy_tmp" 2>&1)
+
+mt_migrate=$(python3 - "$TMPDIR/cron-legacy/jobs.json" <<'PY'
+import json, sys
+jobs = json.load(open(sys.argv[1]))["jobs"]
+if len(jobs) != 1:
+    print("fail count=%d" % len(jobs)); sys.exit()
+j = jobs[0]
+prompt = j.get("prompt") or ""
+checks = {
+    "id_preserved": j.get("id") == "legacy1234",
+    "created_at_preserved": j.get("created_at") == "2026-01-01T00:00:00+00:00",
+    "user_field_preserved": j.get("user_note") == "keep me",
+    "prompt_updated": "memories/topics" in prompt,
+    "untruncated_list": "list --full" in prompt,
+}
+bad = [k for k, v in checks.items() if not v]
+print("pass" if not bad else "fail " + repr(bad))
+PY
+)
+case "$mt_migrate" in
+    pass) ok "existing job migrated in place (id/created_at/user fields preserved)" ;;
+    *) nope "memory-triage migration" "$mt_migrate" ;;
+esac
+case "$mt_migrate_out" in
+    *migrated*) ok "migration is reported" ;;
+    *) nope "migration report" "got: $mt_migrate_out" ;;
+esac
+
+# The routing rule must name the topic-file directory the seed creates.
+grep -q "/opt/data/memories/topics" "$SEED_SCRIPT" \
+    && ok "seed creates the topic-file directory" \
+    || nope "topic-file directory" "seed does not reference /opt/data/memories/topics"
 
 # Reinstall survival: scripts + skill must be baked in the repo (image) so the
 # seed can restore them.

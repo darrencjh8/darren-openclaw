@@ -21,8 +21,8 @@ if echo "$AUTH_TOKEN" | grep -q '^ghs_'; then
 else
     REPO_URL="https://${AUTH_TOKEN}@${MEMORY_REPO_URL#https://}"
 fi
-CLONE_DIR="/opt/data/memories-backup"
-SRC_DIR="/opt/data/memories"
+CLONE_DIR="${MEMORY_CLONE_DIR:-/opt/data/memories-backup}"
+SRC_DIR="${MEMORY_SRC_DIR:-/opt/data/memories}"
 EXPENSE_DIR="${EXPENSE_TRACKER_DATA:-}"
 
 # Fix read-only permissions from prior git operations
@@ -51,6 +51,13 @@ else
 fi
 
 cp "$SRC_DIR/MEMORY.md" "$SRC_DIR/USER.md" "$CLONE_DIR/" 2>/dev/null || true
+# Topic files hold the durable facts that do not fit the always-on memory core.
+# They are memory, so a backup without them is incomplete. MEMORY.md/USER.md are
+# copied by name above, which means the directory itself is not copied wholesale.
+if [ -d "$SRC_DIR/topics" ]; then
+    mkdir -p "$CLONE_DIR/topics"
+    cp "$SRC_DIR"/topics/*.md "$CLONE_DIR/topics/" 2>/dev/null || true
+fi
 # Backup SOUL.md (evolves over time)
 cp /opt/data/SOUL.md "$CLONE_DIR/" 2>/dev/null || true
 if [ -n "$EXPENSE_DIR" ]; then

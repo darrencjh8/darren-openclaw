@@ -94,6 +94,34 @@ for f in sorted(glob.glob("/opt/data/pending/memory/*.json"), key=os.path.getmti
 5. **Show the proposed diff before writing** if the user is still in the loop — for a
    90+ op queue this is a reviewable change, not a housekeeping detail.
 
+## Tier 2 — topic files (`/opt/data/memories/topics/`)
+
+The always-on core is capped; sessions and skills cover procedures and history. Durable
+**facts** that still do not fit the core go to topic files, one file per domain
+(`infra.md`, `accounts.md`, `expenses.md`, `prefs.md`), indexed by `INDEX.md`.
+
+Rules that keep this from becoming a second junk drawer:
+
+- One fact per line, with **aliases on the label**:
+  `Groceries / supermarket / NTUC FairPrice / Cold Storage -> payee Groceries`. Aliases are
+  what let keyword search (`search_files`) cover near-synonyms without an embedding model.
+- The agent searches this directory before answering a recall question; `MEMORY.md` keeps a
+  pointer line naming the directory.
+- When the triage judge files a fact here it **discards** that queue record in the same run.
+  Filing *and* approving produces two copies that drift; never do both.
+- Read the queue with `memory-triage.sh list --full` before filing: the default `list`
+  truncates each op at 240 characters (`memory_triage.py`, `_summarize`).
+- **Backup and restore are split.** `memory-backup.sh` copies `MEMORY.md`, `USER.md` and
+  `topics/*.md` (the two stores are copied by name, so the topics copy is an explicit
+  block). The triage snapshot/restore covers `MEMORY.md`/`USER.md` only — a `restore` will
+  **not** roll topic files back; the git backup (every 6 h) is their restore path.
+- Address facts that look like credentials or env assignments can be refused by the skill
+  content scanner; expect a reported failure rather than a silent skip.
+
+Monthly: count entries in `MISSES.md`. If misses are paraphrase misses that aliases could
+not fix, that count — not a vendor benchmark — is the trigger for adding a semantic index
+over these same files.
+
 ## Prevention
 
 - The queue only exists because approval is on. Either drain it deliberately, or turn the

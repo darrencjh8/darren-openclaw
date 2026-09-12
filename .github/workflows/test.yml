@@ -104,6 +104,8 @@ jobs:
               run: bash modules/hermes/tests/test-github-auth.sh
             - name: Test 50-seed-defaults cron jobs
               run: bash modules/hermes/tests/test-50-seed-defaults.sh
+            - name: Test memory backup script
+              run: bash modules/hermes/tests/test-memory-backup.sh
             - name: Test Hermes model routing
               run: bash modules/hermes/tests/test-model-routing.sh
             - name: Test Hermes dev-loop review policy
