@@ -43,9 +43,9 @@ for target in $TARGETS; do
             continue
         fi
         staging="$target/.$name.staging.$$"
-        rm -rf "$staging"
+        rm -rf "${staging:?}"
         cp -a "$source_dir" "$staging"
-        rm -rf "$dest"
+        rm -rf "${dest:?}"
         mv "$staging" "$dest"
     done
     # The pre-reconcile installer left single-file compatibility backups in the
@@ -62,8 +62,8 @@ for shadow in $SHADOWS; do
         [ -d "$source_dir" ] || continue
         name=$(basename "$source_dir")
         [ -f "$source_dir/SKILL.md" ] || continue
-        if [ -d "$shadow/$name" ]; then
-            rm -rf "$shadow/$name"
+        if [ -d "${shadow:?}/${name:?}" ]; then
+            rm -rf "${shadow:?}/${name:?}"
         fi
     done
 done
