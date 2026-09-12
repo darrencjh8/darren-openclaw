@@ -1220,6 +1220,107 @@ describe("POST /transactions enriched response", () => {
         expect(body.category).toBe("cat-transport");
     });
 
+    test("names its own row when two inserts race for the same account and date", async () => {
+        // The account's rows, shared by both requests, so the second insert is
+        // visible to the first request's read-back unless the handler
+        // serializes snapshot, insert, and read-back.
+        const rows = [];
+        let inserted = 0;
+        actual.getTransactions.mockImplementation(
+            async (account, start, end) =>
+                rows.filter(
+                    (row) =>
+                        (!account || row.account === account) &&
+                        row.date >= start &&
+                        row.date <= end,
+                ),
+        );
+        actual.addTransactions.mockImplementation(async (account) => {
+            inserted += 1;
+            rows.push({
+                id: `new-${inserted}`,
+                account,
+                date: "2026-06-17",
+                amount: -425,
+                notes: `insert ${inserted}`,
+                category: null,
+            });
+            return "ok";
+        });
+        const handler = findHandler("post", "/transactions");
+        const first = mockRes();
+        const second = mockRes();
+
+        await Promise.all([
+            handler(
+                mockReq({
+                    body: {
+                        account: "acc-1",
+                        date: "2026-06-17",
+                        amount: -425,
+                        notes: "first",
+                    },
+                }),
+                first,
+            ),
+            handler(
+                mockReq({
+                    body: {
+                        account: "acc-1",
+                        date: "2026-06-17",
+                        amount: -425,
+                        notes: "second",
+                    },
+                }),
+                second,
+            ),
+        ]);
+
+        // Each response must name its own insert, not the row the other
+        // request added while this one was between snapshot and read-back.
+        expect(first.json.mock.calls[0][0].id).toBe("new-1");
+        expect(first.json.mock.calls[0][0].notes).toBe("insert 1");
+        expect(second.json.mock.calls[0][0].id).toBe("new-2");
+        expect(second.json.mock.calls[0][0].notes).toBe("insert 2");
+    });
+
+    test("releases the insert lock when the insert fails", async () => {
+        actual.addTransactions.mockRejectedValueOnce(new Error("insert failed"));
+        const handler = findHandler("post", "/transactions");
+        const failed = mockRes();
+
+        await handler(
+            mockReq({
+                body: {
+                    account: "acc-1",
+                    date: "2026-06-17",
+                    amount: -425,
+                    notes: "first",
+                },
+            }),
+            failed,
+        );
+
+        expect(failed.status).toHaveBeenCalledWith(500);
+        // The lock surrounds the insert, so a throw must release it. A leaked
+        // lock would leave this second request queued forever.
+        const retried = mockRes();
+        await handler(
+            mockReq({
+                body: {
+                    account: "acc-1",
+                    date: "2026-06-17",
+                    amount: -425,
+                    notes: "second",
+                },
+            }),
+            retried,
+        );
+
+        expect(retried.status).not.toHaveBeenCalled();
+        expect(actual.addTransactions).toHaveBeenCalledTimes(2);
+    });
+
     test("prefers the persisted fields when the new row is unique", async () => {
         readBack(
             [],
