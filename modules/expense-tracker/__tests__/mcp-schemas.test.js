@@ -35,6 +35,41 @@ describe("MCP Zod schemas — budget_id rejects empty string", () => {
         });
     });
 
+    describe("fetch_budget_month", () => {
+        test("rejects empty budget_id", () => {
+            const r = schemas.fetch_budget_month.safeParse({ budget_id: "" });
+            expect(r.success).toBe(false);
+        });
+
+        test("rejects missing budget_id", () => {
+            const r = schemas.fetch_budget_month.safeParse({});
+            expect(r.success).toBe(false);
+        });
+
+        test("accepts a YYYY-MM month", () => {
+            const r = schemas.fetch_budget_month.safeParse({
+                budget_id: "My MYR Budget",
+                month: "2026-08",
+            });
+            expect(r.success).toBe(true);
+        });
+
+        test("accepts an omitted month", () => {
+            const r = schemas.fetch_budget_month.safeParse({
+                budget_id: "My MYR Budget",
+            });
+            expect(r.success).toBe(true);
+        });
+
+        test("rejects a malformed month", () => {
+            const r = schemas.fetch_budget_month.safeParse({
+                budget_id: "My MYR Budget",
+                month: "2026-8",
+            });
+            expect(r.success).toBe(false);
+        });
+    });
+
     describe("fetch_recent_transactions", () => {
         test("rejects empty budget_id", () => {
             const r = schemas.fetch_recent_transactions.safeParse({

@@ -23,7 +23,7 @@
 | Memory | `MEMORY.md` + WASM embeddings | — | `src/memory.js` semantic fact store (replaces `mappings.json`) |
 | Config | `.env` + `process.env` | — | 12-factor app; `src/config.js` Config class |
 | Dedup/Statement DB | `better-sqlite3` | latest | Single-file journals (`data/dedup.db`, `data/statement.db`) |
-| MCP | `@modelcontextprotocol/sdk` | latest | Streamable HTTP MCP server (`src/mcp-server.js`) — 22 tools |
+| MCP | `@modelcontextprotocol/sdk` | latest | Streamable HTTP MCP server (`src/mcp-server.js`) — 24 tools |
 | Logging | JSON-line to stdout | — | `src/logging.js` structured logs |
 | Container | Docker Compose | — | `docker/Dockerfile` + `modules/docker-compose.yml` |
 
@@ -34,7 +34,7 @@
 ```mermaid
 flowchart TB
     subgraph ET["expense-tracker (Node.js 22, Docker)"]
-        IDX["src/index.js — entry: Express, 26 REST /tools/*, MCP server, IMAP"]
+        IDX["src/index.js — entry: Express, 28 REST /tools/*, MCP server, IMAP"]
         IMAP["src/imap.js (imapflow)<br/>IMAP IDLE: persistent conn, auto-reconnect, catch-up"]
         CLS["src/classify.js<br/>pre-classify: transaction | statement | skip"]
         ORCH["src/orchestrator.js — 3-phase alert pipeline<br/>P1 LLM Analysis (fetch_context)<br/>P2 Resolution (memory→web→Misc / category picker)<br/>P3 Execute (insert/skip/notify, learn_fact)"]
@@ -520,9 +520,9 @@ darren-openclaw/
 │           ├── plan.md
 │           └── tasks.md
 ├── src/
-│   ├── index.js                    # Entry: Express, 26 REST /tools/*, MCP, IMAP wiring
+│   ├── index.js                    # Entry: Express, 28 REST /tools/*, MCP, IMAP wiring
 │   ├── config.js                   # Env-var Config class
-│   ├── mcp-server.js               # MCP Streamable HTTP server (22 tools)
+│   ├── mcp-server.js               # MCP Streamable HTTP server (24 tools)
 │   ├── orchestrator.js             # 3-phase alert pipeline + DeepSeekClient
 │   ├── prompts.js                  # Phase-1 prompt + category picker prompt
 │   ├── tools.js                    # ToolRegistry: schemas + handlers

@@ -16,6 +16,13 @@ import { logger } from "./logging.js";
 export const toolShapes = {
   fetch_budgets: {},
   fetch_context: { budget_id: z.string().min(1) },
+  fetch_budget_month: {
+    budget_id: z.string().min(1),
+    month: z
+      .string()
+      .regex(/^\d{4}-\d{2}$/)
+      .optional(),
+  },
   fetch_recent_transactions: {
     budget_id: z.string().min(1),
     id: z.string().optional(),
@@ -112,6 +119,12 @@ function createTools(server, registry) {
       ]);
       return tx({ accounts, categories, payees });
     },
+  );
+  server.tool(
+    "fetch_budget_month",
+    "Get one month of the budget: every category group and category with its assigned (budgeted), spent, and balance amounts. Defaults to the current month.",
+    toolShapes.fetch_budget_month,
+    async (a) => tx(await registry.executeTool("fetch_budget_month", a)),
   );
   server.tool(
     "fetch_recent_transactions",

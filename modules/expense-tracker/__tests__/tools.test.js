@@ -115,6 +115,84 @@ describe("ToolRegistry — budget_id validation", () => {
         });
     });
 
+    describe("fetch_budget_month", () => {
+        test("returns error when budget_id is missing", async () => {
+            const result = await registry.executeTool("fetch_budget_month", {});
+            expect(result).toEqual({ error: "budget_id is required" });
+        });
+
+        test("forwards the requested month to actual-api", async () => {
+            const payload = {
+                month: "2026-08",
+                categoryGroups: [
+                    {
+                        name: "Everyday",
+                        categories: [
+                            {
+                                name: "Food",
+                                budgeted: 50000,
+                                spent: 1234,
+                                balance: 48766,
+                            },
+                        ],
+                    },
+                ],
+            };
+            mockFetch.mockResolvedValue({
+                ok: true,
+                json: async () => payload,
+            });
+
+            const result = await registry.executeTool("fetch_budget_month", {
+                budget_id: "My MYR Budget",
+                month: "2026-08",
+            });
+
+            expect(result).toEqual(payload);
+            const url = mockFetch.mock.calls[0][0];
+            expect(url).toContain("/budget-month");
+            expect(url).toContain("budget_id=My+MYR+Budget");
+            expect(url).toContain("month=2026-08");
+        });
+
+        test("omits month so actual-api defaults to the current month", async () => {
+            mockFetch.mockResolvedValue({
+                ok: true,
+                json: async () => ({ month: "2026-09" }),
+            });
+
+            await registry.executeTool("fetch_budget_month", {
+                budget_id: "My MYR Budget",
+            });
+
+            const url = mockFetch.mock.calls[0][0];
+            expect(url).toContain("/budget-month?budget_id=My+MYR+Budget");
+            expect(url).not.toContain("month=");
+        });
+
+        test("declares the YYYY-MM month pattern for non-MCP callers", () => {
+            const tool = registry
+                .getToolSchemas()
+                .find((t) => t.function.name === "fetch_budget_month");
+            expect(tool.function.parameters.properties.month.pattern).toBe(
+                "^\\d{4}-\\d{2}$",
+            );
+        });
+
+        test.each(["2026-8", "2026-13-01", "August 2026", ""])(
+            "rejects the malformed month %j before calling actual-api",
+            async (month) => {
+                const result = await registry.executeTool(
+                    "fetch_budget_month",
+                    { budget_id: "My MYR Budget", month },
+                );
+
+                expect(result).toEqual({ error: "month must be YYYY-MM" });
+                expect(mockFetch).not.toHaveBeenCalled();
+            },
+        );
+    });
+
     describe("fetch_recent_transactions", () => {
         test("returns error when budget_id is missing", async () => {
             const result = await registry.executeTool(
