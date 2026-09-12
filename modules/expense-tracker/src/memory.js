@@ -27,189 +27,24 @@ const MEMORY_TEMPLATE = `# Long-Term Memory
 
 `;
 
-/**
- * Card/account suffix facts. One grammar, shared by every reader: the tracker's
- * safety net, the memory index, and bank-movement's identity mapping.
- *
- * Deliberately tolerant on the parts people and models get wrong — a
- * `Card/account` prefix, an optional "in", casing, surrounding whitespace and
- * trailing punctuation — and strict on the parts that matter: the prefix must
- * be a card/account word, and the suffix must be 4-6 digits.
- */
-export const CANONICAL_SUFFIX_RE =
-  /^(?:card|account)(?:\s*\/\s*account|\s*\/\s*card)?\s+ending(?:\s+in)?\s+(\d{4,6})\s+belongs\s+to\s+([\s\S]+)$/i;
+// Imported for local use and re-exported, so fact handling has one import site.
+import {
+  CANONICAL_SUFFIX_RE,
+  STRUCTURED_PATTERNS,
+  canonicalSuffixFact,
+  matchAccountByName,
+  parseSuffixFact,
+  stopwords,
+} from "./suffix-facts.js";
 
-/** @type {Array<{re: RegExp, rel: string}>} */
-const STRUCTURED_PATTERNS = [
-  {
-    re: /^(.+?)\s+merchant\s+maps\s+to\s+(.+?)\s+payee$/i,
-    rel: "merchant->payee",
-  },
-  { re: /^(.+?)\s+maps\s+to\s+(.+?)\s+payee$/i, rel: "->payee" },
-  { re: /^(.+?)\s+maps\s+to\s+(.+?)\s+category$/i, rel: "->category" },
-  { re: /^(.+?)\s+is\s+(?:a|an)\s+(.+?)\s+account$/i, rel: "is-account" },
-  { re: CANONICAL_SUFFIX_RE, rel: "suffix->account" },
-];
-
-/** Words that carry no discriminating power in an account name. */
-const ACCOUNT_STOPWORDS = new Set([
-  "my",
-  "the",
-  "a",
-  "an",
-  "card",
-  "cards",
-  "account",
-  "accounts",
-  "bank",
-  "belongs",
-  "to",
-  "of",
-  "for",
-  "this",
-  "that",
-]);
-
-/** The stopword list, exposed for callers that normalise account names. */
-export function stopwords() {
-  return [...ACCOUNT_STOPWORDS];
-}
-
-/** Lowercase word tokens. Letters and digits only, so a symbol such as the
- *  degree sign in "OCBC 90°N" splits the token rather than gluing it, letting
- *  "90n" match "OCBC 90N". */
-function accountTokens(text) {
-  return String(text || "")
-    .toLowerCase()
-    .replace(/(\p{N})(\p{L})/gu, "$1 $2")
-    .replace(/(\p{L})(\p{N})/gu, "$1 $2")
-    .replace(/[^\p{L}\p{N}]+/gu, " ")
-    .split(/\s+/)
-    .filter(Boolean);
-}
-
-/** Drop a parenthesised account id, e.g. "DBS Yuu Card (22caada9)". */
-function stripParenthesisedId(text) {
-  return String(text || "").replace(/\s*\([^)]*\)\s*/g, " ").trim();
-}
-
-/** Trailing punctuation and collapsed whitespace, for a captured account name. */
-function cleanAccountText(text) {
-  return String(text || "")
-    .replace(/[.,;:!?]+$/, "")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-/**
- * Parse a card/account suffix fact. Returns `{ suffix, accountName }` or null.
- *
- * Never returns a prefix: `Card/account` is tolerated on input but is not a
- * value the system carries, keys on, or writes. Stored text is always
- * canonical, produced by `canonicalSuffixFact`.
- */
-export function parseSuffixFact(text) {
-  const m = String(text || "").trim().match(CANONICAL_SUFFIX_RE);
-  if (!m) return null;
-  const accountName = cleanAccountText(m[2]);
-  if (!accountName) return null;
-  return { suffix: m[1], accountName };
-}
-
-/**
- * The one deterministic way to name a suffix mapping. The prefix is cosmetic —
- * the safety net keys on suffix plus account — so it is derived from the
- * account name, never from whoever wrote the fact.
- */
-export function canonicalSuffixFact({ suffix, accountName } = {}) {
-  const prefix = /\bcard\b/i.test(String(accountName || "")) ? "Card" : "Account";
-  return `${prefix} ending ${suffix} belongs to ${accountName}`;
-}
-
-/** Trailing "s" is treated as a plural marker. Only a word that actually ends in
- *  "s" is trimmed, so "dbs" is never reduced to "db". */
-function pluralTrim(tokens) {
-  return tokens.map((t) =>
-    t.endsWith("s") && t.length > 3 && !t.endsWith("ss")
-      ? t.slice(0, -1)
-      : t,
-  );
-}
-
-/** Refusal result. Always an object, so callers can log why resolution failed. */
-function refusal(reason) {
-  return { matched: false, id: null, name: null, reason };
-}
-
-/**
- * Resolve an account name written by a human or a model to a live account.
- *
- * Deterministic word matching, not embeddings: measured against the real
- * account set, embedding similarity rejects names people obviously write
- * ("Yuu Card" 0.746, "UOB Ladies" 0.742, "Altitude" 0.554), and shorter names
- * score worse rather than better.
- *
- * Order matters. Exact matching runs BEFORE stopword removal, otherwise "DBS"
- * reduces to the same tokens as "DBS Account" and silently resolves to the
- * wrong account — the exact failure this issue is about.
- *
- * Returns ONE shape always, so callers switch on `matched` rather than
- * truthiness: an unmatched refusal is a non-null object with `matched: false`.
- *
- * @returns {{matched: boolean, id: string|null, name: string|null, reason?: string}}
- *   the matched live account's id/name when `matched` is true, otherwise nulls
- *   plus a `reason` for logging.
- */
-export function matchAccountByName(nameText, accounts) {
-  const live = (accounts || []).filter((a) => a && !a.closed);
-  if (!live.length) return refusal("no live accounts");
-
-  const raw = accountTokens(stripParenthesisedId(nameText));
-  if (!raw.length) return refusal("empty account name");
-
-  // Duplicate live names cannot be resolved deterministically.
-  const nameCounts = new Map();
-  for (const account of live) {
-    const key = accountTokens(account.name).join(" ");
-    nameCounts.set(key, (nameCounts.get(key) || 0) + 1);
-  }
-
-  const resolve = (account) => {
-    const key = accountTokens(account.name).join(" ");
-    if (nameCounts.get(key) > 1) return refusal("duplicate account name");
-    return { matched: true, id: account.id, name: account.name };
-  };
-  const resolveOneOf = (list) => {
-    const keys = new Set(list.map((a) => accountTokens(a.name).join(" ")));
-    // Two live accounts sharing one name cannot be resolved deterministically.
-    if (keys.size === 1 && nameCounts.get([...keys][0]) > 1) {
-      return refusal("duplicate account name");
-    }
-    if (list.length !== 1) return refusal("ambiguous");
-    return resolve(list[0]);
-  };
-
-  // Step 1 — exact match on the full token string, stopwords included.
-  const exact = live.filter(
-    (a) =>
-      accountTokens(stripParenthesisedId(a.name)).join(" ") === raw.join(" "),
-  );
-  if (exact.length) return resolveOneOf(exact);
-
-  // Step 2 — containment over set-difference tokens (token SET, not substring).
-  // Plural trimming happens only here, after the exact comparison, because
-  // trimming account names would turn "DBS Account" into "db" and make a bare
-  // "DBS" resolve to the wrong account.
-  const query = pluralTrim(raw.filter((w) => !ACCOUNT_STOPWORDS.has(w)));
-  if (!query.length) return refusal("no distinctive words in the name");
-  const candidates = live.filter((a) => {
-    const target = pluralTrim(accountTokens(a.name));
-    return query.every((w) => target.includes(w));
-  });
-  if (candidates.length === 0) return refusal("no account matches those words");
-  if (candidates.length > 1) return refusal("ambiguous");
-  return resolve(candidates[0]);
-}
+export {
+  CANONICAL_SUFFIX_RE,
+  STRUCTURED_PATTERNS,
+  canonicalSuffixFact,
+  matchAccountByName,
+  parseSuffixFact,
+  stopwords,
+};
 
 /** Semantic-dedup cosine-similarity threshold for free-form facts. */
 const SEMANTIC_THRESHOLD = 0.88;
@@ -506,10 +341,9 @@ export class MemoryStore {
     const before = this._facts.length;
     let changed = false;
 
-    // Step 0: canonicalise suffix facts and drop exact duplicates of the same
-    // mapping. Tolerance reads a "Card/account …" or "… account" phrasing but
-    // never rewrites it, so without this pass the file keeps several spellings
-    // of one mapping and whichever line is last decides the override.
+    // Step 0: canonicalise suffix facts. Duplicates are NOT dropped here —
+    // dropping one spelling before contradiction resolution would change which
+    // conflicting mapping survives (last-wins runs over the remaining lines).
     const normalised = this._canonicaliseSuffixFacts();
     if (normalised.count > 0) changed = true;
 
@@ -552,6 +386,11 @@ export class MemoryStore {
     }
 
     this._rebuildIndices();
+    // Exact duplicates of one mapping are only safe to drop AFTER
+    // contradiction resolution, so the last-wins choice was already made from
+    // the full line set.
+    const dropped = this._dropDuplicateSuffixFacts();
+    if (dropped > 0) changed = true;
     // Rewriting unconditionally bumps the file mtime on every run, which races
     // the 6-hourly memory backup and makes "did cleanup change anything?"
     // unanswerable. Only write when something actually changed.
@@ -568,43 +407,56 @@ export class MemoryStore {
   }
 
   /**
-   * Rewrite suffix facts to their canonical form and drop exact duplicates of
-   * one mapping.
+   * Remove repeated spellings of one mapping, comparing the PARSED
+   * (suffix, account) pair rather than the raw text: two lines can read
+   * differently and still mean one mapping.
    *
-   * Two spellings of one mapping are the failure this guards: `_resolveContradictions`
-   * only removes a duplicate when the parsed values DIFFER, so an identical
-   * mapping written two ways survives as two lines and the last line wins by
-   * file order. Comparison is therefore on the parsed (suffix, account) pair,
-   * not the raw text.
+   * Deliberately separate from canonicalisation so it cannot influence which
+   * conflicting mapping wins; call it after `_resolveContradictions`.
    *
-   * Conflict between different accounts for the same suffix is left alone and
-   * reported through `_resolveContradictions`, because choosing a winner is a
-   * data decision, not a formatting one.
-   *
-   * @returns {{count: number}} how many lines were rewritten or dropped.
+   * @returns {number} how many duplicate lines were dropped.
    */
-  _canonicaliseSuffixFacts() {
-    let count = 0;
-    const seen = new Map(); // "suffix|||accountName" → first occurrence
+  _dropDuplicateSuffixFacts() {
+    const seen = new Set();
     const kept = [];
+    let dropped = 0;
     for (const fact of this._facts) {
       const parsed = parseSuffixFact(fact);
       if (!parsed) {
         kept.push(fact);
         continue;
       }
-      const canonical = canonicalSuffixFact(parsed);
       const key = `${parsed.suffix}|||${parsed.accountName.toLowerCase()}`;
       if (seen.has(key)) {
-        // Same mapping already kept — drop this spelling.
-        count++;
+        dropped++;
         continue;
       }
-      seen.set(key, canonical);
-      if (canonical !== fact) count++;
-      kept.push(canonical);
+      seen.add(key);
+      kept.push(fact);
     }
     this._facts = kept;
+    return dropped;
+  }
+
+  /**
+   * Rewrite suffix facts to their canonical form.
+   *
+   * Tolerance reads a "Card/account …" or trailing-full-stop phrasing but never
+   * rewrites it, so without this pass the file keeps the spelling a user or
+   * Hermes happened to produce. Comparison is on the raw line, so an already
+   * canonical fact is left untouched and repeated runs are no-ops.
+   *
+   * @returns {{count: number}} how many lines were rewritten.
+   */
+  _canonicaliseSuffixFacts() {
+    let count = 0;
+    this._facts = this._facts.map((fact) => {
+      const parsed = parseSuffixFact(fact);
+      if (!parsed) return fact;
+      const canonical = canonicalSuffixFact(parsed);
+      if (canonical !== fact) count++;
+      return canonical;
+    });
     return { count };
   }
 

@@ -1312,13 +1312,17 @@ export class AgentOrchestrator {
                     .toLowerCase()
                     .split(" ");
                 // Accept only a fact about THIS account. Exact entity, or the
-                // queried name as a prefix of the entity ("UOB One" for
-                // "UOB One is a credit card account"). A different account's
-                // fact must never decide this.
+                // queried name as a multi-word prefix of the entity ("UOB One"
+                // for "UOB One is a credit card account"). A single generic word
+                // such as the "DBS" left after stripping "DBS Account" must not
+                // let a sibling account's fact decide the sign of this one.
                 const entity =
                     entityTokens.length >= wantedTokens.length &&
+                    wantedTokens.length >= 2 &&
                     wantedTokens.every((t, i) => entityTokens[i] === t);
-                if (entity) return m[2].toLowerCase();
+                const exactEntity =
+                    entityTokens.join(" ") === wantedTokens.join(" ");
+                if (entity || exactEntity) return m[2].toLowerCase();
             }
         } catch {}
         // Fallback: keyword match on account name

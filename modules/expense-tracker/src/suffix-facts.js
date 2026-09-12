@@ -1,0 +1,210 @@
+/**
+ * Card/account suffix facts — one grammar and one resolver, shared by every
+ * consumer.
+ *
+ * This module is deliberately dependency-free: `memory.js` owns fact storage
+ * and `bank-movement.js` owns movement resolution, and both must read the same
+ * fact shape. Keeping the grammar here is what stops the readers drifting
+ * apart again, which is the defect issue #331 was filed about.
+ */
+
+/**
+ * Card/account suffix facts. Deliberately tolerant on the parts people and
+ * models get wrong — a `Card/account` prefix, an optional "in", casing,
+ * surrounding whitespace and trailing punctuation — and strict on the parts
+ * that matter: the prefix must be a card/account word, and the suffix must be
+ * 4-6 digits.
+ */
+export const CANONICAL_SUFFIX_RE =
+  /^(?:card|account)(?:\s*\/\s*account|\s*\/\s*card)?\s+ending(?:\s+in)?\s+(\d{4,6})\s+belongs\s+to\s+([\s\S]+)$/i;
+
+/**
+ * Structured fact templates, keyed by (entity, relation). The suffix pattern
+ * uses the shared grammar so the index, the safety net and movement resolution
+ * agree on what a suffix fact is.
+ */
+export const STRUCTURED_PATTERNS = [
+  {
+    re: /^(.+?)\s+merchant\s+maps\s+to\s+(.+?)\s+payee$/i,
+    rel: "merchant->payee",
+  },
+  { re: /^(.+?)\s+maps\s+to\s+(.+?)\s+payee$/i, rel: "->payee" },
+  { re: /^(.+?)\s+maps\s+to\s+(.+?)\s+category$/i, rel: "->category" },
+  { re: /^(.+?)\s+is\s+(?:a|an)\s+(.+?)\s+account$/i, rel: "is-account" },
+  { re: CANONICAL_SUFFIX_RE, rel: "suffix->account" },
+];
+
+/** Words that carry no discriminating power in an account name. */
+const ACCOUNT_STOPWORDS = new Set([
+  "my",
+  "the",
+  "a",
+  "an",
+  "card",
+  "cards",
+  "account",
+  "accounts",
+  "bank",
+  "belongs",
+  "to",
+  "of",
+  "for",
+  "this",
+  "that",
+]);
+
+/** The stopword list, exposed for callers that normalise account names. */
+export function stopwords() {
+  return [...ACCOUNT_STOPWORDS];
+}
+
+/** Lowercase word tokens. Letters and digits only, so a symbol such as the
+ *  degree sign in "OCBC 90°N" splits the token rather than gluing it, letting
+ *  "90n" match "OCBC 90N". */
+function accountTokens(text) {
+  return String(text || "")
+    .toLowerCase()
+    .replace(/(\p{N})(\p{L})/gu, "$1 $2")
+    .replace(/(\p{L})(\p{N})/gu, "$1 $2")
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .split(/\s+/)
+    .filter(Boolean);
+}
+
+/** Drop a parenthesised account id, e.g. "DBS Yuu Card (22caada9)". */
+function stripParenthesisedId(text) {
+  return String(text || "").replace(/\s*\([^)]*\)\s*/g, " ").trim();
+}
+
+/** Trailing punctuation and collapsed whitespace, for a captured account name. */
+function cleanAccountText(text) {
+  return String(text || "")
+    .replace(/[.,;:!?]+$/, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/**
+ * Parse a card/account suffix fact. Returns `{ suffix, accountName }` or null.
+ *
+ * Never returns a prefix: `Card/account` is tolerated on input but is not a
+ * value the system carries, keys on, or writes. Stored text is always
+ * canonical, produced by `canonicalSuffixFact`.
+ */
+export function parseSuffixFact(text) {
+  const m = String(text || "").trim().match(CANONICAL_SUFFIX_RE);
+  if (!m) return null;
+  const accountName = cleanAccountText(m[2]);
+  if (!accountName) return null;
+  return { suffix: m[1], accountName };
+}
+
+/**
+ * The one deterministic way to name a suffix mapping. The prefix is cosmetic —
+ * the safety net keys on suffix plus account — so it is derived from the
+ * account name, never from whoever wrote the fact.
+ */
+export function canonicalSuffixFact({ suffix, accountName } = {}) {
+  const prefix = /\bcard\b/i.test(String(accountName || "")) ? "Card" : "Account";
+  return `${prefix} ending ${suffix} belongs to ${accountName}`;
+}
+
+/** Trailing "s" is treated as a plural marker. Only a word that actually ends
+ *  in "s" is trimmed, so "dbs" is never reduced to "db". */
+function pluralTrim(tokens) {
+  return tokens.map((t) =>
+    t.endsWith("s") && t.length > 3 && !t.endsWith("ss") ? t.slice(0, -1) : t,
+  );
+}
+
+/** Refusal result. Always an object, so callers can log why resolution failed. */
+function refusal(reason) {
+  return { matched: false, id: null, name: null, reason };
+}
+
+/**
+ * Resolve an account name written by a human or a model to an account.
+ *
+ * Deterministic word matching, not embeddings: measured against the real
+ * account set, embedding similarity rejects names people obviously write
+ * ("Yuu Card" 0.746, "UOB Ladies" 0.742, "Altitude" 0.554), and shorter names
+ * score worse rather than better.
+ *
+ * Order matters. Exact matching runs BEFORE stopword removal, otherwise "DBS"
+ * reduces to the same tokens as "DBS Account" and silently resolves to the
+ * wrong account — the exact failure this issue is about.
+ *
+ * CLOSED accounts stay in the candidate set on purpose. Filtering them out
+ * first would let a fact naming a closed account resolve to a live sibling:
+ * "DBS Account" would match "DBS Yuu Card" once the generic word "account" is
+ * dropped. A closed twin must force ambiguity, and resolving to a closed
+ * account is itself a refusal.
+ *
+ * Returns ONE shape always, so callers switch on `matched` rather than
+ * truthiness: an unmatched refusal is a non-null object with `matched: false`.
+ *
+ * @returns {{matched: boolean, id: string|null, name: string|null, reason?: string}}
+ */
+export function matchAccountByName(nameText, accounts) {
+  const all = (accounts || []).filter(Boolean);
+  if (!all.length) return refusal("no live accounts");
+
+  const raw = accountTokens(stripParenthesisedId(nameText));
+  if (!raw.length) return refusal("empty account name");
+
+  const nameCounts = new Map();
+  for (const account of all) {
+    const key = accountTokens(account.name).join(" ");
+    nameCounts.set(key, (nameCounts.get(key) || 0) + 1);
+  }
+
+  const resolve = (account) => {
+    if (account.closed) return refusal("account is closed");
+    const key = accountTokens(account.name).join(" ");
+    if (nameCounts.get(key) > 1) return refusal("duplicate account name");
+    return { matched: true, id: account.id, name: account.name };
+  };
+  const resolveOneOf = (list) => {
+    const keys = new Set(list.map((a) => accountTokens(a.name).join(" ")));
+    // Two accounts sharing one name cannot be resolved deterministically.
+    if (keys.size === 1 && nameCounts.get([...keys][0]) > 1) {
+      return refusal("duplicate account name");
+    }
+    if (list.length !== 1) return refusal("ambiguous");
+    return resolve(list[0]);
+  };
+
+  // Step 1 — exact match on the full token string, stopwords included.
+  const exact = all.filter(
+    (a) =>
+      accountTokens(stripParenthesisedId(a.name)).join(" ") === raw.join(" "),
+  );
+  if (exact.length) return resolveOneOf(exact);
+
+  // Step 2 — containment over set-difference tokens (token SET, not substring).
+  // Plural trimming happens only here, after the exact comparison, because
+  // trimming account names would turn "DBS Account" into "db" and make a bare
+  // "DBS" resolve to the wrong account.
+  const query = pluralTrim(raw.filter((w) => !ACCOUNT_STOPWORDS.has(w)));
+  if (!query.length) return refusal("no distinctive words in the name");
+
+  // "account" and "bank" are ordinary words in this domain, so they are dropped
+  // as stopwords above — but a name that ends with one is naming a specific
+  // account KIND. Without this guard "DBS Account" would resolve to
+  // "DBS Yuu Card" and "Trust Bank" to "Trust Card" whenever the account the
+  // user actually named is absent or closed, which is a wrong-account booking.
+  const kindWord = raw[raw.length - 1];
+  const requiresKindWord =
+    kindWord === "account" ||
+    kindWord === "bank" ||
+    kindWord === "card";
+
+  const candidates = all.filter((a) => {
+    const target = pluralTrim(accountTokens(a.name));
+    if (requiresKindWord && !target.includes(kindWord)) return false;
+    return query.every((w) => target.includes(w));
+  });
+  if (candidates.length === 0) return refusal("no account matches those words");
+  if (candidates.length > 1) return refusal("ambiguous");
+  return resolve(candidates[0]);
+}

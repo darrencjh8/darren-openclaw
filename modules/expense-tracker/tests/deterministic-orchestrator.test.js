@@ -2006,12 +2006,12 @@ describe("suffix-override helpers (unit)", () => {
       ),
     ).toBe(false);
     expect(
-      // "Yuu Card" resolves to neither live DBS account.
+      // A name that resolves to no live account must not count as evidence.
       hasUsableSuffixFact(
-        [{ text: "Card ending 3255 belongs to Yuu Card", score: 1 }],
+        [{ text: "Card ending 3255 belongs to Nonexistent Card", score: 1 }],
         email,
         "DBS",
-        [],
+        liveAccounts,
       ),
     ).toBe(false);
     expect(
@@ -2402,6 +2402,29 @@ describe("Phase 2: Sign correction", () => {
 
       const result = await orch._detectAccountType("DBS Yuu Card");
       expect(result).toBe("credit card");
+    });
+
+    it("ignores a SIBLING account's type fact (issue #331 review)", async () => {
+      const { AgentOrchestrator } = await import("../src/orchestrator.js");
+      const config = makeConfig();
+      const tools = makeTools({
+        executeTool: vi.fn(async (name) => {
+          if (name === "search_memory")
+            return {
+              results: [
+                // Semantic fallback can surface this for a "DBS Account" query.
+                { text: "DBS Yuu Card is a credit card account", score: 1.0 },
+              ],
+            };
+          return true;
+        }),
+      });
+      const orch = new AgentOrchestrator(config, tools);
+
+      // "DBS Account" reduces to the single token "dbs"; a sibling card fact
+      // must not be accepted as this account's type, because the type drives
+      // the credit-card sign flip.
+      await expect(orch._detectAccountType("DBS Account")).resolves.toBe("bank");
     });
 
     it("returns 'bank' from memory fact without 'account' suffix", async () => {

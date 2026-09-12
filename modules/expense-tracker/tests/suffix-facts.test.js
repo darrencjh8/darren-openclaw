@@ -285,3 +285,32 @@ describe("MemoryStore.cleanup — canonicalisation of suffix facts", () => {
     );
   });
 });
+
+describe("regressions found in dev-loop review round 1", () => {
+  it("does not resolve a closed account's name to a live sibling", () => {
+    const withClosedTwin = [
+      { id: "dbs-account", name: "DBS Account", closed: true },
+      { id: "dbs-yuu", name: "DBS Yuu Card", closed: false },
+    ];
+    const result = matchAccountByName("DBS Account", withClosedTwin);
+    expect(result.matched).toBe(false);
+
+    // Also when the closed account is absent from the list entirely: "DBS
+    // Account" must not degrade into "DBS Yuu Card" just because "account" is
+    // a stopword.
+    const onlyYuu = [{ id: "dbs-yuu", name: "DBS Yuu Card", closed: false }];
+    expect(matchAccountByName("DBS Account", onlyYuu).matched).toBe(false);
+    expect(matchAccountByName("Trust Bank", [
+      { id: "trust-card", name: "Trust Card", closed: false },
+    ]).matched).toBe(false);
+  });
+
+  it("still resolves the account that is actually present", () => {
+    const live = [
+      { id: "dbs-account", name: "DBS Account", closed: false },
+      { id: "dbs-yuu", name: "DBS Yuu Card", closed: false },
+    ];
+    expect(matchAccountByName("DBS Yuu", live).name).toBe("DBS Yuu Card");
+    expect(matchAccountByName("DBS Account", live).name).toBe("DBS Account");
+  });
+});

@@ -920,6 +920,7 @@ export class ToolRegistry {
         before: 0,
         after: 0,
         removed: 0,
+        normalised: 0,
         contradictions: [],
       };
     return this._memory.cleanup();
