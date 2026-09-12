@@ -20,6 +20,12 @@ import {
     suffix,
     bankFromText,
 } from "./bank-movement.js";
+import {
+    CANONICAL_SUFFIX_RE,
+    canonicalSuffixFact,
+    matchAccountByName,
+    parseSuffixFact,
+} from "./memory.js";
 import { logger } from "./logging.js";
 
 export class LLMClient {
@@ -185,9 +191,15 @@ export function bankFromSender(sender) {
 
 // ── Suffix-override helpers (LLM-directed retrieval) ────────────────
 
-/** "Card ending 3255 belongs to DBS Yuu Card" — learned suffix facts. */
-export const SUFFIX_RE =
-    /^(?:Card|Account)\s+ending\s+(\S+)\s+belongs\s+to\s+(.+)$/i;
+/**
+ * "Card ending 3255 belongs to DBS Yuu Card" — learned suffix facts.
+ *
+ * Delegates to the shared grammar in memory.js so the tracker's safety net,
+ * the memory index and bank-movement's identity mapping can never drift apart.
+ * Tolerant on input (a `Card/account` prefix, an optional "in", casing,
+ * trailing punctuation); canonical on write.
+ */
+export const SUFFIX_RE = CANONICAL_SUFFIX_RE;
 
 /** Secret-looking fact texts — redacted before the LLM sees them. */
 export const SECRET_RE =
@@ -262,18 +274,46 @@ export function sanitizeResults(results) {
 
 /**
  * True when any cached fact is usable as suffix-override evidence:
- * high-score, suffix-format, suffix present in email, bank known and
- * matching senderBank.
+ * high-score, suffix-format, suffix present in email, and the account it names
+ * resolving to a live account whose bank matches the sender.
+ *
+ * The fact's account name is resolved through `matchAccountByName` rather than
+ * compared literally. That is the whole point of issue #331: a fact written as
+ * "Yuu" or "Altitude" must still arm the net, and the bank check must run
+ * against the resolved account rather than the words the user happened to type.
+ * A name that resolves to no account still fails, so this does not loosen the
+ * cross-bank guard.
+ *
+ * @param {Array} facts cached search_memory results
+ * @param {string} emailText alert body
+ * @param {string} senderBank bank parsed from the sender domain
+ * @param {Array} [liveAccounts] live accounts; when absent, only exact names
+ *   count (the pre-#331 behaviour).
  */
-export function hasUsableSuffixFact(facts, emailText, senderBank) {
+export function hasUsableSuffixFact(facts, emailText, senderBank, liveAccounts = []) {
     return (facts || []).some((f) => {
         if ((f.score ?? 0) < 0.5) return false;
-        const m = (f.text || "").match(SUFFIX_RE);
-        if (!m) return false;
-        const expectedAccount = m[2].trim();
-        if (!nameMatchesBank(expectedAccount, senderBank)) return false;
-        return new RegExp(`\\b${m[1]}\\b`).test(emailText);
+        const parsed = parseSuffixFact(f.text);
+        if (!parsed) return false;
+        const resolved = resolveFactAccount(parsed.accountName, liveAccounts);
+        if (!resolved) return false;
+        if (!nameMatchesBank(resolved.name, senderBank)) return false;
+        return new RegExp(`\\b${parsed.suffix}\\b`).test(emailText);
     });
+}
+
+/**
+ * Resolve a fact's written account name to a live account.
+ *
+ * Without live accounts there is nothing to resolve against, so the fact is
+ * treated as unusable — the pre-#331 behaviour for callers that only pass fact
+ * text, and the reason a resolution test must supply the account list.
+ */
+export function resolveFactAccount(accountName, liveAccounts = []) {
+    const name = String(accountName || "").trim();
+    if (!name || !liveAccounts.length) return null;
+    const m = matchAccountByName(name, liveAccounts);
+    return m.matched ? { id: m.id, name: m.name } : null;
 }
 
 /** Bill-payment layout — override must never pick the destination card. */
@@ -1007,6 +1047,7 @@ export class AgentOrchestrator {
                         cachedSearchResults,
                         emailText,
                         senderBank,
+                        liveAccounts,
                     )
                 ) {
                     fallbackRan = true;
@@ -1051,33 +1092,37 @@ export class AgentOrchestrator {
                     const candidates = new Map();
                     for (const fact of cachedSearchResults) {
                         if ((fact.score ?? 0) < 0.5) continue;
-                        const m = (fact.text || "").match(SUFFIX_RE);
-                        if (!m) continue;
-                        const suffix = m[1];
-                        const expectedAccount = m[2].trim();
+                        const parsed = parseSuffixFact(fact.text);
+                        if (!parsed) continue;
+                        const { suffix } = parsed;
+                        // Resolve the written name to a live account first, then
+                        // apply the bank guard to the RESOLVED account. Keying
+                        // the map on the account id (not the name) is what lets
+                        // two spellings of one account still override.
+                        const resolved = resolveFactAccount(
+                            parsed.accountName,
+                            liveAccounts,
+                        );
+                        if (!resolved) {
+                            logger.info({
+                                event: "suffix_fact_unresolved",
+                                suffix,
+                                account: parsed.accountName,
+                            });
+                            continue;
+                        }
                         // Unknown-bank or cross-bank facts must never drive
                         // an override (brand aliases count as same-bank).
-                        if (!nameMatchesBank(expectedAccount, senderBank)) {
+                        if (!nameMatchesBank(resolved.name, senderBank)) {
                             continue;
                         }
                         // Only facts whose suffix actually appears in this email
                         if (!new RegExp(`\\b${suffix}\\b`).test(emailText)) continue;
-                        candidates.set(expectedAccount.toLowerCase(), {
-                            suffix,
-                            expectedAccount,
-                        });
+                        candidates.set(resolved.id, { suffix, match: resolved });
                     }
                     if (candidates.size === 1) {
-                        const { suffix, expectedAccount } = [
-                            ...candidates.values(),
-                        ][0];
-                        const match = liveAccounts.find(
-                            (a) =>
-                                a.name.toLowerCase() ===
-                                    expectedAccount.toLowerCase() &&
-                                !a.closed,
-                        );
-                        if (match && match.id !== output.account_id) {
+                        const { suffix, match } = [...candidates.values()][0];
+                        if (match.id !== output.account_id) {
                             logger.info({
                                 event: "card_suffix_override",
                                 suffix,
@@ -1240,13 +1285,40 @@ export class AgentOrchestrator {
 
     async _detectAccountType(accountName) {
         if (!accountName) return "bank";
+        // Entity equality, not "first memory hit". search_memory returns every
+        // substring hit at score 1.0 in file order, so returning the first
+        // matching fact let an unrelated or stale fact line decide the account
+        // type — and the type drives the credit-card sign flip, i.e. whether a
+        // purchase is booked negative. Only a fact about THIS account counts.
+        const wanted = String(accountName)
+            .replace(/\s+account$/i, "")
+            .replace(/\s+/g, " ")
+            .trim()
+            .toLowerCase();
+        const wantedTokens = wanted.split(" ");
         try {
             const mem = await this._tools.executeTool("search_memory", {
                 query: accountName,
             });
             for (const r of mem?.results || []) {
-                const m = (r.text || "").match(/is an?\s+(.+?)(?:\s+account)?\s*$/i);
-                if (m) return m[1].toLowerCase(); // "credit card", "debit card", "bank"
+                const m = (r.text || "").match(
+                    /^(.+?)\s+is\s+(?:a|an)\s+(.+?)(?:\s+account)?\s*$/i,
+                );
+                if (!m) continue;
+                const entityTokens = m[1]
+                    .replace(/\s+account$/i, "")
+                    .replace(/\s+/g, " ")
+                    .trim()
+                    .toLowerCase()
+                    .split(" ");
+                // Accept only a fact about THIS account. Exact entity, or the
+                // queried name as a prefix of the entity ("UOB One" for
+                // "UOB One is a credit card account"). A different account's
+                // fact must never decide this.
+                const entity =
+                    entityTokens.length >= wantedTokens.length &&
+                    wantedTokens.every((t, i) => entityTokens[i] === t);
+                if (entity) return m[2].toLowerCase();
             }
         } catch {}
         // Fallback: keyword match on account name
@@ -1651,7 +1723,14 @@ export class AgentOrchestrator {
             }
 
             // Learn facts (fire-and-forget, don't block)
-            // Two-step: learn_fact → update_fact on contradiction
+            //
+            // The account-type fact is written only when the entity has no
+            // fact yet. A contradiction is logged, never overwritten: the type
+            // derived here comes from whether THIS transaction was sign-flipped,
+            // so letting it rewrite an existing fact made the stored type
+            // oscillate with the alert stream and silently flip the sign of the
+            // next purchase. Correcting a wrong type is a deliberate edit, not a
+            // side effect of booking a transaction.
             const learnPromises = [];
             if (llmOutput.account_name) {
                 learnPromises.push(
@@ -1667,13 +1746,12 @@ export class AgentOrchestrator {
                                     fact,
                                 },
                             );
-                            if (
-                                learned?.reason === "contradiction" &&
-                                learned?.existing
-                            ) {
-                                await this._tools.executeTool("update_fact", {
-                                    old_text: learned.existing,
-                                    new_text: fact,
+                            if (learned?.reason === "contradiction") {
+                                logger.warn({
+                                    event: "account_type_conflict",
+                                    account: llmOutput.account_name,
+                                    proposed: acctType,
+                                    existing: learned.existing,
                                 });
                             }
                         } catch (e) {
@@ -1714,11 +1792,12 @@ export class AgentOrchestrator {
     /**
      * Build the canonical suffix→account fact. "Card ending X belongs to Y"
      * for card-named accounts, "Account ending X belongs to Y" otherwise.
-     * The prefix is cosmetic — the safety net keys on suffix + account name.
+     * The prefix is cosmetic — the safety net keys on suffix + account name —
+     * so the rule lives in memory.js beside the reader that has to parse it,
+     * and this delegates rather than duplicating it.
      */
     _suffixFactText({ suffix, accountName }) {
-        const prefix = /\bcard\b/i.test(accountName) ? "Card" : "Account";
-        return `${prefix} ending ${suffix} belongs to ${accountName}`;
+        return canonicalSuffixFact({ suffix, accountName });
     }
 
     /**
@@ -1733,8 +1812,14 @@ export class AgentOrchestrator {
         try {
             const learned = await this._tools.executeTool("learn_fact", { fact });
             if (learned?.reason === "contradiction" && learned?.existing) {
-                const existingMatch = learned.existing.match(SUFFIX_RE);
-                const existingAccount = existingMatch ? existingMatch[2].trim() : "";
+                // Parse the STORED fact with the shared tolerant parser, so an
+                // existing fact written as "Card/account …" or with a trailing
+                // full stop still yields a clean account name for the bank
+                // comparison below.
+                const existingParsed = parseSuffixFact(learned.existing);
+                const existingAccount = existingParsed
+                    ? existingParsed.accountName
+                    : "";
                 const newBank = bankFromText(accountName);
                 const existingBank = bankFromText(existingAccount);
                 // Only overwrite on a same-bank rename. A cross-bank collision

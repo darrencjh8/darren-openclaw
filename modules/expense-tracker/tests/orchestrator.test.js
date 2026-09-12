@@ -766,7 +766,7 @@ describe("auto-learn contradiction resolution", () => {
         expect(updateCalls.length).toBe(0);
     });
 
-    it("falls back to update_fact when learn_fact returns contradiction (account)", async () => {
+    it("does NOT overwrite a conflicting account-type fact (issue #331)", async () => {
         const config = makeConfig();
         const tools = makeTools({
             executeTool: vi.fn(async (name, args) => {
@@ -799,12 +799,14 @@ describe("auto-learn contradiction resolution", () => {
 
         await orch.processEmail("test-al3", "raw email");
 
-        // update_fact was called to correct the contradiction
-        expect(tools.executeTool).toHaveBeenCalledWith(
+        // The account type is written once and never overwritten from a
+        // booking: doing so let the stored type oscillate with the alert
+        // stream, which flips the sign of the next purchase and would undo the
+        // cleanup of a wrong type fact. A contradiction is logged instead.
+        expect(tools.executeTool).not.toHaveBeenCalledWith(
             "update_fact",
             expect.objectContaining({
                 old_text: "DBS Yuu is a debit card account",
-                new_text: "DBS Yuu is a bank account",
             }),
         );
     });
