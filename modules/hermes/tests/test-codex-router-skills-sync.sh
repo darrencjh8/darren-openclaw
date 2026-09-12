@@ -299,7 +299,7 @@ fi
 echo "=== a lock left by a dead process is reclaimed ==="
 fresh_fixture
 mkdir -p "$PRIMARY/.codex-router-skills.lock.d"
-# 4194304 is /proc/sys/kernel/pid_max here, so use one past it: no live pid can
+# 4194305 is one past /proc/sys/kernel/pid_max (4194304), so no live pid can
 # ever name it, and the reclaim path must clear the lock.
 echo 4194305 > "$PRIMARY/.codex-router-skills.lock.d/pid"
 stale_rc=0
