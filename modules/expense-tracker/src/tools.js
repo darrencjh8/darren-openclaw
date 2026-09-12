@@ -328,7 +328,7 @@ const TOOLS = [
   {
     name: "insert_transaction",
     description:
-      "Insert a new transaction into Actual Budget. Returns the created transaction with id.",
+      "Insert a new transaction into Actual Budget. Returns the created transaction with id; the id is null when the inserted row cannot be attributed (a concurrent insert on the same account in the same window, or a failed read-back).",
     schema: {
       type: "object",
       properties: {

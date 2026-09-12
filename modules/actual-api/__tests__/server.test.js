@@ -786,27 +786,22 @@ describe("POST /transactions enriched response", () => {
         expect(res.json.mock.calls[0][0].id).toBeNull();
     });
 
-    test("picks the newest new transaction as the inserted id", async () => {
+    test("reports a null id when a concurrent insert makes two rows look new", async () => {
+        // Both rows are absent from the snapshot: the second is a concurrent
+        // POST on the same account inside the window. Nothing distinguishes
+        // them, so no id may be claimed.
         readBack(
+            [],
             [
                 {
-                    id: "older",
-                    account: "acc-1",
-                    date: "2026-06-17",
-                    amount: -425,
-                    sort_order: 1,
-                },
-            ],
-            [
-                {
-                    id: "older",
+                    id: "mine",
                     account: "acc-1",
                     date: "2026-06-17",
                     amount: -425,
                     sort_order: 1,
                 },
                 {
-                    id: "newer",
+                    id: "theirs",
                     account: "acc-1",
                     date: "2026-06-17",
                     amount: -500,
@@ -828,7 +823,7 @@ describe("POST /transactions enriched response", () => {
             res,
         );
 
-        expect(res.json.mock.calls[0][0].id).toBe("newer");
+        expect(res.json.mock.calls[0][0].id).toBeNull();
     });
 
     test("does not return a pre-existing row as the inserted id", async () => {
@@ -963,6 +958,179 @@ describe("POST /transactions enriched response", () => {
             "2026-06-16",
             "2026-06-18",
         );
+        // The diff only means anything while both calls ask for the same rows,
+        // so pin the two windows against each other. The literals above cannot
+        // catch an asymmetry by themselves, because both spell the dates out.
+        const calls = actual.getTransactions.mock.calls;
+        expect(calls[0][0]).toBe(calls[1][0]);
+        expect(calls[0][1]).toBe(calls[1][1]);
+        expect(calls[0][2]).toBe(calls[1][2]);
+    });
+
+    test("reports the persisted amount as a number when the row carries a string", async () => {
+        readBack(
+            [],
+            [
+                {
+                    id: "only-new",
+                    account: "acc-1",
+                    date: "2026-06-17",
+                    // Deliberately different from the request amount below, so
+                    // the assertion can only pass if the persisted string was
+                    // parsed rather than the request echoed.
+                    amount: "-999",
+                    sort_order: 1,
+                },
+            ],
+        );
+        const handler = findHandler("post", "/transactions");
+        const res = mockRes();
+
+        await handler(
+            mockReq({
+                body: {
+                    account: "acc-1",
+                    date: "2026-06-17",
+                    amount: -425,
+                },
+            }),
+            res,
+        );
+
+        const body = res.json.mock.calls[0][0];
+        expect(body.id).toBe("only-new");
+        expect(body.amount).toBe(-999);
+        expect(typeof body.amount).toBe("number");
+    });
+
+    test("falls back to the request amount when the persisted amount is not numeric", async () => {
+        readBack(
+            [],
+            [
+                {
+                    id: "only-new",
+                    account: "acc-1",
+                    date: "2026-06-17",
+                    amount: "n/a",
+                    sort_order: 1,
+                },
+            ],
+        );
+        const handler = findHandler("post", "/transactions");
+        const res = mockRes();
+
+        await handler(
+            mockReq({
+                body: {
+                    account: "acc-1",
+                    date: "2026-06-17",
+                    amount: -425,
+                },
+            }),
+            res,
+        );
+
+        const body = res.json.mock.calls[0][0];
+        expect(body.id).toBe("only-new");
+        // Reporting 0 would claim the row holds no cents.
+        expect(body.amount).toBe(-425);
+    });
+
+    test.each([
+        ["a non-numeric string", "n/a"],
+        ["null", null],
+        ["an empty string", ""],
+        ["a blank string", "   "],
+        ["a hex string", "0x10"],
+        ["an exponent string", "1e3"],
+        ["a boolean", true],
+        ["an array", [5]],
+    ])(
+        "falls back to the request amount when the persisted amount is %s",
+        async (_label, amount) => {
+            readBack(
+                [],
+                [
+                    {
+                        id: "only-new",
+                        account: "acc-1",
+                        date: "2026-06-17",
+                        amount,
+                        sort_order: 1,
+                    },
+                ],
+            );
+            const handler = findHandler("post", "/transactions");
+            const res = mockRes();
+
+            await handler(
+                mockReq({
+                    body: {
+                        account: "acc-1",
+                        date: "2026-06-17",
+                        amount: -425,
+                    },
+                }),
+                res,
+            );
+
+            const body = res.json.mock.calls[0][0];
+            expect(body.id).toBe("only-new");
+            // Reporting 0 would claim a row holds no cents when the amount is
+            // simply absent.
+            expect(body.amount).toBe(-425);
+        },
+    );
+
+    test("echoes the coerced request amount as a number when nothing is attributed", async () => {
+        readBack([], []);
+        const handler = findHandler("post", "/transactions");
+        const res = mockRes();
+
+        await handler(
+            mockReq({
+                body: {
+                    account: "acc-1",
+                    date: "2026-06-17",
+                    amount: "-425",
+                },
+            }),
+            res,
+        );
+
+        expect(res.json.mock.calls[0][0].amount).toBe(-425);
+        expect(typeof res.json.mock.calls[0][0].amount).toBe("number");
+    });
+
+    test("prefers the persisted cleared flag when a rule clears the row", async () => {
+        readBack(
+            [],
+            [
+                {
+                    id: "cleared-by-rule",
+                    account: "acc-1",
+                    date: "2026-06-17",
+                    amount: -425,
+                    cleared: true,
+                    sort_order: 1,
+                },
+            ],
+        );
+        const handler = findHandler("post", "/transactions");
+        const res = mockRes();
+
+        await handler(
+            mockReq({
+                body: {
+                    account: "acc-1",
+                    date: "2026-06-17",
+                    amount: -425,
+                },
+            }),
+            res,
+        );
+
+        expect(res.json.mock.calls[0][0].cleared).toBe(true);
     });
 
     test("finds the inserted row when a rule moves it to an adjacent date", async () => {
@@ -1121,11 +1289,79 @@ describe("POST /transactions enriched response", () => {
     });
 
     test.each([
+        ["omitted", undefined],
+        ["empty", ""],
+        ["blank", "   "],
+        ["text", "abc"],
+        ["fractional", -425.5],
+        ["null", null],
+        ["object", {}],
+        ["true", true],
+        ["false", false],
+        ["an empty array", []],
+        ["a single-item array", [5]],
+        ["a hex string", "0x10"],
+        ["an exponent string", "1e3"],
+        ["a bare plus string", "+5"],
+        ["an unsafe integer string", "9007199254740993"],
+        ["an unsafe integer", 9007199254740993],
+    ])(
+        "returns 400 for the %s amount without inserting",
+        async (_label, amount) => {
+            const handler = findHandler("post", "/transactions");
+            const res = mockRes();
+
+            await handler(
+                mockReq({
+                    body: { account: "acc-1", date: "2026-06-17", amount },
+                }),
+                res,
+            );
+
+            expect(res.status).toHaveBeenCalledWith(400);
+            expect(res.json).toHaveBeenCalledWith({
+                error: "Amount must be an integer number of cents",
+            });
+            expect(actual.addTransactions).not.toHaveBeenCalled();
+            expect(actual.getTransactions).not.toHaveBeenCalled();
+        },
+    );
+
+    test.each([
+        ["a number", -425],
+        ["a numeric string", "-425"],
+        ["zero", 0],
+        ["a zero string", "0"],
+        ["the largest safe integer", Number.MAX_SAFE_INTEGER],
+        ["the smallest safe integer string", String(Number.MIN_SAFE_INTEGER)],
+    ])(
+        "still inserts %s amount",
+        async (_label, amount) => {
+            readBack([], []);
+            const handler = findHandler("post", "/transactions");
+            const res = mockRes();
+
+            await handler(
+                mockReq({
+                    body: { account: "acc-1", date: "2026-06-17", amount },
+                }),
+                res,
+            );
+
+            expect(actual.addTransactions).toHaveBeenCalled();
+            // The insert payload must carry the coerced number, not the raw
+            // string the caller sent.
+            const payload = actual.addTransactions.mock.calls[0][1][0];
+            expect(payload.amount).toBe(Number(amount));
+            expect(typeof payload.amount).toBe("number");
+            expect(res.status).not.toHaveBeenCalled();
+        },
+    );
+
+    test.each([
         "2026-6-7",
         "2026-13-01",
         "2026-06-32",
-        "0000-01-01",
-        "9999-12-31",
         "not-a-date",
     ])(
         "returns 400 for the invalid date %s without inserting",
@@ -1143,6 +1379,28 @@ describe("POST /transactions enriched response", () => {
             expect(res.status).toHaveBeenCalledWith(400);
             expect(res.json).toHaveBeenCalledWith({
                 error: "Invalid date (use YYYY-MM-DD)",
+            });
+            expect(actual.addTransactions).not.toHaveBeenCalled();
+            expect(actual.getTransactions).not.toHaveBeenCalled();
+        },
+    );
+
+    test.each(["0000-01-01", "9999-12-31", "0999-12-31"])(
+        "returns 400 with a range message for the out-of-range date %s",
+        async (date) => {
+            const handler = findHandler("post", "/transactions");
+            const res = mockRes();
+
+            await handler(
+                mockReq({
+                    body: { account: "acc-1", date, amount: -425 },
+                }),
+                res,
+            );
+
+            expect(res.status).toHaveBeenCalledWith(400);
+            expect(res.json).toHaveBeenCalledWith({
+                error: "Date out of supported range",
             });
             expect(actual.addTransactions).not.toHaveBeenCalled();
             expect(actual.getTransactions).not.toHaveBeenCalled();

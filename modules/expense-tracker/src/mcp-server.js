@@ -120,7 +120,7 @@ function createTools(server, registry) {
   );
   server.tool(
     "insert_transaction",
-    "Insert transaction into AB. Dedup checked internally — returns {status: duplicate} if exists. Returns the created transaction with id.",
+    "Insert transaction into AB. Dedup checked internally — returns {status: duplicate} if exists. Returns the created transaction with id; the id is null when the inserted row cannot be attributed.",
     toolShapes.insert_transaction,
     async (a) => tx(await registry.executeTool("insert_transaction", a)),
   );

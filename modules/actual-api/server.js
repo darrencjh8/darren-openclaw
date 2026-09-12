@@ -175,7 +175,12 @@ function buildTransaction(body) {
     const txn = {
         account: account || account_id,
         date: date || new Date().toISOString().slice(0, 10),
-        amount: amount || 0,
+        // Coerce here so a numeric string reaches addTransactions as a number
+        // for a transfer counterpart, and so the response reports the same
+        // number whether it echoes the request or the persisted row. The route
+        // rejects a missing or non-integer amount before this value is used, so
+        // the `|| 0` only guards a direct caller of this exported function.
+        amount: Number(amount) || 0,
         payee_name: payee_name || imported_payee || undefined,
         imported_payee: imported_payee || payee_name || undefined,
         notes: notes || "",
@@ -337,6 +342,26 @@ app.post("/transactions", async (req, res) => {
         if (!txn.account) {
             return res.status(400).json({ error: "Account is required" });
         }
+        // Amount is money at a trust boundary, so reject a missing or
+        // non-integer amount instead of booking it as 0 cents. Only a number or
+        // a plain integer string is accepted: Number() alone would also accept
+        // true, [], [5], "0x10", and "1e3", which would book 1, 0, 5, 16, or
+        // 1000 cents for input nobody sent as an amount. Blanks are rejected
+        // because Number("") and Number(null) are both 0, and the value must be
+        // a safe integer because a longer digit string coerces to a rounded
+        // number and would book cents the caller never sent.
+        const amount = req.body?.amount;
+        const amountIsNumber =
+            typeof amount === "number" && Number.isSafeInteger(amount);
+        const amountIsIntegerString =
+            typeof amount === "string" &&
+            /^-?\d+$/.test(amount.trim()) &&
+            Number.isSafeInteger(Number(amount));
+        if (!amountIsNumber && !amountIsIntegerString) {
+            return res
+                .status(400)
+                .json({ error: "Amount must be an integer number of cents" });
+        }
         // The snapshot is account-scoped, so the account must be present or the
         // read-back could match a row in a different account.
         // readWindow parses the date and shifts it to the neighbouring days, so
@@ -348,13 +373,18 @@ app.post("/transactions", async (req, res) => {
         const parsedDate = new Date(`${txn.date}T00:00:00Z`);
         if (
             Number.isNaN(parsedDate.getTime()) ||
-            parsedDate.toISOString().slice(0, 10) !== txn.date ||
-            txn.date < "1000-01-01" ||
-            txn.date > "9999-12-30"
+            parsedDate.toISOString().slice(0, 10) !== txn.date
         ) {
             return res
                 .status(400)
                 .json({ error: "Invalid date (use YYYY-MM-DD)" });
+        }
+        if (txn.date < "1000-01-01" || txn.date > "9999-12-30") {
+            // Well-formed but outside the range whose neighbouring days stay
+            // four-digit, so the format message above would contradict it.
+            return res
+                .status(400)
+                .json({ error: "Date out of supported range" });
         }
         const window = readWindow(txn.date);
         // Serialize the snapshot, the insert, and the read-back. Without this,
@@ -423,19 +453,38 @@ app.post("/transactions", async (req, res) => {
         } finally {
             unlock();
         }
+        // A synced or imported row can carry the amount as a string, so parse
+        // the persisted value with the same rules as the request: a number, or a
+        // plain decimal string. Number() alone would accept true, [5], "0x10",
+        // and "1e3" and report cents the request never booked, and a nullish or
+        // blank amount must not be trusted either, because Number(null) and
+        // Number("") are a finite 0. Everything else falls back to the request
+        // amount.
+        const persistedAmount = created?.amount;
+        const persistedLooksNumeric =
+            (typeof persistedAmount === "number" &&
+                Number.isFinite(persistedAmount)) ||
+            (typeof persistedAmount === "string" &&
+                /^-?\d+$/.test(persistedAmount.trim()));
+        const parsedPersisted = persistedLooksNumeric
+            ? Number(persistedAmount)
+            : NaN;
+        const responseAmount = Number.isFinite(parsedPersisted)
+            ? parsedPersisted
+            : txn.amount;
         res.json({
             id: created ? created.id : null,
             account: txn.account,
             // Prefer the persisted row: a transfer clears the category, and
-            // rules can rewrite notes, amount, or date, so the request body can
-            // be stale. account, payee_name, and cleared have no comparable
+            // rules can rewrite notes, amount, date, or cleared, so the request
+            // body can be stale. account and payee_name have no comparable
             // persisted value here, so they keep echoing the request.
             date: created?.date ?? txn.date,
-            amount: created?.amount ?? txn.amount,
+            amount: responseAmount,
             payee_name: txn.payee_name,
             notes: created?.notes ?? txn.notes,
             category: (created ? created.category : txn.category) || null,
-            cleared: txn.cleared,
+            cleared: created?.cleared ?? txn.cleared,
         });
     } catch (e) {
         res.status(500).json({ error: e.message });
