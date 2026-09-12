@@ -49,6 +49,73 @@ export {
 /** Semantic-dedup cosine-similarity threshold for free-form facts. */
 const SEMANTIC_THRESHOLD = 0.88;
 
+/**
+ * Minimum cosine similarity for a free-form semantic hit to be returned.
+ * Measured against the live fact set, an unrelated merchant still scores 0.62,
+ * so this floor is a backstop for free-form notes only — merchant mappings are
+ * matched structurally, never by similarity. Issues #420, #471.
+ */
+const SEARCH_MIN_SIMILARITY = 0.6;
+
+/** Shortest structured entity that may match inside a longer merchant string. */
+const MIN_ENTITY_LENGTH = 3;
+
+/** True when `needle` occurs in `haystack` on word boundaries, not inside a word. */
+function containsWord(haystack, needle) {
+  if (!needle) return false;
+  let at = haystack.indexOf(needle);
+  while (at !== -1) {
+    const before = at === 0 ? "" : haystack[at - 1];
+    const after = haystack[at + needle.length] || "";
+    if (!/[a-z0-9]/.test(before) && !/[a-z0-9]/.test(after)) return true;
+    at = haystack.indexOf(needle, at + 1);
+  }
+  return false;
+}
+
+/**
+ * The lowercased key of a fact that maps a merchant to a payee or category
+ * (`amaze* alipayprogra` in `AMAZE* ALIPAYPROGRA maps to Misc payee, no
+ * category (middle-man processor — varies)`), or null for a free-form fact.
+ *
+ * Deliberately looser than `_parseStructured`, which indexes dedup keys: a
+ * mapping whose tail carries a qualifier still names a merchant, and that
+ * qualifier must not hide it from matching.
+ */
+function mappingEntity(fact) {
+  const text = String(fact || "");
+  const normalize = (name) =>
+    name
+      .replace(/[.,;:!?\s]+$/, "")
+      .replace(/\s+/g, " ")
+      .trim()
+      .toLowerCase();
+  const mapsTo = text.match(/^(.+?)\s+(?:merchant\s+)?maps\s+to\s+/i);
+  if (mapsTo) return normalize(mapsTo[1]);
+  const isAccount = text.match(/^(.+?)\s+is\s+(?:a|an)\s+(.+?)\s+account$/i);
+  if (isAccount) return normalize(isAccount[1]);
+  const suffix = text.match(CANONICAL_SUFFIX_RE);
+  if (suffix) return normalize(suffix[2]);
+  return null;
+}
+
+/**
+ * True when `fact` is a mapping for `merchant`: the fact text contains the whole
+ * query, or the fact's key occurs in the merchant on word boundaries. The second
+ * direction matters because an alert merchant carries words the stored key does
+ * not — `AMAZE* ALIPAYPROGRA SINGAPORE SGP` versus the stored key
+ * `AMAZE* ALIPAYPROGRA`. Issue #471.
+ */
+export function factNamesMerchant(fact, merchant) {
+  const text = String(fact || "").toLowerCase();
+  const query = String(merchant || "").toLowerCase().trim();
+  if (!text || !query) return false;
+  if (text.includes(query)) return true;
+  const entity = mappingEntity(fact);
+  if (!entity || entity.length < MIN_ENTITY_LENGTH) return false;
+  return containsWord(query, entity);
+}
+
 export class MemoryStore {
   /**
    * @param {string} path - Path to MEMORY.md
@@ -771,20 +838,59 @@ export class MemoryStore {
       }
     }
 
-    // Sort by similarity descending
+    // Sort by similarity descending, then keep only what the semantic path is
+    // allowed to answer: free-form notes above the floor. A structured merchant
+    // mapping is matched by key, never by similarity.
     results.sort((a, b) => b.score - a.score);
-    return results.slice(0, topK);
+    return results
+      .filter((r) => this._acceptSemanticHit(r.text, r.score))
+      .slice(0, topK)
+      .map((r) => ({ ...r, match: "fuzzy" }));
+  }
+
+  /**
+   * The semantic path exists for free-form notes, not for merchant mappings.
+   * Measured against the live fact set, similarity puts a different merchant
+   * first for 68 of 159 structured facts, and `AMAZE* GREATEASTERN` scores
+   * 0.623 against the `AMAZE* ALIPAYPROGRA SINGAPORE SGP` alert — the wrong
+   * booking in #471. A structured fact is therefore never reachable by
+   * similarity, and a free-form hit must clear the floor. Issues #420, #471.
+   */
+  _acceptSemanticHit(fact, score) {
+    if (mappingEntity(fact)) return false;
+    return score >= SEARCH_MIN_SIMILARITY;
   }
 
   _substringSearch(query, topK) {
     const q = query.toLowerCase();
-    const results = [];
+    const forward = [];
+    const reverse = [];
     for (const f of this._facts) {
       if (f.toLowerCase().includes(q)) {
-        results.push({ text: f, score: 1.0 });
+        forward.push({ text: f, score: 1.0, match: "exact" });
+        continue;
+      }
+      // The merchant carries words the stored key does not — a location suffix,
+      // a terminal id. When the key still names it, this is an exact match.
+      const entity = mappingEntity(f);
+      if (
+        entity &&
+        entity.length >= MIN_ENTITY_LENGTH &&
+        containsWord(q, entity)
+      ) {
+        reverse.push({
+          text: f,
+          score: 1.0,
+          match: "exact",
+          specificity: entity.length,
+        });
       }
     }
-    return results.slice(0, topK);
+    // A longer entity is the more specific match when several keys fit.
+    reverse.sort((a, b) => b.specificity - a.specificity);
+    return [...forward, ...reverse]
+      .slice(0, topK)
+      .map(({ specificity, ...result }) => result);
   }
 
   // ── migration ─────────────────────────────────────────────────

@@ -258,6 +258,27 @@ describe("resolve_merchant pipeline", () => {
     expect(result).toEqual({ payee: "Coffee", source: "memory" });
   });
 
+  it("never takes a payee from a hit for a different merchant (issue #471)", async () => {
+    const memory = mockMemoryStore();
+    // What the store actually returned for the AliPay charge: a same-shaped
+    // neighbour from another merchant, at a score above #420's proposed floor.
+    memory.search = vi.fn(async () => [
+      {
+        text: "AMAZE* GREATEASTERN SINGAPORE SGP maps to Insurance payee",
+        score: 0.623,
+      },
+    ]);
+    const config = mockConfig({ braveSearchApiKey: undefined });
+    const registry = new ToolRegistry(config, memory);
+
+    const result = await registry._handle_resolve_merchant({
+      merchant: "AMAZE* ALIPAYPROGRA SINGAPORE SGP",
+      budget_id: "test-budget",
+    });
+
+    expect(result).toEqual({ payee: "Misc", source: "fallback" });
+  });
+
   it("falls back to Misc when no memory fact (keyword removed)", async () => {
     const memory = mockMemoryStore();
     const config = mockConfig();

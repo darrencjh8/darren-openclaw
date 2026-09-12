@@ -10,6 +10,7 @@ import { simpleParser } from "mailparser";
 import { DedupJournal } from "./dedup.js";
 import { extractPdfFromBuffer, extractEmailContent } from "./extractors.js";
 import { LLMClient } from "./orchestrator.js";
+import { factNamesMerchant } from "./memory.js";
 import { composeNotes } from "./transaction-notes.js";
 import { logger, getLogger, redactSensitive } from "./logging.js";
 
@@ -1511,6 +1512,10 @@ export class ToolRegistry {
       const memResults = await this._memory.search(merchant);
       if (memResults && memResults.length > 0) {
         for (const r of memResults) {
+          // A hit for a different merchant must never supply this one's payee.
+          // Issue #471: a weakly similar neighbour booked an AliPay charge to
+          // the neighbour's payee and then to that payee's category.
+          if (!factNamesMerchant(r.text, merchant)) continue;
           const match = (r.text || "").match(/maps to (.+?) payee/i);
           if (match) return { payee: match[1], source: "memory" };
         }

@@ -125,7 +125,7 @@ describe("MemoryStore", () => {
 
   // Semantic search tests (with mocked model)
   describe("semanticSearch", () => {
-    it("returns results sorted by similarity score when model is loaded", async () => {
+    it("returns semantic results sorted by similarity score when model is loaded", async () => {
       const store = new MemoryStore(tempMemoryPath);
       const loaded = await store.ready();
       if (!loaded) {
@@ -136,18 +136,11 @@ describe("MemoryStore", () => {
       }
       expect(store._model).not.toBeNull();
 
+      // Every fact in tempMemoryPath is a structured mapping, which the semantic
+      // path may no longer answer (#471), so this must be empty rather than a
+      // smeared neighbour.
       const results = await store.search("debit card info", 3);
-      expect(results.length).toBeGreaterThan(0);
-      // Each result should have text and score
-      for (const r of results) {
-        expect(r).toHaveProperty("text");
-        expect(r).toHaveProperty("score");
-        expect(typeof r.score).toBe("number");
-      }
-      // Scores should be in descending order
-      for (let i = 1; i < results.length; i++) {
-        expect(results[i - 1].score).toBeGreaterThanOrEqual(results[i].score);
-      }
+      expect(results).toEqual([]);
     });
 
     it("returns results with scores in [0,1] range", async () => {
@@ -1922,5 +1915,78 @@ describe("MemoryStore", () => {
       expect(facts).toContain("GrabFood Express maps to Food payee");
       expect(facts).toContain("GrabPay topup is a payment account");
     });
+  });
+});
+
+// ── Issues #420, #471: a merchant mapping must name the merchant ──────────
+describe("merchant mapping lookup", () => {
+  const ALIPAY_FACTS = [
+    "- AMAZE* ALIPAYPROGRA maps to Misc payee, no category (middle-man processor — varies)",
+    "- AMAZE* GREATEASTERN maps to Insurance payee",
+    "- Insurance maps to Malaysia Insurances category",
+  ].join("\n");
+
+  it("matches a stored key that is a prefix of the alert merchant (#471)", async () => {
+    const path = tempFile(
+      ".md",
+      `# Long-Term Memory\n\n## Facts\n\n${ALIPAY_FACTS}\n`,
+    );
+    const store = new MemoryStore(path);
+    store._model = null; // exercise the deterministic path only
+
+    const results = await store.search("AMAZE* ALIPAYPROGRA SINGAPORE SGP");
+
+    expect(results[0].text).toContain("AMAZE* ALIPAYPROGRA maps to");
+    expect(results[0].score).toBe(1.0);
+    expect(results[0].match).toBe("exact");
+    expect(results.some((r) => r.text.includes("GREATEASTERN"))).toBe(false);
+    unlinkSync(path);
+  });
+
+  it("does not match a key that only occurs inside a longer word", async () => {
+    const path = tempFile(
+      ".md",
+      "# Long-Term Memory\n\n## Facts\n\n- Taxi maps to Household category\n",
+    );
+    const store = new MemoryStore(path);
+    store._model = null;
+
+    expect(await store.search("taxiway")).toEqual([]);
+    unlinkSync(path);
+  });
+
+  it("never reaches a structured mapping by similarity (#420, #471)", () => {
+    const path = tempFile(
+      ".md",
+      `# Long-Term Memory\n\n## Facts\n\n${ALIPAY_FACTS}\n`,
+    );
+    const store = new MemoryStore(path);
+
+    expect(
+      store._acceptSemanticHit(
+        "AMAZE* GREATEASTERN maps to Insurance payee",
+        0.99,
+      ),
+    ).toBe(false);
+    expect(
+      store._acceptSemanticHit("Insurance maps to Malaysia Insurances category", 0.99),
+    ).toBe(false);
+    unlinkSync(path);
+  });
+
+  it("keeps a free-form hit above the floor and drops one below it", () => {
+    const path = tempFile(
+      ".md",
+      "# Long-Term Memory\n\n## Facts\n\n- Darren identifies this as a work expense\n",
+    );
+    const store = new MemoryStore(path);
+
+    expect(
+      store._acceptSemanticHit("Darren identifies this as a work expense", 0.61),
+    ).toBe(true);
+    expect(
+      store._acceptSemanticHit("Darren identifies this as a work expense", 0.59),
+    ).toBe(false);
+    unlinkSync(path);
   });
 });
