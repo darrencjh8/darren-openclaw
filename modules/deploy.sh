@@ -937,12 +937,12 @@ health_ok() {
 failed=0
 
 # ---- codex-router skill payload ----
-# codex-router owns the skills it publishes (dev-loop, code-reviewer, ...). A
-# router-only deploy never rebuilds the Hermes image, so stage its canonical
-# tree onto the Hermes volume and reconcile every runtime skill root here. The
-# same script runs at boot (50-seed-defaults), so a restart cannot resurrect a
-# stale copy.
-if should_deploy "codex-router" || should_deploy "all"; then
+# codex-router owns the skills it publishes (dev-loop, code-reviewer, ...). The
+# deploy.yml checkout always provides modules/codex-router, so stage its
+# canonical tree onto the Hermes volume and reconcile every runtime skill root
+# on any deploy that touches either side. The same script runs at boot
+# (50-seed-defaults), so a restart cannot resurrect a stale copy.
+if should_deploy "codex-router" || should_deploy "hermes" || should_deploy "all"; then
   SKILLS_SRC="$ROOT/modules/codex-router/codex/skills"
   SKILLS_SYNC="$ROOT/modules/hermes/scripts/sync-codex-router-skills.sh"
   if [ ! -d "$SKILLS_SRC" ]; then

@@ -59,6 +59,9 @@ grep -Fq -- 'sync-codex-router-skills.sh' "$DEPLOY_SCRIPT" \
 grep -Fq -- 'modules/codex-router/codex/skills' "$DEPLOY_SCRIPT" \
     && ok "deploy.sh stages the canonical codex-router checkout" \
     || nope "deploy.sh stages the canonical codex-router checkout"
+grep -Eq 'should_deploy "codex-router".*should_deploy "hermes"' "$DEPLOY_SCRIPT" \
+    && ok "deploy.sh syncs on a router-only and a hermes deploy" \
+    || nope "deploy.sh syncs on a router-only and a hermes deploy"
 
 echo "=== the retired reviewer slug is gone from the Hermes module ==="
 slug_hits=$(grep -rIl -- 'auto-thinking-free' \
