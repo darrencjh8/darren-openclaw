@@ -48,7 +48,7 @@ For workflow, tool schemas, and deployment, see `.speckit/features/expense-track
                                ▼
                     ┌──────────────────┐
                     │  ToolRegistry    │
-                    │  22 MCP / 26 REST│
+                    │  24 MCP / 28 REST│
                     │  tools (:8080)   │
                     └────────┬─────────┘
                              │
@@ -83,9 +83,9 @@ The expense-tracker's pre-classification returns `"skip"` for IBKR/trade emails,
 
 ```
 src/
-├── index.js                     (194 lines) App entry: wiring, Express, 26 REST /tools/* routes, MCP server, IMAP
+├── index.js                     (194 lines) App entry: wiring, Express, 28 REST /tools/* routes, MCP server, IMAP
 ├── config.js                    (88 lines)  Env-var Config class (MEMORY_PATH = data/MEMORY.md)
-├── mcp-server.js                (275 lines) MCP Streamable HTTP server — 22 server.tool() registrations
+├── mcp-server.js                (275 lines) MCP Streamable HTTP server — 24 server.tool() registrations
 ├── orchestrator.js              (876 lines) 3-phase alert pipeline (LLM Analysis → Resolution → Execute) + DeepSeekClient
 ├── prompts.js                   (88 lines)  Phase-1 prompt + category picker prompt
 ├── tools.js                     (1562 lines) ToolRegistry: tool schemas + handlers (Actual Budget CRUD, dedup, memory, resolve_merchant)
@@ -102,7 +102,7 @@ src/
     └── matcher.js               (86 lines)  fuzzy match: amount/date/merchant scoring
 ```
 
-The module registers **26 REST `/tools/*` POST endpoints** (`index.js:127-154`) and **22 MCP tools** (`mcp-server.js`). The dedup and statement journals are SQLite (`data/dedup.db`, `data/statement.db`); statement tracking lives in `src/statement/`.
+The module registers **28 REST `/tools/*` POST endpoints** (`index.js:127-155`) and **24 MCP tools** (`mcp-server.js`). The dedup and statement journals are SQLite (`data/dedup.db`, `data/statement.db`); statement tracking lives in `src/statement/`.
 
 ---
 
@@ -182,7 +182,7 @@ Memory tools: `search_memory`, `learn_fact`, `list_facts`, `update_fact`, `delet
 | **Classification** | `_classify_email()` returns correct category; `dispatch_email()` routing logic |
 | **Agent Orchestrator** | Orchestrator construction, message building, SYSTEM_PROMPT content, happy-path flow with mocked LLM |
 | **Statement Pipeline** | StatementProcessor, fuzzy matcher, journal CRUD, reconcile, fetch-unreconciled, record, history |
-| **Tool Registry** | 22 MCP tool schemas / 26 REST endpoints, tool dispatch, individual tool handlers |
+| **Tool Registry** | 24 MCP tool schemas / 28 REST endpoints, tool dispatch, individual tool handlers |
 | **Extractors** | HTML → text, PDF → OCR, MIME multipart extraction, text cleaning |
 | **IMAP** | IMAP connect/fetch/mark-read, idle loop with mocks |
 | **Dedup Journal** | Hash computation, insert/check cycles, duplicate detection |

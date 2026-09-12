@@ -135,6 +135,7 @@ async function main() {
         "fetch_accounts",
         "fetch_categories",
         "fetch_payees",
+        "fetch_budget_month",
         "fetch_recent_transactions",
         "insert_transaction",
         "check_duplicate",

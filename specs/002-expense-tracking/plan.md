@@ -34,7 +34,7 @@
 ```mermaid
 flowchart TB
     subgraph ET["expense-tracker (Node.js 22, Docker)"]
-        IDX["src/index.js — entry: Express, 26 REST /tools/*, MCP server, IMAP"]
+        IDX["src/index.js — entry: Express, 28 REST /tools/*, MCP server, IMAP"]
         IMAP["src/imap.js (imapflow)<br/>IMAP IDLE: persistent conn, auto-reconnect, catch-up"]
         CLS["src/classify.js<br/>pre-classify: transaction | statement | skip"]
         ORCH["src/orchestrator.js — 3-phase alert pipeline<br/>P1 LLM Analysis (fetch_context)<br/>P2 Resolution (memory→web→Misc / category picker)<br/>P3 Execute (insert/skip/notify, learn_fact)"]
@@ -520,7 +520,7 @@ darren-openclaw/
 │           ├── plan.md
 │           └── tasks.md
 ├── src/
-│   ├── index.js                    # Entry: Express, 26 REST /tools/*, MCP, IMAP wiring
+│   ├── index.js                    # Entry: Express, 28 REST /tools/*, MCP, IMAP wiring
 │   ├── config.js                   # Env-var Config class
 │   ├── mcp-server.js               # MCP Streamable HTTP server (22 tools)
 │   ├── orchestrator.js             # 3-phase alert pipeline + DeepSeekClient

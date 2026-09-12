@@ -339,6 +339,25 @@ const TOOLS = [
     },
   },
   {
+    name: "fetch_budget_month",
+    description:
+      "Get one month of the budget: every category group and category with its assigned (budgeted), spent, and balance amounts. Defaults to the current month. Use this for questions about how much is assigned or left to spend in a budget month.",
+    schema: {
+      type: "object",
+      properties: {
+        budget_id: {
+          type: "string",
+          description: "Budget file name (required)",
+        },
+        month: {
+          type: "string",
+          description: "Month as YYYY-MM; defaults to the current month",
+        },
+      },
+      required: ["budget_id"],
+    },
+  },
+  {
     name: "fetch_recent_transactions",
     description:
       "Fetch transactions from Actual Budget. Pass id to fetch a single transaction, or account_id + days to fetch recent ones.",
@@ -1012,6 +1031,13 @@ export class ToolRegistry {
   async _handle_fetch_payees({ budget_id }) {
     if (!budget_id) return { error: "budget_id is required" };
     return this._get("/payees", budget_id);
+  }
+
+  async _handle_fetch_budget_month({ budget_id, month }) {
+    if (!budget_id) return { error: "budget_id is required" };
+    // Omitting the month lets actual-api default to the current month, so the
+    // two cannot disagree about which month "now" is.
+    return this._get("/budget-month", budget_id, month ? { month } : {});
   }
 
   async _handle_fetch_context({ budget_id }) {
