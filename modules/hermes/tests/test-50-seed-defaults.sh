@@ -562,8 +562,29 @@ if [ -n "$seed_fallback" ]; then
     cmp -s "$TMPDIR/fallback/data/config.yaml" "$seed_config" \
         && ok "seed: a failed merge leaves the live config untouched" \
         || nope "seed failure path preserves the live config" "live config was rewritten"
+
+    # A first boot has no live config: the failure path must still bootstrap one.
+    rm -f "$TMPDIR/fallback/data/config.yaml"
+    PATH="$TMPDIR/fallback/bin:$PATH" sh -c "$seed_fallback" 2>/dev/null
+    cmp -s "$TMPDIR/fallback/data/config.yaml" "$TMPDIR/seed/hermes-defaults/config.yaml" \
+        && ok "seed: a failed merge still bootstraps a missing live config" \
+        || nope "seed failure path bootstraps a missing config" "baked config was not copied"
 else
     nope "seed failure path preserves the live config" "merge block not found in $SEED_SCRIPT"
+fi
+
+# Unparseable live YAML must not lose the carried keys without trace: the
+# broken file is kept as config.yaml.invalid before the reseed overwrites it.
+if [ -n "$seed_merge_block" ]; then
+    printf 'hooks:\n  pre_llm_call:\n    - command: /x\n  bad: [unclosed\n' > "$TMPDIR/seed/data/config.yaml"
+    cp "$TMPDIR/seed/data/config.yaml" "$TMPDIR/seed/data/broken.expected"
+    python3 - "$TMPDIR/seed/hermes-defaults/config.yaml" "$TMPDIR/seed/data/config.yaml" \
+        < "$TMPDIR/seed/merge.py" 2>/dev/null
+    cmp -s "$TMPDIR/seed/data/config.yaml.invalid" "$TMPDIR/seed/data/broken.expected" \
+        && ok "seed: an unparseable live config is backed up before reseeding" \
+        || nope "seed backs up unparseable live config" "config.yaml.invalid missing or wrong"
+else
+    nope "seed backs up unparseable live config" "merge block not found in $SEED_SCRIPT"
 fi
 
 seeded_threshold_tokens=$(python3 - "$seed_config" <<'PY'

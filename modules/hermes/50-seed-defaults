@@ -17,6 +17,8 @@
 # this matches the opencode.json merge below. Add a drop list only if a retired
 # key starts breaking boot.
 if ! python3 - /opt/hermes-defaults/config.yaml /opt/data/config.yaml <<'PYCONFIG'
+import os
+import shutil
 import sys
 from pathlib import Path
 
@@ -30,9 +32,18 @@ carried = {}
 if live_path.exists():
     try:
         live = yaml.safe_load(live_path.read_text()) or {}
-    except yaml.YAMLError as exc:
-        print(f"WARNING: {live_path} is not valid YAML ({exc}); reseeding it", file=sys.stderr)
+    except (OSError, UnicodeDecodeError, yaml.YAMLError) as exc:
+        # An unreadable live config parses as empty, so the reseed below would
+        # drop every carried key without trace. Keep a copy an operator can
+        # recover the hooks from before overwriting it.
         live = {}
+        backup_path = live_path.with_name(live_path.name + ".invalid")
+        try:
+            shutil.copyfile(live_path, backup_path)
+            detail = f"backed up to {backup_path}"
+        except OSError as backup_exc:
+            detail = f"backup failed ({backup_exc})"
+        print(f"WARNING: {live_path} is unreadable or not valid YAML ({exc}); {detail}; reseeding it", file=sys.stderr)
     if isinstance(canonical, dict) and isinstance(live, dict):
         for key, value in live.items():
             if key not in canonical:
@@ -44,7 +55,10 @@ live_path.parent.mkdir(parents=True, exist_ok=True)
 text = canonical_path.read_text()
 if carried:
     text = text.rstrip("\n") + "\n\n" + yaml.safe_dump(carried, sort_keys=False)
-live_path.write_text(text)
+# Atomic replace: a kill mid-write must not truncate the live config.
+tmp_path = live_path.with_name(live_path.name + ".tmp")
+tmp_path.write_text(text)
+os.replace(tmp_path, live_path)
 PYCONFIG
 then
     # Merge failed (no python3, no PyYAML, unwritable target). Never fall back
