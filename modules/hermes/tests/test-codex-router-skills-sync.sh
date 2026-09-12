@@ -336,7 +336,12 @@ else
     nope "reclaimed a fallback lock whose holder is gone" "rc=$stale_rc out=$stale_output"
 fi
 
-echo "=== a live lock the reconciler cannot probe is never reclaimed ==="
+echo "=== a live lock is never reclaimed ==="
+# The holder here is this test shell's own live pid, so `kill -0` succeeds and
+# the lock is left alone for that reason. This pins the live-holder case, not
+# the EPERM/`/proc`-hidden branch the script comments on: reaching that branch
+# needs privilege to out-rank the holder's user or to hide /proc, neither of
+# which the suite has.
 fresh_fixture
 mkdir -p "$PRIMARY/.codex-router-skills.lock.d"
 echo $$ > "$PRIMARY/.codex-router-skills.lock.d/pid"
@@ -350,9 +355,9 @@ ep_output=$(HERMES_SKILL_PRIMARY_HOME="$PRIMARY" \
 ep_pid=$(cat "$PRIMARY/.codex-router-skills.lock.d/pid" 2>/dev/null)
 if [[ "$ep_rc" -ne 0 && "$ep_pid" == "$$" \
       && "$ep_output" == *"could not acquire"* ]]; then
-    ok "left a live lock in place instead of reclaiming it"
+    ok "left a live holder's lock in place instead of reclaiming it"
 else
-    nope "left a live lock in place instead of reclaiming it" \
+    nope "left a live holder's lock in place instead of reclaiming it" \
         "rc=$ep_rc pid=${ep_pid:-none} out=$ep_output"
 fi
 rm -rf "$PRIMARY/.codex-router-skills.lock.d"
@@ -479,6 +484,15 @@ else
         "rc=$dbg_rc debounced_looks=${dbg_looks:-0}"
 fi
 
+# Not covered here, and not coverable on the CI runner: a preempted fallback
+# writer whose cleanup must not delete its successor's lock (the `cat pid = $$`
+# guard in the script's trap). Driving that end to end needs the writer to lose
+# the lock while it is still alive, and the pid-file path only reclaims a lock
+# the reconciler cannot prove live — which needs either privilege to out-rank
+# the holder's user (so `kill -0` fails with EPERM) or the ability to make
+# /proc/<pid>/stat unreadable. Neither is available in CI. The adjacent pieces
+# are pinned instead: a live lock is left alone, a dead, padded-dead, or empty
+# pid is reclaimed, and the ownerless-lock debounce re-arms per lock.
 echo "=== an empty source never prunes the managed set ==="
 fresh_fixture
 run "$SOURCE" >/dev/null

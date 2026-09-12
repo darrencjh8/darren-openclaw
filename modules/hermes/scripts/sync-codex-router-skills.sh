@@ -72,8 +72,10 @@ mkdir -p "$PRIMARY_HOME" "$SECONDARY_HOME"
 # `flock` is the primary primitive: the kernel releases it when the holder dies,
 # including across a container recreate where a stored pid could be recycled to
 # an unrelated live process. `HERMES_SKILL_LOCK_MODE=mkdir` forces the fallback
-# (used by tests); the fallback only ever reclaims a lock whose process is gone
-# and refuses to remove a lock it no longer owns.
+# (used by tests). On the pid-file path the fallback only reclaims a lock whose
+# process is provably gone; an ownerless lock directory is reclaimed after a
+# bounded debounce without proof of death. After any reclaim the fallback
+# refuses to remove a lock it no longer owns.
 LOCK_MODE=${HERMES_SKILL_LOCK_MODE:-auto}
 LOCK_BASE=${HERMES_SKILL_LOCK_BASE:-$PRIMARY_HOME/.codex-router-skills.lock}
 MKDIR_LOCK="$LOCK_BASE.d"
@@ -217,16 +219,11 @@ MODES_TMP="$PRIMARY_HOME/.codex-router-modes.$$"
 # change would be skipped as identical and never reach the runtime root. Only
 # directories and regular files are compared, the two types `cp -a` restores,
 # and each listing is sorted so a different readdir order is not read as drift.
-# ponytail: symlink modes are not compared — Linux cannot set them, and a
-# symlink that survives `cp -a` keeps the canonical target string anyway.
+# Symlinks are omitted deliberately: Linux cannot set their modes, and a changed
+# target is already caught by the `--no-dereference` content comparison.
 same_modes() {
     src=$1
     dst=$2
-    # A symlinked root is the one shape where `diff -r` follows the link into a
-    # directory while `find` (no -L) sees a non-directory: the listings would
-    # compare a populated tree against a single root line. Treat that as
-    # different rather than guess.
-    [ -d "$src" ] && [ -d "$dst" ] || return 1
     srclist="$MODES_TMP.src"
     dstlist="$MODES_TMP.dst"
     printf '%s\n' "$(stat -c '%a' "$src")" > "$srclist"
@@ -285,11 +282,12 @@ for target in $TARGETS; do
         [ -f "$source_dir/SKILL.md" ] || continue
         valid_name "$name" || continue
         dest="$target/$name"
-        # `diff -r` is the content comparison and `same_modes` the permission
-        # comparison: a tree is skipped only when both match, so a canonical
-        # permission change still propagates. The modes are only checked once
-        # the contents match, to keep the listing off the common drift path.
-        if [ -d "$dest" ] && diff -r "$source_dir" "$dest" >/dev/null 2>&1 \
+        # `diff -r --no-dereference` is the content comparison, symlink targets
+        # included, and `same_modes` the permission comparison: a tree is skipped
+        # only when both match, so a canonical permission change still
+        # propagates. The modes are only checked once the contents match, to keep
+        # the listing off the common drift path.
+        if [ -d "$dest" ] && diff -r --no-dereference "$source_dir" "$dest" >/dev/null 2>&1 \
             && same_modes "$source_dir" "$dest"; then
             continue
         fi
