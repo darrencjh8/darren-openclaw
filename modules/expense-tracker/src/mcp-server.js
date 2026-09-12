@@ -56,11 +56,12 @@ function createTools(server, registry) {
   );
   server.tool(
     "update_transaction",
-    "Update existing transaction. Payee and category are validated against live lists. Set category_id to null only to clear the category when the resulting payee is Misc.",
+    "Update existing transaction. Payee and category are validated against live lists. When a transfer payee and a plain payee share a name, a bare payee_name selects the transfer payee; pass payee_id to select a specific one. Set category_id to null only to clear the category when the resulting payee is Misc.",
     {
       id: z.string().min(1),
       budget_id: z.string().min(1),
       payee_name: z.string().optional(),
+      payee_id: z.string().optional(),
       notes: z.string().optional(),
       amount: z.number().optional(),
       date: z.string().optional(),

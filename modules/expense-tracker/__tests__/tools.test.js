@@ -291,6 +291,57 @@ describe("ToolRegistry — budget_id validation", () => {
                 error: 'Payee ID "missing-payee" not found in payee list.',
             });
         });
+
+        test("a bare name matching a transfer payee creates the transfer (#421)", async () => {
+            mockFetch
+                .mockResolvedValueOnce({
+                    ok: true,
+                    json: () => [
+                        { id: "payee-misc", name: "Misc" },
+                        {
+                            id: "payee-misc-transfer",
+                            name: "Misc",
+                            transfer_acct: "acct-misc",
+                        },
+                    ],
+                })
+                .mockResolvedValueOnce({
+                    ok: true,
+                    json: () => ({ status: "updated", id: "txn-1" }),
+                });
+
+            await registry.executeTool("update_transaction", {
+                id: "txn-1",
+                budget_id: "My Budget",
+                payee_name: "Misc",
+            });
+
+            const patchBody = JSON.parse(mockFetch.mock.calls[1][1].body);
+            expect(patchBody.payee).toBe("payee-misc-transfer");
+        });
+
+        test("payee_id resolves the payee for the category-clear guard (#421)", async () => {
+            mockFetch
+                .mockResolvedValueOnce({
+                    ok: true,
+                    json: () => [{ id: "payee-misc", name: "Misc" }],
+                })
+                .mockResolvedValueOnce({
+                    ok: true,
+                    json: () => ({ status: "updated", id: "txn-1" }),
+                });
+
+            await registry.executeTool("update_transaction", {
+                id: "txn-1",
+                budget_id: "My Budget",
+                payee_id: "payee-misc",
+                category_id: null,
+            });
+
+            const patchBody = JSON.parse(mockFetch.mock.calls[1][1].body);
+            expect(patchBody.payee).toBe("payee-misc");
+            expect(patchBody.category).toBeNull();
+        });
     });
 
     describe("check_duplicate", () => {
