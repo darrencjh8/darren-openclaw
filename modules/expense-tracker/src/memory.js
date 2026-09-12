@@ -831,9 +831,13 @@ export class MemoryStore {
     const queryOutput = await this._model(query);
     const queryEmbedding = this._meanPool(queryOutput.data, queryOutput.dims);
 
-    // Get embeddings for all facts (cached)
+    // Get embeddings for the facts the semantic path can answer (cached). A
+    // structured mapping is matched by key, never by similarity, so embedding
+    // it only to discard the hit just burns the first query after process
+    // start: 159 of 238 live facts were embedded for nothing (#473).
     const results = [];
     for (const fact of this._facts) {
+      if (mappingEntity(fact)) continue;
       try {
         const embedding = await this._getOrComputeEmbedding(fact);
         const similarity = this._cosineSimilarity(queryEmbedding, embedding);
