@@ -169,12 +169,24 @@ async function applyBudgetSwitch(target) {
  * the lock can land in a budget a concurrent request switched to (#506).
  * `acquireLock` is not reentrant, so `fn` must not call `ensureBudget` or
  * `withBudget`.
+ *
+ * Returns false when the request names a budget that does not exist, so the
+ * caller answers 400 instead of writing into whichever budget is active. A
+ * request that names no budget keeps the active-budget fallback.
  */
 async function withBudget(req, fn) {
+    const requested = getBudgetId(req);
+    // Resolution is read-only, so it stays outside the lock; existence cannot
+    // change while the process runs, and `applyBudgetSwitch` re-checks the
+    // active budget inside the lock.
+    const target = await resolveBudgetTarget(requested);
+    if (requested && !target) return false;
+
     const unlock = await acquireLock();
     try {
-        await applyBudgetSwitch(await resolveBudgetTarget(getBudgetId(req)));
-        return await fn();
+        await applyBudgetSwitch(target);
+        await fn();
+        return true;
     } finally {
         unlock();
     }
@@ -441,17 +453,12 @@ app.post("/transactions", async (req, res) => {
         // not cover it. ponytail: a global lock, so inserts queue behind each
         // other and behind a budget switch; key it per account if either the
         // insert rate or the budget-switch cooldown ever makes that visible.
-        const unlock = await acquireLock();
         let beforeIds = null;
         let created = null;
-        try {
-            // Re-assert the requested budget now that the lock is held. The
-            // check that used to run before this point could not see a switch
-            // another request made in between, so the insert could land in that
-            // request's budget (#506).
-            await applyBudgetSwitch(
-                await resolveBudgetTarget(getBudgetId(req)),
-            );
+        // withBudget serializes the budget assertion, the snapshot, the insert
+        // and the read-back, and answers 400 for a budget that does not exist
+        // instead of writing into whichever budget is active.
+        const knownBudget = await withBudget(req, async () => {
             // Snapshot the account's rows first so the insert can be identified
             // unambiguously afterwards, even if a rule rewrites its amount, date,
             // or payee.
@@ -502,8 +509,9 @@ app.post("/transactions", async (req, res) => {
                     // Read-back is best-effort; the insert already committed.
                 }
             }
-        } finally {
-            unlock();
+        });
+        if (!knownBudget) {
+            return res.status(400).json({ error: "Unknown budget" });
         }
         // A synced or imported row can carry the amount as a string, so parse
         // the persisted value with the same rules as the request: a number, or a
@@ -582,7 +590,12 @@ app.get("/transactions", async (req, res) => {
 
 app.delete("/transactions/:id", async (req, res) => {
     try {
-        await withBudget(req, () => actual.deleteTransaction(req.params.id));
+        const knownBudget = await withBudget(req, () =>
+            actual.deleteTransaction(req.params.id),
+        );
+        if (!knownBudget) {
+            return res.status(400).json({ error: "Unknown budget" });
+        }
         res.json({ status: "deleted", id: req.params.id });
     } catch (e) {
         res.status(500).json({ error: e.message });
@@ -594,9 +607,12 @@ app.post("/transactions/:id/clear", async (req, res) => {
         const { notes } = req.body || {};
         const fields = { cleared: true };
         if (notes) fields.notes = notes;
-        await withBudget(req, () =>
+        const knownBudget = await withBudget(req, () =>
             actual.updateTransaction(req.params.id, fields),
         );
+        if (!knownBudget) {
+            return res.status(400).json({ error: "Unknown budget" });
+        }
         res.json({ status: "cleared", id: req.params.id });
     } catch (e) {
         res.status(500).json({ error: e.message });
@@ -605,9 +621,12 @@ app.post("/transactions/:id/clear", async (req, res) => {
 
 app.post("/transactions/:id/unclear", async (req, res) => {
     try {
-        await withBudget(req, () =>
+        const knownBudget = await withBudget(req, () =>
             actual.updateTransaction(req.params.id, { cleared: false }),
         );
+        if (!knownBudget) {
+            return res.status(400).json({ error: "Unknown budget" });
+        }
         res.json({ status: "uncleared", id: req.params.id });
     } catch (e) {
         res.status(500).json({ error: e.message });
@@ -628,9 +647,12 @@ app.patch("/transactions/:id", async (req, res) => {
         if (Object.keys(fields).length === 0) {
             return res.status(400).json({ error: "No fields to update" });
         }
-        await withBudget(req, () =>
+        const knownBudget = await withBudget(req, () =>
             actual.updateTransaction(req.params.id, fields),
         );
+        if (!knownBudget) {
+            return res.status(400).json({ error: "Unknown budget" });
+        }
         res.json({ status: "updated", id: req.params.id });
     } catch (e) {
         res.status(500).json({ error: e.message });

@@ -311,6 +311,82 @@ describe("a concurrent budget switch cannot redirect a write (issue #506)", () =
     });
 });
 
+describe("a named budget that does not exist is refused, not redirected", () => {
+    test("POST /transactions answers 400 without inserting or switching", async () => {
+        const post = findHandler("post", "/transactions");
+        const res = mockRes();
+
+        await post(
+            mockReq({
+                body: {
+                    budget_id: "no-such-budget",
+                    account: "acc-sgd",
+                    date: "2026-09-01",
+                    amount: -100,
+                },
+            }),
+            res,
+        );
+
+        expect(res.status).toHaveBeenCalledWith(400);
+        expect(res.json).toHaveBeenCalledWith({ error: "Unknown budget" });
+        expect(actual.addTransactions).not.toHaveBeenCalled();
+        expect(actual.downloadBudget).not.toHaveBeenCalled();
+    });
+
+    test("DELETE /transactions/:id answers 400 without deleting", async () => {
+        const handler = findHandler("delete", "/transactions/:id");
+        const res = mockRes();
+
+        await handler(
+            mockReq({
+                body: { budget_id: "no-such-budget" },
+                params: { id: "txn-sgd" },
+            }),
+            res,
+        );
+
+        expect(res.status).toHaveBeenCalledWith(400);
+        expect(actual.deleteTransaction).not.toHaveBeenCalled();
+    });
+
+    test("PATCH /transactions/:id answers 400 without updating", async () => {
+        const handler = findHandler("patch", "/transactions/:id");
+        const res = mockRes();
+
+        await handler(
+            mockReq({
+                body: { budget_id: "no-such-budget", notes: "patched" },
+                params: { id: "txn-sgd" },
+            }),
+            res,
+        );
+
+        expect(res.status).toHaveBeenCalledWith(400);
+        expect(actual.updateTransaction).not.toHaveBeenCalled();
+    });
+
+    test("a request that names no budget keeps the active-budget fallback", async () => {
+        const post = findHandler("post", "/transactions");
+        const res = mockRes();
+
+        await post(
+            mockReq({
+                body: {
+                    account: "acc-sgd",
+                    date: "2026-09-01",
+                    amount: -100,
+                },
+            }),
+            res,
+        );
+
+        expect(res.status).not.toHaveBeenCalled();
+        expect(actual.downloadBudget).not.toHaveBeenCalled();
+        expect(actual.addTransactions).toHaveBeenCalledTimes(1);
+    });
+});
+
 describe("the already-active budget path stays cheap and deadlock-free", () => {
     test("POST /transactions with the active budget inserts without a switch", async () => {
         const post = findHandler("post", "/transactions");
