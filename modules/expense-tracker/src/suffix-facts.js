@@ -61,7 +61,7 @@ export function stopwords() {
 /** Lowercase word tokens. Letters and digits only, so a symbol such as the
  *  degree sign in "OCBC 90°N" splits the token rather than gluing it, letting
  *  "90n" match "OCBC 90N". */
-function accountTokens(text) {
+export function accountTokens(text) {
   return String(text || "")
     .toLowerCase()
     .replace(/(\p{N})(\p{L})/gu, "$1 $2")
@@ -120,6 +120,34 @@ function pluralTrim(tokens) {
 /** Refusal result. Always an object, so callers can log why resolution failed. */
 function refusal(reason) {
   return { matched: false, id: null, name: null, reason };
+}
+
+/**
+ * Resolve a fact's account name the way EVERY reader must: normal word
+ * matching first, then one bounded retry that strips a trailing filler
+ * "account" word.
+ *
+ * The retry accepts only an EXACT token match against a live account. A
+ * containment retry would turn a named-but-absent account into a live sibling:
+ * "UOB One Account" would resolve to "UOB One Card". Keeping this here, rather
+ * than in each caller, is what stops the three readers drifting apart.
+ *
+ * @returns the same shape as `matchAccountByName`.
+ */
+export function resolveFactAccount(accountName, accounts) {
+  const first = matchAccountByName(accountName, accounts);
+  if (first.matched) return first;
+  const stripped = String(accountName || "")
+    .replace(/\s+account$/i, "")
+    .trim();
+  if (stripped === String(accountName || "").trim()) return first;
+  const target = accountTokens(stripped).join(" ");
+  if (!target) return first;
+  const exact = (accounts || []).filter(
+    (a) => a && accountTokens(a.name).join(" ") === target,
+  );
+  if (exact.length !== 1) return first;
+  return matchAccountByName(exact[0].name, accounts);
 }
 
 /**

@@ -1,4 +1,4 @@
-import { matchAccountByName, parseSuffixFact } from "./suffix-facts.js";
+import { parseSuffixFact, resolveFactAccount } from "./suffix-facts.js";
 
 const BANK_ALIASES = [
   ["OCBC", /\b(?:ocbc|oversea\s*chinese\s*banking)\b/i],
@@ -290,40 +290,10 @@ export function identityMappingsFromFacts(facts, accounts) {
     const text = typeof fact === "string" ? fact : fact?.text || "";
     const parsed = parseSuffixFact(text);
     if (parsed) {
-      // Resolve through the shared word matcher so a fact written as "Yuu" or
-      // with a "Card/account" prefix arms the mapping here too, and so a name
-      // that is unknown, ambiguous or closed resolves to nothing rather than
-      // to a sibling account.
-      //
-      // "belongs to OCBC 360 account" carries a filler trailing word, so retry
-      // without it when the full name does not resolve.
-      //
-      // The retry is allowed only when the stripped name still carries a
-      // distinctive word ("OCBC 360 account" -> "OCBC 360"). A kind word with
-      // nothing else is a real account kind ("DBS Account" -> "DBS",
-      // "Trust Bank" -> "Trust"), and stripping it there would resolve a
-      // closed or absent account to a live sibling — the wrong-account booking
-      // #331 is about.
-      const stripped = parsed.accountName
-        .replace(/\s+account$/i, "")
-        .trim();
-      const generic = new Set([
-        "account",
-        "accounts",
-        "bank",
-        "card",
-        "cards",
-        "my",
-        "the",
-      ]);
-      const distinctive = stripped
-        .toLowerCase()
-        .split(/\s+/)
-        .filter((t) => t && !generic.has(t));
-      let resolution = matchAccountByName(parsed.accountName, accounts);
-      if (!resolution.matched && distinctive.length >= 2) {
-        resolution = matchAccountByName(stripped, accounts);
-      }
+      // One shared resolver: normal matching, then a bounded filler-word
+      // retry that only accepts an exact account name. Never containment, so a
+      // named-but-absent account cannot resolve to a live sibling.
+      const resolution = resolveFactAccount(parsed.accountName, accounts);
       const account = resolution.matched
         ? accounts.find((a) => a.id === resolution.id)
         : null;

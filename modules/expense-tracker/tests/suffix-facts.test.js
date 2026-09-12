@@ -303,3 +303,114 @@ describe("regressions found in dev-loop review round 1", () => {
     expect(matchAccountByName("DBS Account", live).name).toBe("DBS Account");
   });
 });
+
+describe("regressions found in dev-loop review rounds 2-3", () => {
+  it("does not let a filler-word retry resolve an absent account to a sibling", async () => {
+    const { identityMappingsFromFacts } = await import("../src/bank-movement.js");
+    // "UOB One Account" is absent; a containment retry would reach "UOB One Card".
+    const m = identityMappingsFromFacts(
+      ["Account ending 4321 belongs to UOB One Account"],
+      [{ id: "uob-card", name: "UOB One Card", closed: false }],
+    );
+    expect(m.suffix.get("4321")).toBeUndefined();
+
+    // The legitimate filler case still resolves by exact name.
+    const ok = identityMappingsFromFacts(
+      ["Account ending 869001 belongs to OCBC 360 account"],
+      [{ id: "ocbc", name: "OCBC 360", closed: false }],
+    );
+    expect(ok.suffix.get("869001")?.name).toBe("OCBC 360");
+  });
+
+  it("arms the safety net for a filler-word fact too", async () => {
+    const { hasUsableSuffixFact } = await import("../src/orchestrator.js");
+    const live = [{ id: "ocbc", name: "OCBC 360", closed: false }];
+    expect(
+      hasUsableSuffixFact(
+        [{ text: "Account ending 9001 belongs to OCBC 360 account", score: 1 }],
+        "From: OCBC card ending 9001",
+        "OCBC",
+        live,
+      ),
+    ).toBe(true);
+  });
+
+  it("does not let a sibling type fact decide this account's sign", async () => {
+    const { AgentOrchestrator } = await import("../src/orchestrator.js");
+    const { mkdtempSync } = await import("fs");
+    const { join } = await import("path");
+    const { tmpdir } = await import("os");
+    void mkdtempSync(join(tmpdir(), "m331-"));
+    const config = {
+      primaryCurrency: "SGD",
+      secondaryCurrency: "MYR",
+      primaryBudgetFile: "b1",
+      secondaryBudgetFile: "b2",
+      llmProvider: "deepseek",
+      llmApiKey: "t",
+      deepseekApiKey: "t",
+    };
+    const tools = {
+      getPhase1ToolSchemas: () => [],
+      setEmailContext: () => {},
+      executeTool: async (name) => {
+        if (name === "search_memory")
+          return {
+            results: [
+              { text: "Trust Card is a credit card account", score: 1 },
+            ],
+          };
+        return true;
+      },
+    };
+    const orch = new AgentOrchestrator(config, tools);
+    // Only one generic token is shared ("trust"), so this must not decide.
+    await expect(orch._detectAccountType("Trust Bank")).resolves.toBe("bank");
+
+    // A genuine same-account fact still decides, including a short stored form.
+    const tools2 = {
+      getPhase1ToolSchemas: () => [],
+      setEmailContext: () => {},
+      executeTool: async (name) =>
+        name === "search_memory"
+          ? { results: [{ text: "DBS Yuu is a credit card account", score: 1 }] }
+          : true,
+    };
+    const orch2 = new AgentOrchestrator(config, tools2);
+    await expect(orch2._detectAccountType("DBS Yuu Card")).resolves.toBe(
+      "credit card",
+    );
+  });
+
+  it("keeps the structured index consistent after cleanup drops a duplicate", async () => {
+    const { MemoryStore } = await import("../src/memory.js");
+    const { mkdtempSync, writeFileSync, readFileSync } = await import("fs");
+    const { join } = await import("path");
+    const { tmpdir } = await import("os");
+    const dir = mkdtempSync(join(tmpdir(), "mem-idx-"));
+    const path = join(dir, "MEMORY.md");
+    writeFileSync(
+      path,
+      [
+        "# Long-Term Memory",
+        "",
+        "## Facts",
+        "",
+        "- Card/account ending 3255 belongs to DBS Yuu Card.",
+        "- Card ending 3255 belongs to DBS Yuu Card",
+        "- BUS/MRT maps to Public Transport payee",
+        "",
+      ].join("\n"),
+    );
+    const store = new MemoryStore(path);
+    await store.cleanup();
+    // A later update must not overwrite an unrelated fact through a stale index.
+    await store.update(
+      "Card ending 3255 belongs to DBS Yuu Card",
+      "Card ending 3255 belongs to DBS Altitude Card",
+    );
+    const written = readFileSync(path, "utf8");
+    expect(written).toContain("Public Transport payee");
+    expect(written).toContain("DBS Altitude Card");
+  });
+});

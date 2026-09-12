@@ -21,11 +21,11 @@ import {
     bankFromText,
 } from "./bank-movement.js";
 import {
+    accountTokens,
     canonicalSuffixFact,
-    matchAccountByName,
     parseSuffixFact,
-    stopwords,
-} from "./memory.js";
+    resolveFactAccount as resolveFactAccountShared,
+} from "./suffix-facts.js";
 import { logger } from "./logging.js";
 
 export class LLMClient {
@@ -267,8 +267,8 @@ export function sanitizeResults(results) {
  * high-score, suffix-format, suffix present in email, and the account it names
  * resolving to a live account whose bank matches the sender.
  *
- * The fact's account name is resolved through `matchAccountByName` rather than
- * compared literally. That is the whole point of issue #331: a fact written as
+ * The fact's account name is resolved through the shared account resolver
+ * rather than compared literally. That is the whole point of issue #331: a fact written as
  * "Yuu" or "Altitude" must still arm the net, and the bank check must run
  * against the resolved account rather than the words the user happened to type.
  * A name that resolves to no account still fails, so this does not loosen the
@@ -296,14 +296,10 @@ export function hasUsableSuffixFact(facts, emailText, senderBank, liveAccounts =
  * Resolve a fact's written account name to a live account.
  *
  * Without live accounts there is nothing to resolve against, so the fact is
- * treated as unusable — the pre-#331 behaviour for callers that only pass fact
- * text, and the reason a resolution test must supply the account list.
+ * treated as unusable. Callers must supply the account list.
  */
 export function resolveFactAccount(accountName, liveAccounts = []) {
-    const name = String(accountName || "").trim();
-    if (!name || !liveAccounts.length) return null;
-    const m = matchAccountByName(name, liveAccounts);
-    return m.matched ? { id: m.id, name: m.name } : null;
+    return resolveFactAccountShared(accountName, liveAccounts);
 }
 
 /** Bill-payment layout — override must never pick the destination card. */
@@ -1303,43 +1299,33 @@ export class AgentOrchestrator {
             const mem = await this._tools.executeTool("search_memory", {
                 query: accountName,
             });
-            // Compare the fact's entity to this account with the SAME word
-            // normalisation the suffix resolver uses, instead of raw text.
-            // Raw comparison was wrong in both directions: a stored short form
-            // ("DBS Yuu" against "DBS Yuu Card") was refused, losing the sign
-            // flip, while a sibling sharing a word prefix could be accepted.
-            const norm = (t) =>
-                String(t || "")
-                    .toLowerCase()
-                    .replace(/[^\p{L}\p{N}]+/gu, " ")
-                    .split(/\s+/)
-                    .filter((w) => w && !stopwords().includes(w));
-            const wanted = norm(
+            // Compare the fact's entity to this account with the SAME token
+            // normaliser the resolver uses. Token overlap was wrong in both
+            // directions before: a stored short form ("DBS Yuu" against
+            // "DBS Yuu Card") was refused, losing the sign flip, while a
+            // sibling sharing one generic word ("Trust Bank" vs "Trust Card",
+            // both reducing to "trust") could be accepted.
+            const wanted = accountTokens(
                 String(accountName).replace(/\s+account$/i, ""),
             );
             for (const r of mem?.results || []) {
-                // Non-greedy type, so a fact whose entity holds the word
-                // "card" ("DBS Yuu Card is a credit card") still parses with
-                // the entity intact. A trailing filler "account" is stripped
-                // from the TYPE separately.
+                // Non-greedy type so an entity containing the word "card"
+                // ("DBS Yuu Card is a credit card") still parses intact; a
+                // trailing filler "account" is stripped from the TYPE below.
                 const m = (r.text || "").match(
                     /^(.+?)\s+is\s+(?:a|an)\s+(.+?)(?:\s+account)?\s*$/i,
                 );
                 if (!m) continue;
-                const entity = norm(m[1].replace(/\s+account$/i, ""));
-                // Same account when one token list is a prefix of the other.
-                // A single-token match needs at least two shared tokens, so the
-                // bare "DBS" left after stripping "DBS Account" cannot let a
-                // sibling's fact decide this account's sign.
-                const shorter =
-                    entity.length <= wanted.length ? entity : wanted;
-                const longer =
-                    entity.length <= wanted.length ? wanted : entity;
-                const isPrefix =
-                    shorter.length > 0 &&
-                    shorter.every((t, i) => longer[i] === t);
-                if (!isPrefix) continue;
-                if (shorter.length < 2 && longer.length > 1) continue;
+                const entity = accountTokens(
+                    m[1].replace(/\s+account$/i, ""),
+                );
+                if (!wanted.length || !entity.length) continue;
+                const same =
+                    entity.join(" ") === wanted.join(" ") ||
+                    (entity.length >= 2 &&
+                        wanted.length >= 2 &&
+                        entity.filter((t) => wanted.includes(t)).length >= 2);
+                if (!same) continue;
                 return m[2].replace(/\s+account$/i, "").trim().toLowerCase();
             }
         } catch {}
