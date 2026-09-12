@@ -532,6 +532,200 @@ describe("AgentOrchestrator", () => {
         expect(notifyCall[1].message).toContain("Toast Box");
     });
 
+    it("refuses the insert when Phase 1 extracted no amount (#508)", async () => {
+        const config = makeConfig();
+        const tools = makeTools({
+            executeTool: vi.fn(async (name, args) => {
+                if (name === "check_duplicate") return false;
+                if (name === "insert_transaction")
+                    return args.amount_cents === undefined
+                        ? { error: "amount_cents is required" }
+                        : true;
+                return true;
+            }),
+        });
+        const orch = new AgentOrchestrator(config, tools);
+
+        const p1 = fakePhase1Output({ amount_cents: undefined });
+        const p2 = fakePhase2Output(p1);
+        orch._runPhase1 = vi.fn().mockResolvedValue(p1);
+        orch._resolvePhase2 = vi.fn().mockResolvedValue(p2);
+
+        const result = await orch.processEmail("test-noamount", "raw email");
+
+        expect(result.action).toBe("error");
+        expect(result.details).toContain("amount_cents is required");
+        const insertCall = tools.executeTool.mock.calls.find(
+            (c) => c[0] === "insert_transaction",
+        );
+        // The absent amount must reach the tool as absent: defaulting it to 0
+        // here is what booked a wrong-amount transaction.
+        expect(insertCall[1].amount_cents).toBeUndefined();
+    });
+
+    it("does not treat a missing amount as a 0-cent duplicate (#508)", async () => {
+        const config = makeConfig();
+        const tools = makeTools({
+            executeTool: vi.fn(async (name, args) => {
+                if (name === "check_duplicate") return true;
+                if (name === "insert_transaction")
+                    return args.amount_cents === undefined
+                        ? { error: "amount_cents is required" }
+                        : true;
+                return true;
+            }),
+        });
+        const orch = new AgentOrchestrator(config, tools);
+
+        const p1 = fakePhase1Output({ amount_cents: undefined });
+        const p2 = fakePhase2Output(p1);
+        orch._runPhase1 = vi.fn().mockResolvedValue(p1);
+        orch._resolvePhase2 = vi.fn().mockResolvedValue(p2);
+
+        const result = await orch.processEmail("test-nodup", "raw email");
+
+        expect(result.action).toBe("error");
+        // A 0-cent lookback could match an unrelated row and silently drop the
+        // alert, so the duplicate check must not run without an amount.
+        expect(tools.executeTool).not.toHaveBeenCalledWith(
+            "check_duplicate",
+            expect.anything(),
+        );
+        const markCalls = tools.executeTool.mock.calls.filter(
+            (c) => c[0] === "mark_email_read",
+        );
+        expect(markCalls.length).toBe(0);
+    });
+
+    it("still checks duplicates for a quoted integer amount (#508)", async () => {
+        const config = makeConfig();
+        const tools = makeTools({
+            executeTool: vi.fn(async (name) => {
+                if (name === "check_duplicate") return true;
+                return true;
+            }),
+        });
+        const orch = new AgentOrchestrator(config, tools);
+
+        const p1 = fakePhase1Output({ amount_cents: "-1280" });
+        const p2 = fakePhase2Output(p1);
+        orch._runPhase1 = vi.fn().mockResolvedValue(p1);
+        orch._resolvePhase2 = vi.fn().mockResolvedValue(p2);
+
+        const result = await orch.processEmail("test-quoted", "raw email");
+
+        // A quoted integer is bookable, so it must not bypass duplicate
+        // detection: the duplicate branch returns before any insert.
+        expect(result.action).toBe("duplicate");
+        expect(tools.executeTool).toHaveBeenCalledWith(
+            "check_duplicate",
+            expect.objectContaining({ amount_cents: "-1280" }),
+        );
+        expect(tools.executeTool).not.toHaveBeenCalledWith(
+            "insert_transaction",
+            expect.anything(),
+        );
+    });
+
+    it("omits a malformed amount from the insert-failure notice (#508)", async () => {
+        const config = makeConfig();
+        const tools = makeTools({
+            executeTool: vi.fn(async (name) => {
+                if (name === "check_duplicate") return false;
+                if (name === "insert_transaction")
+                    throw new Error(
+                        "actual-api 400: Amount must be an integer number of cents",
+                    );
+                return true;
+            }),
+        });
+        const orch = new AgentOrchestrator(config, tools);
+
+        const p1 = fakePhase1Output({ amount_cents: "1e3" });
+        const p2 = fakePhase2Output(p1);
+        orch._runPhase1 = vi.fn().mockResolvedValue(p1);
+        orch._resolvePhase2 = vi.fn().mockResolvedValue(p2);
+
+        await orch.processEmail("test-badamount", "raw email");
+
+        const notify = tools.executeTool.mock.calls.find(
+            (c) => c[0] === "notify_user",
+        );
+        // "1e3" is not a bookable amount, so the alert must not convert it into
+        // a plausible-looking "SGD 10" figure.
+        expect(notify[1].message).not.toContain("SGD");
+        expect(notify[1].message).toContain("actual-api 400");
+    });
+
+    it("omits a malformed amount from the success notice and summary (#508)", async () => {
+        const config = makeConfig();
+        const tools = makeTools({
+            executeTool: vi.fn(async (name) => {
+                if (name === "check_duplicate") return false;
+                if (name === "insert_transaction") return { id: "txn-1" };
+                if (name === "notify_user") return true;
+                return true;
+            }),
+        });
+        const orch = new AgentOrchestrator(config, tools);
+
+        // A non-bookable amount only reaches Phase 3 through a direct caller,
+        // but the notice must still not turn it into money.
+        const p1 = fakePhase1Output({ amount_cents: "1e3" });
+        const p2 = fakePhase2Output(p1);
+        orch._runPhase1 = vi.fn().mockResolvedValue(p1);
+        orch._resolvePhase2 = vi.fn().mockResolvedValue(p2);
+
+        const result = await orch.processEmail("test-badamount-ok", "raw email");
+
+        const notify = tools.executeTool.mock.calls.find(
+            (c) => c[0] === "notify_user",
+        );
+        expect(notify[1].message).not.toContain("S$");
+        expect(notify[1].message).toContain("at Toast Box");
+        expect(result.action).toBe("inserted");
+        expect(result.details).not.toContain("SGD");
+    });
+
+    it("retries when the extracted amount is not a bookable shape (#508)", async () => {
+        const config = makeConfig();
+        const payload = {
+            merchant: "Toast Box",
+            amount_cents: "1e3",
+            date: new Date().toISOString().slice(0, 10),
+            currency: "SGD",
+            account_id: "acc-1",
+            action: "insert",
+        };
+        const tools = makeTools({
+            getPhase1ToolSchemas: vi.fn(() => []),
+            executeTool: vi.fn(async (name) => {
+                if (name === "fetch_context")
+                    return {
+                        accounts: [
+                            { id: "acc-1", name: "DBS Nova", closed: false },
+                        ],
+                        categories: [],
+                        payees: [],
+                    };
+                return true;
+            }),
+        });
+        const orch = new AgentOrchestrator(config, tools);
+        orch._llm.chat = vi.fn().mockResolvedValue({
+            choices: [{ message: { content: JSON.stringify(payload) } }],
+        });
+
+        const result = await orch._runPhase1("raw email body", {
+            receivedAt: new Date().toISOString(),
+        });
+
+        // "1e3" is an extraction failure, not money: the pipeline retries and
+        // gives up rather than letting Phase 2 coerce it into a booking.
+        expect(result).toBeNull();
+        expect(orch._llm.chat.mock.calls.length).toBeGreaterThan(1);
+    });
+
     it("does not mark email read when insert_transaction fails", async () => {
         const config = makeConfig();
         const tools = makeTools({

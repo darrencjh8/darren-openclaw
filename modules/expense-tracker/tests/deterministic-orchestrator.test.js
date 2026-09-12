@@ -2557,6 +2557,63 @@ describe("Phase 2: Sign correction", () => {
       expect(result._sign_flipped).toBe(true);
     });
 
+    it("does not book a bank movement whose amount did not parse (#508)", async () => {
+      const { AgentOrchestrator } = await import("../src/orchestrator.js");
+      const { parseBankMovement } = await import("../src/bank-movement.js");
+      const tools = makeTools();
+      const orch = new AgentOrchestrator(makeConfig(), tools);
+
+      // The amount regex accepts "1.2.3", but cents() cannot parse it.
+      const movement = parseBankMovement(
+        "Date of Transfer : 01 Sep 2026 Time of Transfer : 01.06 AM SGT Amount : SGD 1.2.3 From your account : 111 Account (-869001) To account : Example Trust (-310980) at TRUST BANK SINGAPORE LIMITED Reference number : REF-OCBC-1",
+        { senderBank: "OCBC", receivedAt: "2026-09-01T01:05:00+08:00" },
+      );
+      expect(movement).not.toBeNull();
+      expect(movement.amount_cents).toBeNull();
+
+      const result = await orch._resolveMovementToOutput(movement);
+
+      expect(result).toBeNull();
+      // Nothing was booked and no context was even fetched.
+      expect(tools.executeTool).not.toHaveBeenCalled();
+    });
+
+    it("does not reinterpret a malformed amount for a credit card (#508)", async () => {
+      const { AgentOrchestrator } = await import("../src/orchestrator.js");
+      const config = makeConfig();
+      const tools = makeTools({
+        executeTool: vi.fn(async (name) => {
+          if (name === "search_memory") {
+            return {
+              results: [
+                { text: "UOB Unity is a credit card account", score: 0.9 },
+              ],
+            };
+          }
+          return true;
+        }),
+      });
+      const orch = new AgentOrchestrator(config, tools);
+
+      const phase1Output = {
+        merchant: "AMAZE* GREATEASTERN",
+        amount_cents: "1e3",
+        date: "2026-06-19",
+        currency: "SGD",
+        account_id: "acc-1",
+        account_name: "UOB Unity",
+        budget_id: "primary-budget-id",
+        action: "insert",
+      };
+
+      const result = await orch._resolvePhase2(phase1Output);
+
+      // -Math.abs(Number("1e3")) would be -1000: a bookable figure the route
+      // accepts, so a malformed extraction must not be converted here.
+      expect(result.amount_cents).toBe("1e3");
+      expect(result._sign_flipped).toBeUndefined();
+    });
+
     it("keeps negative as negative for credit card (idempotent)", async () => {
       const { AgentOrchestrator } = await import("../src/orchestrator.js");
       const config = makeConfig();
