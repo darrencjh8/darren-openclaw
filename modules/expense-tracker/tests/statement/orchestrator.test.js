@@ -548,7 +548,7 @@ describe("DeepSeekClient API format", () => {
     const kwargs = callArgs[0];
     expect(kwargs.messages).toBeDefined();
     expect(kwargs.messages[0].content).toBe("hello");
-    expect(kwargs.thinking).toEqual({ type: "low" });
+    expect(kwargs.thinking).toEqual({ type: "adaptive" });
     expect(kwargs.model).toBe("deepseek-flash");
   });
 
@@ -567,10 +567,10 @@ describe("DeepSeekClient API format", () => {
     const kwargs = mockCreate.mock.calls[0][0];
     expect(kwargs.tools).toEqual(tools);
     expect(kwargs.tool_choice).toBe("auto");
-    expect(kwargs.thinking).toEqual({ type: "low" });
+    expect(kwargs.thinking).toEqual({ type: "adaptive" });
   });
 
-  it("uses low thinking on the statement deepseek route with the default effort", async () => {
+  it("uses adaptive thinking on the statement deepseek route, which has no low effort", async () => {
     const config = makeConfig();
     const client = new DeepSeekClient(config);
 
@@ -582,7 +582,7 @@ describe("DeepSeekClient API format", () => {
     const tools = [{ type: "function", function: { name: "fetch_history" } }];
     await client.chat([{ role: "user", content: "reconcile" }], tools);
 
-    expect(mockCreate.mock.calls[0][0].thinking).toEqual({ type: "low" });
+    expect(mockCreate.mock.calls[0][0].thinking).toEqual({ type: "adaptive" });
   });
 
   it("retries on failure then succeeds on second attempt", async () => {

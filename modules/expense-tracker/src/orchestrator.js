@@ -103,7 +103,18 @@ export class LLMClient {
             const reasoning = opts.reasoning || "auto";
             if (route.provider === "deepseek") {
                 if (reasoning !== "disabled" && (reasoning === "adaptive" || !toolChoice || toolChoice === "auto")) {
-                    kwargs.thinking = { type: reasoning === "auto" ? this._reasoningEffort : reasoning };
+                    // This route rejects any other `thinking.type` with
+                    // `400 ... unknown variant`, and the captured production
+                    // error names its accepted set as `adaptive`, `enabled`,
+                    // `disabled`. The low/medium/high effort scale is not part of
+                    // it, so an effort value falls back to the model-decides
+                    // mode rather than going on the wire.
+                    const thinking = reasoning === "auto" ? this._reasoningEffort : reasoning;
+                    kwargs.thinking = {
+                        type: ["adaptive", "enabled", "disabled"].includes(thinking)
+                            ? thinking
+                            : "adaptive",
+                    };
                 }
             } else if (reasoning !== "disabled") {
                 kwargs.reasoning_effort = this._reasoningEffort;
