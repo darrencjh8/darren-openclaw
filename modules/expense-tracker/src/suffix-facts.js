@@ -148,8 +148,8 @@ function refusal(reason) {
  *
  * @returns the same shape as `matchAccountByName`.
  */
-export function resolveFactAccount(accountName, accounts) {
-  const first = matchAccountByName(accountName, accounts);
+export function resolveFactAccount(accountName, accounts, aliases) {
+  const first = matchAccountByName(accountName, accounts, aliases);
   if (first.matched) return first;
   const stripped = String(accountName || "")
     .replace(/\s+accounts?$/i, "")
@@ -161,7 +161,7 @@ export function resolveFactAccount(accountName, accounts) {
     (a) => a && accountTokens(a.name).join(" ") === target,
   );
   if (exact.length !== 1) return first;
-  return matchAccountByName(exact[0].name, accounts);
+  return matchAccountByName(exact[0].name, accounts, aliases);
 }
 
 /**
@@ -187,11 +187,16 @@ export function resolveFactAccount(accountName, accounts) {
  *
  * @returns {{matched: boolean, id: string|null, name: string|null, reason?: string}}
  */
-export function matchAccountByName(nameText, accounts) {
+export function matchAccountByName(nameText, accounts, aliases) {
   const all = (accounts || []).filter(Boolean);
   if (!all.length) return refusal("no live accounts");
 
-  const raw = accountTokens(stripParenthesisedId(nameText));
+  // An alert may name the product ("Main Account", "Trust Cashback card"),
+  // which no account is called. Substitute the live account the alias points at
+  // before matching; everything below then behaves exactly as before. #496.
+  const written = accountTokens(stripParenthesisedId(nameText)).join(" ");
+  const aliased = aliases?.get(written);
+  const raw = accountTokens(stripParenthesisedId(aliased || nameText));
   if (!raw.length) return refusal("empty account name");
 
   const nameCounts = new Map();
@@ -251,4 +256,37 @@ export function matchAccountByName(nameText, accounts) {
   if (candidates.length === 0) return refusal("no account matches those words");
   if (candidates.length > 1) return refusal("ambiguous");
   return resolve(candidates[0]);
+}
+
+/**
+ * Names a bank alert uses for an account that is not its Actual name:
+ * `Main Account is a Ryt Bank account`, `Trust Cashback card is a Trust Card
+ * account`. A product name cannot be matched against an account list at all, so
+ * the written name is looked up here first. Issue #496.
+ *
+ * Only facts whose target is a LIVE account become aliases, which is what keeps
+ * every type fact out of the map: `Citi Reward is a credit card account` targets
+ * `credit card`, and no account is called that.
+ *
+ * @param {Array<{text?: string}|string>} facts records from `search_memory`
+ * @param {Array<{name: string}>} accounts live accounts
+ * @returns {Map<string, string>} normalised alias to the live account's name
+ */
+export function accountAliases(facts, accounts) {
+  const aliases = new Map();
+  for (const record of facts || []) {
+    const text = typeof record === "string" ? record : record?.text;
+    const m = String(text || "").match(
+      /^(.+?)\s+is\s+(?:a|an)\s+(.+?)\s+account$/i,
+    );
+    if (!m) continue;
+    const alias = accountTokens(m[1]).join(" ");
+    const target = accountTokens(m[2]).join(" ");
+    if (!alias || !target) continue;
+    const live = (accounts || []).find(
+      (a) => a && accountTokens(a.name).join(" ") === target,
+    );
+    if (live) aliases.set(alias, live.name);
+  }
+  return aliases;
 }

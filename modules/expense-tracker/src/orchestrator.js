@@ -21,6 +21,7 @@ import {
     bankFromText,
 } from "./bank-movement.js";
 import {
+    accountAliases,
     accountTokens,
     canonicalSuffixFact,
     parseSuffixFact,
@@ -297,7 +298,11 @@ export function hasUsableSuffixFact(facts, emailText, senderBank, liveAccounts =
         if ((f.score ?? 0) < 0.5) return false;
         const parsed = parseSuffixFact(f.text);
         if (!parsed) return false;
-        const resolved = resolveFactAccount(parsed.accountName, liveAccounts);
+        const resolved = resolveFactAccount(
+            parsed.accountName,
+            liveAccounts,
+            accountAliases(facts, liveAccounts),
+        );
         if (!resolved || !resolved.matched) return false;
         if (!nameMatchesBank(resolved.name, senderBank)) return false;
         return new RegExp(`\\b${parsed.suffix}\\b`).test(emailText);
@@ -1100,6 +1105,7 @@ export class AgentOrchestrator {
                         const resolved = resolveFactAccount(
                             parsed.accountName,
                             liveAccounts,
+                            accountAliases(cachedSearchResults, liveAccounts),
                         );
                         if (!resolved || !resolved.matched) {
                             logger.info({

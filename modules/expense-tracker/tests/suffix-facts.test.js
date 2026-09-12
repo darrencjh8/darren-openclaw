@@ -12,7 +12,7 @@ import {
   stopwords,
 } from "../src/memory.js";
 // memory.js does not re-export this one, and the plural filler retry lives on it.
-import { resolveFactAccount } from "../src/suffix-facts.js";
+import { accountAliases, resolveFactAccount } from "../src/suffix-facts.js";
 
 // Synthetic account names, deliberately shaped like a real portfolio: several
 // accounts share a brand token, some are card-named and some account-named, one
@@ -539,5 +539,58 @@ describe("issue #469 item 1: writing an exact account name always resolves", () 
     expect(
       matchAccountByName(name, [{ id: name, name, closed: false }]).name,
     ).toBe(name);
+  });
+});
+
+// ── Issue #496: a bank alert may name the product, not the account ────────
+describe("account aliases (#496)", () => {
+  const live = [
+    { id: "ryt", name: "Ryt Bank", closed: false },
+    { id: "trust-bank", name: "Trust Bank", closed: false },
+    { id: "trust-card", name: "Trust Card", closed: false },
+  ];
+  const alertFacts = [
+    { text: "Main Account is a Ryt Bank account" },
+    { text: "Trust Cashback card is a Trust Card account" },
+    { text: "Citi Reward is a credit card account" },
+    { text: "Trust Bank is a bank account" },
+  ];
+
+  it("resolves a product name the alert uses instead of the account name", () => {
+    const aliases = accountAliases(alertFacts, live);
+    expect(matchAccountByName("Main Account", live, aliases).name).toBe("Ryt Bank");
+    expect(matchAccountByName("Trust Cashback card", live, aliases).name).toBe(
+      "Trust Card",
+    );
+  });
+
+  it("only aliases facts whose target is a live account", () => {
+    // "credit card" and "bank" are kinds, not accounts, so they stay out.
+    const aliases = accountAliases(alertFacts, live);
+    expect(aliases.size).toBe(2);
+    expect(aliases.has("citi reward")).toBe(false);
+    expect(aliases.has("trust bank")).toBe(false);
+  });
+
+  it("leaves every existing rule alone when no alias applies", () => {
+    const aliases = accountAliases(alertFacts, live);
+    // Exact name still wins.
+    expect(matchAccountByName("Trust Card", live, aliases).name).toBe("Trust Card");
+    // A named-but-absent account still refuses rather than reaching a sibling.
+    expect(
+      matchAccountByName("Trust Account", [live[2]], aliases).matched,
+    ).toBe(false);
+    // An unknown product name still refuses.
+    expect(matchAccountByName("Some Other Product", live, aliases).matched).toBe(
+      false,
+    );
+  });
+
+  it("does not alias a product name to an account that is not live", () => {
+    const aliases = accountAliases(
+      [{ text: "Main Account is a Ryt Bank account" }],
+      [{ id: "dbs", name: "DBS Account", closed: false }],
+    );
+    expect(aliases.size).toBe(0);
   });
 });

@@ -1,4 +1,4 @@
-import { parseSuffixFact, resolveFactAccount } from "./suffix-facts.js";
+import { accountAliases, parseSuffixFact, resolveFactAccount } from "./suffix-facts.js";
 
 const BANK_ALIASES = [
   ["OCBC", /\b(?:ocbc|oversea\s*chinese\s*banking)\b/i],
@@ -293,7 +293,11 @@ export function identityMappingsFromFacts(facts, accounts) {
       // One shared resolver: normal matching, then a bounded filler-word
       // retry that only accepts an exact account name. Never containment, so a
       // named-but-absent account cannot resolve to a live sibling.
-      const resolution = resolveFactAccount(parsed.accountName, accounts);
+      const resolution = resolveFactAccount(
+        parsed.accountName,
+        accounts,
+        accountAliases(facts, accounts),
+      );
       const account = resolution.matched
         ? accounts.find((a) => a.id === resolution.id)
         : null;
