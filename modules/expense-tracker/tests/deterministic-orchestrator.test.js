@@ -18,7 +18,7 @@ function makeConfig(overrides = {}) {
     llmApiKey: "sk-test",
     llmBaseUrl: "https://api.deepseek.com/v1",
     llmModel: "deepseek-v4-pro",
-    llmReasoningEffort: "adaptive",
+    llmReasoningEffort: "low",
     primaryCurrency: "SGD",
     secondaryCurrency: "MYR",
     primaryBudgetFile: "primary-budget-id",

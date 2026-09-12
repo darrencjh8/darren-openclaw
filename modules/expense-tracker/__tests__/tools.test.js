@@ -54,7 +54,7 @@ function mockConfig() {
         llmApiKey: "sk-test",
         llmBaseUrl: "https://api.deepseek.com/v1",
         llmModel: "deepseek-v4-pro",
-        llmReasoningEffort: "adaptive",
+        llmReasoningEffort: "low",
         actualBudgetUrl: "http://actual-api:3000",
         actualBudgetPassword: "pw",
         primaryBudgetFile: "My Budget",

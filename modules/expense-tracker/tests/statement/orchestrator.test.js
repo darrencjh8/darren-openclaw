@@ -26,7 +26,7 @@ function makeConfig(overrides = {}) {
     llmApiKey: "sk-test",
     llmBaseUrl: "https://api.deepseek.com/v1",
     llmModel: "deepseek-v4-pro",
-    llmReasoningEffort: "adaptive",
+    llmReasoningEffort: "low",
     systemPrompt: "You are a test agent.",
     actualBudgetFile: "test-budget",
     openclawGatewayUrl: "http://openclaw:18800",
@@ -548,7 +548,7 @@ describe("DeepSeekClient API format", () => {
     const kwargs = callArgs[0];
     expect(kwargs.messages).toBeDefined();
     expect(kwargs.messages[0].content).toBe("hello");
-    expect(kwargs.thinking).toEqual({ type: "adaptive" });
+    expect(kwargs.thinking).toEqual({ type: "low" });
     expect(kwargs.model).toBe("deepseek-v4-pro");
   });
 
@@ -567,11 +567,11 @@ describe("DeepSeekClient API format", () => {
     const kwargs = mockCreate.mock.calls[0][0];
     expect(kwargs.tools).toEqual(tools);
     expect(kwargs.tool_choice).toBe("auto");
-    expect(kwargs.thinking).toEqual({ type: "adaptive" });
+    expect(kwargs.thinking).toEqual({ type: "low" });
   });
 
   it("uses low thinking on the statement deepseek route with the default effort", async () => {
-    const config = makeConfig({ llmReasoningEffort: "low" });
+    const config = makeConfig();
     const client = new DeepSeekClient(config);
 
     const mockCreate = vi.fn().mockResolvedValue({

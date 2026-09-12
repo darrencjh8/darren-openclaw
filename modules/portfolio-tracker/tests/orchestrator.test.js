@@ -68,7 +68,7 @@ describe("DeepSeekClient", () => {
                 model: "deepseek-chat",
                 messages,
                 temperature: 0.1,
-                thinking: { type: "adaptive" },
+                thinking: { type: "low" },
             }),
         );
         expect(response).toBe(mockResponse);
