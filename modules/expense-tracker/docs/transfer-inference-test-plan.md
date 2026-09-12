@@ -336,7 +336,7 @@ All test emails are sanitized synthetic fixtures. No production email content, c
 
 Create sanitized fixtures for:
 
-- OCBC outgoing transfer to Zeta Bank.
+- OCBC outgoing transfer to Trust Bank.
 - Trust incoming transfer from OCBC.
 - Existing DBS bill-payment transfer format, including `Date and Time` and transaction reference.
 - Epsilon Vista to Citi Credit Cards bill payment.
@@ -370,7 +370,7 @@ PASS: Previously unseen card account in live Actual context resolves without reg
 PASS: Full suffix `869001` resolves OCBC 111.
 PASS: `9001` resolves OCBC 111 only when it uniquely matches that bank's last four digits.
 PASS: `9001` is unresolved when two OCBC accounts match.
-PASS: Exact Zeta Bank + `310980` resolves Zeta Card.
+PASS: Exact Trust Bank + `310980` resolves Zeta Card.
 PASS: Exact DBS + `9302` resolves Epsilon Vista even if live Actual name is `Vista`.
 PASS: Exact UOB CREDIT CARDS + `4605` resolves UOB Card only when configured and open.
 PASS: Exact CITI CREDIT CARDS + `4756` resolves Citi Card only when configured and open.
