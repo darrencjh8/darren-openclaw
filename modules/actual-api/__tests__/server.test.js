@@ -1113,6 +1113,65 @@ describe("POST /transactions enriched response", () => {
         expect(res.status).toHaveBeenCalledWith(400);
         expect(actual.addTransactions).not.toHaveBeenCalled();
     });
+
+    test("returns 400 for a date outside YYYY-MM-DD without inserting", async () => {
+        const handler = findHandler("post", "/transactions");
+        const res = mockRes();
+
+        await handler(
+            mockReq({
+                body: {
+                    account: "acc-1",
+                    date: "2026-6-7",
+                    amount: -425,
+                },
+            }),
+            res,
+        );
+
+        expect(res.status).toHaveBeenCalledWith(400);
+        expect(res.json).toHaveBeenCalledWith({
+            error: "Invalid date (use YYYY-MM-DD)",
+        });
+        expect(actual.addTransactions).not.toHaveBeenCalled();
+    });
+
+    test("picks the newest of two new rows on the window", async () => {
+        readBack(
+            [],
+            [
+                {
+                    id: "rule-created",
+                    account: "acc-1",
+                    date: "2026-06-16",
+                    amount: -10,
+                    sort_order: 100,
+                },
+                {
+                    id: "inserted",
+                    account: "acc-1",
+                    date: "2026-06-17",
+                    amount: -425,
+                    sort_order: 200,
+                },
+            ],
+        );
+        const handler = findHandler("post", "/transactions");
+        const res = mockRes();
+
+        await handler(
+            mockReq({
+                body: {
+                    account: "acc-1",
+                    date: "2026-06-17",
+                    amount: -425,
+                },
+            }),
+            res,
+        );
+
+        expect(res.json.mock.calls[0][0].id).toBe("inserted");
+    });
 });
 
 describe("readWindow", () => {

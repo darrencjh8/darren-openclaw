@@ -336,6 +336,13 @@ app.post("/transactions", async (req, res) => {
         }
         // The snapshot is account-scoped, so the account must be present or the
         // read-back could match a row in a different account.
+        // readWindow parses the date, so an out-of-contract date would fail the
+        // request before the insert; reject it explicitly instead.
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(txn.date)) {
+            return res
+                .status(400)
+                .json({ error: "Invalid date (use YYYY-MM-DD)" });
+        }
         const window = readWindow(txn.date);
         // Snapshot the account's rows first so the insert can be identified
         // unambiguously afterwards, even if a rule rewrites its amount, date,
