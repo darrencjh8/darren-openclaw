@@ -83,23 +83,23 @@ The expense-tracker's pre-classification returns `"skip"` for IBKR/trade emails,
 
 ```
 src/
-├── index.js                     (194 lines) App entry: wiring, Express, 26 REST /tools/* routes, MCP server, IMAP
-├── config.js                    (88 lines)  Env-var Config class (MEMORY_PATH = data/MEMORY.md)
-├── mcp-server.js                (275 lines) MCP Streamable HTTP server — 22 server.tool() registrations
-├── orchestrator.js              (876 lines) 3-phase alert pipeline (LLM Analysis → Resolution → Execute) + DeepSeekClient
-├── prompts.js                   (88 lines)  Phase-1 prompt + category picker prompt
-├── tools.js                     (1562 lines) ToolRegistry: tool schemas + handlers (Actual Budget CRUD, dedup, memory, resolve_merchant)
-├── memory.js                    (934 lines) MEMORY.md fact store with WASM semantic embeddings + dedup/cleanup
-├── extractors.js                (194 lines) MIME-aware email content + PDF text (pdftotext via child_process)
-├── imap.js                      (398 lines) IMAP IDLE (imapflow) + inbox browsing (list/read/extract)
-├── classify.js                  (145 lines) Email pre-classification + dispatch routing
-├── dedup.js                     (93 lines)  SHA-256 dedup journal (data/dedup.db)
-├── logging.js                   (31 lines)  Structured JSON-line logging
+├── index.js App entry: wiring, Express, 26 REST /tools/* routes, MCP server, IMAP
+├── config.js Env-var Config class (MEMORY_PATH = data/MEMORY.md)
+├── mcp-server.js MCP Streamable HTTP server — 22 server.tool() registrations
+├── orchestrator.js 3-phase alert pipeline (LLM Analysis → Resolution → Execute) + DeepSeekClient
+├── prompts.js Phase-1 prompt + category picker prompt
+├── tools.js ToolRegistry: tool schemas + handlers (Actual Budget CRUD, dedup, memory, resolve_merchant)
+├── memory.js MEMORY.md fact store with WASM semantic embeddings + dedup/cleanup
+├── extractors.js MIME-aware email content + PDF text (pdftotext via child_process)
+├── imap.js IMAP IDLE (imapflow) + inbox browsing (list/read/extract)
+├── classify.js Email pre-classification + dispatch routing
+├── dedup.js SHA-256 dedup journal (data/dedup.db)
+├── logging.js Structured JSON-line logging
 │
 └── statement/
-    ├── orchestrator.js          (278 lines) Statement reconciliation pipeline
-    ├── prompts.js               (194 lines) Classification + statement prompts
-    └── matcher.js               (86 lines)  fuzzy match: amount/date/merchant scoring
+    ├── orchestrator.js Statement reconciliation pipeline
+    ├── prompts.js Classification + statement prompts
+    └── matcher.js fuzzy match: amount/date/merchant scoring
 ```
 
 The module registers **26 REST `/tools/*` POST endpoints** (`index.js:127-154`) and **22 MCP tools** (`mcp-server.js`). The dedup and statement journals are SQLite (`data/dedup.db`, `data/statement.db`); statement tracking lives in `src/statement/`.
@@ -160,7 +160,7 @@ CREATE TABLE statement_transactions (
 
 ### Learned Facts (`data/MEMORY.md`)
 
-Learned mappings are stored as free-form + structured facts in `MEMORY.md` (config key `MEMORY_PATH`, default `data/MEMORY.md`); structured facts are matched by key and free-form facts by WASM semantic embeddings (`src/memory.js`). On first run, the legacy `data/mappings.json` (accounts/payees/categories dictionaries) is migrated into `MEMORY.md` (`index.js:52-61`); `mappings.json` is no longer read afterward.
+Learned mappings are stored as free-form + structured facts in `MEMORY.md` (config key `MEMORY_PATH`, default `data/MEMORY.md`); a lookup tries substring matching first and falls back to WASM semantic embeddings (`src/memory.js`). On first run, the legacy `data/mappings.json` (accounts/payees/categories dictionaries) is migrated into `MEMORY.md` (`index.js:52-61`); `mappings.json` is no longer read afterward.
 
 ```
 # MEMORY.md (example facts)
@@ -173,13 +173,13 @@ Memory tools: `search_memory`, `learn_fact`, `list_facts`, `update_fact`, `delet
 
 #### Merchant matching: keys, not similarity (#472)
 
-A structured fact names an entity — `X maps to Y payee`, `X is a Y account`, or a canonical-suffix fact. Such a fact is authorized by key, never by similarity:
+A structured fact names an entity — `X maps to Y payee`, `X maps to Y category`, `X is a Y account`, or a canonical-suffix fact. Such a fact is authorized by key, never by similarity:
 
 - `MemoryStore._semanticSearch()` skips structured facts before embedding them, and `_acceptSemanticHit()` refuses any that reach it another way, so no cosine score can make a mapping usable.
 - `factNamesMerchant(fact, merchant)` accepts exactly two cases: the alert merchant equals the stored key (any length), or the key occurs inside it on a word boundary and is at least `MIN_ENTITY_LENGTH` (3) characters. `AMAZE` therefore does not match `AMAZE* GREATEASTERN`.
-- Retrieval is not authorization: `search_memory`'s substring lookup can return structured rows for a loose query, so each caller filters them through `factNamesMerchant` before trusting one — `orchestrator.js` (payee and category resolution) and `tools.js` (insert-time payee lookup, statement duplicate check).
+- Retrieval is not authorization: `search_memory`'s substring lookup can return structured rows for a loose query, so the code that lets a mapping decide a payee or category filters the rows through `factNamesMerchant` first — `orchestrator.js` (payee resolution, category resolution) and `tools.js` (`_validate_payee`'s insert-time lookup, and `_handle_resolve_merchant`'s raw-merchant → payee fallback). Other readers consume the same rows as raw evidence only: the phase-1 LLM context, `_detectAccountType`, and `identityMappingsFromFacts`, none of which can authorize a mapping on their own.
 
-Consequence, accepted as risk in issue #472: a misspelled or abbreviated merchant that neither equals the stored key nor contains it as whole words can no longer reach that mapping through semantic search. It falls through to web classification and, failing that, `Misc`.
+Consequence, accepted as risk in issue #472: a misspelled or abbreviated merchant that neither equals the stored key nor contains it as whole words can no longer reach that mapping through semantic search. A payee then falls through to web classification when `BRAVE_SEARCH_API_KEY` is configured, and to `Misc` when it is not; a category falls to the LLM picker and then to no category.
 
 Why the restriction is accepted: measured against the live fact set (238 facts, 159 of them structured — point-in-time, recorded in issue #472; `MEMORY.md` is not tracked in this repo), ranking by embedding similarity put a *different* merchant first for 68 of those 159 keys, and a wrong merchant scored at or above 0.60 for 60 of them. `AMAZE* GREATEASTERN` scored 0.623 against the `AMAZE* ALIPAYPROGRA SINGAPORE SGP` alert, which is the wrong booking that motivated the change. No numeric floor separates those wrong hits from legitimate spelling variants, because the score does not encode "same merchant". A stricter rule would need distinctive-token presence plus a similarity floor, measured before it is trusted; `factNamesMerchant` deliberately has no spelling-variant path, so issue #472's second acceptance box is not triggered.
 

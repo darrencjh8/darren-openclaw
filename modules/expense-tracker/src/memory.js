@@ -865,6 +865,9 @@ export class MemoryStore {
    * 0.623 against the `AMAZE* ALIPAYPROGRA SINGAPORE SGP` alert — the wrong
    * booking in #471. A structured fact is therefore never reachable by
    * similarity, and a free-form hit must clear the floor. Issues #420, #471.
+   * #472 accepts that a misspelled key can no longer reach its mapping this
+   * way and records what a stricter rule would need; see
+   * `docs/design.md`, "Merchant matching: keys, not similarity".
    */
   _acceptSemanticHit(fact, score) {
     if (mappingEntity(fact)) return false;

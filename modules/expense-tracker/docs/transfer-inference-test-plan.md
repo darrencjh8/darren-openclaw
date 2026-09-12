@@ -305,7 +305,7 @@ For ordinary payments, payee resolution order is:
 
 1. Exact normalized raw descriptor mapping.
 2. Exact normalized merchant display-name mapping.
-3. Semantic memory only when score is at least `0.75`, meaningful tokens overlap, and processor-prefixed descriptors match their suffix exactly.
+3. Semantic memory only when score is at least `0.75`, meaningful tokens overlap, and processor-prefixed descriptors match their suffix exactly. *(superseded: since #471/#472 a structured mapping is never authorized by similarity — it needs an exact key or whole-word key containment; see `modules/expense-tracker/docs/design.md`, "Merchant matching: keys, not similarity")*
 4. `resolve_merchant` fallback.
 5. `Misc` or review.
 
