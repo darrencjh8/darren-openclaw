@@ -228,9 +228,12 @@ while IFS= read -r name || [ -n "$name" ]; do
     done
 done < "$CURRENT"
 
-chown -R hermes:hermes \
+# Ownership is what makes the refreshed tree readable by the hermes daemon, so a
+# failure must not be swallowed like the lock bookkeeping above: report it and
+# let the boot hook's redirect keep the breadcrumb.
+chown_error=$(chown -R hermes:hermes \
     "$PRIMARY_HOME/skills" "$PRIMARY_HOME/.agents/skills" "$SECONDARY_HOME/.agents/skills" \
-    2>/dev/null || true
+    2>&1) || echo "sync-codex-router-skills: chown failed on the skill roots: $chown_error" >&2
 
 for state in $STATE_DIRS; do
     [ -d "$state/manifests" ] || continue
