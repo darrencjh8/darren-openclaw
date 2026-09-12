@@ -317,15 +317,52 @@ app.post("/transactions", async (req, res) => {
     try {
         await ensureBudget(getBudgetId(req));
         const txn = buildTransaction(req.body);
-        const ids = await actual.addTransactions(txn.account, [txn]);
+        // Snapshot the account's rows first so the insert can be identified
+        // unambiguously afterwards, even if a rule rewrites its amount, date,
+        // or payee.
+        const beforeIds = new Set(
+            (
+                await actual.getTransactions(txn.account, txn.date, txn.date)
+            ).map((t) => t.id),
+        );
+        // runTransfers makes a transfer payee create its counterpart in the
+        // destination account on insert, matching an in-app payee change.
+        await actual.addTransactions(txn.account, [txn], {
+            runTransfers: true,
+        });
+        // @actual-app/api resolves addTransactions to "ok" (it discards the
+        // new ids), so read the row back to report its real id. Only a row
+        // absent from the pre-insert snapshot qualifies; matching on amount or
+        // payee alone could return a pre-existing transaction.
+        // ponytail: a concurrent insert in the same window could still be
+        // picked; revisit if POST /transactions becomes concurrent.
+        let created = null;
+        try {
+            created =
+                (
+                    await actual.getTransactions(
+                        txn.account,
+                        txn.date,
+                        txn.date,
+                    )
+                )
+                    .filter((t) => !beforeIds.has(t.id))
+                    .sort(
+                        (a, b) => (b.sort_order || 0) - (a.sort_order || 0),
+                    )[0] || null;
+        } catch {
+            // Read-back is best-effort; the insert already committed.
+        }
         res.json({
-            id: ids[0],
+            id: created ? created.id : null,
             account: txn.account,
             date: txn.date,
             amount: txn.amount,
             payee_name: txn.payee_name,
-            notes: txn.notes,
-            category: txn.category || null,
+            // Prefer the persisted row: a transfer clears the category, and
+            // rules can rewrite notes, so the request body can be stale.
+            notes: created?.notes ?? txn.notes,
+            category: (created ? created.category : txn.category) || null,
             cleared: txn.cleared,
         });
     } catch (e) {

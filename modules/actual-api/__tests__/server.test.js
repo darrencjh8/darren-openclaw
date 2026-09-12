@@ -611,20 +611,73 @@ describe("POST /transactions enriched response", () => {
         };
     }
 
+    // The handler snapshots rows before the insert and reads them back after,
+    // so tests supply both responses in order.
+    function readBack(before, after) {
+        actual.getTransactions
+            .mockResolvedValueOnce(before)
+            .mockResolvedValueOnce(after);
+    }
+
     beforeEach(() => {
         actual.init.mockReset();
         actual.getBudgets.mockReset();
         actual.downloadBudget.mockReset();
         actual.addTransactions.mockReset();
+        actual.getTransactions.mockReset();
         actual.init.mockResolvedValue(undefined);
         actual.getBudgets.mockResolvedValue([
             { name: "TestBudget", groupId: "g1" },
         ]);
         actual.downloadBudget.mockResolvedValue(undefined);
-        actual.addTransactions.mockResolvedValue(["new-id-99"]);
+        // @actual-app/api resolves addTransactions to the string "ok", so the
+        // insert handler must read the created transaction back to name it.
+        actual.addTransactions.mockResolvedValue("ok");
+        actual.getTransactions.mockResolvedValue([]);
+    });
+
+    test("inserts with runTransfers so a transfer payee creates its counterpart", async () => {
+        const handler = findHandler("post", "/transactions");
+        const res = mockRes();
+
+        await handler(
+            mockReq({
+                body: {
+                    account: "acc-1",
+                    date: "2026-06-17",
+                    amount: -425,
+                    payee: "transfer-payee-id",
+                    notes: "Transfer",
+                },
+            }),
+            res,
+        );
+
+        expect(actual.addTransactions).toHaveBeenCalledWith(
+            "acc-1",
+            [
+                expect.objectContaining({
+                    account: "acc-1",
+                    amount: -425,
+                    payee: "transfer-payee-id",
+                }),
+            ],
+            { runTransfers: true },
+        );
     });
 
     test("returns full transaction with id, account, date, amount, payee_name, notes, category, cleared", async () => {
+        readBack([], [
+            {
+                id: "new-id-99",
+                account: "acc-1",
+                date: "2026-06-17",
+                amount: -425,
+                notes: "Transport",
+                category: "cat-transport",
+                sort_order: 7,
+            },
+        ]);
         const handler = findHandler("post", "/transactions");
         const res = mockRes();
 
@@ -654,7 +707,180 @@ describe("POST /transactions enriched response", () => {
         });
     });
 
+    test("echoes persisted category and notes, not the request body", async () => {
+        readBack([], [
+            {
+                id: "transfer-src",
+                account: "acc-1",
+                date: "2026-06-17",
+                amount: -425,
+                payee: "transfer-payee-id",
+                notes: "rewritten by rule",
+                category: null,
+                sort_order: 3,
+            },
+        ]);
+        const handler = findHandler("post", "/transactions");
+        const res = mockRes();
+
+        await handler(
+            mockReq({
+                body: {
+                    account: "acc-1",
+                    date: "2026-06-17",
+                    amount: -425,
+                    payee: "transfer-payee-id",
+                    notes: "Transfer",
+                    category: "cat-transport",
+                },
+            }),
+            res,
+        );
+
+        const body = res.json.mock.calls[0][0];
+        expect(body.id).toBe("transfer-src");
+        expect(body.category).toBeNull();
+        expect(body.notes).toBe("rewritten by rule");
+    });
+
+    test("returns a null id when the inserted row cannot be read back", async () => {
+        actual.getTransactions.mockResolvedValue([]);
+        const handler = findHandler("post", "/transactions");
+        const res = mockRes();
+
+        await handler(
+            mockReq({
+                body: {
+                    account: "acc-1",
+                    date: "2026-06-17",
+                    amount: -425,
+                },
+            }),
+            res,
+        );
+
+        expect(res.json.mock.calls[0][0].id).toBeNull();
+    });
+
+    test("picks the newest new transaction as the inserted id", async () => {
+        readBack(
+            [
+                {
+                    id: "older",
+                    account: "acc-1",
+                    date: "2026-06-17",
+                    amount: -425,
+                    sort_order: 1,
+                },
+            ],
+            [
+                {
+                    id: "older",
+                    account: "acc-1",
+                    date: "2026-06-17",
+                    amount: -425,
+                    sort_order: 1,
+                },
+                {
+                    id: "newer",
+                    account: "acc-1",
+                    date: "2026-06-17",
+                    amount: -500,
+                    sort_order: 9,
+                },
+            ],
+        );
+        const handler = findHandler("post", "/transactions");
+        const res = mockRes();
+
+        await handler(
+            mockReq({
+                body: {
+                    account: "acc-1",
+                    date: "2026-06-17",
+                    amount: -425,
+                },
+            }),
+            res,
+        );
+
+        expect(res.json.mock.calls[0][0].id).toBe("newer");
+    });
+
+    test("does not return a pre-existing row as the inserted id", async () => {
+        readBack(
+            [
+                {
+                    id: "older",
+                    account: "acc-1",
+                    date: "2026-06-17",
+                    amount: -425,
+                    sort_order: 1,
+                },
+            ],
+            [
+                {
+                    id: "older",
+                    account: "acc-1",
+                    date: "2026-06-17",
+                    amount: -425,
+                    sort_order: 1,
+                },
+            ],
+        );
+        const handler = findHandler("post", "/transactions");
+        const res = mockRes();
+
+        await handler(
+            mockReq({
+                body: {
+                    account: "acc-1",
+                    date: "2026-06-17",
+                    amount: -425,
+                },
+            }),
+            res,
+        );
+
+        expect(res.json.mock.calls[0][0].id).toBeNull();
+    });
+
+    test("still returns 200 when the read-back query fails", async () => {
+        actual.getTransactions
+            .mockResolvedValueOnce([])
+            .mockRejectedValueOnce(new Error("read-back failed"));
+        const handler = findHandler("post", "/transactions");
+        const res = mockRes();
+
+        await handler(
+            mockReq({
+                body: {
+                    account: "acc-1",
+                    date: "2026-06-17",
+                    amount: -425,
+                    notes: "Transport",
+                },
+            }),
+            res,
+        );
+
+        expect(res.status).not.toHaveBeenCalled();
+        expect(res.json.mock.calls[0][0]).toMatchObject({
+            id: null,
+            notes: "Transport",
+        });
+    });
+
     test("category is null when not provided", async () => {
+        actual.getTransactions.mockResolvedValue([
+            {
+                id: "id-100",
+                account: "acc-1",
+                date: "2026-06-17",
+                amount: -100,
+                sort_order: 1,
+            },
+        ]);
         const handler = findHandler("post", "/transactions");
         const res = mockRes();
 
