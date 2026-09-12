@@ -114,7 +114,7 @@ describe("ToolRegistry — dedup & memory tools", () => {
             `test-tools-memory-${crypto.randomUUID()}.json`,
         );
         memory = new MemoryStore(memPath);
-        registry = new ToolRegistry(cfg, dedup, memory, null, null);
+        registry = new ToolRegistry(cfg, dedup, memory, null);
     });
 
     afterEach(() => {
@@ -239,7 +239,7 @@ describe("ToolRegistry — PP bridge tools", () => {
         );
         memory = new MemoryStore(memPath);
         mockBridge = createMockBridge();
-        registry = new ToolRegistry(cfg, dedup, memory, mockBridge, null);
+        registry = new ToolRegistry(cfg, dedup, memory, mockBridge);
         // Reset OneDrive mock defaults
         pullFromOneDrive.mockResolvedValue({ success: true });
         pushToOneDrive.mockResolvedValue({ success: true });
@@ -253,7 +253,7 @@ describe("ToolRegistry — PP bridge tools", () => {
         });
 
         it("works without bridge configured (uses OneDrive API directly)", async () => {
-            const reg = new ToolRegistry(cfg, dedup, memory, null, null);
+            const reg = new ToolRegistry(cfg, dedup, memory, null);
             pullFromOneDrive.mockResolvedValue({ success: true });
             const result = await reg.executeTool("pp-pull", {});
             expect(result).toEqual({ status: "ok", detail: "downloaded" });
@@ -280,7 +280,7 @@ describe("ToolRegistry — PP bridge tools", () => {
         });
 
         it("works without bridge configured (uses OneDrive API directly)", async () => {
-            const reg = new ToolRegistry(cfg, dedup, memory, null, null);
+            const reg = new ToolRegistry(cfg, dedup, memory, null);
             pushToOneDrive.mockResolvedValue({ success: true });
             const result = await reg.executeTool("pp-push", {});
             expect(result).toEqual({ status: "ok", detail: "uploaded" });
@@ -307,7 +307,7 @@ describe("ToolRegistry — PP bridge tools", () => {
         });
 
         it("returns error when bridge not configured", async () => {
-            const reg = new ToolRegistry(cfg, dedup, memory, null, null);
+            const reg = new ToolRegistry(cfg, dedup, memory, null);
             const result = await reg.executeTool("get_pp_status", {});
             expect(result).toEqual({ error: "PP bridge not configured" });
         });
@@ -327,7 +327,7 @@ describe("ToolRegistry — PP bridge tools", () => {
         });
 
         it("returns error when bridge not configured", async () => {
-            const reg = new ToolRegistry(cfg, dedup, memory, null, null);
+            const reg = new ToolRegistry(cfg, dedup, memory, null);
             const result = await reg.executeTool("query_pp_security", {
                 search: "AAPL",
             });
@@ -603,7 +603,7 @@ describe("ToolRegistry — lazy bridge initialization", () => {
 
         const overrides = { ...REQUIRED_ENV, PP_XML_PATH: xmlPath };
         const testCfg = new Config(overrides);
-        const reg = new ToolRegistry(testCfg, dedup, memory, null, null);
+        const reg = new ToolRegistry(testCfg, dedup, memory, null);
 
         // Before accessing _ppBridge, the backing field should be null
         expect(reg.__ppBridge).toBeNull();
@@ -627,7 +627,7 @@ describe("ToolRegistry — lazy bridge initialization", () => {
         );
         const overrides = { ...REQUIRED_ENV, PP_XML_PATH: nonExistent };
         const testCfg = new Config(overrides);
-        const reg = new ToolRegistry(testCfg, dedup, memory, null, null);
+        const reg = new ToolRegistry(testCfg, dedup, memory, null);
 
         // Accessing getter should return null (file doesn't exist)
         const bridge = reg._ppBridge;
@@ -640,7 +640,7 @@ describe("ToolRegistry — lazy bridge initialization", () => {
         xmlPath = join(tmpdir(), `test-flow-${crypto.randomUUID()}.xml`);
         const overrides = { ...REQUIRED_ENV, PP_XML_PATH: xmlPath };
         const testCfg = new Config(overrides);
-        const reg = new ToolRegistry(testCfg, dedup, memory, null, null);
+        const reg = new ToolRegistry(testCfg, dedup, memory, null);
 
         // 1. Before pp-pull: bridge is null
         expect(reg._ppBridge).toBeNull();

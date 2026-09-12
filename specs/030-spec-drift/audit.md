@@ -1,6 +1,6 @@
 # Spec Drift Audit
 
-**Status:** DOCS FIXED (code untouched — see `code-notes.md`)
+**Status:** DOCS FIXED + PORTFOLIO DEAD-CODE/PROMPT FIXES (see `code-notes.md`)
 **Branch:** `usr/darren/spec-drift-audit`
 **Worktree:** `../darren-openclaw-spec-drift`
 **Source of truth:** the **code**. Specs/docs are corrected to match code, unless a row is flagged as a *code bug* needing a separate decision.
@@ -29,7 +29,7 @@ Verdict legend:
 | 154 | D3: token path `onedrive_refresh_token` vs `onedrive/refresh_token` | **CONFIRMED** | `config.js:120`, `mcp-server.js:113/162` default `"/app/config/onedrive/refresh_token"`. | `/app/config/onedrive/refresh_token` | doc (no repo SKILL.md) |
 | 156 | A1: 19 REST endpoints undocumented in SKILL.md | **CONFIRMED+** | `index.js:126-162` registers **20** `/tools/*` routes. | 20 REST routes | spec.md REST table (already lists 20) |
 | 157 | A2: 11 critical startup env vars undocumented | **CONFIRMED** | `index.js:21-46 guardEnv()` lists 12 vars; spec.md:429 lists them. SKILL.md (container) omits. | 12 critical env vars | already in spec.md:429 |
-| 158 | B1: AB↔PP direction; dead `_abClient` | **CONFIRMED (code reality) / CODE-BUG (intent)** | `tools.js:376,382` `this._abClient = abClient` always `null`; never used. | Code does AB→PP; `_abClient` is dead. | Decision: remove dead field OR build AB-write. Doc → AB→PP. |
+| 158 | B1: AB↔PP direction; dead `_abClient` | **CONFIRMED (code reality) / CODE-BUG (intent)** | `this._abClient = abClient` was always `null` and never used (pre-#261 constructor around `tools.js:457`; line refs previously cited here were stale). | Code does AB→PP; `_abClient` is dead. | Decision: remove dead field OR build AB-write. Doc → AB→PP. **Resolved (#261, ff9347e): dead `abClient` plumbing removed.** |
 
 ### Issues #210–226 (cite portfolio source files)
 
@@ -43,7 +43,7 @@ Verdict legend:
 | 215 | #8 `_computeSyncAll()` returns undocumented fields | **CONFIRMED** | `tools.js:856-866` returns 9 fields (`sync_targets, summary, pull, flex_pull, flex_import, push, taxonomy_export, taxonomy_data, portfolio_status`). | Document 9-field shape | spec.md:269 area |
 | 216 | #9 Dead code `classifyEmail()` | **RESOLVED — removed** | Was defined in `email_handler.js` with zero callers; `classify.js` routes every Trades-folder email straight to the orchestrator. Function, its test block, its test import, and its mock entry were removed. The expense-tracker's live `classifyEmail()` in `src/classify.js` is unrelated and untouched. | Dead code, now gone | Done — verify with `grep -rn "classifyEmail" modules/portfolio-tracker` |
 | 217 | #10 Dead config `BALANCE_SYNC_MODEL`, `LOG_LEVEL` | **RESOLVED — removed** | `config.js` set `logLevel`/`balanceSyncModel` with no consumers; neither var was in `.env.example`. Assignments and all test assertions removed. | Dead config, now gone | Done — verify with `grep -rn "balanceSyncModel\|logLevel" modules/portfolio-tracker` |
-| 218 | #16 `GOOGLE_SERVICE_ACCOUNT_JSON` fail-fast vs README "optional" | **CONFIRMED** | `index.js:33` guardEnv exits if missing; `tools.js:923-929` skips gracefully; `README.md:45` says "(optional)". | Currently mandatory at startup | Reconcile: make conditional OR fix README/spec |
+| 218 | #16 `GOOGLE_SERVICE_ACCOUNT_JSON` fail-fast vs README "optional" | **RESOLVED — docs already correct; no code change** | `index.js:33` guardEnv exits if missing; `tools.js:923-929` skips gracefully; the docs already list it as required (`modules/portfolio-tracker/README.md:65`, `specs/003-portfolio-tracker/spec.md:453`). The previously cited `README.md:45` is a bash-block line and never said "(optional)". | Currently mandatory at startup | Resolved — the docs already required these vars; no README/spec/code change was needed or made (the earlier "make conditional OR fix docs" action was unnecessary). |
 | 219 | #17 AB budget response shape undocumented | **CONFIRMED** | `tools.js:763,771,779` read `sgd.emergency_total`, `myr.emergency_total`, `sgd.investment_total` (`\|\|0` fallback). | Document response shape | spec.md:345 area |
 | 220 | #11 Stale "SSE transport" comment in index.js | **RESOLVED — already fixed** | Comment now reads `// Register MCP Streamable HTTP transport (POST/GET/DELETE /mcp)`, matching `createMcpServer()` in `mcp-server.js`. | Streamable HTTP at `/mcp` | Done |
 | 221 | #12 REST count: 19 (diagram) vs 20 (table) | **CONFIRMED** | Code = **20** routes (`index.js:126-162`). Table (spec.md:387) correct; diagram (spec.md:38, also L240) wrong. | 20 | spec.md:38, :240 |
