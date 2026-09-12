@@ -5,7 +5,46 @@
 # shellcheck disable=SC2015,SC2235
 # Seed baked-in config, SOUL, skills, and scripts on every boot.
 # Then resolve any remaining ${VAR} placeholders that Hermes doesn't auto-substitute.
-cp /opt/hermes-defaults/config.yaml /opt/data/config.yaml
+# Seed the baked config WITHOUT clobbering the whole live file. A raw copy
+# erased the codex-router `hooks.pre_llm_call` merge at every boot, so the
+# installer reported a global hook that never survived a restart. Merge, don't
+# clobber: every key the baked config defines wins, and runtime-installed
+# top-level keys it does not define are carried over.
+#
+# ponytail: the carry list is a deliberate allowlist of exactly what
+# install-hermes.sh installs into this file. Add a key here when another
+# runtime writer appears; a blanket "keep every live key" merge would defeat
+# the drift correction the seed exists for.
+python3 - /opt/hermes-defaults/config.yaml /opt/data/config.yaml <<'PYCONFIG' || cp /opt/hermes-defaults/config.yaml /opt/data/config.yaml
+import sys
+from pathlib import Path
+
+import yaml
+
+canonical_path = Path(sys.argv[1])
+live_path = Path(sys.argv[2])
+
+canonical = yaml.safe_load(canonical_path.read_text()) or {}
+carried = {}
+if live_path.exists():
+    try:
+        live = yaml.safe_load(live_path.read_text()) or {}
+    except yaml.YAMLError as exc:
+        print(f"WARNING: {live_path} is not valid YAML ({exc}); reseeding it", file=sys.stderr)
+        live = {}
+    if isinstance(live, dict):
+        for key in ("hooks",):
+            if key in live and key not in canonical:
+                carried[key] = live[key]
+
+live_path.parent.mkdir(parents=True, exist_ok=True)
+# Write the baked bytes unchanged and graft the carried blocks on the end, so
+# the baked file's comments and formatting survive the merge.
+text = canonical_path.read_text()
+if carried:
+    text = text.rstrip("\n") + "\n\n" + yaml.safe_dump(carried, sort_keys=False)
+live_path.write_text(text)
+PYCONFIG
 [ ! -f /opt/data/SOUL.md ] && cp /opt/hermes-defaults/SOUL.md.template /opt/data/SOUL.md
 mkdir -p /opt/data/skills
 cp -r /opt/hermes-defaults/skills/* /opt/data/skills/

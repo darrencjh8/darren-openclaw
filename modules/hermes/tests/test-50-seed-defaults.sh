@@ -459,28 +459,75 @@ PY
 echo ""
 echo "=== hermes config seeding ==="
 
-# The seed script copies the baked canonical config into the live data dir, so
-# the seeded copy inherits whatever compression settings are baked here. Run the
-# real copy line against a fixture and parse the COPIED file, so the assertion
-# fails if the seeded output ever loses the compaction block.
-seed_cp_line=$(grep -F 'cp /opt/hermes-defaults/config.yaml /opt/data/config.yaml' "$SEED_SCRIPT") || seed_cp_line=""
-[ -n "$seed_cp_line" ] \
-    && ok "seed: copies baked config.yaml to /opt/data/config.yaml" \
-    || nope "seed: baked config copy" "expected 'cp /opt/hermes-defaults/config.yaml /opt/data/config.yaml'"
+# The seed script merges the baked canonical config into the live data dir: the
+# baked file owns every key it defines, and a runtime-installed top-level key it
+# does not define (codex-router's `hooks:`) survives. Run the real merge block
+# against fixtures and parse the MERGED file, so the assertions fail if the
+# seeded output loses either the compaction keys or a runtime-installed hook.
+seed_merge_block=$(python3 - "$SEED_SCRIPT" <<'PY'
+import re
+import sys
+
+with open(sys.argv[1]) as f:
+    content = f.read()
+match = re.search(r"<<'PYCONFIG'[^\n]*\n(.*?)\nPYCONFIG", content, re.DOTALL)
+print(match.group(1) if match else "")
+PY
+)
+[ -n "$seed_merge_block" ] \
+    && ok "seed: has a config merge block" \
+    || nope "seed: config merge block" "PYCONFIG block missing from $SEED_SCRIPT"
 
 mkdir -p "$TMPDIR/seed/hermes-defaults" "$TMPDIR/seed/data"
 cp "$SCRIPT_DIR/../config.yaml" "$TMPDIR/seed/hermes-defaults/config.yaml"
-seed_cp_line=${seed_cp_line//\/opt\/hermes-defaults/$TMPDIR/seed/hermes-defaults}
-seed_cp_line=${seed_cp_line//\/opt\/data/$TMPDIR/seed/data}
-bash -c "$seed_cp_line"
 seed_config="$TMPDIR/seed/data/config.yaml"
+
+# Live fixture: a hook installed at runtime, plus a drifted managed key the
+# baked config must override.
+cat > "$seed_config" <<'EOF'
+hooks:
+  pre_llm_call:
+    - event: pre_llm_call
+      command: /opt/data/agent-hooks/remind-worktree.sh
+compression:
+    threshold: 0.50
+    threshold_tokens: 1
+EOF
+
+seed_ran=missing
+if [ -n "$seed_merge_block" ]; then
+    printf '%s\n' "$seed_merge_block" > "$TMPDIR/seed/merge.py"
+    if python3 - "$TMPDIR/seed/hermes-defaults/config.yaml" "$seed_config" < "$TMPDIR/seed/merge.py"; then
+        seed_ran=ok
+    else
+        seed_ran=failed
+    fi
+fi
+[ "$seed_ran" = "ok" ] \
+    && ok "seed: config merge block runs against a live config" \
+    || nope "seed: config merge block runs" "status=$seed_ran"
+
+seeded_hook=$(python3 - "$seed_config" <<'PY'
+import sys
+import yaml
+
+config = yaml.safe_load(open(sys.argv[1], encoding="utf-8"))
+hooks = config.get("hooks") or {}
+entries = hooks.get("pre_llm_call") or []
+command = entries[0].get("command", "") if entries and isinstance(entries[0], dict) else ""
+print(command)
+PY
+)
+[ "$seed_ran" = "ok" ] && [ "$seeded_hook" = "/opt/data/agent-hooks/remind-worktree.sh" ] \
+    && ok "config: runtime-installed hooks.pre_llm_call survives the seed" \
+    || nope "seed preserves hooks.pre_llm_call" "status=$seed_ran got '$seeded_hook'"
 
 seeded_threshold_tokens=$(python3 - "$seed_config" <<'PY'
 import sys
 import yaml
 
 config = yaml.safe_load(open(sys.argv[1], encoding="utf-8"))
-print(config["compression"]["threshold_tokens"])
+print((config.get("compression") or {}).get("threshold_tokens"))
 PY
 )
 [ "$seeded_threshold_tokens" = "300000" ] \
@@ -492,12 +539,18 @@ import sys
 import yaml
 
 config = yaml.safe_load(open(sys.argv[1], encoding="utf-8"))
-print(config["compression"]["threshold"])
+print((config.get("compression") or {}).get("threshold"))
 PY
 )
 [ "$seeded_threshold" = "0.5" ] \
     && ok "config: compression.threshold is 0.50" \
     || nope "compression.threshold" "expected 0.5, got $seeded_threshold"
+
+# The merge must write the baked bytes unchanged, not re-serialise the parsed
+# config: comments in the baked file are not round-tripped by PyYAML.
+grep -q 'Keep this block AFTER `webhook`' "$seed_config" \
+    && ok "config: seeded file keeps the baked file's comments" \
+    || nope "seed keeps baked comments" "baked comment missing from seeded config"
 
 # The memory core limit and session retention are the knobs the tier-2 design
 # depends on: the judge prompt quotes the cap and retention decides how long the
@@ -513,6 +566,50 @@ PY
 [ "$seeded_memory_limits" = "2800 180 True" ] \
     && ok "config: memory_char_limit 2800 + sessions.retention_days 180 + auto_prune on" \
     || nope "memory/sessions config" "expected '2800 180 True', got '$seeded_memory_limits'"
+
+echo ""
+echo "=== compaction trigger derivation ==="
+
+# threshold_tokens is a cap applied AFTER derivation, and Hermes floors the
+# ratio to 0.75 for windows under _SMALL_CTX_WINDOW_LIMIT (512000). Assert the
+# derived trigger for stubbed windows, not just the literals: a cap that stops
+# binding, or a threshold that no longer parses, must fail here. The compressor
+# lives in the Hermes image, so this mirrors its documented formula rather than
+# importing it and cannot see Hermes-side drift; that is the trade #466 asked
+# for over a literal restatement.
+derived_trigger=$(python3 - "$seed_config" <<'PY'
+import sys
+import yaml
+
+config = yaml.safe_load(open(sys.argv[1], encoding="utf-8"))
+compression = config.get("compression") or {}
+cap = compression.get("threshold_tokens")
+ratio = compression.get("threshold")
+limit = 512_000
+
+
+def trigger(window):
+    if not isinstance(cap, (int, float)) or not isinstance(ratio, (int, float)):
+        raise ValueError("compression.threshold_tokens={!r} compression.threshold={!r}".format(cap, ratio))
+    effective = max(ratio, 0.75) if window < limit else ratio
+    return min(int(effective * window), int(cap))
+
+
+failures = []
+for window, expected in ((272_000, 204_000), (400_000, 300_000), (1_048_576, 300_000)):
+    try:
+        got = trigger(window)
+    except ValueError as exc:
+        failures.append(str(exc))
+        continue
+    if got != expected:
+        failures.append("window {}: expected {}, got {}".format(window, expected, got))
+print("pass" if not failures else "; ".join(failures))
+PY
+)
+[ "$derived_trigger" = "pass" ] \
+    && ok "config: derived compaction trigger is min(floor_ratio x window, 300000)" \
+    || nope "compaction trigger derivation" "$derived_trigger"
 
 echo ""
 echo "=== opencode config seeding (merge, not clobber) ==="
