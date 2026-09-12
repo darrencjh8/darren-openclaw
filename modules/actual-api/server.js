@@ -184,6 +184,20 @@ function buildTransaction(body) {
     return txn;
 }
 
+// The insert is identified by diffing transaction ids around it, so the
+// snapshot and the read-back must query the same rows. An in-app rule can
+// rewrite the inserted row's date, which would hide it from a window scoped to
+// the request date alone, so both queries span the neighbouring days.
+// ponytail: a rule that moves the date further than one day, or moves the row
+// to another account, still yields a null id. Upgrade path: diff the whole
+// account instead of a window if that ever happens in practice.
+function readWindow(date) {
+    const day = new Date(`${date}T00:00:00Z`);
+    const shift = (days) =>
+        new Date(day.getTime() + days * 86400000).toISOString().slice(0, 10);
+    return { start: shift(-1), end: shift(1) };
+}
+
 const app = express();
 app.use(express.json());
 
@@ -317,14 +331,31 @@ app.post("/transactions", async (req, res) => {
     try {
         await ensureBudget(getBudgetId(req));
         const txn = buildTransaction(req.body);
+        if (!txn.account) {
+            return res.status(400).json({ error: "Account is required" });
+        }
+        // The snapshot is account-scoped, so the account must be present or the
+        // read-back could match a row in a different account.
+        const window = readWindow(txn.date);
         // Snapshot the account's rows first so the insert can be identified
         // unambiguously afterwards, even if a rule rewrites its amount, date,
         // or payee.
-        const beforeIds = new Set(
-            (
-                await actual.getTransactions(txn.account, txn.date, txn.date)
-            ).map((t) => t.id),
-        );
+        let beforeIds = null;
+        try {
+            beforeIds = new Set(
+                (
+                    await actual.getTransactions(
+                        txn.account,
+                        window.start,
+                        window.end,
+                    )
+                ).map((t) => t.id),
+            );
+        } catch {
+            // Without a trustworthy snapshot no row on the window can be proven
+            // new, so the read-back is skipped rather than naming a stranger's
+            // row. The insert still commits and the response reports a null id.
+        }
         // runTransfers makes a transfer payee create its counterpart in the
         // destination account on insert, matching an in-app payee change.
         await actual.addTransactions(txn.account, [txn], {
@@ -337,30 +368,35 @@ app.post("/transactions", async (req, res) => {
         // ponytail: a concurrent insert in the same window could still be
         // picked; revisit if POST /transactions becomes concurrent.
         let created = null;
-        try {
-            created =
-                (
-                    await actual.getTransactions(
-                        txn.account,
-                        txn.date,
-                        txn.date,
+        if (beforeIds) {
+            try {
+                created =
+                    (
+                        await actual.getTransactions(
+                            txn.account,
+                            window.start,
+                            window.end,
+                        )
                     )
-                )
-                    .filter((t) => !beforeIds.has(t.id))
-                    .sort(
-                        (a, b) => (b.sort_order || 0) - (a.sort_order || 0),
-                    )[0] || null;
-        } catch {
-            // Read-back is best-effort; the insert already committed.
+                        .filter((t) => !beforeIds.has(t.id))
+                        .sort(
+                            (a, b) =>
+                                (b.sort_order || 0) - (a.sort_order || 0),
+                        )[0] || null;
+            } catch {
+                // Read-back is best-effort; the insert already committed.
+            }
         }
         res.json({
             id: created ? created.id : null,
             account: txn.account,
-            date: txn.date,
-            amount: txn.amount,
-            payee_name: txn.payee_name,
             // Prefer the persisted row: a transfer clears the category, and
-            // rules can rewrite notes, so the request body can be stale.
+            // rules can rewrite notes, amount, or date, so the request body can
+            // be stale. account, payee_name, and cleared have no comparable
+            // persisted value here, so they keep echoing the request.
+            date: created?.date ?? txn.date,
+            amount: created?.amount ?? txn.amount,
+            payee_name: txn.payee_name,
             notes: created?.notes ?? txn.notes,
             category: (created ? created.category : txn.category) || null,
             cleared: txn.cleared,
@@ -466,4 +502,10 @@ app.listen(PORT, "0.0.0.0", () =>
     console.log(`actual-api listening on :${PORT}`),
 );
 
-module.exports = { getBudgetId, buildTransaction, init, ensureBudget };
+module.exports = {
+    getBudgetId,
+    buildTransaction,
+    readWindow,
+    init,
+    ensureBudget,
+};

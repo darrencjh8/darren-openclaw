@@ -28,7 +28,7 @@ jest.mock("@actual-app/api", () => ({
     getAccountBalance: jest.fn(),
 }));
 
-const { getBudgetId, buildTransaction } = require("../server");
+const { getBudgetId, buildTransaction, readWindow } = require("../server");
 
 describe("getBudgetId", () => {
     test("returns budget_id from query param", () => {
@@ -619,6 +619,30 @@ describe("POST /transactions enriched response", () => {
             .mockResolvedValueOnce(after);
     }
 
+    // Date-aware read-back: the snapshot only sees the rows that existed before
+    // the insert, and the read-back sees those plus the inserted one. Rows are
+    // only visible when the requested window covers their date, so the test
+    // proves the caller widened the window instead of the mock ignoring its
+    // arguments.
+    function readBackDated(before, after) {
+        actual.getTransactions.mockImplementation(
+            async (account, start, end) => {
+                const visible = (rows) =>
+                    rows.filter(
+                        (row) =>
+                            (!account || row.account === account) &&
+                            row.date >= start &&
+                            row.date <= end,
+                    );
+                return visible(
+                    actual.getTransactions.mock.calls.length === 1
+                        ? before
+                        : after,
+                );
+            },
+        );
+    }
+
     beforeEach(() => {
         actual.init.mockReset();
         actual.getBudgets.mockReset();
@@ -872,15 +896,26 @@ describe("POST /transactions enriched response", () => {
     });
 
     test("category is null when not provided", async () => {
-        actual.getTransactions.mockResolvedValue([
-            {
-                id: "id-100",
-                account: "acc-1",
-                date: "2026-06-17",
-                amount: -100,
-                sort_order: 1,
-            },
-        ]);
+        readBack(
+            [
+                {
+                    id: "id-100",
+                    account: "acc-1",
+                    date: "2026-06-17",
+                    amount: -100,
+                    sort_order: 1,
+                },
+            ],
+            [
+                {
+                    id: "id-100",
+                    account: "acc-1",
+                    date: "2026-06-17",
+                    amount: -100,
+                    sort_order: 1,
+                },
+            ],
+        );
         const handler = findHandler("post", "/transactions");
         const res = mockRes();
 
@@ -896,6 +931,207 @@ describe("POST /transactions enriched response", () => {
         );
 
         expect(res.json.mock.calls[0][0].category).toBeNull();
+    });
+
+    test("reads back over the request date and its neighbours", async () => {
+        readBack([], []);
+        const handler = findHandler("post", "/transactions");
+        const res = mockRes();
+
+        await handler(
+            mockReq({
+                body: {
+                    account: "acc-1",
+                    date: "2026-06-17",
+                    amount: -425,
+                },
+            }),
+            res,
+        );
+
+        // A rule can move the inserted row by a day, so the snapshot and the
+        // read-back must cover the same widened window.
+        expect(actual.getTransactions).toHaveBeenNthCalledWith(
+            1,
+            "acc-1",
+            "2026-06-16",
+            "2026-06-18",
+        );
+        expect(actual.getTransactions).toHaveBeenNthCalledWith(
+            2,
+            "acc-1",
+            "2026-06-16",
+            "2026-06-18",
+        );
+    });
+
+    test("finds the inserted row when a rule moves it to an adjacent date", async () => {
+        // The row only ever exists on the neighbour date, so a read-back scoped
+        // to the request date alone yields a null id.
+        readBackDated(
+            [],
+            [
+                {
+                    id: "moved-by-rule",
+                    account: "acc-1",
+                    date: "2026-06-18",
+                    amount: -425,
+                    sort_order: 2,
+                },
+            ],
+        );
+        const handler = findHandler("post", "/transactions");
+        const res = mockRes();
+
+        await handler(
+            mockReq({
+                body: {
+                    account: "acc-1",
+                    date: "2026-06-17",
+                    amount: -425,
+                },
+            }),
+            res,
+        );
+
+        expect(res.json.mock.calls[0][0].id).toBe("moved-by-rule");
+    });
+
+    test("does not claim a pre-existing neighbour row on the widened window", async () => {
+        const existing = {
+            id: "yesterday",
+            account: "acc-1",
+            date: "2026-06-16",
+            amount: -425,
+            sort_order: 1,
+        };
+        // Present on both reads: if the snapshot window were narrower than the
+        // read-back window this row would look new and be reported as the id.
+        readBackDated([existing], [existing]);
+        const handler = findHandler("post", "/transactions");
+        const res = mockRes();
+
+        await handler(
+            mockReq({
+                body: {
+                    account: "acc-1",
+                    date: "2026-06-17",
+                    amount: -425,
+                },
+            }),
+            res,
+        );
+
+        expect(res.json.mock.calls[0][0].id).toBeNull();
+    });
+
+    test("never guesses the id when the pre-insert snapshot fails", async () => {
+        actual.getTransactions
+            .mockRejectedValueOnce(new Error("snapshot failed"))
+            .mockResolvedValueOnce([
+                {
+                    id: "someone-elses-row",
+                    account: "acc-1",
+                    date: "2026-06-17",
+                    amount: -425,
+                    sort_order: 4,
+                },
+            ]);
+        const handler = findHandler("post", "/transactions");
+        const res = mockRes();
+
+        await handler(
+            mockReq({
+                body: {
+                    account: "acc-1",
+                    date: "2026-06-17",
+                    amount: -425,
+                    notes: "Transport",
+                },
+            }),
+            res,
+        );
+
+        // Without a reliable snapshot a row on the window cannot be proven new,
+        // so the response reports no id instead of naming a stranger's row.
+        expect(res.status).not.toHaveBeenCalled();
+        expect(res.json.mock.calls[0][0]).toMatchObject({
+            id: null,
+            notes: "Transport",
+            amount: -425,
+        });
+    });
+
+    test("prefers persisted amount and date when a rule rewrites them", async () => {
+        readBack(
+            [],
+            [
+                {
+                    id: "rewritten",
+                    account: "acc-1",
+                    date: "2026-06-18",
+                    amount: -999,
+                    notes: "Transport",
+                    sort_order: 5,
+                },
+            ],
+        );
+        const handler = findHandler("post", "/transactions");
+        const res = mockRes();
+
+        await handler(
+            mockReq({
+                body: {
+                    account: "acc-1",
+                    date: "2026-06-17",
+                    amount: -425,
+                    payee_name: "BUS/MRT",
+                    notes: "Transport",
+                },
+            }),
+            res,
+        );
+
+        const body = res.json.mock.calls[0][0];
+        expect(body.id).toBe("rewritten");
+        expect(body.amount).toBe(-999);
+        expect(body.date).toBe("2026-06-18");
+        // payee_name has no persisted counterpart: @actual-app/api stores the
+        // payee id only, so the request value stays.
+        expect(body.payee_name).toBe("BUS/MRT");
+    });
+
+    test("returns 400 when the account is missing", async () => {
+        const handler = findHandler("post", "/transactions");
+        const res = mockRes();
+
+        await handler(
+            mockReq({ body: { date: "2026-06-17", amount: -425 } }),
+            res,
+        );
+
+        expect(res.status).toHaveBeenCalledWith(400);
+        expect(actual.addTransactions).not.toHaveBeenCalled();
+    });
+});
+
+describe("readWindow", () => {
+    test("spans the day before and the day after", () => {
+        expect(readWindow("2026-06-17")).toEqual({
+            start: "2026-06-16",
+            end: "2026-06-18",
+        });
+    });
+
+    test("crosses a month and a year boundary", () => {
+        expect(readWindow("2026-01-01")).toEqual({
+            start: "2025-12-31",
+            end: "2026-01-02",
+        });
+        expect(readWindow("2026-03-01")).toEqual({
+            start: "2026-02-28",
+            end: "2026-03-02",
+        });
     });
 });
 
