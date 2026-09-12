@@ -169,6 +169,15 @@ describe("ToolRegistry — budget_id validation", () => {
             expect(url).toContain("/budget-month?budget_id=My+MYR+Budget");
             expect(url).not.toContain("month=");
         });
+
+        test("declares the YYYY-MM month pattern for non-MCP callers", () => {
+            const tool = registry
+                .getToolSchemas()
+                .find((t) => t.function.name === "fetch_budget_month");
+            expect(tool.function.parameters.properties.month.pattern).toBe(
+                "^\\d{4}-\\d{2}$",
+            );
+        });
     });
 
     describe("fetch_recent_transactions", () => {

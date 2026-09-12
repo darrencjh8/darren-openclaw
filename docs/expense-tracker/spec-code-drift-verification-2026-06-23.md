@@ -141,7 +141,7 @@ Risk: if LLM misidentifies currency, code fallback uses different budget than LL
 **Code facts:**
 1. migrateFromMappings (memory.js:690-716) converts old mappings.json (keyword->payee/category) into MEMORY.md facts. Runs only if MEMORY.md empty AND mappings.json exists (index.js:54-61).
 2. STRUCTURED_PATTERNS (memory.js:30-38) define regex for "X merchant maps to Y payee" — used for dedup/contradiction detection, not payee matching.
-3. Payee matching (orchestrator.js:546-551) uses semantic memory search + regex, not keyword lookup.
+3. Payee matching (orchestrator.js:546-551) uses semantic memory search + regex, not keyword lookup. *(superseded: since #471/#472 a structured mapping is matched by key only — exact key or whole-word key containment — and semantic similarity never authorizes one; the line anchors in this dated entry are stale.)*
 
 **Arguments for drift:**
 - STRUCTURED_PATTERNS formalize keyword->payee relations (just in memory)
@@ -149,7 +149,7 @@ Risk: if LLM misidentifies currency, code fallback uses different budget than LL
 - Memory facts like "TNG merchant maps to Touch 'n Go payee" ARE keyword->payee mappings
 
 **Arguments against drift:**
-- Payee matching uses semantic (embedding-based) search, not keyword table
+- Payee matching uses semantic (embedding-based) search, not keyword table *(superseded: since #471/#472 a structured fact is matched by key only, never by similarity — see `modules/expense-tracker/docs/design.md`, "Merchant matching: keys, not similarity")*
 - STRUCTURED_PATTERNS serve dedup/contradiction, not matching
 - mappings.json migration is backward-compat cleanup, not active feature
 - "Memory + web search" IS how code matches payees
@@ -157,7 +157,7 @@ Risk: if LLM misidentifies currency, code fallback uses different budget than LL
 **Why uncertain:** The boundary between "keyword table" and "learned memory fact" is semantic. Does "no keyword table" mean "no keyword->payee lookup exists at all" or "no static hardcoded table, we use dynamic memory"?
 
 **Spec section:** SKILL.md line 24
-**Code locations:** memory.js:30-38, memory.js:690-716, index.js:54-61, orchestrator.js:546-551
+**Code locations:** `src/suffix-facts.js` (structured patterns), `memory.js` (`migrateFromMappings`, `factNamesMerchant`), `index.js:54-61`, `orchestrator.js` (payee resolution, category resolution). The `memory.js:30-38 / 690-716` and `orchestrator.js:546-551` line numbers written on 2026-06-23 have since moved.
 
 ---
 

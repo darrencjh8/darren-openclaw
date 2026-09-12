@@ -351,6 +351,7 @@ const TOOLS = [
         },
         month: {
           type: "string",
+          pattern: "^\\d{4}-\\d{2}$",
           description: "Month as YYYY-MM; defaults to the current month",
         },
       },

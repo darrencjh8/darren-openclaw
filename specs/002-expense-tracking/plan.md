@@ -23,7 +23,7 @@
 | Memory | `MEMORY.md` + WASM embeddings | — | `src/memory.js` semantic fact store (replaces `mappings.json`) |
 | Config | `.env` + `process.env` | — | 12-factor app; `src/config.js` Config class |
 | Dedup/Statement DB | `better-sqlite3` | latest | Single-file journals (`data/dedup.db`, `data/statement.db`) |
-| MCP | `@modelcontextprotocol/sdk` | latest | Streamable HTTP MCP server (`src/mcp-server.js`) — 22 tools |
+| MCP | `@modelcontextprotocol/sdk` | latest | Streamable HTTP MCP server (`src/mcp-server.js`) — 24 tools |
 | Logging | JSON-line to stdout | — | `src/logging.js` structured logs |
 | Container | Docker Compose | — | `docker/Dockerfile` + `modules/docker-compose.yml` |
 
@@ -522,7 +522,7 @@ darren-openclaw/
 ├── src/
 │   ├── index.js                    # Entry: Express, 28 REST /tools/*, MCP, IMAP wiring
 │   ├── config.js                   # Env-var Config class
-│   ├── mcp-server.js               # MCP Streamable HTTP server (22 tools)
+│   ├── mcp-server.js               # MCP Streamable HTTP server (24 tools)
 │   ├── orchestrator.js             # 3-phase alert pipeline + DeepSeekClient
 │   ├── prompts.js                  # Phase-1 prompt + category picker prompt
 │   ├── tools.js                    # ToolRegistry: schemas + handlers
