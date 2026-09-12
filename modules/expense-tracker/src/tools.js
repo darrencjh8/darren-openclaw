@@ -1047,8 +1047,13 @@ export class ToolRegistry {
 
   async _handle_fetch_budget_month({ budget_id, month }) {
     if (!budget_id) return { error: "budget_id is required" };
-    // Omitting the month lets actual-api default to the current month, so the
-    // two cannot disagree about which month "now" is.
+    // The actual-api route only accepts YYYY-MM; validate here so REST and
+    // orchestrator callers get a validation error instead of an opaque 500.
+    if (month !== undefined && !/^\d{4}-\d{2}$/.test(month)) {
+      return { error: "month must be YYYY-MM" };
+    }
+    // Omitting the month lets actual-api default to the current month (in
+    // UTC), so a caller near a local month boundary should pass it.
     return this._get("/budget-month", budget_id, month ? { month } : {});
   }
 

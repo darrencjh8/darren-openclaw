@@ -178,6 +178,19 @@ describe("ToolRegistry — budget_id validation", () => {
                 "^\\d{4}-\\d{2}$",
             );
         });
+
+        test.each(["2026-8", "2026-13-01", "August 2026", ""])(
+            "rejects the malformed month %j before calling actual-api",
+            async (month) => {
+                const result = await registry.executeTool(
+                    "fetch_budget_month",
+                    { budget_id: "My MYR Budget", month },
+                );
+
+                expect(result).toEqual({ error: "month must be YYYY-MM" });
+                expect(mockFetch).not.toHaveBeenCalled();
+            },
+        );
     });
 
     describe("fetch_recent_transactions", () => {
