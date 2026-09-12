@@ -427,7 +427,8 @@ hermes config set auxiliary.vision.model deepseek-flash
 ```
 `hermes config set` writes single keys; it does not clear a `fallback_chain` left on a
 host that predates this change. That stale chain names the same model and is inert, and
-`50-seed-defaults` replaces the whole file on the next boot.
+`50-seed-defaults` reseeds the keys the baked config defines on the next boot, while a
+top-level key the baked config does not define (such as `hooks`) survives the reseed.
 
 **Verify the wiring resolves:**
 ```python

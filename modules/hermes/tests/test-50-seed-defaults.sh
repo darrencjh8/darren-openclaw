@@ -482,13 +482,14 @@ mkdir -p "$TMPDIR/seed/hermes-defaults" "$TMPDIR/seed/data"
 cp "$SCRIPT_DIR/../config.yaml" "$TMPDIR/seed/hermes-defaults/config.yaml"
 seed_config="$TMPDIR/seed/data/config.yaml"
 
-# Live fixture: a hook installed at runtime, plus a drifted managed key the
-# baked config must override.
+# Live fixture: runtime-installed and hand-added top-level keys the baked config
+# does not define, plus a drifted managed key the baked config must override.
 cat > "$seed_config" <<'EOF'
 hooks:
   pre_llm_call:
     - event: pre_llm_call
       command: /opt/data/agent-hooks/remind-worktree.sh
+hooks_auto_accept: true
 compression:
     threshold: 0.50
     threshold_tokens: 1
@@ -521,6 +522,49 @@ PY
 [ "$seed_ran" = "ok" ] && [ "$seeded_hook" = "/opt/data/agent-hooks/remind-worktree.sh" ] \
     && ok "config: runtime-installed hooks.pre_llm_call survives the seed" \
     || nope "seed preserves hooks.pre_llm_call" "status=$seed_ran got '$seeded_hook'"
+
+seeded_auto_accept=$(python3 - "$seed_config" <<'PY'
+import sys
+import yaml
+
+config = yaml.safe_load(open(sys.argv[1], encoding="utf-8"))
+print(config.get("hooks_auto_accept"))
+PY
+)
+[ "$seed_ran" = "ok" ] && [ "$seeded_auto_accept" = "True" ] \
+    && ok "config: other unknown top-level keys survive the seed" \
+    || nope "seed preserves unknown top-level keys" "status=$seed_ran got '$seeded_auto_accept'"
+
+# A failing merge must never fall back to the raw copy that caused #461: an
+# existing live config stays untouched, and only a missing file is bootstrapped.
+seed_fallback=$(python3 - "$SEED_SCRIPT" <<'PY'
+import re
+import sys
+
+with open(sys.argv[1]) as f:
+    content = f.read()
+match = re.search(
+    r"(if ! python3 - /opt/hermes-defaults/config\.yaml /opt/data/config\.yaml <<'PYCONFIG'.*?\nPYCONFIG\n.*?\nfi)",
+    content,
+    re.DOTALL,
+)
+print(match.group(1) if match else "")
+PY
+)
+mkdir -p "$TMPDIR/fallback/bin" "$TMPDIR/fallback/data"
+printf '#!/bin/sh\nexit 1\n' > "$TMPDIR/fallback/bin/python3"
+chmod +x "$TMPDIR/fallback/bin/python3"
+if [ -n "$seed_fallback" ]; then
+    seed_fallback=${seed_fallback//\/opt\/hermes-defaults/$TMPDIR/seed/hermes-defaults}
+    seed_fallback=${seed_fallback//\/opt\/data/$TMPDIR/fallback/data}
+    cp "$seed_config" "$TMPDIR/fallback/data/config.yaml"
+    PATH="$TMPDIR/fallback/bin:$PATH" sh -c "$seed_fallback" 2>/dev/null
+    cmp -s "$TMPDIR/fallback/data/config.yaml" "$seed_config" \
+        && ok "seed: a failed merge leaves the live config untouched" \
+        || nope "seed failure path preserves the live config" "live config was rewritten"
+else
+    nope "seed failure path preserves the live config" "merge block not found in $SEED_SCRIPT"
+fi
 
 seeded_threshold_tokens=$(python3 - "$seed_config" <<'PY'
 import sys

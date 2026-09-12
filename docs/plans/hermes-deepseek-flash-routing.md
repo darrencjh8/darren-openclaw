@@ -37,9 +37,11 @@ itself inside the `auto-thinking` pool.
   `auto-thinking` pool uses the same id for its DeepSeek hop. That route is reachable
   only over the Responses transport, so `deepseek-flash` is deliberately absent from
   the OpenCode Chat Completions catalog in `modules/hermes/opencode/opencode.json`.
-- `50-seed-defaults` force-copies `config.yaml` and force-migrates the managed profile
-  routing fields (`providers`, `model`, `fallback_providers`) on every boot, so all
-  routing changes must land in the repo defaults — runtime edits under `/opt/data` do
-  not persist.
+- `50-seed-defaults` reseeds every config key the baked `config.yaml` defines and
+  force-migrates the managed profile routing fields (`providers`, `model`,
+  `fallback_providers`) on every boot, so all routing changes must land in the repo
+  defaults — runtime edits to those keys under `/opt/data` do not persist. A top-level
+  key the baked config does not define (for example the codex-router `hooks:`) is
+  preserved across the reseed.
 - Deployment is a reviewed pull request followed by GitHub Actions. CI/CD owns the
   rollout; never restart, rebuild, pull, or run Docker Compose on production.
