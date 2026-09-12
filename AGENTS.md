@@ -38,7 +38,7 @@
 - Create `feat/...` or `fix/...` branches. Never commit or push directly to `main`.
 - For behavior changes, write a failing test first, implement the minimum passing change, then refactor with tests green.
 - For documentation, configuration, or skill changes with no testable behavior, state why TDD does not apply and run relevant validation.
-- For code changes that require CI, run round 1 with one fresh-context `auto-thinking` code-reviewer. Run later rounds with `auto-thinking-free`, allowing up to two concurrent fresh-context reviewers on free rounds. Never reuse reviewer context.
+- For code changes that require CI, run round 1 with one fresh-context reviewer under the round's host-native runtime and model (`auto-thinking` on Hermes). Run later rounds with `muse-spark-1.3-contributor-free` through the opencode CLI (`--variant high`, one bounded `mimo-v2.5-free` fallback), allowing up to two concurrent fresh-context reviewers on free rounds. Never reuse reviewer context. Round and runtime policy is owned by `darrencjh8/codex-router` `codex/skills/dev-loop/policy.json`; this file does not pin model slugs.
 - When a relevant specification or approved implementation plan exists, invoke spec-auditor before code review. Skip spec-auditor only when no relevant specification exists.
 - Fix validated Critical and High findings before merge. Cosmetic notes, style preferences, and coverage-only suggestions do not block the loop.
 - Require three continuous approvals on the same unchanged HEAD before merge. Any repository mutation or `REQUEST_CHANGES` resets the streak.

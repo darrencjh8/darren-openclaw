@@ -936,6 +936,53 @@ health_ok() {
 
 failed=0
 
+# ---- codex-router skill payload ----
+# codex-router owns the skills it publishes (dev-loop, code-reviewer, ...). A
+# router-only deploy never rebuilds the Hermes image, so stage its canonical
+# tree onto the Hermes volume and reconcile every runtime skill root here. The
+# same script runs at boot (50-seed-defaults), so a restart cannot resurrect a
+# stale copy.
+if should_deploy "codex-router" || should_deploy "all"; then
+  SKILLS_SRC="$ROOT/modules/codex-router/codex/skills"
+  SKILLS_SYNC="$ROOT/modules/hermes/scripts/sync-codex-router-skills.sh"
+  if [ ! -d "$SKILLS_SRC" ]; then
+    echo "  (codex-router skills not checked out; skipping skill sync)"
+  elif [ ! -f "$SKILLS_SYNC" ]; then
+    echo "  (skill reconciler missing; skipping skill sync)"
+  elif ! docker inspect hermes >/dev/null 2>&1; then
+    echo "  (hermes container not present; skipping skill sync)"
+  else
+    ready=false
+    for _ in $(seq 1 15); do
+      if docker exec hermes true 2>/dev/null; then ready=true; break; fi
+      sleep 2
+    done
+    echo ""
+    echo "--- Codex Router Skills ---"
+    sync_ok=false
+    if [ "$ready" = true ]; then
+      docker exec hermes rm -rf /opt/data/.codex-router-skills.new 2>/dev/null || true
+      if docker cp "$SKILLS_SRC/." hermes:/opt/data/.codex-router-skills.new \
+          && docker cp "$SKILLS_SYNC" hermes:/tmp/sync-codex-router-skills.sh \
+          && docker exec hermes sh -eu -c '
+              rm -rf /opt/data/.codex-router-skills
+              mv /opt/data/.codex-router-skills.new /opt/data/.codex-router-skills
+              chown -R hermes:hermes /opt/data/.codex-router-skills 2>/dev/null || true
+              sh /tmp/sync-codex-router-skills.sh /opt/data/.codex-router-skills
+              rm -f /tmp/sync-codex-router-skills.sh
+          '; then
+        sync_ok=true
+      fi
+    fi
+    if [ "$sync_ok" = true ]; then
+      echo -e "  ${GREEN}✓ codex-router skills reconciled into the Hermes roots${NC}"
+    else
+      echo -e "  ${RED}✗ codex-router skill sync failed${NC}"
+      failed=$((failed + 1))
+    fi
+  fi
+fi
+
 # Hermes gateway (the dashboard is disabled in compose, so its port would always fail)
 # Needs extra wait: config migration + profile seeding registers the supervised
 # gateway service after container start, so poll it with the same bounded budget
