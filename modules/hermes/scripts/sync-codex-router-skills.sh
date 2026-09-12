@@ -134,12 +134,20 @@ while [ "$attempts" -lt "$LOCK_WAIT_SECONDS" ]; do
             # the tests pin the adjacent cases (a dead or empty pid is
             # reclaimed, a live lock with no proof of death is left alone).
             holder=$(cat "$MKDIR_LOCK/pid" 2>/dev/null) || holder=""
+            # Strip whitespace before the digit test: `kill -0 " 123"` honours
+            # the embedded pid, so reclaiming a padded pid file would steal a
+            # live lock.
+            holder=$(printf '%s' "$holder" | tr -d '[:space:]')
             case $holder in
-                ''|*[!0-9]*)
-                    # A truncated or corrupt pid file names no process. Reclaim
-                    # it; otherwise `/proc//stat` resolves to `/proc/stat`, which
-                    # is always readable, and the lock is stuck forever.
+                '')
+                    # A truncated pid file names no process. Reclaim it;
+                    # otherwise `/proc//stat` resolves to `/proc/stat`, which is
+                    # always readable, and the lock is stuck forever.
                     rm -rf "$MKDIR_LOCK" 2>/dev/null || true
+                    ;;
+                *[!0-9]*)
+                    # Neither a pid nor empty (a hand-edited "abc" or "-1"):
+                    # leave it for the timeout and fail closed rather than guess.
                     ;;
                 *)
                     if kill -0 "$holder" 2>/dev/null; then

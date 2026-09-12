@@ -358,6 +358,29 @@ else
     nope "reclaimed a lock whose pid file is empty" "rc=$corrupt_rc out=$corrupt_output"
 fi
 
+echo "=== a padded pid file still names a live holder ==="
+# `kill -0 " 123"` honours the embedded pid, so the whitespace must be stripped
+# before the digit test or a padded pid file reads as corrupt and is stolen.
+fresh_fixture
+mkdir -p "$PRIMARY/.codex-router-skills.lock.d"
+printf ' %s \n' "$$" > "$PRIMARY/.codex-router-skills.lock.d/pid"
+pad_rc=0
+pad_output=$(HERMES_SKILL_PRIMARY_HOME="$PRIMARY" \
+    HERMES_SKILL_SECONDARY_HOME="$SECONDARY" \
+    HERMES_MANIFEST_STATE_DIRS="$STATE" \
+    HERMES_SKILL_LOCK_MODE=mkdir \
+    HERMES_SKILL_LOCK_WAIT_SECONDS=1 \
+    sh "$SYNC" "$SOURCE" 2>&1) || pad_rc=$?
+pad_pid=$(cat "$PRIMARY/.codex-router-skills.lock.d/pid" 2>/dev/null)
+if [[ "$pad_rc" -ne 0 && "$pad_pid" == " $$ " \
+      && "$pad_output" == *"could not acquire"* ]]; then
+    ok "refused to reclaim a whitespace-padded live pid"
+else
+    nope "refused to reclaim a whitespace-padded live pid" \
+        "rc=$pad_rc pid=[${pad_pid:-none}] out=$pad_output"
+fi
+rm -rf "$PRIMARY/.codex-router-skills.lock.d"
+
 echo "=== an empty source never prunes the managed set ==="
 fresh_fixture
 run "$SOURCE" >/dev/null
