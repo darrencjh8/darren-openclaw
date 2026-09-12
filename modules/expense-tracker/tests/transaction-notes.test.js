@@ -71,8 +71,8 @@ describe("composeNotes", () => {
 
     it("adds a Statement line when no notes exist", () => {
         expect(
-            composeNotes({ statementRef: "DBS Yuu | 2026-06-01..2026-06-30" }),
-        ).toBe("Statement: DBS Yuu | 2026-06-01..2026-06-30");
+            composeNotes({ statementRef: "Epsilon Nova | 2026-06-01..2026-06-30" }),
+        ).toBe("Statement: Epsilon Nova | 2026-06-01..2026-06-30");
     });
 
     it("orders Merchant before Statement", () => {
@@ -137,10 +137,10 @@ describe("composeNotes", () => {
     it("preserves old 'Statement [period]' form (no colon) as user content", () => {
         const out = composeNotes({
             notes: "Statement Jun 2026",
-            statementRef: "DBS Yuu | 2026-06-01..2026-06-30",
+            statementRef: "Epsilon Nova | 2026-06-01..2026-06-30",
         });
         expect(out).toBe(
-            "Statement: DBS Yuu | 2026-06-01..2026-06-30\n\nStatement Jun 2026",
+            "Statement: Epsilon Nova | 2026-06-01..2026-06-30\n\nStatement Jun 2026",
         );
     });
 

@@ -11,7 +11,7 @@ function makeConfig(overrides = {}) {
         DEEPSEEK_API_KEY: "sk-test",
         ACTUAL_BUDGET_URL: "http://test:5006",
         ACTUAL_BUDGET_PASSWORD: "test-password",
-        ACTUAL_PRIMARY_BUDGET_FILE: "Darren SGD",
+        ACTUAL_PRIMARY_BUDGET_FILE: "Example SGD",
         ACTUAL_BUDGET_ENCRYPTION_PASSWORD: "",
         IMAP_HOST: "imap.example.com",
         IMAP_PORT: "993",
@@ -39,7 +39,7 @@ function makeMockTools(overrides = {}) {
             if (name === "fetch_context")
                 return {
                     accounts: [
-                        { id: "acc-1", name: "HSBC Revolution", closed: false },
+                        { id: "acc-1", name: "Iota Freedom", closed: false },
                     ],
                     categories: [{ id: "cat-food", name: "Food" }],
                     payees: [{ id: "p-1", name: "Food" }],
@@ -59,14 +59,14 @@ function fakePhase1Output(overrides = {}) {
         currency: "SGD",
         date: "2026-06-18",
         account_id: "acc-1",
-        account_name: "HSBC Revolution",
-        budget_id: "Darren SGD",
+        account_name: "Iota Freedom",
+        budget_id: "Example SGD",
         action: "insert",
         payee_name: "",
         category_id: "",
         raw_description: "S$1.90 at KOUFU PTE LTD",
         notes: "",
-        reasoning: "Matched HSBC Revolution",
+        reasoning: "Matched Iota Freedom",
         notify_message: "S$1.90 at KOUFU PTE LTD, logged!",
         ...overrides,
     };
@@ -117,7 +117,7 @@ describe("processText", () => {
         orch._resolvePhase2 = vi.fn().mockResolvedValue(p2);
 
         const result = await orch.processText(
-            "S$6.44 Shopee on HSBC Revolution",
+            "S$6.44 Shopee on Iota Freedom",
         );
 
         expect(tools.setEmailContext).not.toHaveBeenCalled();
@@ -138,7 +138,7 @@ describe("processText", () => {
             merchant: "Lotus's",
             amount_cents: -4550,
             currency: "MYR",
-            budget_id: "Darren MYR",
+            budget_id: "Example MYR",
         });
         const p2 = fakePhase2Output(p1, {
             payee_name: "Groceries",

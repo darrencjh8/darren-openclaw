@@ -8,7 +8,7 @@ An internal transfer is only created when both sides resolve deterministically t
 
 ## Scope
 
-This work covers structured movement alerts from OCBC, Trust Bank, and DBS, including DBS successful bill-payment alerts.
+This work covers structured movement alerts from OCBC, Zeta Bank, and DBS, including DBS successful bill-payment alerts.
 
 The DBS fixture below must be handled without an LLM when its source and destination account identities are configured and resolve uniquely:
 
@@ -19,14 +19,14 @@ You’ve successfully made a bill payment.
 
 Date and Time: 01 Sep 01:05 (SGT)
 Amount: SGD 1299.29
-From: Altitude (A/C ending 9302)
+From: Vista (A/C ending 9302)
 To: UOB CREDIT CARDS (Ref ending 4605)
 ```
 
 Expected normalized movement:
 
 ```text
-source: DBS Altitude, suffix 9302
+source: Epsilon Vista, suffix 9302
 destination: UOB CREDIT CARDS, suffix 4605
 amount: -129929 cents
 currency: SGD
@@ -34,16 +34,16 @@ time: 2026-09-01T01:05:00+08:00
 reference: 17881959177693481349
 ```
 
-If `UOB CREDIT CARDS` plus suffix `4605` resolves to an open Actual account, send an Actual transfer from `DBS Altitude` to that account. If destination account identity is absent or ambiguous, do not guess a transfer; send it through review/normal fallback.
+If `UOB CREDIT CARDS` plus suffix `4605` resolves to an open Actual account, send an Actual transfer from `Epsilon Vista` to that account. If destination account identity is absent or ambiguous, do not guess a transfer; send it through review/normal fallback.
 
 The same generic flow must support these sanitized fixture variants:
 
 ```text
-DBS:  Altitude (A/C ending <source>) -> CITI CREDIT CARDS (Ref ending <destination>)
-OCBC: 360 Account (-<source>) -> OCBC <card product> Visa Card (-<destination>)
+DBS:  Vista (A/C ending <source>) -> CITI CREDIT CARDS (Ref ending <destination>)
+OCBC: 111 Account (-<source>) -> OCBC <card product> Visa Card (-<destination>)
 ```
 
-Both become Actual transfers only when each destination issuer + suffix maps uniquely to an open Actual account and a live transfer payee exists. The parser must not contain card-product-specific logic for `Altitude`, `CITI CREDIT CARDS`, or an OCBC Visa product.
+Both become Actual transfers only when each destination issuer + suffix maps uniquely to an open Actual account and a live transfer payee exists. The parser must not contain card-product-specific logic for `Vista`, `CITI CREDIT CARDS`, or an OCBC Visa product.
 
 ## Non-goals
 
@@ -60,8 +60,8 @@ OCBC outgoing alert:
 
 ```text
 Amount : SGD 14.25
-From your account : 360 Account (-869001)
-To account : Darren Trust (-310980) at TRUST BANK SINGAPORE LIMITED
+From your account : 111 Account (-869001)
+To account : Example Trust (-310980) at TRUST BANK SINGAPORE LIMITED
 Date of Transfer : 01 Sep 2026
 Time of Transfer : 01.06 AM SGT
 Reference number : 2609010016652878
@@ -74,7 +74,7 @@ You have received SGD 14.25 from OverseaChinese Banking Corporation Ltd
 A/C ending 9001 on 01 Sep 2026 01:06 SGT.
 ```
 
-Expected result: one Actual transfer between `OCBC 360` and `Trust Card`; the second alert is recorded as its counterpart and sends no second transaction to Actual.
+Expected result: one Actual transfer between `OCBC 111` and `Zeta Card`; the second alert is recorded as its counterpart and sends no second transaction to Actual.
 
 ### External payment
 
@@ -83,11 +83,11 @@ The following PayNow transfer has been made to SIONG93 LLP using their
 Unique Entity Number (UEN) T20LL0428K289.
 
 Amount : SGD 7.30
-From your account : 360 Account (-869001)
+From your account : 111 Account (-869001)
 Description : T20LL0428K289QLW511452054
 ```
 
-Expected result: ordinary outgoing expense from `OCBC 360`, with `SIONG93 LLP` as display merchant and the UEN description retained as raw merchant descriptor. It is not an Actual transfer.
+Expected result: ordinary outgoing expense from `OCBC 111`, with `SIONG93 LLP` as display merchant and the UEN description retained as raw merchant descriptor. It is not an Actual transfer.
 
 ### One-sided deposit / credit
 
@@ -110,7 +110,7 @@ counterparty: unknown
 reference: empty
 ```
 
-Expected result: one ordinary positive transaction in `OCBC 360`, marked as an unidentified deposit/credit. It is not an internal transfer and must never be auto-deduplicated against a transfer because the alert supplies no source account, counterparty, or reference. Use the received email timestamp in `Asia/Singapore` for the date when body contains time but no date.
+Expected result: one ordinary positive transaction in `OCBC 111`, marked as an unidentified deposit/credit. It is not an internal transfer and must never be auto-deduplicated against a transfer because the alert supplies no source account, counterparty, or reference. Use the received email timestamp in `Asia/Singapore` for the date when body contains time but no date.
 
 ## Design
 
@@ -127,7 +127,7 @@ Add a pure parser that emits normalized movement evidence when an alert has a su
   occurred_at: "2026-09-01T01:06:00+08:00",
   own_account: { bank: "OCBC", suffix: "869001" },
   counterparty: {
-    name: "Darren Trust",
+    name: "Example Trust",
     bank: "TRUST BANK SINGAPORE LIMITED",
     suffix: "310980",
   },
@@ -171,16 +171,16 @@ For every alert, fetch the live Actual account list and normalize each account n
 Supported verified registry facts, used only as deterministic fallback:
 
 ```text
-Account ending 869001 belongs to OCBC 360
-Trust Bank Singapore Limited account ending 310980 belongs to Trust Card
-Trust Bank alert recipient maps to Trust Card account
-DBS account ending 9302 belongs to DBS Altitude
+Account ending 869001 belongs to OCBC 111
+Zeta Bank Singapore Limited account ending 310980 belongs to Zeta Card
+Zeta Bank alert recipient maps to Zeta Card account
+DBS account ending 9302 belongs to Epsilon Vista
 UOB CREDIT CARDS account ending 4605 belongs to UOB Card
 CITI CREDIT CARDS account ending 4756 belongs to Citi Card
 OCBC Visa Card account ending 1149 belongs to OCBC Visa Card
 ```
 
-For the DBS layout, resolve the source by verified DBS + suffix `9302`; do not require the live Actual account name to contain the literal string `DBS`. `Altitude` and `DBS Altitude` must be normalized equivalent account labels only after suffix and sender-bank validation. For destination cards, issuer plus suffix is identity evidence; labels such as `CITI CREDIT CARDS` and card product text are not enough without suffix mapping.
+For the DBS layout, resolve the source by verified DBS + suffix `9302`; do not require the live Actual account name to contain the literal string `DBS`. `Vista` and `Epsilon Vista` must be normalized equivalent account labels only after suffix and sender-bank validation. For destination cards, issuer plus suffix is identity evidence; labels such as `CITI CREDIT CARDS` and card product text are not enough without suffix mapping.
 
 Rules:
 
@@ -191,7 +191,7 @@ Rules:
 5. The target account must be open and in the selected budget.
 6. Destination must have a live transfer payee whose `transfer_acct` equals target account ID.
 7. Multiple candidates are unresolved.
-8. Recipient display names such as `Darren Trust` are not account identity.
+8. Recipient display names such as `Example Trust` are not account identity.
 
 `9001` may resolve to account suffix `869001` only if it is the unique OCBC account with that last-four suffix. Do not persist a new alias based on one alert.
 
@@ -243,14 +243,14 @@ updated_at
 Keep account direction ordered. Both bank-side emails reconstruct the same logical movement:
 
 ```text
-OCBC outgoing:  source OCBC 360, destination Trust Card
-Trust incoming: source OCBC 360, destination Trust Card
+OCBC outgoing:  source OCBC 111, destination Zeta Card
+Trust incoming: source OCBC 111, destination Zeta Card
 ```
 
 A real reverse movement is distinct:
 
 ```text
-Trust outgoing: source Trust Card, destination OCBC 360
+Trust outgoing: source Zeta Card, destination OCBC 111
 ```
 
 This prevents a real reverse transfer from being discarded as a counterpart.
@@ -314,7 +314,7 @@ This must reject `AMAZE* OPENCODE` mapping to `Wallet` from a low-score (`0.427`
 Remove or replace the unsafe generic fact:
 
 ```text
-Darren Trust maps to Charity payee
+Example Trust maps to Charity payee
 ```
 
 Use structured account identity facts instead.
@@ -336,11 +336,11 @@ All test emails are sanitized synthetic fixtures. No production email content, c
 
 Create sanitized fixtures for:
 
-- OCBC outgoing transfer to Trust Bank.
+- OCBC outgoing transfer to Zeta Bank.
 - Trust incoming transfer from OCBC.
 - Existing DBS bill-payment transfer format, including `Date and Time` and transaction reference.
-- DBS Altitude to Citi Credit Cards bill payment.
-- OCBC 360 to OCBC Visa card bill payment using `Date of Payment` / `Time of Payment`.
+- Epsilon Vista to Citi Credit Cards bill payment.
+- OCBC 111 to OCBC Visa card bill payment using `Date of Payment` / `Time of Payment`.
 - OCBC PayNow UEN external payment.
 - OCBC one-sided deposit alert with account suffix and empty reference.
 - Ordinary merchant purchase alert.
@@ -353,7 +353,7 @@ PASS: OCBC `From your account` / `To account` extracts source, destination, amou
 PASS: Existing DBS `A/C ending` / `Ref ending` format remains supported.
 PASS: DBS `Date and Time: 01 Sep 01:05 (SGT)` produces `2026-09-01T01:05:00+08:00` from fixture receive timestamp.
 PASS: DBS transaction reference is extracted unchanged.
-PASS: DBS Altitude -> CITI CREDIT CARDS extracts source suffix, destination issuer/suffix, and transfer timestamp without card-product-specific parser logic.
+PASS: Epsilon Vista -> CITI CREDIT CARDS extracts source suffix, destination issuer/suffix, and transfer timestamp without card-product-specific parser logic.
 PASS: OCBC `Date of Payment` / `Time of Payment`, lower-case `am`, and card suffix `(-<suffix>)` extract source/destination identity and timestamp.
 PASS: Trust `Sweet! You have received ... from ... A/C ending <suffix> on <date> <time> SGT` alert extracts incoming direction, source bank, suffix, amount, date, and time.
 PASS: Trust incoming transfer fixture never calls Phase 1 LLM and never runs memory-driven account override.
@@ -367,15 +367,15 @@ PASS: Missing required account evidence returns null.
 
 ```text
 PASS: Previously unseen card account in live Actual context resolves without registry when account name contains matching bank + suffix.
-PASS: Full suffix `869001` resolves OCBC 360.
-PASS: `9001` resolves OCBC 360 only when it uniquely matches that bank's last four digits.
+PASS: Full suffix `869001` resolves OCBC 111.
+PASS: `9001` resolves OCBC 111 only when it uniquely matches that bank's last four digits.
 PASS: `9001` is unresolved when two OCBC accounts match.
-PASS: Exact Trust Bank + `310980` resolves Trust Card.
-PASS: Exact DBS + `9302` resolves DBS Altitude even if live Actual name is `Altitude`.
+PASS: Exact Zeta Bank + `310980` resolves Zeta Card.
+PASS: Exact DBS + `9302` resolves Epsilon Vista even if live Actual name is `Vista`.
 PASS: Exact UOB CREDIT CARDS + `4605` resolves UOB Card only when configured and open.
 PASS: Exact CITI CREDIT CARDS + `4756` resolves Citi Card only when configured and open.
 PASS: Exact OCBC card issuer + last-four `1149` resolves its card only when configured and open.
-PASS: `Darren Trust` display name alone does not resolve Trust Card.
+PASS: `Example Trust` display name alone does not resolve Zeta Card.
 PASS: Card known only by generic Actual name with no matching suffix remains unresolved until explicit verified registry mapping exists.
 PASS: Closed accounts do not resolve.
 PASS: Cross-bank suffix matches do not resolve.
@@ -386,13 +386,13 @@ PASS: Cross-bank suffix matches do not resolve.
 ```text
 PASS: OCBC outgoing first creates one transfer command.
 PASS: Trust incoming second sends no Actual command and is marked counterpart-deduplicated.
-PASS: Trust incoming alert resolves source OCBC 9001 to OCBC 360 only through unique bank+suffx identity, never through a `maps to ... payee` memory fact.
-PASS: DBS bill payment from Altitude (`9302`) to UOB CREDIT CARDS (`4605`) sends one transfer command when both accounts resolve.
+PASS: Trust incoming alert resolves source OCBC 9001 to OCBC 111 only through unique bank+suffx identity, never through a `maps to ... payee` memory fact.
+PASS: DBS bill payment from Vista (`9302`) to UOB CREDIT CARDS (`4605`) sends one transfer command when both accounts resolve.
 PASS: Same DBS bill payment with missing or ambiguous UOB `4605` mapping sends no transfer command and enters review/normal fallback.
-PASS: DBS Altitude -> Citi Credit Cards sends one transfer command when Citi `4756` resolves uniquely.
-PASS: OCBC 360 -> OCBC Visa card sends one transfer command when card `1149` resolves uniquely.
+PASS: Epsilon Vista -> Citi Credit Cards sends one transfer command when Citi `4756` resolves uniquely.
+PASS: OCBC 111 -> OCBC Visa card sends one transfer command when card `1149` resolves uniquely.
 PASS: Either card payment with missing/ambiguous destination mapping sends no transfer command.
-PASS: One-sided OCBC deposit creates one ordinary positive transaction in OCBC 360 and sends no transfer payee.
+PASS: One-sided OCBC deposit creates one ordinary positive transaction in OCBC 111 and sends no transfer payee.
 PASS: One-sided OCBC deposit with same amount/time as an internal transfer is not counterpart-deduplicated.
 PASS: Trust incoming first creates a transfer only with explicit verified recipient-account mapping.
 PASS: Trust incoming first without recipient-account mapping does not create a transfer.
@@ -400,7 +400,7 @@ PASS: Same ordered source/destination accounts, amount, currency, and timestamp 
 PASS: Counterpart timestamps one to ten minutes apart create one transfer, including concurrent processing.
 PASS: Timestamps more than ten minutes apart create two transfers.
 PASS: Same accounts and amount but transfers 30 minutes apart create two transfers.
-PASS: Real reverse transfer (Trust Card -> OCBC 360) within ten minutes creates a second transfer.
+PASS: Real reverse transfer (Zeta Card -> OCBC 111) within ten minutes creates a second transfer.
 PASS: Same amount/date with different destination account IDs creates two transfers.
 PASS: Concurrent processing of both alerts sends exactly one transfer command.
 ```
@@ -423,9 +423,9 @@ notes: contains 2609010016652878
 Required assertions:
 
 ```text
-PASS: source account is OCBC 360.
+PASS: source account is OCBC 111.
 PASS: amount is -1425 cents.
-PASS: payee is Trust Card's live Actual transfer payee, whose `transfer_acct` equals Trust Card's account ID.
+PASS: payee is Zeta Card's live Actual transfer payee, whose `transfer_acct` equals Zeta Card's account ID.
 PASS: no ordinary expense category is sent for the transfer.
 PASS: Charity payee is never sent.
 PASS: exactly one HTTP insertion request is sent.
@@ -444,9 +444,9 @@ expect(logDecision).toHaveBeenCalledWith(
 );
 ```
 
-For PayNow UEN, assert final HTTP body has OCBC 360, amount `-730`, the resolved ordinary merchant payee, and `SIONG93 LLP` as imported description. It must not contain a transfer payee or destination Actual account ID.
+For PayNow UEN, assert final HTTP body has OCBC 111, amount `-730`, the resolved ordinary merchant payee, and `SIONG93 LLP` as imported description. It must not contain a transfer payee or destination Actual account ID.
 
-For one-sided OCBC deposit, assert final HTTP body has OCBC 360, amount `+20`, an unidentified-deposit description, no transfer payee, and no ordinary expense category unless an explicit user-approved deposit rule exists.
+For one-sided OCBC deposit, assert final HTTP body has OCBC 111, amount `+20`, an unidentified-deposit description, no transfer payee, and no ordinary expense category unless an explicit user-approved deposit rule exists.
 
 Required assertions:
 
@@ -455,7 +455,7 @@ PASS: no transfer payee is sent.
 PASS: no destination Actual account ID is sent.
 PASS: raw UEN descriptor is preserved in final adapter notes/body.
 
-For the DBS bill-payment fixture, assert final Actual HTTP body uses DBS Altitude as source, amount `-129929`, UOB Card's verified transfer payee, no ordinary category, and notes containing transaction reference `17881959177693481349`.
+For the DBS bill-payment fixture, assert final Actual HTTP body uses Epsilon Vista as source, amount `-129929`, UOB Card's verified transfer payee, no ordinary category, and notes containing transaction reference `17881959177693481349`.
 ```
 
 ### Recovery and safety assertions

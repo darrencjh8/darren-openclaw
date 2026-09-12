@@ -165,7 +165,7 @@ Learned mappings are stored as free-form + structured facts in `MEMORY.md` (conf
 ```
 # MEMORY.md (example facts)
 - "toast box" maps to Food payee
-- DBS Yuu is a debit card account
+- Epsilon Nova is a debit card account
 - ntuc transactions are Groceries
 ```
 

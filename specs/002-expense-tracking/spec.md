@@ -78,7 +78,7 @@ Incoming emails are pre-classified by a lightweight LLM call into one of three c
 
 **Acceptance Criteria:**
 - [ ] The LLM calls `fetch_accounts` before matching any transaction
-- [ ] Account matching is by name similarity (e.g., "DBS Yuu" in email → "DBS Yuu" in Actual Budget)
+- [ ] Account matching is by name similarity (e.g., "Epsilon Nova" in email → "Epsilon Nova" in Actual Budget)
 - [ ] If no clear account match exists, the LLM calls `notify_user` with available accounts listed
 - [ ] No hardcoded account UUIDs or names exist in config or code
 

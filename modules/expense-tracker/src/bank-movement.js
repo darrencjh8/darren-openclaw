@@ -158,7 +158,7 @@ export function parseBankMovement(text, { senderBank = null, receivedAt } = {}) 
   const body = restoreFieldLines(String(text || ""));
   const reference = field(body, ["Reference number", "Transaction Ref", "Reference"]);
 
-  // Ryt Bank "Card payment completed" alert — no "Amount :" label.
+  // Alpha Bank "Card payment completed" alert — no "Amount :" label.
   //   "RM200.00 was paid at TNG-EWALLET ECOM 3-EC using your Main Account on 2/9/2026, 12:46 AM (GMT+8)."
   const ryt = body.match(/(SGD|RM|MYR)\s*([\d,.]+)\s+was paid at\s+(.+?)\s+using\s+(.+?)\s+on\s+(\d{1,2}\/\d{1,2}\/\d{4})\s*,?\s*(\d{1,2}:\d{2}\s*(?:AM|PM)?)/i);
   if (ryt) {
@@ -293,6 +293,11 @@ export function identityMappingsFromFacts(facts, accounts) {
       // One shared resolver: normal matching, then a bounded filler-word
       // retry that only accepts an exact account name. Never containment, so a
       // named-but-absent account cannot resolve to a live sibling.
+      // Aliases are deliberately NOT applied on this path: it can run with an
+      // unknown bank (`evidence.bank` null leaves the candidate set unfiltered),
+      // so a cross-bank alias could book the wrong account. The orchestrator
+      // paths apply aliases and then check the resolved name against the sender
+      // bank. Review round 1 on c1e1d10.
       const resolution = resolveFactAccount(parsed.accountName, accounts);
       const account = resolution.matched
         ? accounts.find((a) => a.id === resolution.id)
@@ -352,7 +357,7 @@ function resolveMappedAccount(evidence, mappings) {
     ).values(),
   ];
   // Dedup by account so two suffix aliases that resolve to the SAME account
-  // (e.g. OCBC 360 as both 869001 and 9001) are not treated as ambiguous.
+  // (e.g. Beta 360 as both 869001 and 9001) are not treated as ambiguous.
   return unique.length === 1 ? unique[0] : null;
 }
 

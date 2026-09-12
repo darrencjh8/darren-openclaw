@@ -12,7 +12,7 @@ import {
   stopwords,
 } from "../src/memory.js";
 // memory.js does not re-export this one, and the plural filler retry lives on it.
-import { resolveFactAccount } from "../src/suffix-facts.js";
+import { accountAliases, resolveFactAccount } from "../src/suffix-facts.js";
 
 // Synthetic account names, deliberately shaped like a real portfolio: several
 // accounts share a brand token, some are card-named and some account-named, one
@@ -539,5 +539,174 @@ describe("issue #469 item 1: writing an exact account name always resolves", () 
     expect(
       matchAccountByName(name, [{ id: name, name, closed: false }]).name,
     ).toBe(name);
+  });
+});
+
+// ── Issue #496: a bank alert may name the product, not the account ────────
+describe("account aliases (#496)", () => {
+  const live = [
+    { id: "ryt", name: "Ryt Bank", closed: false },
+    { id: "trust-bank", name: "Trust Bank", closed: false },
+    { id: "trust-card", name: "Trust Card", closed: false },
+  ];
+  const alertFacts = [
+    { text: "Main Account is a Ryt Bank account" },
+    { text: "Trust Cashback card is a Trust Card account" },
+    { text: "Citi Reward is a credit card account" },
+    { text: "Trust Bank is a bank account" },
+  ];
+
+  it("resolves a product name the alert uses instead of the account name", () => {
+    const aliases = accountAliases(alertFacts, live);
+    expect(matchAccountByName("Main Account", live, aliases).name).toBe("Ryt Bank");
+    expect(matchAccountByName("Trust Cashback card", live, aliases).name).toBe(
+      "Trust Card",
+    );
+  });
+
+  it("only aliases facts whose target is a live account", () => {
+    // "credit card" and "bank" are kinds, not accounts, so they stay out.
+    const aliases = accountAliases(alertFacts, live);
+    expect(aliases.size).toBe(2);
+    expect(aliases.has("citi reward")).toBe(false);
+    expect(aliases.has("trust bank")).toBe(false);
+  });
+
+  it("leaves every existing rule alone when no alias applies", () => {
+    const aliases = accountAliases(alertFacts, live);
+    // Exact name still wins.
+    expect(matchAccountByName("Trust Card", live, aliases).name).toBe("Trust Card");
+    // A named-but-absent account still refuses rather than reaching a sibling.
+    expect(
+      matchAccountByName("Trust Account", [live[2]], aliases).matched,
+    ).toBe(false);
+    // An unknown product name still refuses.
+    expect(matchAccountByName("Some Other Product", live, aliases).matched).toBe(
+      false,
+    );
+  });
+
+  it("does not alias a product name to an account that is not live", () => {
+    const aliases = accountAliases(
+      [{ text: "Main Account is a Ryt Bank account" }],
+      [{ id: "dbs", name: "DBS Account", closed: false }],
+    );
+    expect(aliases.size).toBe(0);
+  });
+});
+
+describe("account aliases in the orchestrator path (#496 review)", () => {
+  it("applies an alias through hasUsableSuffixFact", async () => {
+    const { hasUsableSuffixFact } = await import("../src/orchestrator.js");
+    const live = [{ id: "ryt", name: "Ryt Bank", closed: false }];
+    const facts = [
+      { text: "Main Account is a Ryt Bank account", score: 0.9 },
+      { text: "Card ending 1234 belongs to Main Account", score: 0.9 },
+    ];
+    // Round 1 on c1e1d10: the local wrapper dropped the aliases argument, so
+    // this returned false even though the alias map was correct.
+    expect(
+      hasUsableSuffixFact(facts, "card ending 1234 at Ryt", "Ryt", live),
+    ).toBe(true);
+  });
+
+  it("does not let a fact shadow a live account name", () => {
+    const live = [
+      { id: "dbs", name: "DBS Account", closed: false },
+      { id: "ryt", name: "Ryt Bank", closed: false },
+    ];
+    const aliases = accountAliases(
+      [{ text: "DBS Account is a Ryt Bank account" }],
+      live,
+    );
+    expect(matchAccountByName("DBS Account", live, aliases).name).toBe(
+      "DBS Account",
+    );
+  });
+
+  it("ignores an alias fact below the search score floor", () => {
+    const live = [{ id: "ryt", name: "Ryt Bank", closed: false }];
+    expect(
+      accountAliases(
+        [{ text: "Main Account is a Ryt Bank account", score: 0.1 }],
+        live,
+      ).size,
+    ).toBe(0);
+  });
+});
+
+describe("alias edge cases (#496 round 1)", () => {
+  const live = [
+    { id: "ryt", name: "Ryt Bank", closed: false },
+    { id: "trust", name: "Trust Bank", closed: false },
+    { id: "closed-eps", name: "Epsilon Account", closed: true },
+    { id: "nova", name: "Epsilon Nova Card", closed: false },
+  ];
+
+  it("refuses a product claimed for two different accounts", () => {
+    const aliases = accountAliases(
+      [
+        { text: "Main Account is a Ryt Bank account" },
+        { text: "Main Account is a Trust Bank account" },
+      ],
+      live,
+    );
+    expect(aliases.has("main account")).toBe(false);
+  });
+
+  it("keeps a parenthesised id out of the alias key", () => {
+    const aliases = accountAliases(
+      [{ text: "Main Account (abc123) is a Ryt Bank account" }],
+      live,
+    );
+    expect(aliases.get("main account")).toBe("Ryt Bank");
+  });
+
+  it("still refuses the closed-twin case with an aliases map present", () => {
+    const aliases = accountAliases(
+      [{ text: "Epsilon Account is a Epsilon Nova Card account" }],
+      live,
+    );
+    // The closed account still owns its own name, so it is never redirected.
+    expect(
+      matchAccountByName("Epsilon Account", live, aliases).matched,
+    ).toBe(false);
+  });
+});
+
+describe("alias targets that cannot resolve (#496 round 5)", () => {
+  const live = [
+    { id: "eps", name: "Epsilon Account", closed: true },
+    { id: "ryt", name: "Ryt Bank", closed: false },
+  ];
+
+  it("ignores a rival claim from a target that could never resolve", () => {
+    const aliases = accountAliases(
+      [
+        { text: "Main Account is a Epsilon Account account", score: 0.9 },
+        { text: "Main Account is a Ryt Bank account", score: 0.9 },
+      ],
+      live,
+      );
+    expect(aliases.get("main account")).toBe("Ryt Bank");
+    expect(
+      matchAccountByName("Main Account", live, aliases).name,
+    ).toBe("Ryt Bank");
+  });
+
+  it("ignores a rival claim from a duplicate-named target", () => {
+    const dupes = [
+      { id: "a", name: "Shared Account", closed: false },
+      { id: "b", name: "Shared Account", closed: false },
+      { id: "ryt", name: "Ryt Bank", closed: false },
+    ];
+    const aliases = accountAliases(
+      [
+        { text: "Main Account is a Shared Account account", score: 0.9 },
+        { text: "Main Account is a Ryt Bank account", score: 0.9 },
+      ],
+      dupes,
+    );
+    expect(aliases.get("main account")).toBe("Ryt Bank");
   });
 });

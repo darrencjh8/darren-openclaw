@@ -92,7 +92,7 @@ bash scripts/migrate-memory.sh
 
 # Verify in Hermes chat:
 # "what credit card ends with 4605?"
-# → Should return: UOB Ladies credit card
+# → Should return: Delta Extra credit card
 
 # Copy to Docker volume
 cp ~/.hermes/memories/MEMORY.md gateway/hermes/memories/

@@ -51,8 +51,8 @@ describe("hermes expense-tracker skill", () => {
   });
 
   it("documents the canonical written form", () => {
-    expect(skill).toContain("Card ending 3255 belongs to DBS Yuu Card");
-    expect(skill).toContain("Account ending 5750 belongs to DBS Account");
+    expect(skill).toContain("Card ending 3255 belongs to Epsilon Nova Card");
+    expect(skill).toContain("Account ending 5750 belongs to Epsilon Account");
   });
 
   it("states that ambiguity refuses rather than guessing", () => {
