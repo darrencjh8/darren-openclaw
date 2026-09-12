@@ -8,7 +8,7 @@ import {
 const accounts = [
   { id: "ocbc-111", name: "OCBC 111 9001", closed: false },
   { id: "trust-card", name: "Trust Card 0980", closed: false },
-  { id: "dbs-altitude", name: "Vista 9302", closed: false },
+  { id: "dbs-vista", name: "Vista 9302", closed: false },
   { id: "citi-card", name: "Citi Rewards 4756", closed: false },
   { id: "ocbc-visa", name: "OCBC Visa 1149", closed: false },
 ];
@@ -26,7 +26,7 @@ Date of Transfer : 01 Sep 2026
 Time of Transfer : 01.06 AM SGT
 Amount : SGD 14.25
 From your account : 111 Account (-869001)
-To account : Darren Trust (-310980) at TRUST BANK SINGAPORE LIMITED
+To account : Example Trust (-310980) at TRUST BANK SINGAPORE LIMITED
 Reference number : REF-OCBC-1
 `, { senderBank: "OCBC", receivedAt: "2026-09-01T01:07:00+08:00" });
 
@@ -82,7 +82,7 @@ To: CITI CREDIT CARDS (Ref ending 4756)
 
   it("parses a flattened OCBC outgoing transfer", () => {
     const movement = parseBankMovement(
-      "Date of Transfer : 01 Sep 2026 Time of Transfer : 01.06 AM SGT Amount : SGD 14.25 From your account : 111 Account (-869001) To account : Darren Trust (-310980) at TRUST BANK SINGAPORE LIMITED Reference number : REF-OCBC-1",
+      "Date of Transfer : 01 Sep 2026 Time of Transfer : 01.06 AM SGT Amount : SGD 14.25 From your account : 111 Account (-869001) To account : Example Trust (-310980) at TRUST BANK SINGAPORE LIMITED Reference number : REF-OCBC-1",
       { senderBank: "OCBC", receivedAt: "2026-09-01T01:07:00+08:00" },
     );
 
@@ -130,7 +130,7 @@ To: CITI CREDIT CARDS (Ref ending 4756)
 
   it("parses a Ryt Bank card payment without an Amount label", () => {
     const movement = parseBankMovement(
-      "Hi Darren,\n\nRM200.00 was paid at TNG-EWALLET ECOM 3-EC using your Main Account on 2/9/2026, 12:46 AM (GMT+8).\n\nIf this was not you, give us a call.",
+      "Hi Customer,\n\nRM200.00 was paid at TNG-EWALLET ECOM 3-EC using your Main Account on 2/9/2026, 12:46 AM (GMT+8).\n\nIf this was not you, give us a call.",
       { senderBank: "Ryt", receivedAt: "2026-09-01T01:00:00+08:00" },
     );
 
@@ -252,7 +252,7 @@ describe("identityMappingsFromFacts", () => {
   it("maps identity facts whose account name ends in Account without truncating it", () => {
     const localAccounts = [
       { id: "dbs-account", name: "DBS Account", closed: false },
-      { id: "dbs-yuu", name: "DBS Nova Card", closed: false },
+      { id: "dbs-nova", name: "DBS Nova Card", closed: false },
     ];
     const mappings = identityMappingsFromFacts([
       "Account ending 5750 belongs to DBS Account",
@@ -366,7 +366,7 @@ Description : UEN123-REFERENCE
         calls.push({ name, args });
         if (name === "fetch_context") return {
           accounts: [
-            { id: "dbs-altitude", name: "Vista 9302", closed: false },
+            { id: "dbs-vista", name: "Vista 9302", closed: false },
             { id: "citi-card", name: "Citi Rewards 4756", closed: false },
           ],
           categories: [],
@@ -400,14 +400,14 @@ To: CITI CREDIT CARDS (Ref ending 4756)
 
     expect(orch._llm.chat).not.toHaveBeenCalled();
     expect(phase1).toMatchObject({
-      account_id: "dbs-altitude", payee_id: "transfer-citi",
+      account_id: "dbs-vista", payee_id: "transfer-citi",
       amount_cents: -25337, category_id: null, _is_transfer: true,
     });
 
     await orch._executePhase3(phase1);
     const insert = calls.find((call) => call.name === "insert_transaction");
     expect(insert.args).toMatchObject({
-      account_id: "dbs-altitude",
+      account_id: "dbs-vista",
       amount_cents: -25337,
       payee_id: "transfer-citi",
       category_id: undefined,
@@ -423,7 +423,7 @@ To: CITI CREDIT CARDS (Ref ending 4756)
         calls.push({ name, args });
         if (name === "fetch_context") return {
           accounts: [
-            { id: "dbs-altitude", name: "Vista 9302", closed: false },
+            { id: "dbs-vista", name: "Vista 9302", closed: false },
             { id: "citi-card", name: "Citi Rewards 4756", closed: false },
           ],
           categories: [],
@@ -472,7 +472,7 @@ To: CITI CREDIT CARDS (Ref ending 4756)
     expect(orch._llm.chat).not.toHaveBeenCalled();
     const insert = calls.find((call) => call.name === "insert_transaction");
     expect(insert.args).toMatchObject({
-      account_id: "dbs-altitude",
+      account_id: "dbs-vista",
       amount_cents: -25337,
       payee_id: "transfer-citi",
     });
@@ -522,10 +522,10 @@ To: CITI CREDIT CARDS (Ref ending 4756)
         if (name === "fetch_context") return {
           accounts: [
             { id: "dbs-account", name: "DBS Account", closed: false },
-            { id: "dbs-yuu", name: "DBS Nova Card", closed: false },
+            { id: "dbs-nova", name: "DBS Nova Card", closed: false },
           ],
           categories: [],
-          payees: [{ id: "transfer-yuu", transfer_acct: "dbs-yuu" }],
+          payees: [{ id: "transfer-nova", transfer_acct: "dbs-nova" }],
         };
         if (name === "search_memory") return { results: [
           { text: "Account ending 5750 belongs to DBS Account", score: 1 },
@@ -554,13 +554,13 @@ To: Nova (Ref ending 3255)
     expect(orch._llm.chat).not.toHaveBeenCalled();
     expect(phase1).toMatchObject({
       account_id: "dbs-account",
-      payee_id: "transfer-yuu",
+      payee_id: "transfer-nova",
       amount_cents: -6894,
       _is_transfer: true,
     });
     expect(phase1._transfer).toMatchObject({
       source_account_id: "dbs-account",
-      destination_account_id: "dbs-yuu",
+      destination_account_id: "dbs-nova",
     });
   });
 
@@ -571,10 +571,10 @@ To: Nova (Ref ending 3255)
         if (name === "fetch_context") return {
           accounts: [
             { id: "dbs-account", name: "DBS Account", closed: false },
-            { id: "dbs-yuu", name: "DBS Nova Card", closed: false },
+            { id: "dbs-nova", name: "DBS Nova Card", closed: false },
           ],
           categories: [],
-          payees: [{ id: "transfer-yuu", transfer_acct: "dbs-yuu" }],
+          payees: [{ id: "transfer-nova", transfer_acct: "dbs-nova" }],
         };
         if (name === "search_memory") return { results: [
           { text: "Account ending 5750 belongs to DBS Account", score: 1 },
@@ -601,7 +601,7 @@ To: Nova (Ref ending 3255)
     expect(orch._llm.chat).not.toHaveBeenCalled();
     expect(phase1).toMatchObject({
       account_id: "dbs-account",
-      payee_id: "transfer-yuu",
+      payee_id: "transfer-nova",
       amount_cents: -6894,
       category_id: null,
       _is_transfer: true,
@@ -645,10 +645,10 @@ To: Nova (Ref ending 3255)
         if (name === "fetch_context") return {
           accounts: [
             { id: "dbs-account", name: "DBS Account", closed: false },
-            { id: "dbs-yuu", name: "DBS Nova Card", closed: false },
+            { id: "dbs-nova", name: "DBS Nova Card", closed: false },
           ],
           categories: [{ id: "cat-food", name: "Food" }],
-          payees: [{ id: "transfer-yuu", transfer_acct: "dbs-yuu" }],
+          payees: [{ id: "transfer-nova", transfer_acct: "dbs-nova" }],
         };
         if (name === "search_memory") return { results: [
           { text: "Account ending 5750 belongs to DBS Account", score: 1 },
@@ -678,7 +678,7 @@ To: Nova (Ref ending 3255)
     const phase2 = await orch._resolvePhase2(phase1);
 
     expect(phase2._is_transfer).toBe(true);
-    expect(phase2.payee_id).toBe("transfer-yuu");
+    expect(phase2.payee_id).toBe("transfer-nova");
     expect(phase2.category_id).toBeFalsy();
     expect(phase2.category_name).toBeUndefined();
   });
@@ -774,7 +774,7 @@ Reference :
       executeTool: vi.fn(async (name) => {
         if (name === "fetch_context") return {
           accounts: [
-            { id: "dbs-altitude", name: "Vista 9302", closed: false },
+            { id: "dbs-vista", name: "Vista 9302", closed: false },
             { id: "citi-card", name: "Citi Rewards 4756", closed: false },
           ],
           categories: [],
@@ -1169,7 +1169,7 @@ describe("suffix auto-learn", () => {
       executeTool: vi.fn(async (name) => {
         if (name === "fetch_context") return {
           accounts: [
-            { id: "dbs-altitude", name: "Vista 9302", closed: false },
+            { id: "dbs-vista", name: "Vista 9302", closed: false },
             { id: "citi-card", name: "Citi Rewards 4756", closed: false },
           ],
           categories: [],
@@ -1206,10 +1206,10 @@ To: CITI CREDIT CARDS (Ref ending 4756)
         if (name === "fetch_context") return {
           accounts: [
             { id: "dbs-account", name: "DBS Account", closed: false },
-            { id: "dbs-yuu", name: "DBS Nova Card", closed: false },
+            { id: "dbs-nova", name: "DBS Nova Card", closed: false },
           ],
           categories: [],
-          payees: [{ id: "transfer-yuu", transfer_acct: "dbs-yuu" }],
+          payees: [{ id: "transfer-nova", transfer_acct: "dbs-nova" }],
         };
         if (name === "search_memory") return { results: [
           { text: "Account ending 5750 belongs to DBS Account", score: 1 },
@@ -1251,7 +1251,7 @@ To: Nova (Ref ending 3255)
 
     await orch._executePhase3({
       action: "insert",
-      account_id: "dbs-yuu",
+      account_id: "dbs-nova",
       account_name: "DBS Nova Card",
       payee_name: "Misc",
       amount_cents: -6894,
@@ -1284,7 +1284,7 @@ To: Nova (Ref ending 3255)
 
     const result = await orch._executePhase3({
       action: "insert",
-      account_id: "dbs-yuu",
+      account_id: "dbs-nova",
       account_name: "DBS Nova Card",
       payee_name: "Misc",
       amount_cents: -6894,
@@ -1307,7 +1307,7 @@ To: Nova (Ref ending 3255)
       executeTool: vi.fn(async (name) => {
         if (name === "fetch_context") return {
           accounts: [
-            { id: "altitude", name: "DBS Vista 1234", closed: false },
+            { id: "vista", name: "DBS Vista 1234", closed: false },
             { id: "visa", name: "DBS Visa 1234", closed: false },
           ],
           categories: [],

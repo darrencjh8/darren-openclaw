@@ -11,7 +11,7 @@ function makeConfig(overrides = {}) {
         DEEPSEEK_API_KEY: "sk-test",
         ACTUAL_BUDGET_URL: "http://test:5006",
         ACTUAL_BUDGET_PASSWORD: "test-password",
-        ACTUAL_PRIMARY_BUDGET_FILE: "Darren SGD",
+        ACTUAL_PRIMARY_BUDGET_FILE: "Example SGD",
         ACTUAL_BUDGET_ENCRYPTION_PASSWORD: "",
         IMAP_HOST: "imap.example.com",
         IMAP_PORT: "993",
@@ -60,7 +60,7 @@ function fakePhase1Output(overrides = {}) {
         date: "2026-06-18",
         account_id: "acc-1",
         account_name: "Iota Freedom",
-        budget_id: "Darren SGD",
+        budget_id: "Example SGD",
         action: "insert",
         payee_name: "",
         category_id: "",
@@ -138,7 +138,7 @@ describe("processText", () => {
             merchant: "Lotus's",
             amount_cents: -4550,
             currency: "MYR",
-            budget_id: "Darren MYR",
+            budget_id: "Example MYR",
         });
         const p2 = fakePhase2Output(p1, {
             payee_name: "Groceries",

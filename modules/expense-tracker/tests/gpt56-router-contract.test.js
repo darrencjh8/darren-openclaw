@@ -18,8 +18,8 @@ beforeEach(() => {
 const requiredEnv = {
   ACTUAL_BUDGET_URL: "http://actual-api:3000",
   ACTUAL_BUDGET_PASSWORD: "test-password",
-  ACTUAL_PRIMARY_BUDGET_FILE: "Darren SGD",
-  ACTUAL_SECONDARY_BUDGET_FILE: "Darren MYR",
+  ACTUAL_PRIMARY_BUDGET_FILE: "Example SGD",
+  ACTUAL_SECONDARY_BUDGET_FILE: "Example MYR",
   ACTUAL_PRIMARY_CURRENCY: "SGD",
   ACTUAL_SECONDARY_CURRENCY: "MYR",
   IMAP_HOST: "imap.example.com",

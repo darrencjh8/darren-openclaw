@@ -1960,7 +1960,7 @@ describe("suffix-override helpers (unit)", () => {
     // Resolution needs the live account list; a name that is not a live
     // account must never count as evidence.
     const liveAccounts = [
-      { id: "dbs-yuu", name: "DBS Nova Card", closed: false },
+      { id: "dbs-nova", name: "DBS Nova Card", closed: false },
       { id: "dbs-account", name: "DBS Account", closed: false },
       { id: "uob-ladies", name: "UOB Extra Card", closed: false },
     ];

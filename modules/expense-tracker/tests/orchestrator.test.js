@@ -1076,7 +1076,7 @@ describe("bill payment pre-parser", () => {
         const config = makeConfig();
         const allAccounts = [
             { id: "acc-dbs-main", name: "DBS My Account 5750", closed: false },
-            { id: "acc-dbs-yuu", name: "DBS Nova Card", closed: false },
+            { id: "acc-dbs-nova", name: "DBS Nova Card", closed: false },
         ];
         let llmCalled = false;
         const tools = makeTools({
@@ -1306,7 +1306,7 @@ describe("Phase 1 memory retrieval (LLM-directed)", () => {
         let capturedMessages = null;
         const tools = phase1Tools(vi.fn(async (name) => {
             if (name === "fetch_context")
-                return { accounts: [{ id: "acc-yuu", name: "DBS Nova Card", closed: false }], categories: [], payees: [] };
+                return { accounts: [{ id: "acc-nova", name: "DBS Nova Card", closed: false }], categories: [], payees: [] };
             if (name === "search_memory")
                 return { results: [{ text: "Card ending 3255 belongs to DBS Nova Card", score: 0.85 }] };
             return true;
@@ -1320,7 +1320,7 @@ describe("Phase 1 memory retrieval (LLM-directed)", () => {
                     capturedMessages = messages;
                     return { choices: [{ message: toolCall("search_memory", { query: "3255" }) }] };
                 })
-                .mockResolvedValueOnce(json(baseOut("acc-yuu", "DBS Nova Card"))),
+                .mockResolvedValueOnce(json(baseOut("acc-nova", "DBS Nova Card"))),
         };
 
         const result = await orch._runPhase1(
@@ -1328,7 +1328,7 @@ describe("Phase 1 memory retrieval (LLM-directed)", () => {
             { senderBank: "DBS" },
         );
 
-        expect(result.account_id).toBe("acc-yuu");
+        expect(result.account_id).toBe("acc-nova");
         // The LLM asked for facts and received them as a tool message
         const toolMsgs = capturedMessages.filter((m) => m.role === "tool");
         expect(toolMsgs.length).toBeGreaterThanOrEqual(1);
@@ -1376,7 +1376,7 @@ describe("Phase 1 memory retrieval (LLM-directed)", () => {
             if (name === "fetch_context")
                 return {
                     accounts: [
-                        { id: "acc-yuu", name: "DBS Nova Card", closed: false },
+                        { id: "acc-nova", name: "DBS Nova Card", closed: false },
                         { id: "acc-alt", name: "DBS Vista Card", closed: false },
                     ],
                     categories: [],
@@ -1403,7 +1403,7 @@ describe("Phase 1 memory retrieval (LLM-directed)", () => {
 
         // Safety net overrides from cached tool results
         expect(result).not.toBeNull();
-        expect(result.account_id).toBe("acc-yuu");
+        expect(result.account_id).toBe("acc-nova");
         expect(result.account_name).toBe("DBS Nova Card");
     });
 
@@ -1413,7 +1413,7 @@ describe("Phase 1 memory retrieval (LLM-directed)", () => {
             if (name === "fetch_context")
                 return {
                     accounts: [
-                        { id: "acc-yuu", name: "DBS Nova Card", closed: false },
+                        { id: "acc-nova", name: "DBS Nova Card", closed: false },
                         { id: "acc-alt", name: "DBS Vista Card", closed: false },
                     ],
                     categories: [],
@@ -1443,7 +1443,7 @@ describe("Phase 1 memory retrieval (LLM-directed)", () => {
         const config = makeConfig();
         const tools = phase1Tools(vi.fn(async (name) => {
             if (name === "fetch_context")
-                return { accounts: [{ id: "acc-yuu", name: "DBS Nova Card", closed: false }], categories: [], payees: [] };
+                return { accounts: [{ id: "acc-nova", name: "DBS Nova Card", closed: false }], categories: [], payees: [] };
             if (name === "search_memory")
                 return { results: [{ text: "Card ending 3255 belongs to DBS Nova Card", score: 0.80 }] };
             if (name === "check_duplicate") return false;
@@ -1459,7 +1459,7 @@ describe("Phase 1 memory retrieval (LLM-directed)", () => {
                     capturedMessages = messages;
                     return { choices: [{ message: toolCall("search_memory", { query: "3255" }) }] };
                 })
-                .mockResolvedValueOnce(json(baseOut("acc-yuu", "DBS Nova Card"))),
+                .mockResolvedValueOnce(json(baseOut("acc-nova", "DBS Nova Card"))),
         };
 
         await orch.processText(
@@ -1762,7 +1762,7 @@ describe("_resolvePhase2 transfer detection", () => {
             merchant: "Touch N Go",
             payee_name: "",
             category_id: "",
-            budget_id: "Darren MYR",
+            budget_id: "Example MYR",
         });
 
         // Mock fetch_context to return accounts + payees with transfer_acct
@@ -1873,7 +1873,7 @@ describe("_resolvePhase2 transfer detection", () => {
             merchant: "Touch N Go",
             payee_name: "",
             category_id: "",
-            budget_id: "Darren MYR",
+            budget_id: "Example MYR",
         });
 
         tools.executeTool.mockImplementation(async (name, args) => {
@@ -2066,7 +2066,7 @@ describe("_resolvePhase2 transfer detection", () => {
         orch._runPhase1 = vi.fn().mockResolvedValue(
             fakePhase1Output({
                 merchant: "Touch N Go",
-                budget_id: "Darren MYR",
+                budget_id: "Example MYR",
             }),
         );
         orch._resolvePhase2 = vi.fn().mockResolvedValue(

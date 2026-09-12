@@ -40,7 +40,7 @@ The same generic flow must support these sanitized fixture variants:
 
 ```text
 DBS:  Vista (A/C ending <source>) -> CITI CREDIT CARDS (Ref ending <destination>)
-OCBC: 360 Account (-<source>) -> OCBC <card product> Visa Card (-<destination>)
+OCBC: 111 Account (-<source>) -> OCBC <card product> Visa Card (-<destination>)
 ```
 
 Both become Actual transfers only when each destination issuer + suffix maps uniquely to an open Actual account and a live transfer payee exists. The parser must not contain card-product-specific logic for `Vista`, `CITI CREDIT CARDS`, or an OCBC Visa product.
@@ -60,8 +60,8 @@ OCBC outgoing alert:
 
 ```text
 Amount : SGD 14.25
-From your account : 360 Account (-869001)
-To account : Darren Trust (-310980) at TRUST BANK SINGAPORE LIMITED
+From your account : 111 Account (-869001)
+To account : Example Trust (-310980) at TRUST BANK SINGAPORE LIMITED
 Date of Transfer : 01 Sep 2026
 Time of Transfer : 01.06 AM SGT
 Reference number : 2609010016652878
@@ -74,7 +74,7 @@ You have received SGD 14.25 from OverseaChinese Banking Corporation Ltd
 A/C ending 9001 on 01 Sep 2026 01:06 SGT.
 ```
 
-Expected result: one Actual transfer between `Beta 360` and `Zeta Card`; the second alert is recorded as its counterpart and sends no second transaction to Actual.
+Expected result: one Actual transfer between `OCBC 111` and `Zeta Card`; the second alert is recorded as its counterpart and sends no second transaction to Actual.
 
 ### External payment
 
@@ -83,11 +83,11 @@ The following PayNow transfer has been made to SIONG93 LLP using their
 Unique Entity Number (UEN) T20LL0428K289.
 
 Amount : SGD 7.30
-From your account : 360 Account (-869001)
+From your account : 111 Account (-869001)
 Description : T20LL0428K289QLW511452054
 ```
 
-Expected result: ordinary outgoing expense from `Beta 360`, with `SIONG93 LLP` as display merchant and the UEN description retained as raw merchant descriptor. It is not an Actual transfer.
+Expected result: ordinary outgoing expense from `OCBC 111`, with `SIONG93 LLP` as display merchant and the UEN description retained as raw merchant descriptor. It is not an Actual transfer.
 
 ### One-sided deposit / credit
 
@@ -110,7 +110,7 @@ counterparty: unknown
 reference: empty
 ```
 
-Expected result: one ordinary positive transaction in `Beta 360`, marked as an unidentified deposit/credit. It is not an internal transfer and must never be auto-deduplicated against a transfer because the alert supplies no source account, counterparty, or reference. Use the received email timestamp in `Asia/Singapore` for the date when body contains time but no date.
+Expected result: one ordinary positive transaction in `OCBC 111`, marked as an unidentified deposit/credit. It is not an internal transfer and must never be auto-deduplicated against a transfer because the alert supplies no source account, counterparty, or reference. Use the received email timestamp in `Asia/Singapore` for the date when body contains time but no date.
 
 ## Design
 
@@ -127,7 +127,7 @@ Add a pure parser that emits normalized movement evidence when an alert has a su
   occurred_at: "2026-09-01T01:06:00+08:00",
   own_account: { bank: "OCBC", suffix: "869001" },
   counterparty: {
-    name: "Darren Trust",
+    name: "Example Trust",
     bank: "TRUST BANK SINGAPORE LIMITED",
     suffix: "310980",
   },
@@ -171,7 +171,7 @@ For every alert, fetch the live Actual account list and normalize each account n
 Supported verified registry facts, used only as deterministic fallback:
 
 ```text
-Account ending 869001 belongs to Beta 360
+Account ending 869001 belongs to OCBC 111
 Zeta Bank Singapore Limited account ending 310980 belongs to Zeta Card
 Zeta Bank alert recipient maps to Zeta Card account
 DBS account ending 9302 belongs to Epsilon Vista
@@ -191,7 +191,7 @@ Rules:
 5. The target account must be open and in the selected budget.
 6. Destination must have a live transfer payee whose `transfer_acct` equals target account ID.
 7. Multiple candidates are unresolved.
-8. Recipient display names such as `Darren Trust` are not account identity.
+8. Recipient display names such as `Example Trust` are not account identity.
 
 `9001` may resolve to account suffix `869001` only if it is the unique OCBC account with that last-four suffix. Do not persist a new alias based on one alert.
 
@@ -243,14 +243,14 @@ updated_at
 Keep account direction ordered. Both bank-side emails reconstruct the same logical movement:
 
 ```text
-OCBC outgoing:  source Beta 360, destination Zeta Card
-Trust incoming: source Beta 360, destination Zeta Card
+OCBC outgoing:  source OCBC 111, destination Zeta Card
+Trust incoming: source OCBC 111, destination Zeta Card
 ```
 
 A real reverse movement is distinct:
 
 ```text
-Trust outgoing: source Zeta Card, destination Beta 360
+Trust outgoing: source Zeta Card, destination OCBC 111
 ```
 
 This prevents a real reverse transfer from being discarded as a counterpart.
@@ -314,7 +314,7 @@ This must reject `AMAZE* OPENCODE` mapping to `Wallet` from a low-score (`0.427`
 Remove or replace the unsafe generic fact:
 
 ```text
-Darren Trust maps to Charity payee
+Example Trust maps to Charity payee
 ```
 
 Use structured account identity facts instead.
@@ -340,7 +340,7 @@ Create sanitized fixtures for:
 - Trust incoming transfer from OCBC.
 - Existing DBS bill-payment transfer format, including `Date and Time` and transaction reference.
 - Epsilon Vista to Citi Credit Cards bill payment.
-- Beta 360 to OCBC Visa card bill payment using `Date of Payment` / `Time of Payment`.
+- OCBC 111 to OCBC Visa card bill payment using `Date of Payment` / `Time of Payment`.
 - OCBC PayNow UEN external payment.
 - OCBC one-sided deposit alert with account suffix and empty reference.
 - Ordinary merchant purchase alert.
@@ -367,15 +367,15 @@ PASS: Missing required account evidence returns null.
 
 ```text
 PASS: Previously unseen card account in live Actual context resolves without registry when account name contains matching bank + suffix.
-PASS: Full suffix `869001` resolves Beta 360.
-PASS: `9001` resolves Beta 360 only when it uniquely matches that bank's last four digits.
+PASS: Full suffix `869001` resolves OCBC 111.
+PASS: `9001` resolves OCBC 111 only when it uniquely matches that bank's last four digits.
 PASS: `9001` is unresolved when two OCBC accounts match.
 PASS: Exact Zeta Bank + `310980` resolves Zeta Card.
 PASS: Exact DBS + `9302` resolves Epsilon Vista even if live Actual name is `Vista`.
 PASS: Exact UOB CREDIT CARDS + `4605` resolves UOB Card only when configured and open.
 PASS: Exact CITI CREDIT CARDS + `4756` resolves Citi Card only when configured and open.
 PASS: Exact OCBC card issuer + last-four `1149` resolves its card only when configured and open.
-PASS: `Darren Trust` display name alone does not resolve Zeta Card.
+PASS: `Example Trust` display name alone does not resolve Zeta Card.
 PASS: Card known only by generic Actual name with no matching suffix remains unresolved until explicit verified registry mapping exists.
 PASS: Closed accounts do not resolve.
 PASS: Cross-bank suffix matches do not resolve.
@@ -386,13 +386,13 @@ PASS: Cross-bank suffix matches do not resolve.
 ```text
 PASS: OCBC outgoing first creates one transfer command.
 PASS: Trust incoming second sends no Actual command and is marked counterpart-deduplicated.
-PASS: Trust incoming alert resolves source OCBC 9001 to Beta 360 only through unique bank+suffx identity, never through a `maps to ... payee` memory fact.
+PASS: Trust incoming alert resolves source OCBC 9001 to OCBC 111 only through unique bank+suffx identity, never through a `maps to ... payee` memory fact.
 PASS: DBS bill payment from Vista (`9302`) to UOB CREDIT CARDS (`4605`) sends one transfer command when both accounts resolve.
 PASS: Same DBS bill payment with missing or ambiguous UOB `4605` mapping sends no transfer command and enters review/normal fallback.
 PASS: Epsilon Vista -> Citi Credit Cards sends one transfer command when Citi `4756` resolves uniquely.
-PASS: Beta 360 -> OCBC Visa card sends one transfer command when card `1149` resolves uniquely.
+PASS: OCBC 111 -> OCBC Visa card sends one transfer command when card `1149` resolves uniquely.
 PASS: Either card payment with missing/ambiguous destination mapping sends no transfer command.
-PASS: One-sided OCBC deposit creates one ordinary positive transaction in Beta 360 and sends no transfer payee.
+PASS: One-sided OCBC deposit creates one ordinary positive transaction in OCBC 111 and sends no transfer payee.
 PASS: One-sided OCBC deposit with same amount/time as an internal transfer is not counterpart-deduplicated.
 PASS: Trust incoming first creates a transfer only with explicit verified recipient-account mapping.
 PASS: Trust incoming first without recipient-account mapping does not create a transfer.
@@ -400,7 +400,7 @@ PASS: Same ordered source/destination accounts, amount, currency, and timestamp 
 PASS: Counterpart timestamps one to ten minutes apart create one transfer, including concurrent processing.
 PASS: Timestamps more than ten minutes apart create two transfers.
 PASS: Same accounts and amount but transfers 30 minutes apart create two transfers.
-PASS: Real reverse transfer (Zeta Card -> Beta 360) within ten minutes creates a second transfer.
+PASS: Real reverse transfer (Zeta Card -> OCBC 111) within ten minutes creates a second transfer.
 PASS: Same amount/date with different destination account IDs creates two transfers.
 PASS: Concurrent processing of both alerts sends exactly one transfer command.
 ```
@@ -423,7 +423,7 @@ notes: contains 2609010016652878
 Required assertions:
 
 ```text
-PASS: source account is Beta 360.
+PASS: source account is OCBC 111.
 PASS: amount is -1425 cents.
 PASS: payee is Zeta Card's live Actual transfer payee, whose `transfer_acct` equals Zeta Card's account ID.
 PASS: no ordinary expense category is sent for the transfer.
@@ -444,9 +444,9 @@ expect(logDecision).toHaveBeenCalledWith(
 );
 ```
 
-For PayNow UEN, assert final HTTP body has Beta 360, amount `-730`, the resolved ordinary merchant payee, and `SIONG93 LLP` as imported description. It must not contain a transfer payee or destination Actual account ID.
+For PayNow UEN, assert final HTTP body has OCBC 111, amount `-730`, the resolved ordinary merchant payee, and `SIONG93 LLP` as imported description. It must not contain a transfer payee or destination Actual account ID.
 
-For one-sided OCBC deposit, assert final HTTP body has Beta 360, amount `+20`, an unidentified-deposit description, no transfer payee, and no ordinary expense category unless an explicit user-approved deposit rule exists.
+For one-sided OCBC deposit, assert final HTTP body has OCBC 111, amount `+20`, an unidentified-deposit description, no transfer payee, and no ordinary expense category unless an explicit user-approved deposit rule exists.
 
 Required assertions:
 

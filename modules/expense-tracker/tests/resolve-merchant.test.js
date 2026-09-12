@@ -1572,11 +1572,11 @@ describe("budget_id parameter", () => {
 
     await registry._handle_resolve_merchant({
       merchant: "SomeUnknownMerchant",
-      budget_id: "Darren MYR",
+      budget_id: "Example MYR",
     });
 
-    // Keyword match fails → should call _get with Darren MYR
-    expect(capturedBudgetId).toBe("Darren MYR");
+    // Keyword match fails → should call _get with Example MYR
+    expect(capturedBudgetId).toBe("Example MYR");
     vi.unstubAllGlobals();
   });
 });

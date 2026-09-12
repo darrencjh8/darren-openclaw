@@ -573,10 +573,10 @@ describe("MemoryStore", () => {
     it("parses ->payee pattern", () => {
       const store = new MemoryStore(emptyMemoryPath);
       const parsed = store._parseStructured(
-        "CHONG JIN HENG maps to Transfer payee",
+        "Example Payee maps to Transfer payee",
       );
       expect(parsed).toEqual({
-        entity: "chong jin heng",
+        entity: "example payee",
         relation: "->payee",
         value: "transfer",
       });
@@ -608,7 +608,7 @@ describe("MemoryStore", () => {
         store._parseStructured("KOUFU is a food court chain in Singapore"),
       ).toBeNull();
       expect(
-        store._parseStructured("CHONG JIN HENG is Darren himself"),
+        store._parseStructured("Example Payee is Example User"),
       ).toBeNull();
       expect(store._parseStructured("The sky is blue")).toBeNull();
     });
@@ -773,14 +773,14 @@ describe("MemoryStore", () => {
       const store = new MemoryStore(emptyMemoryPath);
       await store.add("Kopitiam merchant maps to Food payee");
       await store.add("KOUFU PTE LTD is a food court chain in Singapore");
-      await store.add("CHONG JIN HENG is Darren himself");
+      await store.add("Example Payee is Example User");
 
       const result = await store.cleanup();
       const facts = store.listFacts();
       expect(facts).toContain(
         "KOUFU PTE LTD is a food court chain in Singapore",
       );
-      expect(facts).toContain("CHONG JIN HENG is Darren himself");
+      expect(facts).toContain("Example Payee is Example User");
       expect(facts).toContain("Kopitiam merchant maps to Food payee");
     });
 
@@ -998,16 +998,16 @@ describe("MemoryStore", () => {
 
     it("updates ->payee pattern facts (non-merchant)", () => {
       const store = new MemoryStore(emptyMemoryPath);
-      store._facts = ["CHONG JIN HENG maps to Transfer payee"];
+      store._facts = ["Example Payee maps to Transfer payee"];
       store._rebuildIndices();
       const result = store.update(
-        "CHONG JIN HENG maps to Transfer payee",
-        "CHONG JIN HENG maps to Personal Transfer payee",
+        "Example Payee maps to Transfer payee",
+        "Example Payee maps to Personal Transfer payee",
       );
       expect(result.updated).toBe(true);
-      expect(result.old).toBe("CHONG JIN HENG maps to Transfer payee");
+      expect(result.old).toBe("Example Payee maps to Transfer payee");
       expect(store.listFacts()).toContain(
-        "CHONG JIN HENG maps to Personal Transfer payee",
+        "Example Payee maps to Personal Transfer payee",
       );
     });
 
@@ -2004,15 +2004,15 @@ describe("merchant mapping lookup", () => {
   it("keeps a free-form hit above the floor and drops one below it", () => {
     const path = tempFile(
       ".md",
-      "# Long-Term Memory\n\n## Facts\n\n- Darren identifies this as a work expense\n",
+      "# Long-Term Memory\n\n## Facts\n\n- Example User identifies this as a work expense\n",
     );
     const store = new MemoryStore(path);
 
     expect(
-      store._acceptSemanticHit("Darren identifies this as a work expense", 0.61),
+      store._acceptSemanticHit("Example User identifies this as a work expense", 0.61),
     ).toBe(true);
     expect(
-      store._acceptSemanticHit("Darren identifies this as a work expense", 0.59),
+      store._acceptSemanticHit("Example User identifies this as a work expense", 0.59),
     ).toBe(false);
     unlinkSync(path);
   });
