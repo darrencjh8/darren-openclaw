@@ -2,7 +2,7 @@
 
 ## Goal
 
-Route Hermes primary model calls through the Docker-hosted LiteLLM router while using ordered OpenAI subscription account pools. Use direct `deepseek-flash` only after the relevant LiteLLM pool is exhausted or unavailable.
+Route Hermes primary model calls through the Docker-hosted LiteLLM router while using ordered OpenAI subscription account pools. Use direct `deepseek-flash` only after the relevant LiteLLM pool is exhausted or unavailable. Exception: `auxiliary.vision` calls `deepseek-flash` directly with no pool route and no fallback.
 
 ## Required routing
 
@@ -12,7 +12,7 @@ Route Hermes primary model calls through the Docker-hosted LiteLLM router while 
 gpt-5.6-terra (router selects account 3 -> 2 -> 1)
 ```
 
-Use for Hermes main chat, vision, approval, and the `code-reviewer` profile.
+Use for Hermes main chat, approval, and the `code-reviewer` profile. (Vision no longer uses this pool: it runs directly on `deepseek-flash`, which is natively multimodal.)
 
 ### Luna pool
 
@@ -51,7 +51,7 @@ DeepSeek is the final direct fallback after the applicable LiteLLM route fails.
 ## Phase 2: darren-openclaw
 
 1. Keep Hermes primary roles pointed at `http://codex-router:4100/v1`.
-2. Use transparent pooled aliases (`gpt-5.6-terra`, `gpt-5.6-luna`, `gpt-5.6-sol`) so LiteLLM selects the account and handles intra-pool fallback; keep exactly one direct `deepseek-flash` fallback per primary/profile route.
+2. Use transparent pooled aliases (`gpt-5.6-terra`, `gpt-5.6-luna`, `gpt-5.6-sol`) so LiteLLM selects the account and handles intra-pool fallback; keep exactly one direct `deepseek-flash` fallback per primary/profile route, except `auxiliary.vision`, which is direct-only.
 3. Configure `auxiliary.compression.fallback_chain` to direct `deepseek-flash` after LiteLLM Luna-pool exhaustion.
 4. Replace `static-analyst` with persistent `code-reviewer`; remove `qa-engineer` and `quality-assurance` from source and startup runtime state.
 5. Keep `kanban.default_assignee` set to `code-reviewer`.

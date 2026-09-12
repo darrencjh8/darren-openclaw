@@ -68,7 +68,7 @@ When a model works in the current chat but an auxiliary task or reviewer reports
 
 Do not paste raw upstream HTML, tokens, or full request bodies into chat. Extract only status, model group, fallback names, reset/expiry metadata, and short redacted error summaries.
 
-**OpenCode relays (opencode.ai/zen) — typed quota errors.** `200` on `/v1/models` + `429`/`401` on a minimal chat completion = account quota/billing problem, NOT a key or config problem. Error bodies carry `error.type`: `FreeUsageLimitError` (429, free-tier rate limit — may be quota OR User-Agent gating, no ETA), `GoUsageLimitError` (429, weekly quota, reset ETA in message), `CreditsError` (401, no paid balance). "Free" models are free but still rate-limited — free ≠ unlimited. **Caveat — free-tier `FreeUsageLimitError` is often UA gating, not quota:** the relay whitelists OpenCode-CLI User-Agents and 429s anything else, including Hermes's own `HermesAgent/x` attribution UA, even with healthy quota. "Works in my IDE/PC but 429 from the server" with the same egress IP is the tell — the IDE sends an `opencode` UA, Hermes doesn't. Re-probe the chat completion with an `opencode` UA before blaming the account (verified on mimo-v2.5-free, 2026-09-04). As of 2026-09-09 the free-tier gate is two-factor: the request must ALSO carry an `x-opencode-session` header (any stable id) or zen 400s `MissingSessionID` ("OpenCode's free tier can only be used in OpenCode") — and a proxy that forwards its client's UA (codex-router's zen hops do) can never pass the gate for agent clients. When every fallback 429s and paid models 401, landing on the last provider (deepseek) is correct behavior, not a misconfiguration. Probe recipe + this host's routes + taxonomy: `references/opencode-quota-errors.md`.
+**OpenCode relays (opencode.ai/zen) — typed quota errors. Historical: no relay provider is configured on this host.** `200` on `/v1/models` + `429`/`401` on a minimal chat completion meant an account quota/billing problem, NOT a key or config problem. Error bodies carried `error.type`: `FreeUsageLimitError` (429, free-tier rate limit — could be quota OR User-Agent gating, no ETA), `GoUsageLimitError` (429, weekly quota, reset ETA in message), `CreditsError` (401, no paid balance). "Free" models were free but still rate-limited — free ≠ unlimited. **Caveat — free-tier `FreeUsageLimitError` was often UA gating, not quota:** the relay whitelisted OpenCode-CLI User-Agents and 429ed anything else, including Hermes's own `HermesAgent/x` attribution UA, even with healthy quota. "Works in my IDE/PC but 429 from the server" with the same egress IP was the tell — the IDE sent an `opencode` UA, Hermes did not. The recipe was to re-probe the chat completion with an `opencode` UA before blaming the account (verified on mimo-v2.5-free, 2026-09-04). As of 2026-09-09 the free-tier gate was two-factor: the request also had to carry an `x-opencode-session` header (any stable id) or zen returned 400 `MissingSessionID` ("OpenCode's free tier can only be used in OpenCode") — and a proxy that forwarded its client's UA (codex-router's zen hops did, before they were removed) could never pass the gate for agent clients. When every fallback 429ed and paid models returned 401, landing on the last provider (deepseek) was correct behavior, not a misconfiguration. Probe recipe + relay routes + taxonomy: `references/opencode-quota-errors.md`.
 
 ## "Is that opencode run going well / what model is it using?" — inspect a live run read-only
 
@@ -91,9 +91,9 @@ Don't answer from the session system-prompt header alone, and don't answer from 
   - `model.provider` + `model.default` — configured primary chat model
   - `fallback_providers` — where the chat loop drops after 3 failed attempts
   - `delegation.provider`/`model` — subagents (distinct from main chat!)
-  - `auxiliary.*` (vision, web_extract, compression, approval, triage_specifier, profile_describer) — each task type has its own provider/model + `fallback_chain`
+  - `auxiliary.*` (vision, web_extract, compression, approval, triage_specifier, profile_describer, kanban_decomposer) — each task type has its own provider/model, plus a `fallback_chain` where the slot needs one (vision and `kanban_decomposer` do not)
 
-**A model visible in config is often fallback-only or slot-specific.** Example (Darren's host, 2026-09): `deepseek-flash` is never a *router-backed* primary — the router-backed primaries are `auto-thinking` (main, delegation, code-reviewer) and the pooled GPT aliases (`gpt-5.6-terra`, `gpt-5.6-luna`, `gpt-5.6-sol` for the auxiliary slots and the other profiles). `deepseek-flash` appears inside `fallback_providers` and the auxiliary `fallback_chain`s, plus exactly one direct primary: `auxiliary.kanban_decomposer` (direct `deepseek` provider, no router hop). So "why DeepSeek?" means either the codex-router primary was down/overloaded and the route fell through to the direct `deepseek` provider, or the slot is the kanban decomposer, or the user is reading the fallback list and mistaking it for the active brain. Answer with a table of role → provider → model so the status is visible.
+**A model visible in config is often fallback-only or slot-specific.** Example (Darren's host, 2026-09): `deepseek-flash` is never a *router-backed* primary — the router-backed primaries are `auto-thinking` (main, delegation, code-reviewer) and the pooled GPT aliases (`gpt-5.6-terra`, `gpt-5.6-luna`, `gpt-5.6-sol` for the auxiliary slots and the other profiles). `deepseek-flash` appears inside `fallback_providers` and some auxiliary `fallback_chain`s, plus two direct primaries on the `deepseek` provider: `auxiliary.vision` (natively multimodal, no fallback) and `auxiliary.kanban_decomposer` (no router hop). So "why DeepSeek?" means either the codex-router primary was down/overloaded and the route fell through to the direct `deepseek` provider, or the slot is vision or the kanban decomposer, or the user is reading the fallback list and mistaking it for the active brain. Answer with a table of role → provider → model so the status is visible.
 
 **Diagnostic:** `env | grep -iE 'model|provider|deepseek'` (redact key values), then read `/opt/data/config.yaml` sections `model:`, `fallback_providers:`, `auxiliary:`, `delegation:`; per-profile overrides live at `/opt/data/profiles/<name>/config.yaml`.
 
@@ -397,13 +397,27 @@ Full catalog + provider table + diagnostic transcript: `references/image-gen-bac
 
 ## DeepSeek vision input (auxiliary.vision)
 
-**Wiring:**
+`deepseek-flash` is natively multimodal and the direct DeepSeek API is the terminal
+route for vision, so vision runs on it directly — no router hop and no `fallback_chain`
+by design:
+
+```yaml
+auxiliary:
+    vision:
+        provider: deepseek
+        model: deepseek-flash
+```
+
+Setting it explicitly:
 ```bash
 hermes config set auxiliary.vision.provider deepseek
 hermes config set auxiliary.vision.model deepseek-flash
 ```
+`hermes config set` writes single keys; it does not clear a `fallback_chain` left on a
+host that predates this change. That stale chain names the same model and is inert, and
+`50-seed-defaults` replaces the whole file on the next boot.
 
-**Verify the router resolves it:**
+**Verify the wiring resolves:**
 ```python
 from agent.auxiliary_client import resolve_vision_provider_client
 # prints (provider, client, model)
