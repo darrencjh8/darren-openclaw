@@ -144,6 +144,7 @@ Incoming emails are pre-classified by a lightweight LLM call into one of three c
 - [x] If the process crashes mid-processing, the email remains unread and is re-processed on restart (UID is only recorded after successful completion)
 - [x] Memory facts are deduplicated via exact-match `Set` gate in `MemoryStore.add()` — repeated `learn_fact` calls for the same mapping produce `{ skipped: true }` instead of appending duplicates to MEMORY.md
 - [x] MEMORY.md is written atomically (temp file + rename) to prevent corruption on crash mid-write
+- [x] Structured memory facts (`X maps to Y payee`, `X is a Y account`, canonical-suffix facts) are matched by key, never by similarity: `_semanticSearch()` skips them before embedding and `factNamesMerchant()` accepts only an exact key or whole-word key containment with the key at least 3 characters. A misspelled or abbreviated merchant that satisfies neither does not reach the mapping through semantic search — accepted risk, rationale and measurements in `modules/expense-tracker/docs/design.md` (#420, #471, #472)
 
 ---
 

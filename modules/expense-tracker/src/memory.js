@@ -4,6 +4,8 @@
  * Ported 1:1 from src/agent/memory.py
  * Replaces the hardcoded data/mappings.json with a human-readable MEMORY.md
  * file backed by all-MiniLM-L6-v2 WASM embeddings for semantic search.
+ * Structured facts are matched by key only, never by similarity (#471/#472) —
+ * see docs/design.md, "Merchant matching: keys, not similarity".
  *
  * Structured dedup (2026-06): facts matching known templates are indexed by
  * (entity, relation) in a Map for O(1) contradiction detection. Free-form
@@ -865,6 +867,9 @@ export class MemoryStore {
    * 0.623 against the `AMAZE* ALIPAYPROGRA SINGAPORE SGP` alert — the wrong
    * booking in #471. A structured fact is therefore never reachable by
    * similarity, and a free-form hit must clear the floor. Issues #420, #471.
+   * #472 accepts that a misspelled key can no longer reach its mapping this
+   * way and records what a stricter rule would need; see
+   * `docs/design.md`, "Merchant matching: keys, not similarity".
    */
   _acceptSemanticHit(fact, score) {
     if (mappingEntity(fact)) return false;
