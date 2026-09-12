@@ -481,14 +481,15 @@ echo "=== the ownerless-lock debounce restarts for each new lock ==="
 # counter's trace separates the two behaviours exactly: a latched counter counts
 # 0 1 2 3 4 before the second reclaim and stops (one value above the limit), a
 # re-armed counter counts 0 1 2 3 then 0 1 2 3 again (two values below it).
-# Timing is not asserted, so this cannot flake on a slow machine.
+# The watcher polls tightly so a slow, loaded runner does not let the run
+# reacquire the freed lock before the watcher notices it.
 fresh_fixture
 mkdir -p "$PRIMARY/.codex-router-skills.lock.d"
 # The watcher recreates the ownerless lock the instant this run frees it, so the
 # run meets a second pid-less lock immediately instead of acquiring the freed
 # directory first.
 (
-    while [ -d "$PRIMARY/.codex-router-skills.lock.d" ]; do sleep 0.2; done
+    while [ -d "$PRIMARY/.codex-router-skills.lock.d" ]; do sleep 0.02; done
     mkdir -p "$PRIMARY/.codex-router-skills.lock.d"
 ) &
 dbg_watch=$!
@@ -499,6 +500,9 @@ HERMES_SKILL_PRIMARY_HOME="$PRIMARY" \
     HERMES_SKILL_LOCK_MODE=mkdir \
     HERMES_SKILL_LOCK_WAIT_SECONDS=20 \
     sh -x "$SYNC" "$SOURCE" >/dev/null 2>"$ROOT/trace" || dbg_rc=$?
+# The watcher may still be running if the run left the lock directory behind;
+# kill it rather than risk `wait` hanging the suite.
+kill "$dbg_watch" 2>/dev/null || true
 wait "$dbg_watch" 2>/dev/null || true
 dbg_looks=$(awk '/^\+ missing_pid=[0-9]+$/ {v=$0; sub(/.*=/, "", v); if (v < 3) c++} END {print c+0}' \
     "$ROOT/trace" 2>/dev/null)
