@@ -958,6 +958,90 @@ python3 -m py_compile "$SCRIPT_DIR/../scripts/memory_triage.py" 2>/dev/null \
     && ok "memory_triage.py compiles" || nope "py compile" "syntax error"
 
 echo ""
+echo "=== boot reconcile log probe ==="
+
+# The hook keeps the reconcile's stderr in a boot log and falls back to
+# /dev/null when the log path cannot be opened. Nothing else runs that branch:
+# the probe block is extracted and executed under dash (the shell the hook runs
+# as) against a stub reconciler. A revert to a bare `:` (which exits the shell on
+# a failed redirection) or to a `mkdir -p`-only check (which returns 0 when the
+# log path already exists as a directory) then fails here instead of silently
+# skipping the reconcile on every boot.
+probe_block=$(python3 - "$SEED_SCRIPT" <<'PY'
+import re
+import sys
+
+content = open(sys.argv[1], encoding="utf-8").read()
+match = re.search(
+    r"(mkdir -p /opt/data/logs 2>/dev/null \|\| true\n"
+    r"if true 2>/opt/data/logs/codex-router-skills-sync\.log; then\n.*?\nfi)",
+    content,
+    re.DOTALL,
+)
+print(match.group(1) if match else "")
+PY
+)
+[ -n "$probe_block" ] \
+    && ok "seed: has the boot reconcile log probe" \
+    || nope "seed: boot reconcile log probe" "probe block missing from $SEED_SCRIPT"
+
+probe_root="$TMPDIR/probe"
+mkdir -p "$probe_root/hermes-defaults/scripts" "$probe_root/data/logs"
+cat > "$probe_root/hermes-defaults/scripts/sync-codex-router-skills.sh" <<'STUB'
+#!/bin/sh
+printf 'stub reconcile ran\n' >> "$PROBE_MARKER"
+printf 'stub reconcile stderr\n' >&2
+STUB
+chmod +x "$probe_root/hermes-defaults/scripts/sync-codex-router-skills.sh"
+
+# The hook hardcodes absolute paths, so run the extracted block against the temp
+# fixtures. It is executed as a file, never sourced: a special-builtin redirect
+# failure exits the shell outright, and sourcing would apply that to this suite
+# instead of to the hook under test.
+probe_code=${probe_block//\/opt\/hermes-defaults/$probe_root/hermes-defaults}
+probe_code=${probe_code//\/opt\/data/$probe_root/data}
+probe_script="$TMPDIR/probe-hook.sh"
+printf '%s\n' "$probe_code" > "$probe_script"
+if command -v dash >/dev/null 2>&1; then
+    probe_shell=dash
+else
+    probe_shell=sh
+fi
+
+probe_log="$probe_root/data/logs/codex-router-skills-sync.log"
+probe_marker="$TMPDIR/probe-marker"
+
+# Healthy log path: the reconcile must run and its stderr must land in the log.
+: > "$probe_marker"
+probe_rc=0
+PROBE_MARKER="$probe_marker" "$probe_shell" "$probe_script" 2>"$TMPDIR/probe-hook-stderr" || probe_rc=$?
+probe_ran=$(cat "$probe_marker" 2>/dev/null || true)
+probe_logged=$(cat "$probe_log" 2>/dev/null || true)
+probe_hook_stderr=$(cat "$TMPDIR/probe-hook-stderr" 2>/dev/null || true)
+[ -n "$probe_block" ] && [ "$probe_rc" -eq 0 ] && [ "$probe_ran" = "stub reconcile ran" ] \
+    && [ "$probe_logged" = "stub reconcile stderr" ] \
+    && ok "boot probe: reconcile runs and its stderr lands in the log" \
+    || nope "boot probe: healthy log path" \
+        "rc=$probe_rc ran='$probe_ran' logged='$probe_logged' hook_stderr='$probe_hook_stderr'"
+
+# Unwritable log path (a directory with that name): the hook must not exit and
+# the reconcile must still run, with its stderr discarded.
+rm -f "$probe_log"
+mkdir -p "$probe_log"
+: > "$probe_marker"
+probe_fallback_rc=0
+PROBE_MARKER="$probe_marker" "$probe_shell" "$probe_script" 2>"$TMPDIR/probe-fallback-stderr" || probe_fallback_rc=$?
+probe_fallback_ran=$(cat "$probe_marker" 2>/dev/null || true)
+probe_fallback_stderr=$(cat "$TMPDIR/probe-fallback-stderr" 2>/dev/null || true)
+probe_fallback_litter=$(ls -A "$probe_log" 2>/dev/null || true)
+[ -n "$probe_block" ] && [ "$probe_fallback_rc" -eq 0 ] \
+    && [ "$probe_fallback_ran" = "stub reconcile ran" ] \
+    && [ -z "$probe_fallback_litter" ] \
+    && ok "boot probe: reconcile still runs when the log path is a directory" \
+    || nope "boot probe: log path is a directory" \
+        "rc=$probe_fallback_rc ran='$probe_fallback_ran' hook_stderr='$probe_fallback_stderr'"
+
+echo ""
 echo "========================================="
 echo -e " Results: ${GREEN}$pass passed${NC}, ${RED}$fail failed${NC}"
 echo "========================================="

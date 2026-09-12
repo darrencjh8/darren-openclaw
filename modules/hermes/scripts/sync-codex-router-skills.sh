@@ -199,10 +199,16 @@ fi
 # file behind, as does one killed while comparing modes. They are litter the next
 # run would otherwise carry forever, so sweep both families before creating the
 # current ones. A matched directory or a permission failure makes rm return
-# non-zero, which must not abort the reconcile, so the sweep stays non-fatal.
+# non-zero, which must not abort the reconcile, so the sweep stays non-fatal;
+# but `rm -f` can never remove a directory, so that failure must not vanish
+# either: report it and let the boot hook's redirect keep the breadcrumb.
 # (`rm -f` already tolerates an unmatched glob.)
-rm -f "$PRIMARY_HOME"/.codex-router-managed-skills.new.* 2>/dev/null || true
-rm -f "$PRIMARY_HOME"/.codex-router-modes.* 2>/dev/null || true
+sweep() {
+    sweep_error=$(rm -f "$@" 2>&1) || \
+        printf 'sync-codex-router-skills: could not sweep %s: %s\n' "$*" "$sweep_error" >&2
+}
+sweep "${PRIMARY_HOME:?}"/.codex-router-managed-skills.new.*
+sweep "${PRIMARY_HOME:?}"/.codex-router-modes.*
 CURRENT="$PRIMARY_HOME/.codex-router-managed-skills.new.$$"
 : > "$CURRENT"
 MODES_TMP="$PRIMARY_HOME/.codex-router-modes.$$"
@@ -299,7 +305,10 @@ for target in $TARGETS; do
     # them as a directory (`copytree`), older ones as a single file, so the
     # removal must handle both shapes. Only a backup of a managed skill is
     # touched; an unrelated entry that happens to carry the suffix is kept.
-    while IFS= read -r name || [ -n "$name" ]; do
+    # `$CURRENT` is written by this script with `echo`, so it always ends in a
+    # newline and needs no partial-line guard; only the hand-editable
+    # managed-name file above does.
+    while IFS= read -r name; do
         [ -n "$name" ] || continue
         bak="$target/$name.codex-router.bak"
         if [ -e "$bak" ]; then
@@ -308,7 +317,7 @@ for target in $TARGETS; do
     done < "$CURRENT"
 done
 
-while IFS= read -r name || [ -n "$name" ]; do
+while IFS= read -r name; do
     [ -n "$name" ] || continue
     valid_name "$name" || continue
     for shadow in $SHADOWS; do

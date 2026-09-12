@@ -230,6 +230,28 @@ else
         "$(find "$PRIMARY" -maxdepth 1 -name '*.new.*' 2>/dev/null)"
 fi
 
+echo "=== litter the sweep cannot remove is reported, not swallowed ==="
+# `rm -f` can never remove a directory, so a staging or modes entry of that
+# shape would fail on every run and never be cleaned up. The reconcile must
+# still succeed, but that failure must not be discarded. Both sweep patterns are
+# covered: a partial fix that reports one and swallows the other fails here.
+fresh_fixture
+mkdir -p "$PRIMARY/.codex-router-managed-skills.new.77777" \
+         "$PRIMARY/.codex-router-modes.77777"
+sweep_dir_rc=0
+sweep_dir_output=$(run "$SOURCE" 2>&1) || sweep_dir_rc=$?
+if [[ "$sweep_dir_rc" -eq 0 \
+      && "$sweep_dir_output" == *"could not sweep"*"codex-router-managed-skills.new.77777"* \
+      && "$sweep_dir_output" == *"could not sweep"*"codex-router-modes.77777"* \
+      && -d "$PRIMARY/.codex-router-managed-skills.new.77777" \
+      && -d "$PRIMARY/.codex-router-modes.77777" \
+      && -f "$PRIMARY/skills/dev-loop/SKILL.md" ]]; then
+    ok "reported unremovable staging and modes litter and still reconciled"
+else
+    nope "reported unremovable staging and modes litter and still reconciled" \
+        "rc=$sweep_dir_rc out=$sweep_dir_output"
+fi
+
 echo "=== a busy lock fails closed, not silently ==="
 fresh_fixture
 mkdir -p "$PRIMARY/.codex-router-skills.lock.d"
@@ -479,7 +501,7 @@ then
     ok "the swapped run refreshed the ledger under the isolated state dir"
 else
     nope "the swapped run refreshed the ledger under the isolated state dir" \
-        "$(cat "$STATE/manifests/$SWAP_IDENTITY/dev-loop.json" 2>/dev/null | head -12)"
+        "$(head -12 "$STATE/manifests/$SWAP_IDENTITY/dev-loop.json" 2>/dev/null)"
 fi
 if HERMES_SKILL_PRIMARY_HOME="$PRIMARY" \
     HERMES_SKILL_SECONDARY_HOME="$SECONDARY" \
