@@ -178,6 +178,192 @@ describe("ToolRegistry — budget_id validation", () => {
             // Should NOT return "amount_cents is required"
             expect(result.error).not.toBe("amount_cents is required");
         });
+
+        // Duplicate payee names must not resolve by list order. Insert follows
+        // the same policy update_transaction already enforced (#487): a bare
+        // name is refused when the transfer-payee preference would come from
+        // array order, and payee_id selects one explicitly. Issue #483.
+        const duplicateNamePayees = [
+            { id: "payee-plain", name: "Deposit" },
+            {
+                id: "payee-transfer",
+                name: "Deposit",
+                transfer_acct: "acct-deposit",
+            },
+        ];
+
+        test("a bare imported_description matching a transfer and a plain payee picks the transfer (#483)", async () => {
+            mockFetch
+                .mockResolvedValueOnce({ ok: true, json: () => duplicateNamePayees })
+                .mockResolvedValueOnce({ ok: true, json: () => ({ id: "txn-1" }) });
+
+            await registry.executeTool("insert_transaction", {
+                budget_id: "My Budget",
+                account_id: "acc-1",
+                date: "2026-06-17",
+                amount_cents: -1500,
+                imported_description: "Deposit",
+            });
+
+            // One payee fetch: the same list supplies the name and the ID.
+            expect(mockFetch).toHaveBeenCalledTimes(2);
+            const postBody = JSON.parse(mockFetch.mock.calls[1][1].body);
+            // The transfer payee is the only match that creates a transfer, so
+            // it wins over the plain payee listed first.
+            expect(postBody.payee).toBe("payee-transfer");
+            expect(postBody.payee_name).toBe("Deposit");
+        });
+
+        test("a bare imported_description naming several plain payees is refused (#483)", async () => {
+            mockFetch.mockResolvedValueOnce({
+                ok: true,
+                json: () => [
+                    { id: "payee-a", name: "Deposit" },
+                    { id: "payee-b", name: "Deposit" },
+                ],
+            });
+
+            const result = await registry.executeTool("insert_transaction", {
+                budget_id: "My Budget",
+                account_id: "acc-1",
+                date: "2026-06-17",
+                amount_cents: -1500,
+                imported_description: "Deposit",
+            });
+
+            expect(result).toEqual({
+                error: 'Payee "Deposit" is ambiguous; pass payee_id (candidates: payee-a, payee-b).',
+            });
+            // No POST was attempted.
+            expect(mockFetch).toHaveBeenCalledTimes(1);
+        });
+
+        test("an explicit payee_id picks the plain payee of a shared name (#483)", async () => {
+            const recordSpy = vi.spyOn(registry._dedup, "record");
+            mockFetch
+                .mockResolvedValueOnce({ ok: true, json: () => duplicateNamePayees })
+                .mockResolvedValueOnce({
+                    ok: true,
+                    json: () => ({ id: "txn-3" }),
+                });
+
+            await registry.executeTool("insert_transaction", {
+                budget_id: "My Budget",
+                account_id: "acc-1",
+                date: "2026-06-17",
+                amount_cents: -1500,
+                imported_description: "Deposit",
+                payee_id: "payee-plain",
+            });
+
+            const postBody = JSON.parse(mockFetch.mock.calls[1][1].body);
+            expect(postBody.payee).toBe("payee-plain");
+            // The ID must be the only payee field: a name resolved from the same
+            // imported_description could point at a different payee.
+            expect(postBody.payee_name).toBeUndefined();
+            // The dedup journal keys on payee name, so the explicit ID path must
+            // still record the name that ID stands for.
+            expect(recordSpy).toHaveBeenCalledWith(
+                "2026-06-17",
+                -1500,
+                "acc-1",
+                "Deposit",
+            );
+        });
+
+        test("an unknown explicit payee_id is rejected (#483)", async () => {
+            mockFetch.mockResolvedValueOnce({
+                ok: true,
+                json: () => duplicateNamePayees,
+            });
+
+            const result = await registry.executeTool("insert_transaction", {
+                budget_id: "My Budget",
+                account_id: "acc-1",
+                date: "2026-06-17",
+                amount_cents: -1500,
+                imported_description: "Deposit",
+                payee_id: "payee-missing",
+            });
+
+            expect(result).toEqual({
+                error: 'Payee ID "payee-missing" not found in payee list.',
+            });
+            // No POST was attempted.
+            expect(mockFetch).toHaveBeenCalledTimes(1);
+        });
+
+        test("an explicit payee_id records a non-empty journal name (#483)", async () => {
+            const recordSpy = vi.spyOn(registry._dedup, "record");
+            mockFetch
+                .mockResolvedValueOnce({
+                    ok: true,
+                    json: () => [{ id: "payee-noname", name: "" }],
+                })
+                .mockResolvedValueOnce({ ok: true, json: () => ({ id: "txn-4" }) });
+
+            await registry.executeTool("insert_transaction", {
+                budget_id: "My Budget",
+                account_id: "acc-1",
+                date: "2026-06-17",
+                amount_cents: -1500,
+                imported_description: "Deposit",
+                payee_id: "payee-noname",
+            });
+
+            // The journal hash includes the payee name, so fall back to the
+            // imported description when the payee has none.
+            expect(recordSpy).toHaveBeenCalledWith(
+                "2026-06-17",
+                -1500,
+                "acc-1",
+                "Deposit",
+            );
+        });
+
+        test("an unverifiable explicit payee_id fails closed (#483)", async () => {            mockFetch.mockRejectedValueOnce(new Error("AB unreachable"));
+
+            const result = await registry.executeTool("insert_transaction", {
+                budget_id: "My Budget",
+                account_id: "acc-1",
+                date: "2026-06-17",
+                amount_cents: -1500,
+                imported_description: "Deposit",
+                payee_id: "payee-plain",
+            });
+
+            expect(result).toEqual({
+                error: 'Could not validate payee_id "payee-plain": payee list unavailable.',
+            });
+            expect(mockFetch).toHaveBeenCalledTimes(1);
+        });
+
+        test("_validate_payee refuses an ambiguous duplicate name (#483)", async () => {
+            mockFetch.mockResolvedValueOnce({
+                ok: true,
+                json: () => [
+                    { id: "payee-a", name: "Deposit" },
+                    { id: "payee-b", name: "Deposit" },
+                ],
+            });
+
+            await expect(
+                registry._validate_payee("DEPOSIT", "My Budget"),
+            ).rejects.toThrow(
+                'Payee "DEPOSIT" is ambiguous; pass payee_id (candidates: payee-a, payee-b).',
+            );
+        });
+
+        test("_validate_payee prefers a unique transfer payee (#483)", async () => {
+            mockFetch.mockResolvedValueOnce({
+                ok: true,
+                json: () => duplicateNamePayees,
+            });
+
+            await expect(
+                registry._validate_payee("deposit", "My Budget"),
+            ).resolves.toEqual({ name: "Deposit", payeeId: "payee-transfer" });
+        });
     });
 
     describe("update_transaction", () => {
@@ -341,6 +527,42 @@ describe("ToolRegistry — budget_id validation", () => {
             const patchBody = JSON.parse(mockFetch.mock.calls[1][1].body);
             expect(patchBody.payee).toBe("payee-misc");
             expect(patchBody.category).toBeNull();
+        });
+
+        test("the category-clear guard resolves the transaction payee by ID, not name order (#483)", async () => {
+            mockFetch
+                // payee-a's name equals the transaction's payee ID. Matching by
+                // name alone would pick it and clear the category.
+                .mockResolvedValueOnce({
+                    ok: true,
+                    json: () => [
+                        { id: "payee-a", name: "payee-b" },
+                        { id: "payee-b", name: "Misc" },
+                    ],
+                })
+                .mockResolvedValueOnce({
+                    ok: true,
+                    json: () => ({ payee: "payee-b" }),
+                })
+                .mockResolvedValueOnce({
+                    ok: true,
+                    json: () => ({ status: "updated", id: "txn-1" }),
+                });
+
+            const result = await registry.executeTool("update_transaction", {
+                id: "txn-1",
+                budget_id: "My Budget",
+                category_id: null,
+            });
+
+            // The transaction holds payee-b, which is Misc, so the clear goes
+            // through. A name-first match would have chosen payee-a and refused.
+            expect(result).toEqual({ status: "updated", id: "txn-1" });
+            const patchCalls = mockFetch.mock.calls.filter(
+                (c) => c[1] && c[1].method === "PATCH",
+            );
+            expect(patchCalls).toHaveLength(1);
+            expect(JSON.parse(patchCalls[0][1].body).category).toBeNull();
         });
 
         test("rejects supplying both payee_id and payee_name (#421)", async () => {

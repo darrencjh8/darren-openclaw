@@ -1695,6 +1695,10 @@ export class AgentOrchestrator {
                     }),
                     budget_id: llmOutput.budget_id || "",
                 });
+                // A tool-level failure is returned, not thrown. Treat it as a
+                // failed insert so the reservation is not completed and the
+                // user is told. Issue #483 review.
+                if (inserted && inserted.error) throw new Error(inserted.error);
                 if (transferReservation?.status === "reserved") {
                     await this._tools.executeTool("complete_transfer", {
                         id: transferReservation.entry.id,

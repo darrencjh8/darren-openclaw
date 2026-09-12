@@ -949,7 +949,7 @@ describe("Category validation in insert_transaction", () => {
 
     const fetchMock = vi
       .fn()
-      // 1) _get("/payees") — _validate_payee name match for "Coffee"
+      // 1) _get("/payees") — _validate_payee resolves the name and its ID
       .mockResolvedValueOnce({
         ok: true,
         json: async () => [
@@ -957,15 +957,7 @@ describe("Category validation in insert_transaction", () => {
           { id: "p2", name: "Groceries" },
         ],
       })
-      // 2) _get("/payees") — payee ID lookup (same list)
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => [
-          { id: "p1", name: "Coffee" },
-          { id: "p2", name: "Groceries" },
-        ],
-      })
-      // 3) _post("/transactions")
+      // 2) _post("/transactions")
       .mockResolvedValueOnce({
         ok: true,
         json: async () => ({ id: "tx-5", payee_name: "Coffee" }),
@@ -980,10 +972,11 @@ describe("Category validation in insert_transaction", () => {
       imported_description: "Coffee",
     });
 
-    const postCall = fetchMock.mock.calls[2];
+    const postCall = fetchMock.mock.calls[1];
     const postBody = JSON.parse(postCall[1].body);
     // Payee should be "Coffee" (exact match from payees list)
     expect(postBody.payee_name).toBe("Coffee");
+    expect(postBody.payee).toBe("p1");
 
     vi.unstubAllGlobals();
   });
@@ -995,17 +988,12 @@ describe("Category validation in insert_transaction", () => {
 
     const fetchMock = vi
       .fn()
-      // 1) _get("/payees") - _validate_payee
+      // 1) _get("/payees") - _validate_payee resolves the name and its ID
       .mockResolvedValueOnce({
         ok: true,
         json: async () => [{ id: "p1", name: "Coffee" }],
       })
-      // 2) _get("/payees") - payee ID lookup
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => [{ id: "p1", name: "Coffee" }],
-      })
-      // 3) _post("/transactions")
+      // 2) _post("/transactions")
       .mockResolvedValueOnce({
         ok: true,
         json: async () => ({ id: "tx-6" }),
@@ -1020,7 +1008,7 @@ describe("Category validation in insert_transaction", () => {
       imported_description: "Coffee",
     });
 
-    const postCall = fetchMock.mock.calls[2];
+    const postCall = fetchMock.mock.calls[1];
     const postBody = JSON.parse(postCall[1].body);
     expect(postBody.payee_name).toBe("Coffee");
     expect(postBody.payee).toBe("p1");
@@ -1028,19 +1016,19 @@ describe("Category validation in insert_transaction", () => {
     vi.unstubAllGlobals();
   });
 
-  it("uses payee_id from args directly as transfer without extra lookup", async () => {
+  it("uses payee_id from args as the only payee field after validating it", async () => {
     const memory = mockMemoryStore();
     const config = mockConfig();
     const registry = new ToolRegistry(config, memory);
 
     const fetchMock = vi
       .fn()
-      // 1) _get("/payees") - _validate_payee
+      // 1) _get("/payees") - validate the explicit payee_id
       .mockResolvedValueOnce({
         ok: true,
         json: async () => [{ id: "p-transfer", name: "Touch N Go", transfer_acct: "acct-tng" }],
       })
-      // 2) _post("/transactions") - no extra lookup because payee_id given
+      // 2) _post("/transactions") - no name lookup for the payee
       .mockResolvedValueOnce({
         ok: true,
         json: async () => ({ id: "tx-transfer" }),
@@ -1058,7 +1046,9 @@ describe("Category validation in insert_transaction", () => {
 
     const postCall = fetchMock.mock.calls[1];
     const postBody = JSON.parse(postCall[1].body);
-    expect(postBody.payee_name).toBe("Touch N Go");
+    // The explicit ID is the only payee field; a name from the same
+    // imported_description could resolve to a different payee. Issue #483.
+    expect(postBody.payee_name).toBeUndefined();
     expect(postBody.payee).toBe("p-transfer");
 
     vi.unstubAllGlobals();

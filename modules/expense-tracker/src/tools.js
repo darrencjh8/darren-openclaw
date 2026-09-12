@@ -195,6 +195,48 @@ export class StatementJournal {
 
 // ── Tool Definitions ────────────────────────────────────────────
 
+/**
+ * Resolve one payee from a live payee list by exact name.
+ *
+ * Duplicate names are never resolved by list order, so this is the one policy
+ * every name-based lookup uses (insert_transaction, update_transaction and
+ * _validate_payee). A bare name means the transfer payee — it is the only
+ * match that creates a transfer — and that preference only holds when exactly
+ * one match is a transfer payee. Otherwise the pick would come from array
+ * order, so return an ambiguity error listing the candidate IDs; each one is a
+ * valid payee_id. Issue #421, #483, #487.
+ *
+ * @param {Array<object>} payees live payee list
+ * @param {string} name payee name to match, case-insensitively
+ * @returns {object|null|{error: string}} the payee, null when the name is
+ *   unknown, or an `{error}` result when several payees share the name
+ */
+export function resolvePayeeMatch(payees, name) {
+  if (!Array.isArray(payees) || !name) return null;
+  const matches = payees.filter(
+    (p) => p.name && p.name.toLowerCase() === name.toLowerCase(),
+  );
+  if (!matches.length) return null;
+  const transferMatches = matches.filter((p) => p.transfer_acct);
+  if (matches.length > 1 && transferMatches.length !== 1) {
+    const candidates = matches
+      .map((p) => p.id)
+      .filter(Boolean)
+      .join(", ");
+    return {
+      error: `Payee "${name}" is ambiguous; pass payee_id (candidates: ${candidates}).`,
+    };
+  }
+  return transferMatches[0] || matches[0];
+}
+
+/** Tag an ambiguity refusal so callers can tell it from a fetch failure. */
+function ambiguousPayeeError(message) {
+  const error = new Error(message);
+  error.code = "AMBIGUOUS_PAYEE";
+  return error;
+}
+
 const TOOLS = [
   {
     name: "search_memory",
@@ -328,7 +370,7 @@ const TOOLS = [
   {
     name: "insert_transaction",
     description:
-      "Insert a new transaction into Actual Budget. Returns the created transaction with id; the id is null when the inserted row cannot be attributed (a concurrent insert on the same account in the same window, or a failed read-back).",
+      "Insert a new transaction into Actual Budget. Returns the created transaction with id; the id is null when the inserted row cannot be attributed (a concurrent insert on the same account in the same window, or a failed read-back). An imported_description that matches several payees is refused and lists the candidate IDs; pass payee_id to select one.",
     schema: {
       type: "object",
       properties: {
@@ -345,6 +387,11 @@ const TOOLS = [
         imported_description: {
           type: "string",
           description: "Merchant name",
+        },
+        payee_id: {
+          type: "string",
+          description:
+            "Explicit payee ID. Selects a specific payee when names collide; overrides name-based resolution.",
         },
         category_id: { type: "string" },
         notes: { type: "string" },
@@ -1018,20 +1065,33 @@ export class ToolRegistry {
     return txns;
   }
 
+  /**
+   * Canonicalise a name for insert_transaction.
+   *
+   * Duplicate names follow resolvePayeeMatch, which also supplies the payee ID
+   * so the caller never re-resolves the name against a second, possibly
+   * different, payee list. Unlike update_transaction, an UNKNOWN name is not an
+   * error here — it falls back to "Misc" — because insert receives a raw
+   * imported description rather than a deliberate payee choice. An AMBIGUOUS
+   * name throws: silently booking whichever payee came first is the defect #483
+   * tracks, and "Misc" would hide the collision. Issue #483.
+   *
+   * @returns {Promise<{name: string, payeeId: string|null}>} the canonical name
+   *   and, when the live list matched it, the matching payee's ID
+   */
   async _validate_payee(payee_name, budget_id = "") {
-    if (!payee_name) return "Misc";
+    if (!payee_name) return { name: "Misc", payeeId: null };
+    let payees = null;
     try {
-      const payees = await this._get("/payees", budget_id);
-      if (Array.isArray(payees)) {
-        // ponytail: first name match wins. insert still picks by list order when
-        // payees share a name; update_transaction refuses that case (#487). Give
-        // this path the same ambiguity guard if insert collisions surface.
-        const match = payees.find(
-          (p) => p.name && p.name.toLowerCase() === payee_name.toLowerCase(),
-        );
-        if (match) return match.name;
-      }
-    } catch {}
+      payees = await this._get("/payees", budget_id);
+    } catch {
+      // A payee list that cannot be read falls through to memory search.
+    }
+    if (Array.isArray(payees)) {
+      const match = resolvePayeeMatch(payees, payee_name);
+      if (match?.error) throw ambiguousPayeeError(match.error);
+      if (match) return { name: match.name, payeeId: match.id || null };
+    }
     // Fall back to semantic memory search if available
     if (this._memory) {
       const results = await this._memory.search(payee_name);
@@ -1040,10 +1100,10 @@ export class ToolRegistry {
         // Issue #471.
         const hit = results.find((r) => factNamesMerchant(r.text, payee_name));
         const payeeMatch = hit && (hit.text || "").match(/maps to (.+?) payee/i);
-        if (payeeMatch) return payeeMatch[1];
+        if (payeeMatch) return { name: payeeMatch[1], payeeId: null };
       }
     }
-    return "Misc";
+    return { name: "Misc", payeeId: null };
   }
 
   async _handle_insert_transaction(args) {
@@ -1054,10 +1114,65 @@ export class ToolRegistry {
     if (!args.amount_cents && args.amount_cents !== 0)
       return { error: "amount_cents is required" };
 
-    const payee_name = await this._validate_payee(
-      args.imported_description || "",
-      budget_id,
-    );
+    // The payee is either one explicit ID or one resolved name. A caller-supplied
+    // ID is sent alone, because its name is validated from that same ID while the
+    // caller's name may resolve to a different payee of the same name. A name is
+    // sent with the ID it resolved to, so the pair always agrees. Issue #483.
+    // Unlike update_transaction, an unknown name is not an error — it becomes
+    // "Misc" (see _validate_payee) — while an ambiguous name is refused.
+    const explicitId = args.payee_id || null;
+    let payeeId = explicitId;
+    let payee_name = null;
+    if (explicitId) {
+      // An explicit ID comes from the caller or from Phase 2 transfer detection,
+      // so it is validated here and never second-guessed by a name lookup.
+      let payees = null;
+      try {
+        payees = await this._get("/payees", budget_id);
+      } catch {
+        // Fail closed: an unvalidatable ID must not reach the API.
+        return {
+          error: `Could not validate payee_id "${explicitId}": payee list unavailable.`,
+        };
+      }
+      if (!Array.isArray(payees))
+        return { error: `Could not validate payee_id "${explicitId}".` };
+      const explicit = payees.find((p) => p.id === explicitId);
+      if (!explicit)
+        return { error: `Payee ID "${explicitId}" not found in payee list.` };
+      // The journal keys duplicates by payee name, so an explicit ID must still
+      // record a non-empty name; fall back to the imported description when the
+      // payee itself has no name.
+      payee_name = explicit.name || args.imported_description || null;
+    } else {
+      let validated = null;
+      try {
+        validated = await this._validate_payee(
+          args.imported_description || "",
+          budget_id,
+        );
+      } catch (e) {
+        // An ambiguous name is refused with the candidate payee IDs.
+        return { error: e.message };
+      }
+      payee_name = validated.name;
+      payeeId = validated.payeeId;
+      if (!payeeId && payee_name && payee_name !== "Misc") {
+        // Only a memory-resolved name needs a second lookup: the live list did
+        // not supply an ID above.
+        try {
+          const payees = await this._get("/payees", budget_id);
+          if (Array.isArray(payees)) {
+            const match = resolvePayeeMatch(payees, payee_name);
+            if (match?.error) return { error: match.error };
+            if (match) {
+              payeeId = match.id;
+              payee_name = match.name;
+            }
+          }
+        } catch {}
+      }
+    }
     let categoryId = args.category_id || null;
     if (categoryId) {
       try {
@@ -1076,20 +1191,6 @@ export class ToolRegistry {
         // Keep original category_id if validation fails
       }
     }
-    // Resolve payee ID so the actual budget API can match the payee.
-    // If a transfer payee_id was provided (from Phase 2), use it directly.
-    let payeeId = args.payee_id || null;
-    if (!payeeId && payee_name && payee_name !== "Misc") {
-      try {
-        const payees = await this._get("/payees", budget_id);
-        if (Array.isArray(payees)) {
-          const match = payees.find(
-            (p) => p.name && p.name.toLowerCase() === payee_name.toLowerCase(),
-          );
-          if (match) payeeId = match.id;
-        }
-      } catch {}
-    }
 
     const result = await this._post(
       "/transactions",
@@ -1097,7 +1198,8 @@ export class ToolRegistry {
         account: args.account_id,
         date: args.date,
         amount: args.amount_cents || 0,
-        payee_name: payee_name,
+        // A payee ID wins over a name, so an explicit ID is sent alone.
+        ...(explicitId ? {} : { payee_name: payee_name || "Misc" }),
         notes: args.notes || "",
         cleared: false,
         ...(payeeId ? { payee: payeeId } : {}),
@@ -1110,7 +1212,7 @@ export class ToolRegistry {
       args.date,
       args.amount_cents || 0,
       args.account_id,
-      payee_name,
+      payee_name || "",
     );
     // Inject budget_id into result for LLM context
     if (result && !result.error) {
@@ -1696,32 +1798,19 @@ export class ToolRegistry {
         return { error: `Payee ID "${payee_id}" not found in payee list.` };
       fields.payee = updatedPayee.id;
     } else if (payee_name) {
-      // Validate payee exists (strict — reject unknown)
-      const nameMatches = payees.filter(
-        (p) => p.name && p.name.toLowerCase() === payee_name.toLowerCase(),
-      );
-      if (!nameMatches.length)
+      // Validate payee exists (strict — reject unknown). Unlike insert, an
+      // unknown name is an error here: update is a deliberate payee change,
+      // not a raw imported description. Issue #483.
+      //
+      // resolvePayeeMatch carries the duplicate-name policy: a bare name means
+      // the transfer payee, and it refuses when that preference would come from
+      // array order. Issue #421, #487, #483.
+      updatedPayee = resolvePayeeMatch(payees, payee_name);
+      if (!updatedPayee)
         return {
           error: `Payee "${payee_name}" not found in payee list. Use a valid payee from fetch_payees.`,
         };
-      // A transfer payee and a plain payee can share a name. The transfer payee
-      // is the only one that creates a transfer, so a bare name means that one;
-      // pass payee_id to choose the plain payee. Issue #421.
-      //
-      // That preference only holds when exactly one match is a transfer payee.
-      // Otherwise the pick would come from array order, so refuse and list every
-      // match ID — each one is a valid payee_id. Issue #487.
-      const transferMatches = nameMatches.filter((p) => p.transfer_acct);
-      if (nameMatches.length > 1 && transferMatches.length !== 1) {
-        const candidates = nameMatches
-          .map((p) => p.id)
-          .filter(Boolean)
-          .join(", ");
-        return {
-          error: `Payee "${payee_name}" is ambiguous; pass payee_id (candidates: ${candidates}).`,
-        };
-      }
-      updatedPayee = transferMatches[0] || nameMatches[0];
+      if (updatedPayee.error) return { error: updatedPayee.error };
       fields.payee = updatedPayee.id;
     }
     if (notes !== undefined) fields.notes = notes;
@@ -1732,12 +1821,18 @@ export class ToolRegistry {
       if (!effectivePayee) {
         const transaction = await this._get(`/transactions/${id}`, budgetId);
         const transactionPayee = transaction?.payee;
+        // The transaction's payee is read by ID first; a bare name goes through
+        // the shared policy and is refused rather than guessed. Issue #483.
         effectivePayee = payees.find(
-          (payee) =>
-            payee.id === transactionPayee ||
-            payee.name?.toLowerCase() ===
-              String(transactionPayee || "").toLowerCase(),
+          (payee) => payee.id === transactionPayee,
         );
+        if (!effectivePayee) {
+          effectivePayee = resolvePayeeMatch(
+            payees,
+            String(transactionPayee || ""),
+          );
+          if (effectivePayee?.error) return { error: effectivePayee.error };
+        }
       }
       if (effectivePayee?.name?.toLowerCase() !== "misc") {
         return { error: "Category can only be cleared when payee is Misc" };
