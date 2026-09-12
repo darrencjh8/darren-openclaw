@@ -664,7 +664,10 @@ describe("ToolRegistry — budget_id validation", () => {
             expect(mockFetch).toHaveBeenCalledTimes(1);
         });
 
-        test("refuses a bare name that matches several transfer payees (#487)", async () => {
+        test("refuses a name matching two different transfer payees (#487)", async () => {
+            // Two payees for one account name cannot exist in Actual, so this
+            // pins the multiple-transfer branch rather than a realistic
+            // collision; the two-plain-payee test covers the reachable case.
             mockFetch.mockResolvedValueOnce({
                 ok: true,
                 json: () => [
