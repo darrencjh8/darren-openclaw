@@ -18,7 +18,7 @@ B1–B1c: Track expense → confirm → verify in Actual Budget UI.
 C1–C2: Duplicate skip, non-duplicate insert.
 
 ### Suite D: Currency Routing (3)
-D1–D3: SGD → Darren SGD, MYR → Darren MYR, ambiguous → ask.
+D1–D3: SGD → Example SGD, MYR → Example MYR, ambiguous → ask.
 
 ### Suite E: Payee-to-Category Mapping (4)
 E1–E4: Hawker→Food, Grab→Transport, Coffee→Coffee, unknown→ask.

@@ -19,6 +19,10 @@ import { accountAliases, resolveFactAccount } from "../src/suffix-facts.js";
 // is a single generic word, and one carries a digit+letter token. The fixture is
 // the whole point of the tests: the resolver must work on a full set with shared
 // tokens, not on a convenient subset.
+// Fully synthetic on purpose: this file exercises the resolver, where no real
+// brand token is needed. Brand-coupled tests keep a real brand (see
+// tests/bank-movement.test.js) because hasBankToken refuses unknown banks, so the
+// two fixture styles differ deliberately - do not "fix" that by unifying them.
 const ACCOUNTS = [
   "Alpha Bank",
   "Beta 360",

@@ -49,13 +49,13 @@ describe("Config — all 30+ fields", () => {
       MAPPINGS_PATH: "/data/custom/mappings.json",
 
       // User
-      USER_NAME: "Darren",
+      USER_NAME: "Example",
       SYSTEM_PROMPT_EXTRA: "Extra instructions here",
 
       // IMAP
       IMAP_HOST: "imap.mail.com",
       IMAP_PORT: "995",
-      IMAP_USERNAME: "darren@example.com",
+      IMAP_USERNAME: "user@example.com",
       IMAP_PASSWORD: "imap-secret",
       IMAP_FOLDER: "INBOX/Trades",
 
@@ -105,13 +105,13 @@ describe("Config — all 30+ fields", () => {
     expect(cfg.mappingsPath).toBe("/data/custom/mappings.json");
 
     // User
-    expect(cfg.userName).toBe("Darren");
+    expect(cfg.userName).toBe("Example");
     expect(cfg.systemPromptExtra).toBe("Extra instructions here");
 
     // IMAP
     expect(cfg.imapHost).toBe("imap.mail.com");
     expect(cfg.imapPort).toBe(995);
-    expect(cfg.imapUsername).toBe("darren@example.com");
+    expect(cfg.imapUsername).toBe("user@example.com");
     expect(cfg.imapPassword).toBe("imap-secret");
     expect(cfg.imapFolder).toBe("INBOX/Trades");
 

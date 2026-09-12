@@ -8,7 +8,7 @@ An internal transfer is only created when both sides resolve deterministically t
 
 ## Scope
 
-This work covers structured movement alerts from OCBC, Zeta Bank, and DBS, including DBS successful bill-payment alerts.
+This work covers structured movement alerts from OCBC, Trust, and DBS, including DBS successful bill-payment alerts.
 
 The DBS fixture below must be handled without an LLM when its source and destination account identities are configured and resolve uniquely:
 
@@ -172,8 +172,8 @@ Supported verified registry facts, used only as deterministic fallback:
 
 ```text
 Account ending 869001 belongs to OCBC 111
-Zeta Bank Singapore Limited account ending 310980 belongs to Zeta Card
-Zeta Bank alert recipient maps to Zeta Card account
+Trust Bank Singapore Limited account ending 310980 belongs to Zeta Card
+Trust Bank alert recipient maps to Zeta Card account
 DBS account ending 9302 belongs to Epsilon Vista
 UOB CREDIT CARDS account ending 4605 belongs to UOB Card
 CITI CREDIT CARDS account ending 4756 belongs to Citi Card
@@ -336,7 +336,7 @@ All test emails are sanitized synthetic fixtures. No production email content, c
 
 Create sanitized fixtures for:
 
-- OCBC outgoing transfer to Zeta Bank.
+- OCBC outgoing transfer to Trust Bank.
 - Trust incoming transfer from OCBC.
 - Existing DBS bill-payment transfer format, including `Date and Time` and transaction reference.
 - Epsilon Vista to Citi Credit Cards bill payment.
@@ -370,7 +370,7 @@ PASS: Previously unseen card account in live Actual context resolves without reg
 PASS: Full suffix `869001` resolves OCBC 111.
 PASS: `9001` resolves OCBC 111 only when it uniquely matches that bank's last four digits.
 PASS: `9001` is unresolved when two OCBC accounts match.
-PASS: Exact Zeta Bank + `310980` resolves Zeta Card.
+PASS: Exact Trust Bank + `310980` resolves Zeta Card.
 PASS: Exact DBS + `9302` resolves Epsilon Vista even if live Actual name is `Vista`.
 PASS: Exact UOB CREDIT CARDS + `4605` resolves UOB Card only when configured and open.
 PASS: Exact CITI CREDIT CARDS + `4756` resolves Citi Card only when configured and open.
@@ -412,7 +412,7 @@ Mock `fetch` at the Actual adapter boundary and assert the exact HTTP request bo
 For the OCBC-to-Trust transfer, assert the request uses the field names and body shape the Actual adapter actually sends, including:
 
 ```text
-account: OCBC_360_ID
+account: OCBC_111_ID
 date: 2026-09-01
 amount: -1425
 payee: TRUST_CARD_TRANSFER_PAYEE_ID

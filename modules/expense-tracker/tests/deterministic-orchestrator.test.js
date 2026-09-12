@@ -887,7 +887,7 @@ describe("Phase 1: LLM-directed retrieval (multi-round tools)", () => {
     return `${d} ${MONTHS[m - 1]} ${y}`;
   }
 
-  const yuuResult = {
+  const novaResult = {
     merchant: "BUS/MRT",
     amount_cents: -230,
     date: "2026-08-25",
@@ -911,7 +911,7 @@ describe("Phase 1: LLM-directed retrieval (multi-round tools)", () => {
       .fn()
       .mockResolvedValueOnce({ choices: [{ message: toolCallMsg("search_memory", { query: "3255" }) }] })
       .mockResolvedValueOnce({ choices: [{ message: toolCallMsg("fetch_context", {}) }] })
-      .mockResolvedValueOnce({ choices: [{ message: jsonMsg(yuuResult) }] });
+      .mockResolvedValueOnce({ choices: [{ message: jsonMsg(novaResult) }] });
 
     const result = await orch._runPhase1("From: DBS/POSB card ending 3255 To: BUS/MRT", {
       senderBank: "DBS",
@@ -938,7 +938,7 @@ describe("Phase 1: LLM-directed retrieval (multi-round tools)", () => {
       .fn()
       .mockResolvedValueOnce({ choices: [{ message: toolCallMsg("fetch_context", {}) }] })
       .mockResolvedValueOnce({ choices: [{ message: toolCallMsg("search_memory", { query: "card ending 3255" }) }] })
-      .mockResolvedValueOnce({ choices: [{ message: jsonMsg(yuuResult) }] });
+      .mockResolvedValueOnce({ choices: [{ message: jsonMsg(novaResult) }] });
 
     const result = await orch._runPhase1("From: DBS/POSB card ending 3255 To: BUS/MRT", {
       senderBank: "DBS",
@@ -987,7 +987,7 @@ describe("Phase 1: LLM-directed retrieval (multi-round tools)", () => {
       })
       .mockImplementationOnce(async (messages) => {
         correctionMessages = messages;
-        return { choices: [{ message: jsonMsg(yuuResult) }] };
+        return { choices: [{ message: jsonMsg(novaResult) }] };
       });
 
     const result = await orch._runPhase1("card ending 3255", {});
@@ -1017,7 +1017,7 @@ describe("Phase 1: LLM-directed retrieval (multi-round tools)", () => {
         choices: [
           {
             message: jsonMsg({
-              ...yuuResult,
+              ...novaResult,
               account_id: "acc-dbs",
               account_name: "DBS Account",
               reasoning: "literal account name in text",
@@ -1064,7 +1064,7 @@ describe("Phase 1: LLM-directed retrieval (multi-round tools)", () => {
       .fn()
       .mockResolvedValueOnce({ choices: [{ message: toolCallMsg("search_memory", { query: "3255" }) }] })
       .mockResolvedValueOnce({
-        choices: [{ message: jsonMsg({ ...yuuResult, account_id: "acc-dbs", account_name: "DBS Account" }) }],
+        choices: [{ message: jsonMsg({ ...novaResult, account_id: "acc-dbs", account_name: "DBS Account" }) }],
       });
 
     const result = await orch._runPhase1("From: DBS/POSB card ending 3255 To: BUS/MRT", {
@@ -1103,7 +1103,7 @@ describe("Phase 1: LLM-directed retrieval (multi-round tools)", () => {
       .fn()
       .mockResolvedValueOnce({ choices: [{ message: toolCallMsg("search_memory", { query: "3255" }) }] })
       .mockResolvedValueOnce({
-        choices: [{ message: jsonMsg({ ...yuuResult, account_id: "acc-dbs", account_name: "DBS Account" }) }],
+        choices: [{ message: jsonMsg({ ...novaResult, account_id: "acc-dbs", account_name: "DBS Account" }) }],
       });
 
     const result = await orch._runPhase1("From: DBS/POSB card ending 3255 To: BUS/MRT", {
@@ -1144,7 +1144,7 @@ describe("Phase 1: LLM-directed retrieval (multi-round tools)", () => {
         capturedMessages = messages;
         return { choices: [{ message: toolCallMsg("search_memory", { query: "3255" }) }] };
       })
-      .mockResolvedValueOnce({ choices: [{ message: jsonMsg(yuuResult) }] });
+      .mockResolvedValueOnce({ choices: [{ message: jsonMsg(novaResult) }] });
 
     const result = await orch._runPhase1("From: DBS/POSB card ending 3255 To: BUS/MRT", {
       senderBank: "DBS",
@@ -1183,7 +1183,7 @@ describe("Phase 1: LLM-directed retrieval (multi-round tools)", () => {
 
     // LLM returns JSON directly — never calls any tool
     orch._llm.chat = vi.fn().mockResolvedValue({
-      choices: [{ message: jsonMsg({ ...yuuResult, account_id: "acc-dbs", account_name: "DBS Account" }) }],
+      choices: [{ message: jsonMsg({ ...novaResult, account_id: "acc-dbs", account_name: "DBS Account" }) }],
     });
 
     const result = await orch._runPhase1("From: DBS/POSB card ending 3255 To: BUS/MRT", {
@@ -1226,7 +1226,7 @@ describe("Phase 1: LLM-directed retrieval (multi-round tools)", () => {
       .fn()
       .mockResolvedValueOnce({ choices: [{ message: toolCallMsg("search_memory", { query: "3255" }) }] })
       .mockResolvedValueOnce({
-        choices: [{ message: jsonMsg({ ...yuuResult, account_id: "acc-dbs", account_name: "DBS Account" }) }],
+        choices: [{ message: jsonMsg({ ...novaResult, account_id: "acc-dbs", account_name: "DBS Account" }) }],
       });
 
     // no senderBank — processText/Telegram path
@@ -1267,7 +1267,7 @@ describe("Phase 1: LLM-directed retrieval (multi-round tools)", () => {
       .fn()
       .mockResolvedValueOnce({ choices: [{ message: toolCallMsg("search_memory", { query: "BUS/MRT" }) }] })
       .mockResolvedValueOnce({
-        choices: [{ message: jsonMsg({ ...yuuResult, account_id: "acc-dbs", account_name: "DBS Account" }) }],
+        choices: [{ message: jsonMsg({ ...novaResult, account_id: "acc-dbs", account_name: "DBS Account" }) }],
       });
 
     const result = await orch._runPhase1("From: DBS/POSB card ending 3255 To: BUS/MRT", {
@@ -1310,11 +1310,11 @@ describe("Phase 1: LLM-directed retrieval (multi-round tools)", () => {
     orch._llm.chat = vi
       .fn()
       .mockResolvedValueOnce({
-        choices: [{ message: jsonMsg({ ...yuuResult, account_id: "acc-bogus", account_name: "Bogus" }) }],
+        choices: [{ message: jsonMsg({ ...novaResult, account_id: "acc-bogus", account_name: "Bogus" }) }],
       })
       .mockImplementationOnce(async (messages) => {
         retryMessages = messages;
-        return { choices: [{ message: jsonMsg(yuuResult) }] };
+        return { choices: [{ message: jsonMsg(novaResult) }] };
       });
 
     const result = await orch._runPhase1("From: DBS/POSB card ending 3255 To: BUS/MRT", {
@@ -1344,7 +1344,7 @@ describe("Phase 1: LLM-directed retrieval (multi-round tools)", () => {
         choices: [
           {
             message: jsonMsg({
-              ...yuuResult,
+              ...novaResult,
               merchant: "Nova",
               account_id: "acc-dbs",
               account_name: "DBS Account",
@@ -1387,7 +1387,7 @@ describe("Phase 1: LLM-directed retrieval (multi-round tools)", () => {
       .fn()
       .mockResolvedValueOnce({ choices: [{ message: toolCallMsg("search_memory", { query: "3255" }) }] })
       .mockResolvedValueOnce({
-        choices: [{ message: jsonMsg({ ...yuuResult, account_id: "acc-dbs", account_name: "DBS Account" }) }],
+        choices: [{ message: jsonMsg({ ...novaResult, account_id: "acc-dbs", account_name: "DBS Account" }) }],
       });
 
     const result = await orch._runPhase1("From: DBS/POSB card ending 3255 To: BUS/MRT", {
@@ -1405,7 +1405,7 @@ describe("Phase 1: LLM-directed retrieval (multi-round tools)", () => {
 
     // LLM never searches — deterministic fallback must not query "123456"
     orch._llm.chat = vi.fn().mockResolvedValue({
-      choices: [{ message: jsonMsg({ ...yuuResult, account_id: "acc-dbs", account_name: "DBS Account" }) }],
+      choices: [{ message: jsonMsg({ ...novaResult, account_id: "acc-dbs", account_name: "DBS Account" }) }],
     });
 
     const result = await orch._runPhase1("please discard 123456 now. Card ending 3255", {
@@ -1449,7 +1449,7 @@ describe("Phase 1: LLM-directed retrieval (multi-round tools)", () => {
         capturedMessages = messages;
         return { choices: [{ message: toolCallMsg("search_memory", { query: "3255" }) }] };
       })
-      .mockResolvedValueOnce({ choices: [{ message: jsonMsg(yuuResult) }] });
+      .mockResolvedValueOnce({ choices: [{ message: jsonMsg(novaResult) }] });
 
     const result = await orch._runPhase1("From: DBS/POSB card ending 3255 To: BUS/MRT", {
       senderBank: "DBS",
@@ -1499,11 +1499,11 @@ describe("Phase 1: LLM-directed retrieval (multi-round tools)", () => {
     orch._llm.chat = vi
       .fn()
       .mockResolvedValueOnce({
-        choices: [{ message: jsonMsg({ ...yuuResult, account_id: "acc-dbs", account_name: "DBS Account" }) }],
+        choices: [{ message: jsonMsg({ ...novaResult, account_id: "acc-dbs", account_name: "DBS Account" }) }],
       })
       .mockImplementationOnce(async (messages) => {
         retryMessages = messages;
-        return { choices: [{ message: jsonMsg(yuuResult) }] };
+        return { choices: [{ message: jsonMsg(novaResult) }] };
       });
 
     const result = await orch._runPhase1("To: BUS/MRT SGD 2.30", {
@@ -1630,11 +1630,11 @@ describe("Phase 1: LLM-directed retrieval (multi-round tools)", () => {
       // DATE, TIME" shape either).
       .mockResolvedValueOnce({ choices: [{ message: { content: "{}" } }] })
       .mockResolvedValueOnce({
-        choices: [{ message: jsonMsg({ ...yuuResult, merchant: "Toast Box", account_id: "acc-dbs", account_name: "DBS Account", date: recentDate }) }],
+        choices: [{ message: jsonMsg({ ...novaResult, merchant: "Toast Box", account_id: "acc-dbs", account_name: "DBS Account", date: recentDate }) }],
       })
       .mockImplementationOnce(async (messages) => {
         retryMessages = messages;
-        return { choices: [{ message: jsonMsg({ ...yuuResult, merchant: "Toast Box", date: recentDate }) }] };
+        return { choices: [{ message: jsonMsg({ ...novaResult, merchant: "Toast Box", date: recentDate }) }] };
       });
 
     const emailText = "Toast Box: SGD 12.80 was paid using your DBS Card just now, " + formatEmailDate(recentDate) + ".";
@@ -1672,7 +1672,7 @@ describe("Phase 1: LLM-directed retrieval (multi-round tools)", () => {
       .fn()
       .mockResolvedValueOnce({ choices: [{ message: toolCallMsg("search_memory", { query: "3255" }) }] })
       .mockResolvedValueOnce({
-        choices: [{ message: jsonMsg({ ...yuuResult, account_id: "acc-dbs", account_name: "DBS Account" }) }],
+        choices: [{ message: jsonMsg({ ...novaResult, account_id: "acc-dbs", account_name: "DBS Account" }) }],
       });
 
     const result = await orch._runPhase1("From: DBS/POSB card ending 3255 To: BUS/MRT", {
@@ -1712,7 +1712,7 @@ describe("Phase 1: LLM-directed retrieval (multi-round tools)", () => {
       .mockResolvedValueOnce({ choices: [{ message: toolCallMsg("fetch_context", {}) }] })
       .mockImplementationOnce(async (messages) => {
         toolMessages = messages.filter((m) => m.role === "tool");
-        return { choices: [{ message: jsonMsg(yuuResult) }] };
+        return { choices: [{ message: jsonMsg(novaResult) }] };
       });
 
     const result = await orch._runPhase1("From: DBS/POSB card ending 3255 To: BUS/MRT", {
@@ -1757,7 +1757,7 @@ describe("Phase 1: LLM-directed retrieval (multi-round tools)", () => {
           choices: [
             {
               message: jsonMsg({
-                ...yuuResult,
+                ...novaResult,
                 account_id: "acc-sc",
                 account_name: "Standard Chartered XtraSaver",
               }),
@@ -1806,7 +1806,7 @@ describe("Phase 1: LLM-directed retrieval (multi-round tools)", () => {
           choices: [
             {
               message: jsonMsg({
-                ...yuuResult,
+                ...novaResult,
                 account_id: "acc-cimb",
                 account_name: "CIMB FastSaver",
               }),
@@ -1861,7 +1861,7 @@ describe("Phase 1: LLM-directed retrieval (multi-round tools)", () => {
         choices: [
           {
             message: jsonMsg({
-              ...yuuResult,
+              ...novaResult,
               account_id: "acc-dbs",
               account_name: "DBS Account",
               reasoning: "guessed",
@@ -1910,7 +1910,7 @@ describe("suffix-override helpers (unit)", () => {
     expect(nameMatchesBank("POSB Everyday Card", "DBS")).toBe(true);
     expect(nameMatchesBank("DBS Nova Card", "POSB")).toBe(true);
     expect(nameMatchesBank("Standard Chartered XtraSaver", "SC")).toBe(true);
-    expect(nameMatchesBank("Citibank Rewards", "Citi")).toBe(true);
+    expect(nameMatchesBank("Citibank Points", "Citi")).toBe(true);
     expect(nameMatchesBank("RHB RYT Savings", "Ryt")).toBe(true);
     expect(nameMatchesBank("CIMB FastSaver", "CIMB")).toBe(true);
     expect(nameMatchesBank("UOB Extra Card", "DBS")).toBe(false);

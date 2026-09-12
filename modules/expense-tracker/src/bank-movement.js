@@ -158,7 +158,7 @@ export function parseBankMovement(text, { senderBank = null, receivedAt } = {}) 
   const body = restoreFieldLines(String(text || ""));
   const reference = field(body, ["Reference number", "Transaction Ref", "Reference"]);
 
-  // Alpha Bank "Card payment completed" alert — no "Amount :" label.
+  // Bank card-payment alert — no "Amount :" label.
   //   "RM200.00 was paid at TNG-EWALLET ECOM 3-EC using your Main Account on 2/9/2026, 12:46 AM (GMT+8)."
   const ryt = body.match(/(SGD|RM|MYR)\s*([\d,.]+)\s+was paid at\s+(.+?)\s+using\s+(.+?)\s+on\s+(\d{1,2}\/\d{1,2}\/\d{4})\s*,?\s*(\d{1,2}:\d{2}\s*(?:AM|PM)?)/i);
   if (ryt) {

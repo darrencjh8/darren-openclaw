@@ -342,7 +342,7 @@ export const MOVEMENT_LIKE =
  * the memory-aware account check specifically, which SUPPRESSES a safety net
  * rather than merely attempting an extra extraction pass. MOVEMENT_LIKE's
  * broader purchase-adjacent phrases ("using your", "was paid", "you've
- * received") also match ordinary card/wallet purchase alerts (e.g. Alpha Bank's
+ * received") also match ordinary card/wallet purchase alerts (e.g. a card alert's
  * "RM200.00 was paid at MERCHANT using your Main Account on ..."), where the
  * merchant is a real merchant, not another tracked account — the memory
  * check must stay active for those.
