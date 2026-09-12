@@ -354,56 +354,71 @@ app.post("/transactions", async (req, res) => {
                 .json({ error: "Invalid date (use YYYY-MM-DD)" });
         }
         const window = readWindow(txn.date);
-        // Snapshot the account's rows first so the insert can be identified
-        // unambiguously afterwards, even if a rule rewrites its amount, date,
-        // or payee.
+        // Serialize the snapshot, the insert, and the read-back. Without this,
+        // a concurrent POST could insert the same account's row between this
+        // request's snapshot and its read-back, and the read-back would report
+        // that stranger's id as this insert's id. The lock is global rather
+        // than per-account because runTransfers inserts a counterpart into the
+        // destination account, so a lock keyed on the request's account would
+        // not cover it. ponytail: a global lock, so inserts queue behind each
+        // other and behind a budget switch; key it per account if either the
+        // insert rate or the budget-switch cooldown ever makes that visible.
+        const unlock = await acquireLock();
         let beforeIds = null;
-        try {
-            beforeIds = new Set(
-                (
-                    await actual.getTransactions(
-                        txn.account,
-                        window.start,
-                        window.end,
-                    )
-                ).map((t) => t.id),
-            );
-        } catch {
-            // Without a trustworthy snapshot no row on the window can be proven
-            // new, so the read-back is skipped rather than naming a stranger's
-            // row. The insert still commits and the response reports a null id.
-        }
-        // runTransfers makes a transfer payee create its counterpart in the
-        // destination account on insert, matching an in-app payee change.
-        await actual.addTransactions(txn.account, [txn], {
-            runTransfers: true,
-        });
-        // @actual-app/api resolves addTransactions to "ok" (it discards the
-        // new ids), so read the row back to report its real id. Only a row
-        // absent from the pre-insert snapshot qualifies; matching on amount or
-        // payee alone could return a pre-existing transaction.
-        // ponytail: the diff shows which rows are new, not which one this
-        // request inserted. When more than one row is new — a concurrent POST,
-        // or a rule that also changes transactions on the window — nothing can
-        // be attributed, so the response reports a null id and the request's own
-        // fields. Claiming the true id would need addTransactions to return the
-        // ids it currently discards.
         let created = null;
-        if (beforeIds) {
+        try {
+            // Snapshot the account's rows first so the insert can be identified
+            // unambiguously afterwards, even if a rule rewrites its amount, date,
+            // or payee.
             try {
-                const newRows = (
-                    await actual.getTransactions(
-                        txn.account,
-                        window.start,
-                        window.end,
-                    )
-                ).filter((t) => !beforeIds.has(t.id));
-                // All or nothing: a single new row is the insert, but adding a
-                // second would make both the id and the fields a guess.
-                if (newRows.length === 1) created = newRows[0];
+                beforeIds = new Set(
+                    (
+                        await actual.getTransactions(
+                            txn.account,
+                            window.start,
+                            window.end,
+                        )
+                    ).map((t) => t.id),
+                );
             } catch {
-                // Read-back is best-effort; the insert already committed.
+                // Without a trustworthy snapshot no row on the window can be
+                // proven new, so the read-back is skipped rather than naming a
+                // stranger's row. The insert still commits and the response
+                // reports a null id.
             }
+            // runTransfers makes a transfer payee create its counterpart in the
+            // destination account on insert, matching an in-app payee change.
+            await actual.addTransactions(txn.account, [txn], {
+                runTransfers: true,
+            });
+            // @actual-app/api resolves addTransactions to "ok" (it discards the
+            // new ids), so read the row back to report its real id. Only a row
+            // absent from the pre-insert snapshot qualifies; matching on amount
+            // or payee alone could return a pre-existing transaction.
+            // ponytail: the diff shows which rows are new, not which one this
+            // request inserted. When more than one row is new — a rule that also
+            // changes transactions on the window, or a PATCH moving a row into
+            // it — nothing can be attributed, so the response reports a null id
+            // and the request's own fields. Claiming the true id would need
+            // addTransactions to return the ids it currently discards.
+            if (beforeIds) {
+                try {
+                    const newRows = (
+                        await actual.getTransactions(
+                            txn.account,
+                            window.start,
+                            window.end,
+                        )
+                    ).filter((t) => !beforeIds.has(t.id));
+                    // All or nothing: a single new row is the insert, but adding
+                    // a second would make both the id and the fields a guess.
+                    if (newRows.length === 1) created = newRows[0];
+                } catch {
+                    // Read-back is best-effort; the insert already committed.
+                }
+            }
+        } finally {
+            unlock();
         }
         res.json({
             id: created ? created.id : null,
