@@ -17,7 +17,7 @@ Use normal prose for user-facing PRs, issues, commits, docs, and other persisted
 ## Hard rules
 
 - Repo rules override this skill.
-- Review profile: `code-reviewer`. Round 1 uses `auto-thinking` with one active reviewer. Rounds 2-15 use `auto-thinking-free` with at most two concurrent reviewers.
+- Review profile: `code-reviewer`. Round 1 uses `auto-thinking` with one active reviewer. Rounds 2-15 use `muse-spark-1.3-contributor-free` with at most two concurrent reviewers.
 - Never substitute the paid and free reviewer models. Missing model, profile, authentication, or evidence fails the round closed.
 - If a relevant specification exists, it must pass the `spec-auditor` gate before code review.
 - No production code before a failing assertion test.
@@ -143,7 +143,7 @@ Every reviewer uses a fresh isolated Hermes process. Round 1 runs alone. For lat
 cd <worktree>
 case "${REVIEW_ROUND-}" in
   1) REVIEWER_MODEL=auto-thinking ;;
-  2|3|4|5|6|7|8|9|10|11|12|13|14|15) REVIEWER_MODEL=auto-thinking-free ;;
+  2|3|4|5|6|7|8|9|10|11|12|13|14|15) REVIEWER_MODEL=muse-spark-1.3-contributor-free ;;
   *) printf 'invalid or exhausted review round: %s\n' "${REVIEW_ROUND-<unset>}" >&2; exit 1 ;;
 esac
 HERMES_HOME=<hermes-home> hermes chat \
@@ -155,7 +155,7 @@ HERMES_HOME=<hermes-home> hermes chat \
   --query-file <review-prompt-outside-repo>
 ```
 
-Before launch verify `hermes chat --help` supports the exact invocation, the launch routes to the model required for that round, and `caveman`/`code-reviewer` skills exist in that profile. The profile defaults to round-1 `auto-thinking`; later launches must override the model to `auto-thinking-free`. Its fallback chain is empty so model failure remains fail-closed.
+Before launch verify `hermes chat --help` supports the exact invocation, the launch routes to the model required for that round, and `caveman`/`code-reviewer` skills exist in that profile. The profile defaults to round-1 `auto-thinking`; later launches must override the model to `muse-spark-1.3-contributor-free`. Its fallback chain is empty so model failure remains fail-closed.
 
 Run one review round using the required `code-reviewer` profile, choosing one lens:
 - **A:** end-to-end behavior, callers, persistence, compatibility, and tests.
@@ -164,7 +164,7 @@ Run one review round using the required `code-reviewer` profile, choosing one le
 Reviewer prompt must require:
 
 - Load `caveman`, ultra intensity; then load `code-reviewer`.
-- Run under `auto-thinking` for round 1 or `auto-thinking-free` for every later round; report the requested virtual model and returned model echo as evidence.
+- Run under `auto-thinking` for round 1 or `muse-spark-1.3-contributor-free` for every later round; report the requested virtual model and returned model echo as evidence.
 - Read-only isolation: no edits, commits, branches, config changes, external write APIs, or network writes.
 - Review exact `merge-base(base, HEAD)..HEAD`, surrounding callers, configuration, tests, and lifecycle paths.
 - Output stable finding IDs, severity, file/line, evidence, concrete trigger for Critical/High, remediation, and verdict.

@@ -33,18 +33,18 @@ require "$DEV_LOOP_SKILL" "skill pulls origin main before planning" "git pull --
 require "$DEV_LOOP_SKILL" "skill creates a worktree from verified origin" "Create a new isolated \`feat/...\` or \`fix/...\` worktree and branch from that verified \`origin/<default-branch>\` SHA"
 require "$DEV_LOOP_SKILL" "skill uses the sole reviewer profile" "--profile code-reviewer"
 require "$DEV_LOOP_SKILL" "skill pins paid round one" "Round 1 uses \`auto-thinking\`"
-require "$DEV_LOOP_SKILL" "skill pins later free rounds" "Rounds 2-15 use \`auto-thinking-free\`"
+require "$DEV_LOOP_SKILL" "skill pins later free rounds" "Rounds 2-15 use \`muse-spark-1.3-contributor-free\`"
 require "$DEV_LOOP_SKILL" "skill caps free concurrency" "at most two concurrent reviewers"
 require "$DEV_LOOP_SKILL" "skill requires three approvals" "three continuous fresh-context approvals on the **same unchanged HEAD SHA**"
 require "$DEV_LOOP_SKILL" "skill disables cross-tier fallback" "Never substitute the paid and free reviewer models"
 require "$DEV_LOOP_SKILL" "skill resolves optional specifications" "If a relevant specification exists"
 require "$DEV_LOOP_SKILL" "skill invokes spec-auditor before code review" "--profile spec-auditor"
 require "$DEV_LOOP_SKILL" "skill verifies the launch routes to the round model" "the launch routes to the model required for that round"
-require "$DEV_LOOP_SKILL" "skill selects the free model for later launches" "REVIEWER_MODEL=auto-thinking-free"
+require "$DEV_LOOP_SKILL" "skill selects the free model for later launches" "REVIEWER_MODEL=muse-spark-1.3-contributor-free"
 require "$DEV_LOOP_SKILL" "review command passes the selected model" '--model "$REVIEWER_MODEL"'
 require "$DEV_LOOP_SKILL" "skill owns the loop through merge" "Own the loop through completion."
 require "$CODE_REVIEWER_SKILL" "reviewer skill pins the managed profile" "managed \`code-reviewer\` profile"
-require "$CODE_REVIEWER_SKILL" "reviewer skill pins round models" "Round 1 uses \`auto-thinking\`; every later round uses \`auto-thinking-free\`"
+require "$CODE_REVIEWER_SKILL" "reviewer skill pins round models" "Round 1 uses \`auto-thinking\`; every later round uses \`muse-spark-1.3-contributor-free\`"
 require "$REPO_RULES" "repo rules permit free concurrency" "up to two concurrent fresh-context reviewers on free rounds"
 require "$REPO_RULES" "repo rules require three approvals" "three continuous approvals on the same unchanged HEAD"
 require "$REPO_RULES" "repo rules invoke spec-auditor when a spec exists" "invoke spec-auditor before code review"
@@ -55,7 +55,7 @@ if [ -n "$selector" ]; then
 else
     nope "round selector is executable"
 fi
-for pair in "1:auto-thinking" "2:auto-thinking-free" "15:auto-thinking-free"; do
+for pair in "1:auto-thinking" "2:muse-spark-1.3-contributor-free" "15:muse-spark-1.3-contributor-free"; do
     round=${pair%%:*}
     expected=${pair#*:}
     if actual=$(REVIEW_ROUND="$round" bash -c "$selector; printf '%s' \"\$REVIEWER_MODEL\"") && [ "$actual" = "$expected" ]; then

@@ -45,16 +45,18 @@ models = config.get("provider", {}).get("codex-router", {}).get("models", {})
 problems = []
 if default != "codex-router/auto-thinking":
     problems.append(f"default model = {default!r}, want codex-router/auto-thinking")
-for required in ("auto-thinking", "auto-thinking-free", "gpt-5.6-terra", "deepseek-v4-flash"):
+for required in ("auto-thinking", "muse-spark-1.3-contributor-free", "gpt-5.6-terra", "deepseek-v4-flash"):
     if required not in models:
         problems.append(f"missing model {required!r}")
 if "deepseek-v4-pro" in models:
     problems.append("stale model deepseek-v4-pro still exposed")
+if "auto-thinking-free" in models:
+    problems.append("stale model auto-thinking-free still exposed (removed from the catalog)")
 
 if problems:
     print("FAIL: " + "; ".join(problems))
 else:
-    print("OK: default=codex-router/auto-thinking; models=auto-thinking,auto-thinking-free,gpt-5.6-terra,deepseek-v4-flash")
+    print("OK: default=codex-router/auto-thinking; models=auto-thinking,muse-spark-1.3-contributor-free,gpt-5.6-terra,deepseek-v4-flash")
 PY
 )
 

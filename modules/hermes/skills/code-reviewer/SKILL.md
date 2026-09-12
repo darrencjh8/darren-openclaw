@@ -20,7 +20,7 @@ While this skill is active, load and follow the global `caveman` skill at **ultr
 
 ## Reviewer Model
 
-Round 1 uses `auto-thinking`; every later round uses `auto-thinking-free`. Review runs under exactly the model required for the assigned round. Never substitute the paid and free reviewer models or report a model that the launch did not route to. If the required model, the managed `code-reviewer` profile, skill, authentication, or another prerequisite is unavailable, fail closed and report the blocker.
+Round 1 uses `auto-thinking`; every later round uses `muse-spark-1.3-contributor-free`. Review runs under exactly the model required for the assigned round. Never substitute the paid and free reviewer models or report a model that the launch did not route to. If the required model, the managed `code-reviewer` profile, skill, authentication, or another prerequisite is unavailable, fail closed and report the blocker.
 
 ## Phase 1: Orientation (do this FIRST)
 
