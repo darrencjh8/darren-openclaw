@@ -378,8 +378,10 @@ else
 fi
 
 echo "=== a padded pid file still names a live holder ==="
-# `kill -0 " 123"` honours the embedded pid, so the whitespace must be stripped
-# before the digit test or a padded pid file reads as corrupt and is stolen.
+# A padded live pid must not be reclaimed. The whitespace strip is what lets the
+# script see the embedded pid at all; the case that pins the strip is the padded
+# dead pid below, since this padded live pid is refused by the non-digit branch
+# even without it.
 fresh_fixture
 mkdir -p "$PRIMARY/.codex-router-skills.lock.d"
 printf ' %s \n' "$$" > "$PRIMARY/.codex-router-skills.lock.d/pid"
@@ -399,6 +401,63 @@ else
         "rc=$pad_rc pid=[${pad_pid:-none}] out=$pad_output"
 fi
 rm -rf "$PRIMARY/.codex-router-skills.lock.d"
+
+echo "=== a padded dead pid is recognised as dead ==="
+# This is the case that pins the whitespace strip: a padded *live* pid is left
+# alone by the non-digit branch either way, but only a stripped dead pid can be
+# probed and reclaimed, so removing the strip turns this into a timeout.
+fresh_fixture
+mkdir -p "$PRIMARY/.codex-router-skills.lock.d"
+printf ' 4194305 \n' > "$PRIMARY/.codex-router-skills.lock.d/pid"
+pdead_rc=0
+pdead_output=$(HERMES_SKILL_PRIMARY_HOME="$PRIMARY" \
+    HERMES_SKILL_SECONDARY_HOME="$SECONDARY" \
+    HERMES_MANIFEST_STATE_DIRS="$STATE" \
+    HERMES_SKILL_LOCK_MODE=mkdir \
+    HERMES_SKILL_LOCK_WAIT_SECONDS=5 \
+    sh "$SYNC" "$SOURCE" 2>&1) || pdead_rc=$?
+if [[ "$pdead_rc" -eq 0 && ! -e "$PRIMARY/.codex-router-skills.lock.d" \
+      && -f "$PRIMARY/skills/dev-loop/SKILL.md" ]]; then
+    ok "reclaimed a whitespace-padded dead pid"
+else
+    nope "reclaimed a whitespace-padded dead pid" "rc=$pdead_rc out=$pdead_output"
+fi
+
+echo "=== the ownerless-lock debounce restarts for each new lock ==="
+# The debounce must be re-armed per observation, not latched. Two ownerless
+# locks are presented, the first at start and the second once the run has
+# reclaimed the first. `sh -x` logs each arithmetic expansion's result, so the
+# counter's trace separates the two behaviours exactly: a latched counter counts
+# 0 1 2 3 4 before the second reclaim and stops (one value above the limit), a
+# re-armed counter counts 0 1 2 3 then 0 1 2 3 again (two values below it).
+# Timing is not asserted, so this cannot flake on a slow machine.
+fresh_fixture
+mkdir -p "$PRIMARY/.codex-router-skills.lock.d"
+# The watcher recreates the ownerless lock the instant this run frees it, so the
+# run meets a second pid-less lock immediately instead of acquiring the freed
+# directory first.
+(
+    while [ -d "$PRIMARY/.codex-router-skills.lock.d" ]; do sleep 0.2; done
+    mkdir -p "$PRIMARY/.codex-router-skills.lock.d"
+) &
+dbg_watch=$!
+dbg_rc=0
+HERMES_SKILL_PRIMARY_HOME="$PRIMARY" \
+    HERMES_SKILL_SECONDARY_HOME="$SECONDARY" \
+    HERMES_MANIFEST_STATE_DIRS="$STATE" \
+    HERMES_SKILL_LOCK_MODE=mkdir \
+    HERMES_SKILL_LOCK_WAIT_SECONDS=20 \
+    sh -x "$SYNC" "$SOURCE" >/dev/null 2>"$ROOT/trace" || dbg_rc=$?
+wait "$dbg_watch" 2>/dev/null || true
+dbg_looks=$(awk '/^\+ missing_pid=[0-9]+$/ {v=$0; sub(/.*=/, "", v); if (v < 3) c++} END {print c+0}' \
+    "$ROOT/trace" 2>/dev/null)
+rm -rf "$PRIMARY/.codex-router-skills.lock.d"
+if [[ "$dbg_rc" -eq 0 && "$dbg_looks" -ge 5 && -f "$PRIMARY/skills/dev-loop/SKILL.md" ]]; then
+    ok "re-armed the ownerless-lock debounce for a later lock (${dbg_looks} debounced looks)"
+else
+    nope "re-armed the ownerless-lock debounce for a later lock" \
+        "rc=$dbg_rc debounced_looks=${dbg_looks:-0}"
+fi
 
 echo "=== an empty source never prunes the managed set ==="
 fresh_fixture

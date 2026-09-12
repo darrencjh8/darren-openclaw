@@ -131,6 +131,11 @@ while [ "$attempts" -lt "$LOCK_WAIT_SECONDS" ]; do
             missing_pid=$((missing_pid + 1))
             if [ "$missing_pid" -ge "$MISSING_PID_LIMIT" ]; then
                 rm -rf "$MKDIR_LOCK" 2>/dev/null || true
+                # Restart the count. Without this the counter latches at the
+                # limit, so a lock that appears later is removed on its first
+                # observation instead of getting the same debounce, and a live
+                # holder caught before it writes its pid loses the lock.
+                missing_pid=0
             fi
         else
             missing_pid=0
