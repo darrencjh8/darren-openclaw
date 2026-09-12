@@ -12,8 +12,8 @@ model is natively multimodal. See darrencjh8/darren-openclaw#428.
 
 | Role | Primary | Fallback |
 | --- | --- | --- |
-| Main agent | codex-router / `gpt-5.6-terra` (medium) | direct / `deepseek-flash` |
-| Delegation | codex-router / `gpt-5.6-luna` | none (not supported) |
+| Main agent | codex-router / `auto-thinking` (reasoning low) | direct / `deepseek-flash` |
+| Delegation | codex-router / `auto-thinking` | none (not supported) |
 | Vision | codex-router / `gpt-5.6-terra` | direct / `deepseek-flash` |
 | Web extract | codex-router / `gpt-5.6-luna` | direct / `deepseek-flash` |
 | Compression | codex-router / `gpt-5.6-luna` | direct / `deepseek-flash` |
@@ -28,12 +28,15 @@ model is natively multimodal. See darrencjh8/darren-openclaw#428.
 
 Hermes resolves `DEEPSEEK_API_KEY` automatically for the named `deepseek` provider.
 The `kanban_decomposer` uses that provider directly because it needs no router hop;
-nothing DeepSeek flows through codex-router.
+no Hermes DeepSeek *fallback* traffic flows through codex-router. Codex-router still
+hops to DeepSeek itself inside the `auto-thinking` pool.
 
 ## Notes
 
 - Codex Router exposes `deepseek-flash` as its only native DeepSeek route, and the
-  `auto-thinking` pool uses the same id for its DeepSeek hop.
+  `auto-thinking` pool uses the same id for its DeepSeek hop. That route is reachable
+  only over the Responses transport, so `deepseek-flash` is deliberately absent from
+  the OpenCode Chat Completions catalog in `modules/hermes/opencode/opencode.json`.
 - `50-seed-defaults` force-copies `config.yaml` and force-migrates the managed profile
   routing fields (`providers`, `model`, `fallback_providers`) on every boot, so all
   routing changes must land in the repo defaults — runtime edits under `/opt/data` do
