@@ -88,8 +88,16 @@ async function init() {
         );
         const budgets = await retryWithBackoff(() => actual.getBudgets());
         const budget = budgets.find((b) => b.name === PRIMARY_BUDGET_FILE);
-        if (!budget)
-            throw new Error(`Budget "${PRIMARY_BUDGET_FILE}" not found`);
+        if (!budget) {
+            const notFound = new Error(
+                `Budget "${PRIMARY_BUDGET_FILE}" not found`,
+            );
+            // Tagged so `GET /budgets` can answer the real budget names for a
+            // mistyped configuration without also masking an authentication or
+            // network failure, which must stay a 500.
+            notFound.code = "BUDGET_NOT_FOUND";
+            throw notFound;
+        }
         activeSyncId = budget.groupId || budget.cloudFileId;
         await retryWithBackoff(() =>
             actual.downloadBudget(activeSyncId, { password: PASSWORD }),
@@ -279,12 +287,13 @@ app.get("/budgets", async (req, res) => {
     try {
         try {
             await init();
-        } catch {
-            // init() fails fast when the configured primary budget name
-            // matches no budget. This endpoint exists to reveal the real
-            // names, so it must still answer: an operator who mistyped the
-            // name needs the list to fix it. A failure from actual.init()
-            // itself is re-raised by the getBudgets() call below.
+        } catch (e) {
+            // Only the tagged not-found result is tolerated here, because that
+            // is the one outcome where actual.init() succeeded and only the
+            // configured name failed to match: this endpoint exists to reveal
+            // the real names to the operator who mistyped it. Any other
+            // init() rejection is re-thrown and answered 500 below.
+            if (e?.code !== "BUDGET_NOT_FOUND") throw e;
         }
         const budgets = await retryWithBackoff(() => actual.getBudgets());
         res.json(
