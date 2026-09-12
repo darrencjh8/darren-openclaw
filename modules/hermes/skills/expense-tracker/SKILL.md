@@ -6,7 +6,7 @@ Process bank transaction alerts into Actual Budget. Trigger: email from UOB, CIM
 
 The expense-tracker orchestrator handles ALL phases internally. Hermes only routes emails — the orchestrator does LLM analysis, code-driven resolution, and execution. (Spec 021 replaced the earlier 4-phase / V2-V3 gate design.)
 
-**Phase 1 — LLM Analysis:** Single LLM call (`reasoning=adaptive`) with the `fetch_context` tool to read live accounts/categories/payees. Extracts merchant, amount, date, currency and proposes payee/category, leaving fields blank when unsure. 1 retry.
+**Phase 1 — LLM Analysis:** Single LLM call (`reasoning=low`) with the `fetch_context` tool to read live accounts/categories/payees. Extracts merchant, amount, date, currency and proposes payee/category, leaving fields blank when unsure. 1 retry.
 
 **Phase 2 — Resolution (code-driven, no LLM gates):** Deterministic fill-in of blanks:
 - **payee:** memory → `resolve_merchant` (memory → web search → classification) → `"Misc"`

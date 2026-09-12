@@ -1,7 +1,7 @@
 /**
  * Agent Orchestrator — 3-phase pipeline.
  *
- * Phase 1: LLM ANALYSIS    reasoning=adaptive, fetch_context tool, 1 retry
+ * Phase 1: LLM ANALYSIS    reasoning=low, fetch_context tool, 1 retry
  * Phase 2: RESOLUTION       code-driven (payee: memory→resolve_merchant→Misc,
  *                           category: memory→LLM picker→null)
  * Phase 3: EXECUTE          insert / skip / notify, learn_fact × 1
@@ -26,7 +26,7 @@ export class LLMClient {
     constructor(config) {
         this._provider = config.llmProvider || "deepseek";
         this._model = config.llmModel || "deepseek-v4-pro";
-        this._reasoningEffort = config.llmReasoningEffort || "adaptive";
+        this._reasoningEffort = config.llmReasoningEffort || "low";
         this._routes = [{
             provider: this._provider,
             model: this._model,
@@ -95,8 +95,8 @@ export class LLMClient {
             }
             const reasoning = opts.reasoning || "auto";
             if (route.provider === "deepseek") {
-                if (reasoning !== "disabled" && (reasoning === "adaptive" || !toolChoice || toolChoice === "auto")) {
-                    kwargs.thinking = { type: "adaptive" };
+                if (reasoning !== "disabled") {
+                    kwargs.thinking = { type: reasoning === "auto" ? this._reasoningEffort : reasoning };
                 }
             } else if (reasoning !== "disabled") {
                 kwargs.reasoning_effort = this._reasoningEffort;
@@ -111,7 +111,7 @@ export class LLMClient {
                     this._mergeReasoning(response, route.provider);
 
                     // Detect a truncated/incomplete response (e.g. DeepSeek's
-                    // adaptive-thinking mode cut off before emitting a final
+                    // thinking mode cut off before emitting a final
                     // answer, or hit a content filter). Without this check
                     // an empty/partial reasoning trace can be silently
                     // merged into `content` (via _mergeReasoning above) and
@@ -762,7 +762,7 @@ export class AgentOrchestrator {
 
             try {
                 let response = await this._llm.chat(messages, tools, "auto", {
-                    reasoning: "adaptive",
+                    reasoning: "low",
                 });
                 let choice = (response.choices || [{}])[0];
                 let msg = choice.message || {};
@@ -792,7 +792,7 @@ export class AgentOrchestrator {
                             messages,
                             undefined,
                             undefined,
-                            { reasoning: "adaptive" },
+                            { reasoning: "low" },
                         );
                         choice = (response.choices || [{}])[0];
                         msg = choice.message || {};
@@ -868,7 +868,7 @@ export class AgentOrchestrator {
                     }
 
                     response = await this._llm.chat(messages, tools, "auto", {
-                        reasoning: "adaptive",
+                        reasoning: "low",
                     });
                     choice = (response.choices || [{}])[0];
                     msg = choice.message || {};

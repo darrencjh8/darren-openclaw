@@ -21,7 +21,7 @@ compression:
     proactive_prune_tokens: 48000
 
 agent:
-    reasoning_effort: medium
+    reasoning_effort: low
     disabled_toolsets:
         - moa
 

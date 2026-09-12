@@ -1,7 +1,7 @@
 /**
  * Deterministic Orchestrator Tests — 3-phase pipeline.
  *
- * Phase 1: LLM ANALYSIS       reasoning=adaptive, fetch_context tool, 1 retry
+ * Phase 1: LLM ANALYSIS       reasoning=low, fetch_context tool, 1 retry
  * Phase 2: RESOLUTION          code-driven (payee: memory→resolve_merchant→Misc,
  *                              category: memory→LLM picker→null)
  * Phase 3: EXECUTE             insert / skip / notify, learn_fact × 1
@@ -92,7 +92,7 @@ describe("Tool Registry: restricted tool schemas", () => {
 // ═══════════════════════════════════════════════════════════════════
 
 describe("Phase 1: LLM Analysis (3-phase)", () => {
-  it("calls LLM with reasoning=adaptive and fetch_context tool", async () => {
+  it("calls LLM with reasoning=low and fetch_context tool", async () => {
     const { AgentOrchestrator } = await import("../src/orchestrator.js");
     const config = makeConfig();
     const tools = makeTools({
@@ -142,7 +142,7 @@ describe("Phase 1: LLM Analysis (3-phase)", () => {
 
     expect(orch._llm.chat).toHaveBeenCalledTimes(1);
     const callArgs = orch._llm.chat.mock.calls[0];
-    expect(callArgs[3].reasoning).toBe("adaptive");
+    expect(callArgs[3].reasoning).toBe("low");
     expect(callArgs[1]).toBeDefined(); // tools provided
     expect(result.merchant).toBe("Toast Box");
     expect(result.account_id).toBe("acc-1");
