@@ -259,17 +259,21 @@ fresh_fixture
 mkdir -p "$PRIMARY/.codex-router-managed-skills.new.77777" \
          "$PRIMARY/.codex-router-modes.77777"
 sweep_dir_rc=0
-sweep_dir_output=$(run "$SOURCE" 2>&1) || sweep_dir_rc=$?
+# Capture stderr alone: the boot hook keeps this breadcrumb only through its
+# stderr redirect, so a report that moved to stdout must fail here. `2>&1
+# >/dev/null` sends stderr to the captured stdout and the real stdout to the
+# discard, in that order.
+sweep_dir_err=$(run "$SOURCE" 2>&1 >/dev/null) || sweep_dir_rc=$?
 if [[ "$sweep_dir_rc" -eq 0 \
-      && "$sweep_dir_output" == *"could not sweep"*"codex-router-managed-skills.new.77777"* \
-      && "$sweep_dir_output" == *"could not sweep"*"codex-router-modes.77777"* \
+      && "$sweep_dir_err" == *"could not sweep"*"codex-router-managed-skills.new.77777"* \
+      && "$sweep_dir_err" == *"could not sweep"*"codex-router-modes.77777"* \
       && -d "$PRIMARY/.codex-router-managed-skills.new.77777" \
       && -d "$PRIMARY/.codex-router-modes.77777" \
       && -f "$PRIMARY/skills/dev-loop/SKILL.md" ]]; then
     ok "reported unremovable staging and modes litter and still reconciled"
 else
     nope "reported unremovable staging and modes litter and still reconciled" \
-        "rc=$sweep_dir_rc out=$sweep_dir_output"
+        "rc=$sweep_dir_rc err=$sweep_dir_err"
 fi
 
 echo "=== a busy lock fails closed, not silently ==="
