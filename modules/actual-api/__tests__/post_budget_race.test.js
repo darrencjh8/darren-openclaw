@@ -17,10 +17,28 @@
  *
  * `BUDGET_SWITCH_DELAY_MS` is read when the server module loads. It is set to
  * "0" before the require so the switches in these tests do not wait out the
- * production cooldown. A large value would make the *first* switch wait too,
- * because `lastSwitchTime` starts at 0.
+ * production cooldown. The cooldown can only delay a switch after the first:
+ * `lastSwitchTime` starts at 0, so `Date.now() - 0` already exceeds any sane
+ * delay. A configured `ACTUAL_SECONDARY_BUDGET_FILE` must not turn an unknown
+ * `budget_id` into a fallback, so it is set to a name that does exist while an
+ * unknown id is still requested. Both values are restored in `afterAll`
+ * because `process.env` is shared by every test file in a jest worker.
  */
+const previousEnv = {
+    BUDGET_SWITCH_DELAY_MS: process.env.BUDGET_SWITCH_DELAY_MS,
+    ACTUAL_SECONDARY_BUDGET_FILE: process.env.ACTUAL_SECONDARY_BUDGET_FILE,
+};
 process.env.BUDGET_SWITCH_DELAY_MS = "0";
+process.env.ACTUAL_SECONDARY_BUDGET_FILE = "MYR";
+
+jest.mock("fs", () => ({ mkdirSync: jest.fn() }));
+
+afterAll(() => {
+    for (const [key, value] of Object.entries(previousEnv)) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+    }
+});
 
 const mockApp = {
     get: jest.fn(),
@@ -312,59 +330,69 @@ describe("a concurrent budget switch cannot redirect a write (issue #506)", () =
 });
 
 describe("a named budget that does not exist is refused, not redirected", () => {
-    test("POST /transactions answers 400 without inserting or switching", async () => {
-        const post = findHandler("post", "/transactions");
-        const res = mockRes();
+    const routes = [
+        {
+            name: "POST /transactions",
+            method: "post",
+            path: "/transactions",
+            request: {
+                body: { account: "acc-sgd", date: "2026-09-01", amount: -100 },
+            },
+            mutation: () => actual.addTransactions,
+        },
+        {
+            name: "DELETE /transactions/:id",
+            method: "delete",
+            path: "/transactions/:id",
+            request: { params: { id: "txn-sgd" } },
+            mutation: () => actual.deleteTransaction,
+        },
+        {
+            name: "PATCH /transactions/:id",
+            method: "patch",
+            path: "/transactions/:id",
+            request: { params: { id: "txn-sgd" }, body: { notes: "patched" } },
+            mutation: () => actual.updateTransaction,
+        },
+        {
+            name: "POST /transactions/:id/clear",
+            method: "post",
+            path: "/transactions/:id/clear",
+            request: { params: { id: "txn-sgd" } },
+            mutation: () => actual.updateTransaction,
+        },
+        {
+            name: "POST /transactions/:id/unclear",
+            method: "post",
+            path: "/transactions/:id/unclear",
+            request: { params: { id: "txn-sgd" } },
+            mutation: () => actual.updateTransaction,
+        },
+    ];
 
-        await post(
-            mockReq({
-                body: {
-                    budget_id: "no-such-budget",
-                    account: "acc-sgd",
-                    date: "2026-09-01",
-                    amount: -100,
-                },
-            }),
-            res,
-        );
+    test.each(routes)(
+        "$name answers 400 Unknown budget without mutating or switching",
+        async ({ method, path, request, mutation }) => {
+            const handler = findHandler(method, path);
+            const res = mockRes();
 
-        expect(res.status).toHaveBeenCalledWith(400);
-        expect(res.json).toHaveBeenCalledWith({ error: "Unknown budget" });
-        expect(actual.addTransactions).not.toHaveBeenCalled();
-        expect(actual.downloadBudget).not.toHaveBeenCalled();
-    });
+            await handler(
+                mockReq({
+                    ...request,
+                    body: {
+                        budget_id: "no-such-budget",
+                        ...(request.body || {}),
+                    },
+                }),
+                res,
+            );
 
-    test("DELETE /transactions/:id answers 400 without deleting", async () => {
-        const handler = findHandler("delete", "/transactions/:id");
-        const res = mockRes();
-
-        await handler(
-            mockReq({
-                body: { budget_id: "no-such-budget" },
-                params: { id: "txn-sgd" },
-            }),
-            res,
-        );
-
-        expect(res.status).toHaveBeenCalledWith(400);
-        expect(actual.deleteTransaction).not.toHaveBeenCalled();
-    });
-
-    test("PATCH /transactions/:id answers 400 without updating", async () => {
-        const handler = findHandler("patch", "/transactions/:id");
-        const res = mockRes();
-
-        await handler(
-            mockReq({
-                body: { budget_id: "no-such-budget", notes: "patched" },
-                params: { id: "txn-sgd" },
-            }),
-            res,
-        );
-
-        expect(res.status).toHaveBeenCalledWith(400);
-        expect(actual.updateTransaction).not.toHaveBeenCalled();
-    });
+            expect(res.status).toHaveBeenCalledWith(400);
+            expect(res.json).toHaveBeenCalledWith({ error: "Unknown budget" });
+            expect(mutation()).not.toHaveBeenCalled();
+            expect(actual.downloadBudget).not.toHaveBeenCalled();
+        },
+    );
 
     test("a request that names no budget keeps the active-budget fallback", async () => {
         const post = findHandler("post", "/transactions");
@@ -384,6 +412,34 @@ describe("a named budget that does not exist is refused, not redirected", () => 
         expect(res.status).not.toHaveBeenCalled();
         expect(actual.downloadBudget).not.toHaveBeenCalled();
         expect(actual.addTransactions).toHaveBeenCalledTimes(1);
+    });
+
+    test("a POST payload error takes precedence over an unknown budget", async () => {
+        const post = findHandler("post", "/transactions");
+        const res = mockRes();
+
+        await post(mockReq({ body: { budget_id: "no-such-budget" } }), res);
+
+        expect(res.status).toHaveBeenCalledWith(400);
+        expect(res.json).toHaveBeenCalledWith({ error: "Account is required" });
+        expect(actual.downloadBudget).not.toHaveBeenCalled();
+    });
+
+    test("a PATCH with no updatable fields takes precedence over an unknown budget", async () => {
+        const handler = findHandler("patch", "/transactions/:id");
+        const res = mockRes();
+
+        await handler(
+            mockReq({
+                body: { budget_id: "no-such-budget" },
+                params: { id: "txn-sgd" },
+            }),
+            res,
+        );
+
+        expect(res.status).toHaveBeenCalledWith(400);
+        expect(res.json).toHaveBeenCalledWith({ error: "No fields to update" });
+        expect(actual.downloadBudget).not.toHaveBeenCalled();
     });
 });
 

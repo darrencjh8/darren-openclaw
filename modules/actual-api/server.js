@@ -7,7 +7,6 @@ const SERVER_URL =
     process.env.ACTUAL_BUDGET_SERVER_URL || process.env.ACTUAL_BUDGET_URL;
 const PASSWORD = process.env.ACTUAL_BUDGET_PASSWORD;
 const PRIMARY_BUDGET_FILE = process.env.ACTUAL_PRIMARY_BUDGET_FILE;
-const SECONDARY_BUDGET_FILE = process.env.ACTUAL_SECONDARY_BUDGET_FILE || "";
 const DATA_DIR = process.env.DATA_DIR || "/tmp/actual-data";
 const BUDGET_SWITCH_DELAY_MS = parseInt(
     process.env.BUDGET_SWITCH_DELAY_MS || "2000",
@@ -88,8 +87,7 @@ async function init() {
             }),
         );
         const budgets = await retryWithBackoff(() => actual.getBudgets());
-        const budget =
-            budgets.find((b) => b.name === PRIMARY_BUDGET_FILE) || budgets[0];
+        const budget = budgets.find((b) => b.name === PRIMARY_BUDGET_FILE);
         if (!budget)
             throw new Error(`Budget "${PRIMARY_BUDGET_FILE}" not found`);
         activeSyncId = budget.groupId || budget.cloudFileId;
@@ -119,11 +117,6 @@ async function resolveBudgetTarget(budgetIdOrName) {
             (b.groupId || b.cloudFileId) === budgetIdOrName ||
             b.name === budgetIdOrName,
     );
-    if (!target) {
-        if (SECONDARY_BUDGET_FILE && budgetIdOrName === SECONDARY_BUDGET_FILE) {
-            target = budgets.find((b) => b.name === SECONDARY_BUDGET_FILE);
-        }
-    }
     return target || null;
 }
 
@@ -167,8 +160,9 @@ async function applyBudgetSwitch(target) {
  * Assert the request's budget, then run `fn` while it stays asserted. Anything
  * that writes through `@actual-app/api` must run inside `fn`: a write outside
  * the lock can land in a budget a concurrent request switched to (#506).
- * `acquireLock` is not reentrant, so `fn` must not call `ensureBudget` or
- * `withBudget`.
+ * `acquireLock` is not reentrant, so `fn` must not re-enter the lock on any
+ * path: a `withBudget` call always takes it, and an `ensureBudget` call takes
+ * it whenever the requested budget is not already active.
  *
  * Returns false when the request names a budget that does not exist, so the
  * caller answers 400 instead of writing into whichever budget is active. A

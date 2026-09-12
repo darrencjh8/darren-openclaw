@@ -41,6 +41,7 @@ function makeBudget(overrides = {}) {
 
 describe("init", () => {
     beforeEach(() => {
+        process.env.ACTUAL_PRIMARY_BUDGET_FILE = "TestBudget";
         jest.resetModules();
         const api = actual();
         api.init.mockReset();
@@ -123,22 +124,17 @@ describe("init", () => {
         });
     });
 
-    test("falls back to first budget when name does not match", async () => {
+    test("rejects a configured primary budget that does not exist", async () => {
         const api = actual();
         process.env.ACTUAL_PRIMARY_BUDGET_FILE = "NonExistent";
         api.init.mockResolvedValue(undefined);
         api.getBudgets.mockResolvedValue([
             makeBudget({ name: "First Budget", groupId: "first-1" }),
-            makeBudget({ name: "Second Budget", groupId: "second-1" }),
         ]);
-        api.downloadBudget.mockResolvedValue(undefined);
 
         const { init } = require("../server");
-        await init();
-
-        expect(api.downloadBudget).toHaveBeenCalledWith("first-1", {
-            password: undefined,
-        });
+        await expect(init()).rejects.toThrow('Budget "NonExistent" not found');
+        expect(api.downloadBudget).not.toHaveBeenCalled();
     });
 
     test("throws when budgets array is empty", async () => {
@@ -190,6 +186,7 @@ describe("ensureBudget", () => {
     }
 
     async function primeInit(budgetName = "SGD") {
+        process.env.ACTUAL_PRIMARY_BUDGET_FILE = budgetName;
         const api = actual();
         api.init.mockResolvedValue(undefined);
         api.getBudgets
@@ -276,10 +273,9 @@ describe("ensureBudget", () => {
         );
     });
 
-    test("returns silently when budget not found and no secondary fallback", async () => {
+    test("returns silently when the budget is not found", async () => {
         await primeInit();
         const api = actual();
-        process.env.ACTUAL_SECONDARY_BUDGET_FILE = "";
         api.getBudgets.mockResolvedValue([
             makeBudget({ name: "SGD", groupId: "sgd-1" }),
         ]);
@@ -333,8 +329,7 @@ describe("ensureBudget", () => {
         expect(api.downloadBudget).toHaveBeenCalledTimes(3);
     });
 
-    test("secondary fallback via exact ACTUAL_SECONDARY_BUDGET_FILE name", async () => {
-        process.env.ACTUAL_SECONDARY_BUDGET_FILE = "Test MYR";
+    test("matches a secondary budget by its configured name", async () => {
         await primeInit("Test SGD");
         const api = actual();
         api.getBudgets.mockResolvedValue([
@@ -349,8 +344,7 @@ describe("ensureBudget", () => {
         );
     });
 
-    test("secondary fallback triggered but budget not found — returns silently", async () => {
-        process.env.ACTUAL_SECONDARY_BUDGET_FILE = "Test MYR";
+    test("returns silently when the configured secondary name has no budget", async () => {
         await primeInit("Test SGD");
         const api = actual();
         api.getBudgets.mockResolvedValue([
