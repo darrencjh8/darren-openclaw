@@ -220,7 +220,7 @@ describe("DedupJournal transfer journal", () => {
 
     const transfer = {
         budget_id: "budget-sgd",
-        source_account_id: "ocbc-360",
+        source_account_id: "ocbc-111",
         destination_account_id: "trust-card",
         currency: "SGD",
         amount_cents: 1425,
@@ -247,7 +247,7 @@ describe("DedupJournal transfer journal", () => {
         const reverse = journal.reserveTransfer({
             ...transfer,
             source_account_id: "trust-card",
-            destination_account_id: "ocbc-360",
+            destination_account_id: "ocbc-111",
             occurred_at: "2026-09-01T01:07:00+08:00",
         });
         expect(reverse.status).toBe("reserved");

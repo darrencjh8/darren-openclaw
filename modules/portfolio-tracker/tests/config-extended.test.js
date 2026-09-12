@@ -55,7 +55,7 @@ describe("Config — all 30+ fields", () => {
       // IMAP
       IMAP_HOST: "imap.mail.com",
       IMAP_PORT: "995",
-      IMAP_USERNAME: "darren@example.com",
+      IMAP_USERNAME: "user@example.com",
       IMAP_PASSWORD: "imap-secret",
       IMAP_FOLDER: "INBOX/Trades",
 
@@ -111,7 +111,7 @@ describe("Config — all 30+ fields", () => {
     // IMAP
     expect(cfg.imapHost).toBe("imap.mail.com");
     expect(cfg.imapPort).toBe(995);
-    expect(cfg.imapUsername).toBe("darren@example.com");
+    expect(cfg.imapUsername).toBe("user@example.com");
     expect(cfg.imapPassword).toBe("imap-secret");
     expect(cfg.imapFolder).toBe("INBOX/Trades");
 

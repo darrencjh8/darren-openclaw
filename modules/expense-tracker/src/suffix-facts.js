@@ -245,9 +245,10 @@ function matchWithoutAliases(nameText, accounts) {
 
   // Step 2 — containment over set-difference tokens (token SET, not substring).
   // Plural trimming AND stopword removal happen only here, after the exact
-  // comparison. Applying either to the exact-comparison input would drop the
-  // "account" token and collapse "Epsilon Account" onto a bare "Epsilon", which
-  // would then resolve to the wrong account.
+  // comparison. Applying stopword removal to the exact-comparison input would
+  // drop the "account" token and collapse "Epsilon Account" onto a bare
+  // "Epsilon", which would then resolve to the wrong account; plural trimming
+  // is deferred for the same reason, so singular and plural names stay distinct.
   const query = pluralTrim(raw.filter((w) => !ACCOUNT_STOPWORDS.has(w)));
   if (!query.length) return refusal("no distinctive words in the name");
 

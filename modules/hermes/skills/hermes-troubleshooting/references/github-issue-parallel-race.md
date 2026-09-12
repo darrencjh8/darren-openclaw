@@ -41,4 +41,4 @@ gh issue view -R darrencjh8/darren-openclaw 416 --json number,state
 - Treat "want me to create this issue?" drafts as concurrently creatable by any sibling session.
 - A single `gh issue list` early in the turn is NOT proof of non-existence; re-list immediately before `gh issue create`.
 - When reconciling, the canonical issue is the one the user referenced (usually the EARLIER number); merge scope into it and close your own duplicate — never leave twin issues, never delete the user's canonical.
-- Ambiguity resolution for "this issue" with no number: session_search the shared lineage for the last issue/draft on the table, then recency-sorted `gh issue list` on all sibling repos (Darren's are darren-openclaw + codex-router).
+- Ambiguity resolution for "this issue" with no number: session_search the shared lineage for the last issue/draft on the table, then recency-sorted `gh issue list` on all sibling repos (the owner's repos are darren-openclaw + codex-router).
