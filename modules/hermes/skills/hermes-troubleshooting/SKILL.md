@@ -76,7 +76,7 @@ A background `opencode` TUI or `run` can be parked or working without producing 
 
 1. **Identify the process → repo:** `ps aux | grep opencode`; then `ls -l /proc/<PID>/cwd` (which worktree), `tr '\0' ' ' < /proc/<PID>/cmdline` (`opencode` alone = interactive TUI), `ps -o pid,etime,stat -p <PID>` (`Ssl+` = TUI session leader).
 2. **Gauge code progress in that repo:** `git log --oneline -8`, `git status --short`, `git rev-list --count <base>..HEAD`, plus `.dev-loop/state.md` if present (phase/tdd_cycles/head_sha). Branch tip == base SHA with only untracked files ⇒ real work never started.
-3. **Read session state from a copy:** opencode state lives in `~/.local/share/opencode/opencode.db` — SQLite in **WAL mode**, so copy `opencode.db-wal` and `opencode.db-shm` too, into a scratch dir under the write-safe root (write_file refuses /tmp), then query with python3 sqlite3 (`file:...?mode=ro` URI). No sqlite3 CLI on the host.
+3. **Read session state from a copy:** opencode state lives in `~/.local/share/opencode/opencode.db` — SQLite in **WAL mode**, so copy `opencode.db-wal` and `opencode.db-shm` too, into a scratch dir under the write-safe root (`/workspace` and `/tmp` both work), then query with python3 sqlite3 (`file:...?mode=ro` URI). No sqlite3 CLI on the host.
 4. **Answer the questions:** `session` rows carry `model` as JSON (`{"id":...,"providerID":...,"variant":...}`), `agent` (build/plan), token/cost counters, `time_created`/`time_updated` (epoch **milliseconds**); `message`/`part` data JSON repeats modelID/providerID per turn. Open `todo` rows = queued work.
 5. **Staleness heuristic:** recent `time_updated` + open todos = actively working; only an old smoke-test session (reply `OPENCODE_SMOKE_OK`) + 0 commits + DB mtime frozen = parked at the TUI prompt, real prompt never fed in.
 
@@ -350,14 +350,14 @@ sandbox-`HERMES_HOME` verification recipe, and the pitfalls:
 
 **Symptom:** `write_file` or `patch` fails with `Write denied: '/path/to/file' is outside HERMES_WRITE_SAFE_ROOT (/opt/data)`.
 
-**Cause:** The official Docker image sets `HERMES_WRITE_SAFE_ROOT=/opt/data` to lock file writes to the mounted data volume. Any path outside that root (e.g., `/tmp`, `/workspace`, `/home`) is rejected immediately — no approval prompt, no override.
+**Cause:** The official Docker image sets `HERMES_WRITE_SAFE_ROOT=/opt/data` to lock file writes to the mounted data volume. Any path outside that root (e.g., `/home`) is rejected immediately — no approval prompt, no override. This repo's compose file broadens it to `/opt/data:/workspace:/tmp`.
 
 **Fix:** Add the target directory to the safe root. Multiple roots use `:` separator on Unix:
 
 ```yaml
 # docker-compose.yml — hermes service
 environment:
-    - HERMES_WRITE_SAFE_ROOT=/opt/data:/workspace
+    - HERMES_WRITE_SAFE_ROOT=/opt/data:/workspace:/tmp
 ```
 
 **Verify:** `env | grep HERMES_WRITE_SAFE_ROOT`
@@ -434,7 +434,7 @@ If the summary file is missing, grep the live transcript for verdicts: `grep -E 
 
 **Review subagents may mutate workspace files** (mutation checks: temporarily revert a fix, run tests, restore). Batch messages then warn "[NOTE: subagent modified files the parent previously read]". Before editing any file after a review round, re-read it; after every round confirm `git status` is clean — reviewers must not leave probe files behind.
 
-**Pitfall — subagent write_file to /tmp is denied:** subagents inherit the same `HERMES_WRITE_SAFE_ROOT` policy (see above). They can still write /tmp via `terminal` redirects; instruct subagents to export artifacts with `git diff > /tmp/...` rather than `write_file`. For parent-side ad-hoc verification scripts (one-shot run + cleanup), the terminal recipe works everywhere:
+**Pitfall — subagent write_file to /tmp needs `/tmp` in the safe root:** subagents inherit the same `HERMES_WRITE_SAFE_ROOT` policy (see above). This repo's compose includes `/tmp`, so `write_file` to `/tmp` works; on a container without it, fall back to `terminal` redirects (`git diff > /tmp/...`). For parent-side ad-hoc verification scripts (one-shot run + cleanup), the terminal recipe works everywhere:
 ```bash
 V=$(mktemp /tmp/hermes-verify-XXXXXX.sh)
 printf '%s\n' '#!/usr/bin/env bash' 'set -euo pipefail' 'cd /project/module' 'npx vitest run tests/foo.test.js --testTimeout=60000 2>&1 | tail -6' > "$V"
