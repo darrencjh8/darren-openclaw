@@ -311,7 +311,8 @@ mkdir -p "$ROOT/staged/dev-loop"
 printf 'canonical dev-loop\n' > "$ROOT/staged/dev-loop/SKILL.md"
 # Seed a ledger record under the isolated STATE dir. Without this the swapped
 # run passes whether or not it honours HERMES_MANIFEST_STATE_DIRS, so the case
-# would not cover the ledger isolation it claims to.
+# would not cover the ledger isolation it claims to. The identity directory name
+# is arbitrary: the reconciler globs manifests/*/*.json and never reads the hash.
 SWAP_IDENTITY=$(python3 - "$PRIMARY/skills" <<'PY'
 import hashlib, sys
 print(hashlib.sha256(str(__import__("pathlib").Path(sys.argv[1]).resolve()).encode()).hexdigest()[:16])

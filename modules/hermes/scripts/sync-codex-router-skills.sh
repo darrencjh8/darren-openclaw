@@ -145,8 +145,9 @@ fi
 
 # A run killed between creating $CURRENT and its EXIT trap leaves that staging
 # file behind. It is litter the next run would otherwise carry forever, so sweep
-# the family before creating the current one. Non-fatal: an unmatched glob under
-# `set -e` would otherwise abort the reconcile.
+# the family before creating the current one. A matched directory or a permission
+# failure makes rm return non-zero, which must not abort the reconcile, so the
+# sweep stays non-fatal. (`rm -f` already tolerates an unmatched glob.)
 rm -f "$PRIMARY_HOME"/.codex-router-managed-skills.new.* 2>/dev/null || true
 CURRENT="$PRIMARY_HOME/.codex-router-managed-skills.new.$$"
 : > "$CURRENT"
