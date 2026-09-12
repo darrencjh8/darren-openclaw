@@ -132,34 +132,16 @@ function syncIdOf(budget) {
     return budget.groupId || budget.cloudFileId;
 }
 
-let duplicateBudgetsLogged = false;
-
 /**
- * `actual.getBudgets()` can list the same budget more than once, which makes
- * `GET /budgets` report duplicates and lets a lookup pick a stale twin. Every
- * caller goes through this wrapper so the list is deduplicated in one place.
- * Entries are keyed by `syncIdOf` because two copies of one budget can disagree
- * on a name while still sharing the id the library switches on; an entry with
- * no id cannot be proven a duplicate and is kept.
+ * The raw `actual.getBudgets()` list. It can list the same budget more than
+ * once — two DATA_DIR directories holding a copy under one sync id — and every
+ * entry must stay visible here: `init()` and `resolveBudgetTarget()` match with
+ * `.find()`, so dropping an entry whose name differs from an earlier twin's
+ * would hide the very name the caller asked for (#390). Deduplication is a
+ * display concern and lives only in the `GET /budgets` response.
  */
 async function getBudgets() {
-    const budgets = await retryWithBackoff(() => actual.getBudgets());
-    const seen = new Set();
-    const unique = budgets.filter((b) => {
-        const syncId = syncIdOf(b);
-        if (!syncId) return true;
-        if (seen.has(syncId)) return false;
-        seen.add(syncId);
-        return true;
-    });
-    const dropped = budgets.length - unique.length;
-    // `init()` is the first caller, so the count the process started with is
-    // reported once; later calls stay silent instead of logging per request.
-    if (dropped > 0 && !duplicateBudgetsLogged) {
-        duplicateBudgetsLogged = true;
-        console.log(`getBudgets: dropped ${dropped} duplicate budget entries`);
-    }
-    return unique;
+    return retryWithBackoff(() => actual.getBudgets());
 }
 
 /**
@@ -207,12 +189,16 @@ const UNKNOWN_BUDGET = Symbol("unknown-budget");
  * path: a `withBudget` call always takes it, and an `ensureBudget` call takes it
  * whenever the requested budget is not already active.
  *
- * ponytail: one global mutex now covers every read, so all reads serialize and a
- * cross-budget read can wait the `BUDGET_SWITCH_DELAY_MS` cooldown plus a
- * `downloadBudget` before it starts. The accepted ceiling is that a
- * multi-budget caller pays that latency; the upgrade path is one actual-api
- * process per budget, each with its own `DATA_DIR` and port, because the
- * library offers no per-budget context object.
+ * ponytail: one global mutex now covers every read, so every read serializes
+ * behind it. A cross-budget read waits at least one `BUDGET_SWITCH_DELAY_MS`
+ * cooldown plus the `downloadBudget` before it starts, and a read that
+ * subsequently needs the budget switched back pays a second cooldown
+ * (production sets `BUDGET_SWITCH_DELAY_MS=5000` in
+ * `modules/docker-compose.yml`). A slow or failing `downloadBudget` inside the
+ * lock delays unrelated reads too, because they queue on the same mutex. The
+ * accepted ceiling is that a multi-budget caller pays that latency; the upgrade
+ * path is one actual-api process per budget, each with its own `DATA_DIR` and
+ * port, because the library offers no per-budget context object.
  */
 async function withBudget(req, fn) {
     const requested = getBudgetId(req);
@@ -233,6 +219,12 @@ async function withBudget(req, fn) {
     }
 }
 
+/**
+ * Test-only legacy helper; an integration test still calls it. Routes must use
+ * `withBudget` instead: this takes the lock only for the switch and leaves the
+ * subsequent read outside it, so a concurrent request can switch the active
+ * budget and the read can serve the wrong one (#390).
+ */
 async function ensureBudget(budgetIdOrName) {
     await init();
     if (!budgetIdOrName) return;
@@ -335,8 +327,43 @@ app.get("/budgets", async (req, res) => {
             if (e?.code !== "BUDGET_NOT_FOUND") throw e;
         }
         const budgets = await getBudgets();
+        // Display-only deduplication: the library can list one budget once per
+        // DATA_DIR copy, all sharing the sync id it switches on. Entries are
+        // keyed by `syncIdOf`; an entry with no id cannot be proven a duplicate
+        // and is kept. When the copies disagree on a name, the configured
+        // `PRIMARY_BUDGET_FILE` wins so the operator sees the name the process
+        // actually loads.
+        const seen = new Map(); // syncId -> index in `unique`
+        const unique = [];
+        for (const b of budgets) {
+            const syncId = syncIdOf(b);
+            if (!syncId) {
+                unique.push(b);
+                continue;
+            }
+            if (!seen.has(syncId)) {
+                seen.set(syncId, unique.length);
+                unique.push(b);
+                continue;
+            }
+            const index = seen.get(syncId);
+            if (
+                unique[index].name !== PRIMARY_BUDGET_FILE &&
+                b.name === PRIMARY_BUDGET_FILE
+            ) {
+                unique[index] = b;
+            }
+        }
+        const dropped = budgets.length - unique.length;
+        if (dropped > 0) {
+            console.log(
+                `getBudgets: dropped ${dropped} duplicate budget ${
+                    dropped === 1 ? "entry" : "entries"
+                }`,
+            );
+        }
         res.json(
-            budgets.map((b) => ({
+            unique.map((b) => ({
                 name: b.name,
                 groupId: b.groupId || null,
                 cloudFileId: b.cloudFileId || null,
