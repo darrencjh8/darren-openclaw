@@ -48,10 +48,6 @@ describe("Config — all 30+ fields", () => {
       DEDUP_DB_PATH: "/data/custom/dedup.db",
       MAPPINGS_PATH: "/data/custom/mappings.json",
 
-      // Logging
-      LOG_LEVEL: "TRACE",
-      BALANCE_SYNC_MODEL: "deepseek-flash",
-
       // User
       USER_NAME: "Darren",
       SYSTEM_PROMPT_EXTRA: "Extra instructions here",
@@ -73,11 +69,6 @@ describe("Config — all 30+ fields", () => {
       ONEDRIVE_REFRESH_TOKEN_PATH: "/secrets/od_token",
       ONEDRIVE_DATA_DIR: "/mnt/onedrive",
       ONEDRIVE_CLIENT_ID: "custom-client-id",
-
-      // AB categories
-      AB_EMERGENCY_PRIMARY_CATEGORY: "Emergency SGD",
-      AB_EMERGENCY_SECONDARY_CATEGORY: "Emergency MYR",
-      AB_WARCHEST_CATEGORY: "Warchest Fund",
     });
 
     // Required
@@ -113,10 +104,6 @@ describe("Config — all 30+ fields", () => {
     expect(cfg.dedupDbPath).toBe("/data/custom/dedup.db");
     expect(cfg.mappingsPath).toBe("/data/custom/mappings.json");
 
-    // Logging
-    expect(cfg.logLevel).toBe("TRACE");
-    expect(cfg.balanceSyncModel).toBe("deepseek-flash");
-
     // User
     expect(cfg.userName).toBe("Darren");
     expect(cfg.systemPromptExtra).toBe("Extra instructions here");
@@ -138,11 +125,6 @@ describe("Config — all 30+ fields", () => {
     expect(cfg.onedriveRefreshTokenPath).toBe("/secrets/od_token");
     expect(cfg.onedriveDataDir).toBe("/mnt/onedrive");
     expect(cfg.onedriveClientId).toBe("custom-client-id");
-
-    // AB categories
-    expect(cfg.abEmergencyPrimaryCategory).toBe("Emergency SGD");
-    expect(cfg.abEmergencySecondaryCategory).toBe("Emergency MYR");
-    expect(cfg.abWarchestCategory).toBe("Warchest Fund");
   });
 });
 

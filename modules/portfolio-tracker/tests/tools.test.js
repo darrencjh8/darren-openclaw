@@ -37,7 +37,6 @@ describe("Portfolio Tracker", () => {
             });
             expect(cfg.openclawGatewayUrl).toBe("http://openclaw:18800");
             expect(cfg.userName).toBe("there");
-            expect(cfg.logLevel).toBe("INFO");
         });
 
         it("throws when required env vars are missing", () => {

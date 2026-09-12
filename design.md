@@ -1,7 +1,7 @@
-# darren-openclaw — Architecture Design Document
+# Friday — Architecture Design Document
 
-**Version:** 3.0.0
-**Last Updated:** 2026-06-20
+**Version:** 4.0.0
+**Last Updated:** 2026-09-12
 **Status:** Hermes migration complete. All modules MCP-enabled.
 
 > ⚠ **This is a high-level overview.** Implementation details, tool tables, env vars, and algorithms belong in `specs/`. Link to specs for full detail. Do not bloat this file.
@@ -39,15 +39,18 @@
 
 ## 1. Project Overview
 
-**OpenClaw** is an umbrella project hosting modular, LLM-powered automation agents. Each module is an independent agent with its own spec, plan, tasks, and implementation. Modules share no code but follow consistent architectural principles: LLM-driven intelligence, deterministic tool execution, and internal-network communication.
+**Friday** is an umbrella project hosting modular, LLM-powered automation agents. Each module is an independent agent with its own spec, plan, tasks, and implementation. Modules share no code but follow consistent architectural principles: LLM-driven intelligence, deterministic tool execution, and internal-network communication. Hermes Agent is the runtime; modules are MCP tool servers it calls.
 
 ### Current Modules
 
 | Module | Purpose | Status |
 |---|---|---|
-| **expense-tracker** | Automated expense tracking via email → Actual Budget (Node.js tool backend) | Implemented |
-| **portfolio-tracker** | Investment portfolio sync: IBKR flex queries, PDF trade confirmations, AB → PP balance sync, taxonomy → Google Sheets. Notifications via Gateway webhook (Node.js + Java CLI) | Implemented |
-| **gateway** | OpenClaw Gateway deployment with expense-tracker + portfolio-tracker skills, Telegram channel, CDP browser relay, memory persistence | Implemented & Deployed |
+| **hermes** | Agent runtime: Telegram + Slack channels, memory, cron, skills, MCP client | Implemented & Deployed |
+| **expense-tracker** | Automated expense tracking via email → Actual Budget (Node.js MCP + REST tool server) | Implemented |
+| **portfolio-tracker** | Investment portfolio sync: IBKR Flex queries, PDF trade confirmations, AB → PP balance sync, taxonomy → Google Sheets (Node.js + Java CLI) | Implemented |
+| **actual-api** | Actual Budget REST/WebSocket proxy (`@actual-app/api`) | Implemented |
+| **codex-router** | LLM router exposing one OpenAI-compatible endpoint over multiple upstream models | Implemented (separate repo, checked out at deploy) |
+| **image-gen** | Image generation skill | Implemented |
 | **statement-reconciliation** | PDF credit card statement reconciliation + outlier detection | Specified, Planned, Tasked — Implementation Pending |
 
 ---
@@ -55,75 +58,50 @@
 ## 2. Repository Structure
 
 ```
-darren-openclaw/                          # Umbrella repository root
-├── design.md                             # ← This file (architecture audit)
+darren-openclaw/                          # Umbrella repository root (product name: Friday)
+├── README.md                             # Project overview
+├── design.md                             # ← This file (architecture document)
+├── DEPLOY.md                             # Production deployment guide
+├── SETUP.md                              # Production host setup + permissions model
+├── AGENTS.md                             # Repository agent rules
 ├── modules/
-│   ├── expense-tracker/                  # Node.js module (expense tracking agent)
-│   │   ├── .speckit/                     # Spec-Kit artifacts
-│       │   ├── constitution.md           # Non-negotiable architecture rules
-│       │   ├── agent.md                  # Agent harness (workflow state, context dump)
-│       │   └── features/
-│       │       └── expense-tracking/
-│       │           ├── spec.md           # User stories & acceptance criteria
-│       │           ├── plan.md           # Technical architecture & tool schemas
-│       │           └── tasks.md          # Ordered implementation breakdown (16 tasks, ~12h)
-│       ├── config/                       # Static configuration (non-secret)
-│       │   ├── .gitkeep
-│       │   └── email_config.json         # IMAP host/port for Email Provider
-│       ├── src/                          # Python source (stubs only — not yet implemented)
-│       │   ├── __init__.py
-│       │   ├── agent/                    # LLM orchestration
-│       │   ├── client/                   # Actual Budget REST client
-│       │   ├── extractors/               # Email content extractors (HTML, PDF, text)
-│       │   ├── imap/                     # IMAP IDLE handler
-│       │   ├── notifier/                 # SMTP notification sender
-│       │   └── utils/                    # Dedup journal, structured logging
-│       ├── tests/                        # Test suite (stubs only)
-│       ├── docker/                       # Dockerfile for expense-tracker container
-│       └── db.sqlite                     # Dedup journal (runtime artifact)
-│   └── portfolio-tracker/                # Node.js + Java 21 module
-│       ├── .speckit/                     # Spec-Kit artifacts (constitution, spec, plan, tasks, agent)
-│       ├── pp-cli/                       # Java CLI for PP XML read/write (Maven project)
-│       │   ├── pom.xml                   # Depends on name.abuchen.portfolio:0.84.1
-│       │   └── src/main/java/.../cli/
-│       │       ├── Main.java             # CLI dispatcher (accounts, securities, insert, balance, taxonomy, portfolio)
-│       │       └── PpClient.java         # PP model I/O via ClientFactory.load()/save()
-│       ├── src/
-│       │   ├── agent/                    # LLM orchestration (prompts.py, tools.py, orchestrator.py)
-│       │   ├── channels/                 # Telegram bot handler + IMAP email handler
-│       │   ├── extractors/               # PDF OCR (tesseract), IBKR flex query XML parser, email extractor
-│       │   ├── pp_client/                # Async subprocess bridge to Java CLI
-│       │   ├── google/                   # Google Sheets API client (taxonomy export)
-│       │   ├── client/                   # Actual Budget REST client (budget queries)
-│       │   └── utils/                    # Dedup journal, memory store, structured logging
-│       ├── tests/                        # 111 Python tests across 13 test files
-│       ├── docker/Dockerfile             # Python 3.12 + JRE 17 + Tesseract + curl
-│       └── README.md
-└── gateway/                              # OpenClaw Gateway config + skills
-    ├── openclaw.json                     # Gateway configuration (JSON5)
-    ├── docker-compose.yml                # Gateway + expense-tracker + actual-api + portfolio-tracker
-    ├── Dockerfile                        # Custom image extending openclaw:latest-browser
-    ├── docker-entrypoint.sh              # Template → workspace file generation + Xvfb/DBus startup
-    ├── .env                              # Secrets (TELEGRAM_BOT_TOKEN, GEMINI_API_KEY, etc.)
-    ├── AGENTS.md.template                # Agent instructions template (env-var substituted)
-    ├── SOUL.md.template                  # Agent persona template (voice, visual appearance)
-    ├── USER.md.template                  # User profile template (currency, budgets, rules)
-    ├── IDENTITY.md.template              # Agent identity template (name, vibe, emoji)
-    ├── MEMORY.md.template                # Memory seed template (plugin-managed, section headers only)
-    ├── workspace/                        # Agent workspace (persisted on openclaw_home volume)
-    │   └── skills/                       # Skills loaded by the gateway
-    │       ├── expense-tracker/          # Expense tracker skill
-    │       │   ├── SKILL.md              # LLM instructions for expense tracking
-    │       │   └── SKILL.js              # Tool wrappers (HTTP → Python tools)
-    │       ├── portfolio-tracker/        # Portfolio tracker skill
-    │       ├── image-generation/         # Image generation skill (Perchance + Pollinations)
-    │       └── pdf/                      # PDF decryption + extraction skill
-    ├── actual-api/                       # Official Actual Budget API (Node.js)
-    │   ├── server.js                     # Express.js wrapper around @actual-app/api
-    │   ├── package.json                  # @actual-app/api@^26.6.0
-    │   └── Dockerfile                    # Node.js container
-    ├── notify-webhook.py                 # Portfolio-tracker notification webhook → Telegram
-    └── .speckit/                         # Spec-Kit artifacts (gateway + skill)
+│   ├── docker-compose.yml                # expense-tracker, portfolio-tracker, actual-api, codex-router, hermes
+│   ├── deploy.sh                         # Component-aware deploy: build + compose up
+│   ├── build.sh                          # Component-aware image build (no downtime)
+│   ├── hermes/                           # Agent runtime
+│   │   ├── config.yaml                   # Providers, model, mcp_servers, platforms
+│   │   ├── Dockerfile
+│   │   ├── 50-seed-defaults              # Seeds skills/profiles/cron into the container
+│   │   ├── SOUL.md.template              # Agent persona template
+│   │   ├── SLACK.md                      # Slack app setup + manifest instructions
+│   │   ├── skills/                       # expense-tracker, image-gen, spec-auditor, hermes-troubleshooting
+│   │   ├── profiles/                     # architect, code-reviewer, project-manager, spec-auditor
+│   │   ├── opencode/                     # OpenCode CLI config for dev-loop workers
+│   │   ├── scripts/                      # Skill reconciler, Slack manifest generator
+│   │   └── tests/                        # Shell-based contract tests
+│   ├── expense-tracker/                  # Node.js ESM MCP + REST tool server
+│   │   ├── src/                          # orchestrator, classify, tools, imap, memory, statement/, extractors
+│   │   ├── tests/                        # vitest suites
+│   │   ├── docs/                         # Module-level design + test plans
+│   │   ├── docker/Dockerfile
+│   │   └── .env.example
+│   ├── portfolio-tracker/                # Node.js ESM + Java CLI tool server
+│   │   ├── src/                          # orchestrator, tools, ibkr_flex, ibkr_parser, pdf_extractor, onedrive
+│   │   ├── pp-cli/                       # Java CLI for PP XML read/write (Maven project)
+│   │   ├── tests/                        # vitest suites
+│   │   ├── docker/Dockerfile
+│   │   └── .env.example
+│   ├── actual-api/                       # Official Actual Budget API proxy (Node.js)
+│   ├── image-gen/                        # Image generation MCP service
+│   ├── signal-cli/                       # Optional Signal channel deployment
+│   ├── perchance-gen/                    # Perchance image generation script
+│   ├── onedrive-sync/                    # Legacy rclone helper (superseded by portfolio-tracker OAuth tools)
+│   └── tests/                            # Repo-level Python checks (compose, logs, deploy workflow)
+├── specs/                                # Spec-Kit artifacts, one numbered directory per feature
+├── docs/                                 # Point-in-time plans and drift verification notes
+├── scripts/                              # Runner setup + utility scripts
+├── .github/                              # CI/CD workflows + Spec-Kit agent prompts
+└── .specify/                             # Spec-Kit tooling configuration
 ```
 
 ---
@@ -135,45 +113,29 @@ darren-openclaw/                          # Umbrella repository root
 ```mermaid
 graph TB
     subgraph External["External Services"]
-        EmailSvc["Email<br/>imap.example.com:993"]
-        DeepSeek["DeepSeek API<br/>api.deepseek.com/v1"]
-         AB["Actual Budget<br/>Server<br/>(production host)"]
+        EmailSvc["Email provider<br/>IMAP :993"]
+        LLM["codex-router<br/>OpenAI-compatible API"]
+        AB["Actual Budget<br/>via actual-api"]
     end
 
-    subgraph OpenClaw["Ubuntu Laptop (Docker Compose): expense-tracker (Node.js, ~150MB RAM)"]
-        subgraph Main["main.py"]
-            IMAP["IMAP IDLE Loop<br/>imap/idle_handler.py"]
-            Orch["Agent Orchestrator<br/>agent/orchestrator.py"]
-            IMAP -->|"new email callback"| Orch
-        end
-
-        subgraph Tools["21 Typed Plugin Tools (budget_ prefix)"]
-            T1["extract_email_content()"]
-            T2["fetch_accounts()"]
-            T3["fetch_categories()"]
-            T4["fetch_payees()"]
-            T5["fetch_recent_txns()"]
-            T6["insert_transaction()"]
-            T7["check_duplicate()"]
-            T8["mark_email_read()"]
-            T9["notify_user()"]
-            T10["log_decision()"]
-        end
-
-        Orch -->|"LLM calls tools"| Tools
-
-        subgraph Storage["Local Storage"]
-            SQLite["SQLite Dedup Journal<br/>data/dedup.db"]
-        end
+    subgraph Runtime["Hermes Agent (Docker)"]
+        Watch["Email watcher / user message"]
+        Orch["LLM orchestrator<br/>prompts + tool calling"]
+        MCPC["MCP client"]
+        Watch -->|"new email or message"| Orch
+        Orch -->|"tool calls"| MCPC
     end
 
-    EmailSvc -->|"IMAP IDLE (SSL)"| IMAP
-    DeepSeek -->|"HTTPS"| Orch
-    T2 & T3 & T4 & T5 -->|"Internal HTTP"| AB
-    T6 -->|"POST transaction"| AB
-    T7 -->|"hash lookup"| SQLite
-    T8 -->|"\Seen flag"| EmailSvc
-    T9 -->|"SMTP notification"| User["User's Main Inbox"]
+    subgraph ExpenseTracker["expense-tracker (Node.js, MCP + REST)"]
+        ETools["32 typed tools<br/>fetch_* / insert_transaction / check_duplicate<br/>extract_* / statement_* / memory"]
+        SQLite["SQLite dedup journal<br/>data/dedup.db"]
+        ETools -->|"hash lookup"| SQLite
+    end
+
+    EmailSvc -->|"IMAP IDLE (SSL)"| Watch
+    Orch -->|"HTTPS"| LLM
+    MCPC <-->|"MCP /mcp"| ETools
+    ETools -->|"HTTP"| AB
 ```
 
 ### 3.2 Component Relationship Diagram
@@ -191,7 +153,7 @@ graph LR
     subgraph Processing["Processing Pipeline"]
         Inbox["Email Burner<br/>Inbox"] -->|"IMAP IDLE"| Handler["IMAP Handler"]
         Handler -->|"raw MIME"| Extract["Content Extractor<br/>HTML→text / PDF→OCR"]
-        Extract -->|"cleaned text"| LLM["DeepSeek LLM<br/>System Prompt + Tools"]
+        Extract -->|"cleaned text"| LLM["LLM via codex-router<br/>System Prompt + Tools"]
         LLM -->|"tool_calls"| Executor["Tool Executor"]
         Executor -->|"results"| LLM
         LLM -->|"final decision"| Decision{Decision}
@@ -202,12 +164,12 @@ graph LR
     Decision -->|"uncertain"| Notify["notify_user()<br/>→ User email"]
 
     Insert --> Dedup["check_duplicate()<br/>→ Dedup Journal"]
-    Dedup -->|"not duplicate"| AB_API["Actual Budget<br/>REST API"]
+    Dedup -->|"not duplicate"| AB_API["Actual Budget<br/>via actual-api"]
 ```
 
 ### 3.3 Architectural Pattern
 
-OpenClaw uses the **LLM Agent Pattern**: expense-tracker tools are exposed as typed plugin tools (`budget_*` prefix) via the OpenClaw plugin system. All intelligence — parsing, classification, matching, routing — is delegated to the DeepSeek LLM via OpenAI-compatible function calling.
+Hermes Agent uses the **LLM Agent Pattern**: each module exposes typed tools over MCP, and Hermes' LLM decides which to call. All intelligence — parsing, classification, matching, routing — is delegated to the LLM via OpenAI-compatible function calling, routed through `codex-router`.
 
 **Key Principle:** No business rules are hardcoded. Category mapping, account matching, and currency detection are performed by the LLM using live data fetched from Actual Budget's API at runtime.
 
@@ -217,89 +179,58 @@ OpenClaw uses the **LLM Agent Pattern**: expense-tracker tools are exposed as ty
 
 | Component | Host | Network Access | Specs |
 |---|---|---|---|
-| **Actual Budget** | Server #1 (existing) | Public HTTPS for web UI; API via HTTPS (with auth) | Existing production instance |
-| **OpenClaw Gateway** | Ubuntu laptop (Docker) | Agent orchestration, channels, skills, tool calling | ~400MB RAM |
-| **Expense-tracker** | Ubuntu laptop (Docker) | 21 typed plugin tools (budget_ prefix), IMAP IDLE | ~150MB RAM |
-| **Portfolio-tracker** | Ubuntu server (Docker) | Node.js agent + Java CLI subprocess; IMAP ingress (Trades folder); PP XML read/write; notifications via Gateway webhook | ~256MB RAM |
-| **actual-api** | Ubuntu laptop (Docker) | Official `@actual-app/api` (Node.js), WebSocket sync | ~100MB RAM |
-| **Email Burner** | Any IMAP provider | Public IMAP (imap.example.com:993) | Free tier, dedicated inbox |
-| **DeepSeek API** | DeepSeek Cloud | Public HTTPS (api.deepseek.com/v1) | Pay-per-token |
-| **Windows Companion** | Windows laptop | Windows Hub app connects via `ws://192.168.68.51:18789` + token. Canvas, camera, screen, voice, TTS/STT via node mode | Any modern Windows 10/11 PC |
-| **Chrome Daemon** | Production server | Chromium (headed, Xvfb :99) CDP :9222, socat-forwarded :9223 for Docker | ~300 MB RAM |
+| **Actual Budget** | Existing server | Public HTTPS for web UI; API through `actual-api` (auth required) | Existing production instance |
+| **Hermes Agent** | Production server (Docker) | Telegram + Slack channels, memory, cron, skills, MCP client | ~3 GB limit (`mem_limit: 3g`) |
+| **expense-tracker** | Production server (Docker) | MCP + REST tool server, IMAP IDLE | ~512 MB (`mem_limit: 512m`) |
+| **portfolio-tracker** | Production server (Docker) | MCP + REST tool server, IMAP ingress (Trades folder), PP XML read/write, OneDrive | ~512 MB (`mem_limit: 512m`) |
+| **actual-api** | Production server (Docker) | Official `@actual-app/api` (Node.js), WebSocket sync | — |
+| **codex-router** | Production server (Docker) | OpenAI-compatible LLM endpoint on :4100 | ~1.5 GB (`mem_limit: 1536m`) |
+| **Email Burner** | Any IMAP provider | Public IMAP | Dedicated inbox |
+| **DeepSeek API** | DeepSeek Cloud | Public HTTPS, reached through `codex-router` | Pay-per-token |
+
+All container resource limits are declared in `modules/docker-compose.yml`; read that file for the authoritative values.
 
 ### Production Server Setup
 
-The production server (`<SERVER_IP>`) runs several host-level services alongside Docker:
+The production server runs host-level services alongside Docker. `chrome-daemon.service` is a Chromium + Xvfb CDP helper kept in the repository as a template for Perchance-based image generation (`modules/perchance-gen/`); it is **not** installed by `modules/deploy.sh`. Verify what is actually enabled on the host before relying on it:
 
 | Service | Port | Purpose |
 |---------|------|---------|
-| `chrome-daemon` | CDP :9222 | Chromium (headed, Xvfb :99) for browser automation (openclaw + Perchance) |
-| `cdp-forward` | :9223 → :9222 | socat relay making loopback CDP accessible from Docker bridge |
-| `x11vnc` | VNC :5900 | Debug accessibility for the virtual display (optional) |
-| `cloudflare-warp` | system VPN | Accelerates Docker builds via Cloudflare backbone |
-
-**Chrome daemon flags** (`chrome-daemon.service`):
-
-```
---disable-dev-shm-usage
---remote-debugging-port=9222
---disable-gpu
---disable-software-rasterizer
---renderer-process-limit=1
-```
-
-See `./chrome-daemon.service` — a template included in the repo for new server setup.
-The `modules/deploy.sh` creates and enables these services automatically on first run.
-
-### Browser CDP Relay Architecture
-
-Chrome runs **on the host**, not inside Docker. Containers connect via `host.docker.internal:9223`
-(socat relay). `openclaw.json` uses `${CDP_URL}` — resolved dynamically by
-`docker-entrypoint.sh` at container boot via `extra_hosts`.
-
-```mermaid
-graph LR
-    subgraph Docker
-        OW[gateway-openclaw-1]
-        PC[Perchance script]
-    end
-    subgraph Host
-        SC[socat :9223→:9222]
-        CH[chrome-daemon :9222<br/>headed]
-    end
-    OW -->|CDP| SC --> CH
-    PC -->|CDP| SC
-```
+| `chrome-daemon` | CDP :9222 | Chromium (headed, Xvfb :99) for Perchance browser automation (template: `chrome-daemon.service`) |
 
 ### Internal Networking
 
-The expense-tracker container accesses Actual Budget's API via HTTPS over the public internet. Actual Budget's web UI port (5006) is publicly accessible with HTTPS enforcement and API authentication.
+Containers talk to each other by Compose service name (`expense-tracker`, `portfolio-tracker`, `actual-api`, `codex-router`) on the default Compose network. `hermes` additionally joins the external `hermes_shared` network. Hermes reaches Actual Budget only through `actual-api`; the tracker modules reach Portfolio Performance through their bundled Java CLI and OneDrive, not over the network.
 
 ### Network Diagram
 
 ```mermaid
 graph TB
-    subgraph Docker["Ubuntu Laptop — Docker Compose"]
-        GW["OpenClaw Gateway<br/>Port :18789"]
-        ET["expense-tracker<br/>Port :8080"]
-        GW -->|"HTTP /tools/*"| ET
-    end
-
-    subgraph FlyIO["Server"]
-        AB["Actual Budget VM<br/>HTTPS :5006"]
+    subgraph Docker["Production server — Docker Compose"]
+        H["hermes<br/>:8642 / :8644 / :9119"]
+        ET["expense-tracker<br/>:8080"]
+        PT["portfolio-tracker<br/>:8081"]
+        API["actual-api<br/>:3000"]
+        CR["codex-router<br/>:4100"]
+        H -->|"MCP /mcp"| ET
+        H -->|"MCP /mcp"| PT
+        ET -->|"HTTP"| API
+        PT -->|"HTTP"| API
+        H -->|"OpenAI-compatible"| CR
     end
 
     subgraph Public["Public Internet"]
-        DS["DeepSeek API<br/>api.deepseek.com:443"]
-        Mail["IMAP<br/>imap.example.com:993"]
-        User["User Browser<br/>(Actual Budget UI)"]
+        AB["Actual Budget server<br/>HTTPS"]
+        Mail["IMAP<br/>:993"]
+        OD["OneDrive"]
+        DS["Upstream LLM APIs"]
     end
 
-    ET -->|"HTTPS"| DS
+    API -->|"HTTPS + WebSocket"| AB
     ET -->|"IMAP/SSL"| Mail
-    ET -->|"HTTPS"| AB
-    GW -->|"HTTPS"| DS
-    User -->|"HTTPS"| AB
+    PT -->|"IMAP/SSL"| Mail
+    PT -->|"HTTPS"| OD
+    CR -->|"HTTPS"| DS
 ```
 
 ---
@@ -308,7 +239,7 @@ graph TB
 
 ### 5.1 Purpose
 
-An LLM-powered agent that handles receipt emails, extracts structured transactions, and inserts them into Actual Budget. Exposes 22 tools via MCP to Hermes (and 26 REST `/tools/*` endpoints). The LLM orchestrator, IMAP handling, and memory are now owned by Hermes — expense-tracker is a tool server.
+An LLM-powered agent that handles receipt emails, extracts structured transactions, and inserts them into Actual Budget. Exposes 32 tools via MCP to Hermes (and REST `/tools/*` endpoints). The LLM orchestrator, IMAP handling, and memory are now owned by Hermes — expense-tracker is a tool server.
 
 ### 5.2 Technology Stack
 
@@ -338,7 +269,7 @@ Expense-tracker exposes an MCP server at `:8080/mcp`. Hermes handles email inges
 
 ### 5.5 Implementation Status
 
-- ✅ 22 tools registered as MCP server (26 REST `/tools/*` endpoints)
+- ✅ 32 tools registered as MCP server (plus REST `/tools/*` endpoints)
 - ✅ Dedup journal (dedup.db + statement.db)
 - ✅ PDF extraction (pdftotext)
 - ✅ WASM embeddings baked into Docker image
@@ -387,6 +318,7 @@ The central agent runtime replacing the former OpenClaw gateway. Hermes provides
 graph TB
     subgraph Hermes["Hermes Agent"]
         TG["Telegram"]
+        SL["Slack (Socket Mode)"]
         Email["IMAP Email"]
         MEM["Memory"]
         CRON["Cron"]
@@ -396,15 +328,14 @@ graph TB
     subgraph Modules["MCP Servers"]
         ET["expense-tracker\n:8080/mcp"]
         PT["portfolio-tracker\n:8081/mcp"]
-        IG["image-gen\n:8083/mcp"]
     end
 
     TG --> Hermes
+    SL --> Hermes
     Email --> Hermes
     CRON --> Hermes
     MCP <--> ET
     MCP <--> PT
-    MCP <--> IG
 
     ET --> AB["Actual Budget"]
     PT --> PP["Portfolio Performance"]
@@ -416,9 +347,10 @@ graph TB
 
 | Module | MCP URL | Tools |
 |---|---|---|
-| expense-tracker | `http://expense-tracker:8080/mcp` | 22 MCP tools — Actual Budget CRUD + dedup + extractors + memory + IMAP inbox |
-| portfolio-tracker | `http://portfolio-tracker:8081/mcp` | `portfolio_sync`, OneDrive IO, OneDrive auth |
-| image-gen | `http://image-gen:8083/mcp` | Image generation |
+| expense-tracker | `http://expense-tracker:8080/mcp` | Actual Budget CRUD + dedup + extractors + memory + IMAP inbox |
+| portfolio-tracker | `http://portfolio-tracker:8081/mcp` | Portfolio queries/imports, OneDrive IO, OneDrive auth |
+
+`image-gen` ships as a skill plus a deployable component (`--component image-gen`, port 8083), but as of this revision it is **not** listed under `mcp_servers:` in `modules/hermes/config.yaml`.
 
 ### 6.4 Cron Jobs (Hermes-managed)
 
@@ -431,8 +363,8 @@ graph TB
 ### 6.5 Implementation Status
 
 - ✅ Hermes container running (`modules/hermes/Dockerfile`)
-- ✅ All 4 modules registered as MCP servers in `config.yaml`
-- ✅ Telegram + email channels configured
+- ✅ expense-tracker and portfolio-tracker registered as MCP servers in `config.yaml`
+- ✅ Telegram + Slack + email channels configured
 - ✅ Cron jobs seeded via `50-seed-defaults`
 - ✅ OpenClaw gateway fully removed
 
@@ -566,23 +498,26 @@ All credentials are injected via environment variables:
 - **DeepSeek API key** — `DEEPSEEK_API_KEY`
 - **IMAP password** — `IMAP_PASSWORD` (IMAP app-specific password)
 - **Actual Budget password** — `ACTUAL_BUDGET_PASSWORD`
-- **SMTP password** — `NOTIFICATION_EMAIL_PASSWORD`
-- **Gateway auth token** — `OPENCLAW_GATEWAY_TOKEN` (authenticates operators, nodes, and internal CLI)
+- **SMTP password** — `NOTIFICATION_SMTP_*` / `NOTIFICATION_EMAIL`
+- **Chat channel tokens** — `TELEGRAM_BOT_TOKEN`, `SLACK_BOT_TOKEN`, `SLACK_APP_TOKEN`
+- **GitHub App credentials** — `GH_APP_ID`, `GH_APP_INSTALLATION_ID`, `GH_APP_PRIVATE_KEY`; agent PAT `FRIDAY_PAT`
 
-Secrets are set via `.env` file (mounted as read-only volume in Docker Compose). `.env` is `.gitignore`d. Both `openclaw.json` and `docker-compose.yml` reference `${OPENCLAW_GATEWAY_TOKEN}` via env-var substitution — no hardcoded tokens.
+Secrets are injected by the GitHub Actions deploy workflow (`.github/workflows/deploy.yml`) from repository secrets and GitHub Variables, and are never committed. `.env` is `.gitignore`d; a tracked `.env.example` documents required names without values.
 
-At container startup, `docker-entrypoint.sh` seeds `/app/.openclaw/exec-approvals.json` (the allowlist for `exec:` commands). Device pairing is handled separately: on first connect, the Windows Companion sends a pairing request. Run `docker exec openclaw openclaw devices approve <requestId>` on the server to approve it. Once approved, the pairing persists in `/app/.openclaw/devices/paired.json` (managed by the OpenClaw runtime). This is a one-time step.
+API keys, bot tokens, and the GitHub App private key are supplied as environment variables by the deploy workflow at container start. There is no agent-side device pairing step: the retired OpenClaw gateway's approval flow does not exist in the Hermes runtime.
 
 ### 8.2 Network Isolation
 
 | Path | Protocol | Exposure |
 |---|---|---|
-| expense-tracker → Actual Budget API | HTTPS (public) | Outbound only (with auth) |
-| expense-tracker → DeepSeek | HTTPS (public) | Outbound only |
-| expense-tracker → IMAP | IMAP/SSL (public) | Outbound only |
+| actual-api → Actual Budget server | HTTPS + WebSocket (public) | Outbound only (with auth) |
+| codex-router → upstream model APIs | HTTPS (public) | Outbound only |
+| expense-tracker / portfolio-tracker → IMAP | IMAP/SSL (public) | Outbound only |
+| portfolio-tracker → OneDrive | HTTPS (public) | Outbound only, OAuth refresh token |
+| Hermes → tracker modules | HTTP (Docker network) | `expense-tracker:8080/mcp`, `portfolio-tracker:8081/mcp`; inter-container only |
+| Hermes webhook ingress | HTTP | `:8644`, guarded by `HERMES_WEBHOOK_SECRET` |
 | User → Actual Budget UI | HTTPS (public) | For manual budget management |
-| Windows Companion → Gateway | WebSocket (LAN) | `0.0.0.0:18789` authenticated via `gateway.auth.token` |
-| Internal services → Gateway | HTTP (Docker network) | Inter-container only; webhooks use `hooks.token` |
+| Telegram / Slack → Hermes | HTTPS outbound | Slack uses Socket Mode, so no inbound port is opened |
 
 ### 8.3 Burner Email Isolation
 
@@ -666,7 +601,7 @@ Token economics per Telegram message:
 
 ## 11. Development Workflow (Spec-Kit)
 
-OpenClaw follows **Spec-Kit**, a spec-driven development methodology. Every feature progresses through 5 phases:
+Friday follows **Spec-Kit**, a spec-driven development methodology. Every feature progresses through 5 phases:
 
 ```mermaid
 flowchart LR
@@ -726,7 +661,7 @@ flowchart LR
 
 ```mermaid
 gantt
-    title OpenClaw Expense Tracker Implementation Roadmap
+    title Friday Expense Tracker Implementation Roadmap
     dateFormat  YYYY-MM-DD
     axisFormat  %b %d
     
@@ -762,13 +697,11 @@ gantt
 |---|---|---|
 | **Current** | expense-tracker (alert pipeline): Spec, Plan, Tasks complete | ✅ |
 | **Current** | statement-reconciliation: Spec, Plan, Tasks complete | ✅ |
-| **Current** | Gateway model tiering (orchestrator + thinker): Deployed | ✅ |
-| **Next** | expense-tracker: `/implement` — Phase 0 (Foundation) | ⬜ |
-| | statement-reconciliation: `/implement` — Phase 0 (Foundation) | ⬜ |
-| | expense-tracker: `/validate` — Test suite + Docker build | ⬜ |
-| | statement-reconciliation: `/validate` — Full regression suite | ⬜ |
-| **Future** | gateway: Feature specification & implementation | ⬜ |
+| **Current** | OpenClaw gateway → Hermes Agent migration (Telegram, Slack, email, cron, MCP client) | ✅ |
+| **Current** | expense-tracker + portfolio-tracker registered as MCP servers | ✅ |
+| **Next** | statement-reconciliation: `/implement` — Phase 0 (Foundation) | ⬜ |
+| **Future** | image-gen: register as an MCP server in `modules/hermes/config.yaml` | ⬜ |
 
 ### 13.1 Technical Debt
 
-See [tech-debt.md](../tech-debt.md) for cross-cutting architectural items.
+Cross-cutting debt is tracked in `specs/030-spec-drift/` (audit + code notes) and in the open GitHub issues labelled `spec-drift`.

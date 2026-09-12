@@ -1,23 +1,32 @@
-# Code Issues — Left Untouched (Docs-Only Fix Phase)
+# Code Issues — Status After Dead-Code Removal
 
-Per decision, the fix phase corrects **documentation only**. The code below is the source of truth and was **NOT modified**, but is recorded here so a future code-cleanup pass (or per-issue PR) can address it. Each needs a human decision (remove vs. wire-in), not just a doc edit.
+The original docs-only phase (#262) recorded the code issues below without touching code. The follow-up docs + stale-code-removal pass then resolved the dead-config and dead-code items and removed them from the modules concerned. This file is the current status of every item.
+
+**Source of truth is the code.** When this table and the code disagree, the code wins — update this table.
 
 ## Portfolio-tracker (`modules/portfolio-tracker/src`)
 
-| Ref | Location | Issue | Description | Suggested action |
-|-----|----------|-------|-------------|------------------|
-| C-1 | `tools.js:369-382` | #158 | `_abClient` constructor field is always `null` (never passed from `index.js`) and never read. Vestige of a planned AB-write path. | Remove field, OR build the AB-write path if PP→AB import is intended. |
-| C-2 | `email_handler.js:126` | #216 | `classifyEmail(subject, body)` exported but has **zero** callers. | Remove, OR wire into `classify.js`/dispatch. |
-| C-3 | `config.js:90` (`logLevel`), `config.js:93` (`balanceSyncModel`) | #217 | Read into config but never consumed anywhere. | Remove from config + docs, OR implement. |
-| C-4 | `config.js:72-77` (`abEmergencyPrimaryCategory`, `abEmergencySecondaryCategory`, `abWarchestCategory`) | #211 | Category config set from `AB_*_CATEGORY` env vars but never consumed by sync logic (amounts come from `sgd/myr.*_total`). | Remove from config + docs, OR wire into sync. |
-| C-5 | `index.js:195` (comment) | #220 | Comment reads `// Register MCP SSE transport (GET /sse + POST /messages)`; actual transport is Streamable HTTP at `/mcp` (POST/GET/DELETE). | Trivial comment fix when code is next touched. |
-| C-6 | `index.js:21-46 guardEnv()` vs `tools.js:923-929` | #218 | `GOOGLE_SERVICE_ACCOUNT_JSON`/`GOOGLE_SHEET_ID` cause `process.exit(1)` at startup, but `_exportTaxonomiesToSheet()` skips gracefully at runtime, and README calls them "optional". Container can't start without them. | Make guard conditional on taxonomy config, OR accept as required (docs updated to "required"). |
-| C-7 | `config.js:8-13` REQUIRED_ENV_VARS | #229 | Does not include `ACTUAL_SECONDARY_BUDGET_FILE` (it is still guarded by `index.js:27`). Defense-in-depth gap only. | Optional: add to `REQUIRED_ENV_VARS`. |
-| C-8 | `prompts.js:43-148`, `prompts.js:152-221` | #213, #228 | System prompt + few-shot examples describe manual IBKR ingestion via email/Telegram, while `pp-sync-all` auto-pulls via the IBKR Flex Web Service (`ibkr_flex.js`). Not a hard contradiction (manual paths still exist) but trains a stale-leaning workflow. | Refresh prompt/examples toward the API-driven sync. |
+| Ref | Location | Issue | Status | Detail |
+|-----|----------|-------|--------|--------|
+| C-1 | `tools.js` — `ToolRegistry` constructor (`abClient` param, `this._abClient`) | #158 | **Open — deferred** | `abClient` is accepted by the constructor, stored as `this._abClient`, and never read. Every call site passes `null` (only `index.js` passes the `factsMemory` argument after it). Removing the parameter changes positional arguments, so it must be done together with all callers instead of as a superficial delete. Remove the field and fix every `new ToolRegistry(...)` call site, OR build the AB-write path if PP→AB import is intended. |
+| C-2 | `email_handler.js` — `classifyEmail()` | #216 | **Resolved — removed** | Function was exported, tested, and had zero production callers; `classify.js` deliberately routes every Trades-folder email to the orchestrator with no LLM classification. Removed the function, its test block, its import in `tests/email-handler.test.js`, and the now-unnecessary mock entry in `tests/tools_memory.test.js`. |
+| C-3 | `config.js` — `logLevel`, `balanceSyncModel` | #217 | **Resolved — removed** | Both were read from `LOG_LEVEL` / `BALANCE_SYNC_MODEL` and never consumed. Removed the assignments and every test assertion. The env vars were never in `.env.example`. |
+| C-4 | `config.js` — `abEmergencyPrimaryCategory`, `abEmergencySecondaryCategory`, `abWarchestCategory` | #211 | **Resolved — removed** | Category config was set from `AB_*_CATEGORY` env vars but never consumed by the sync logic (balance amounts come from `sgd/myr.*_total`). Removed the assignments, the `.env.example` block, and every test assertion. |
+| C-5 | `index.js` — MCP transport comment | #220 | **Resolved — already fixed** | Comment now reads `// Register MCP Streamable HTTP transport (POST/GET/DELETE /mcp)`, matching `createMcpServer()`. |
+| C-6 | `index.js` `guardEnv()` vs `tools.js` `_exportTaxonomiesToSheet()` | #218 | **Open — deferred** | `GOOGLE_SERVICE_ACCOUNT_JSON` / `GOOGLE_SHEET_ID` still cause `process.exit(1)` at startup even though the runtime export path skips gracefully. Docs now describe them as required, matching the running code. | Make the guard conditional on taxonomy config, OR keep as required and leave docs as-is. |
+| C-7 | `config.js` — `REQUIRED_ENV_VARS` | #229 | **Open — deferred** | `REQUIRED_ENV_VARS` still omits `ACTUAL_SECONDARY_BUDGET_FILE`, which `index.js guardEnv()` does require. Defense-in-depth gap only. | Add `ACTUAL_SECONDARY_BUDGET_FILE` to `REQUIRED_ENV_VARS`. |
+| C-8 | `prompts.js` — system prompt + few-shot examples | #213, #228 | **Open — deferred** | Prompt still describes manual IBKR ingestion via email/Telegram while `pp-sync-all` auto-pulls via the IBKR Flex Web Service (`ibkr_flex.js`). Not a hard contradiction — the manual paths still exist — but it trains a stale-leaning workflow. | Refresh prompt/examples toward the API-driven sync. |
 
 ## Expense-tracker
 
-No dead-code issues identified that require a code decision; #232/#235/#236 are doc/spec-only (keyword table never existed; gateway plugin became an MCP tool). The 3-phase pipeline (`orchestrator.js:1-8`) is correct — only `SKILL.md` doc is stale.
+No dead-code issues identified that require a code decision. #232/#235/#236 are doc/spec-only (the keyword table never existed; the gateway plugin became an MCP tool). The 3-phase pipeline (`orchestrator.js`) is correct — only `SKILL.md` is stale.
+
+The expense-tracker's `classifyEmail()` (`src/classify.js`) is a **different, live** function: it is awaited by `src/index.js` before dispatch and has its own test suite. Do not confuse it with the removed portfolio-tracker function of the same name.
 
 ## Doc-vs-doc reconciliation note (resolved in docs, no code change)
-- Decision needed on whether `GOOGLE_SERVICE_ACCOUNT_JSON` should be "required" (matches current `guardEnv`) or "optional" (matches runtime skip). Docs are being set to **required** to match the running code; flip C-6 if you prefer optional.
+
+`GOOGLE_SERVICE_ACCOUNT_JSON` and `GOOGLE_SHEET_ID` are documented as **required** to match the running `guardEnv()`. Flip C-6 if you would rather make them optional at startup.
+
+## Operational note for the removals (C-2, C-3, C-4)
+
+Removing those config fields and the helper function changes no runtime behaviour: the fields were only ever written, never read on any live path, and `classifyEmail()` had no callers. Setting `LOG_LEVEL`, `BALANCE_SYNC_MODEL`, `AB_EMERGENCY_PRIMARY_CATEGORY`, `AB_EMERGENCY_SECONDARY_CATEGORY`, or `AB_WARCHEST_CATEGORY` in a deployed `.env` is now a no-op in the same way it always was — the values were already ignored.
