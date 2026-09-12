@@ -469,7 +469,7 @@ describe("StatementProcessor", () => {
 describe("extractPasswordFromFacts", () => {
   it("extracts password from 'password is X' pattern", () => {
     expect(
-      extractPasswordFromFacts(["DBS Yuu statement password is Test@123"]),
+      extractPasswordFromFacts(["Epsilon Nova statement password is Test@123"]),
     ).toBe("Test@123");
   });
 

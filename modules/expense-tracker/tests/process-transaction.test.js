@@ -39,7 +39,7 @@ function makeMockTools(overrides = {}) {
             if (name === "fetch_context")
                 return {
                     accounts: [
-                        { id: "acc-1", name: "HSBC Revolution", closed: false },
+                        { id: "acc-1", name: "Iota Freedom", closed: false },
                     ],
                     categories: [{ id: "cat-food", name: "Food" }],
                     payees: [{ id: "p-1", name: "Food" }],
@@ -59,14 +59,14 @@ function fakePhase1Output(overrides = {}) {
         currency: "SGD",
         date: "2026-06-18",
         account_id: "acc-1",
-        account_name: "HSBC Revolution",
+        account_name: "Iota Freedom",
         budget_id: "Darren SGD",
         action: "insert",
         payee_name: "",
         category_id: "",
         raw_description: "S$1.90 at KOUFU PTE LTD",
         notes: "",
-        reasoning: "Matched HSBC Revolution",
+        reasoning: "Matched Iota Freedom",
         notify_message: "S$1.90 at KOUFU PTE LTD, logged!",
         ...overrides,
     };
@@ -117,7 +117,7 @@ describe("processText", () => {
         orch._resolvePhase2 = vi.fn().mockResolvedValue(p2);
 
         const result = await orch.processText(
-            "S$6.44 Shopee on HSBC Revolution",
+            "S$6.44 Shopee on Iota Freedom",
         );
 
         expect(tools.setEmailContext).not.toHaveBeenCalled();

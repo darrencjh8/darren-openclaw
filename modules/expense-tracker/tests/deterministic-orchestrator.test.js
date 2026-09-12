@@ -113,7 +113,7 @@ describe("Phase 1: LLM Analysis (3-phase)", () => {
       executeTool: vi.fn(async (name) => {
         if (name === "fetch_context")
           return {
-            accounts: [{ id: "acc-1", name: "DBS Yuu", closed: false }],
+            accounts: [{ id: "acc-1", name: "DBS Nova", closed: false }],
             categories: [{ id: "cat-food", name: "Food" }],
             payees: [{ name: "Toast Box" }],
           };
@@ -129,11 +129,11 @@ describe("Phase 1: LLM Analysis (3-phase)", () => {
         date: "2026-06-19",
         currency: "SGD",
         account_id: "acc-1",
-        account_name: "DBS Yuu",
+        account_name: "DBS Nova",
         raw_description: "S$12.80 at Toast Box",
         notes: "",
         skip: false,
-        reasoning: "Matched DBS Yuu",
+        reasoning: "Matched DBS Nova",
         notify_message: "S$12.80 at Toast Box, logged!",
       }),
     );
@@ -146,7 +146,7 @@ describe("Phase 1: LLM Analysis (3-phase)", () => {
     expect(callArgs[1]).toBeDefined(); // tools provided
     expect(result.merchant).toBe("Toast Box");
     expect(result.account_id).toBe("acc-1");
-    expect(result.account_name).toBe("DBS Yuu");
+    expect(result.account_name).toBe("DBS Nova");
   });
 
   it("regression (#398): a DBS 'Card Transaction Alert' falls through to the generic LLM path and resolves BUS/MRT via memory", async () => {
@@ -169,7 +169,7 @@ describe("Phase 1: LLM Analysis (3-phase)", () => {
       executeTool: vi.fn(async (name, args) => {
         if (name === "fetch_context")
           return {
-            accounts: [{ id: "acc-yuu", name: "DBS Yuu Card", closed: false }],
+            accounts: [{ id: "acc-nova", name: "DBS Nova Card", closed: false }],
             categories: [{ id: "cat-transport", name: "Public Transport", group_id: "g1" }],
             payees: [],
           };
@@ -178,7 +178,7 @@ describe("Phase 1: LLM Analysis (3-phase)", () => {
           if (query.includes("BUS/MRT"))
             return { results: [{ text: "BUS/MRT maps to Public Transport payee", score: 1 }] };
           if (query.includes("3255"))
-            return { results: [{ text: "Card ending 3255 belongs to DBS Yuu Card", score: 1 }] };
+            return { results: [{ text: "Card ending 3255 belongs to DBS Nova Card", score: 1 }] };
           if (query.includes("Public Transport"))
             return { results: [{ text: "Public Transport maps to Public Transport category", score: 1 }] };
           return { results: [] };
@@ -194,12 +194,12 @@ describe("Phase 1: LLM Analysis (3-phase)", () => {
         amount_cents: -460,
         date: "2026-09-03",
         currency: "SGD",
-        account_id: "acc-yuu",
-        account_name: "DBS Yuu Card",
+        account_id: "acc-nova",
+        account_name: "DBS Nova Card",
         raw_description: "SGD 4.60 at BUS/MRT",
         notes: "",
         skip: false,
-        reasoning: "Matched DBS Yuu Card ending 3255",
+        reasoning: "Matched DBS Nova Card ending 3255",
         notify_message: "",
       }),
     );
@@ -242,7 +242,7 @@ To: BUS/MRT`;
       executeTool: vi.fn(async (name) => {
         if (name === "fetch_context")
           return {
-            accounts: [{ id: "acc-1", name: "DBS Yuu", closed: false }],
+            accounts: [{ id: "acc-1", name: "DBS Nova", closed: false }],
             categories: [],
             payees: [],
           };
@@ -258,7 +258,7 @@ To: BUS/MRT`;
         date: "2026-06-19",
         currency: "SGD",
         account_id: "acc-1",
-        account_name: "DBS Yuu",
+        account_name: "DBS Nova",
         raw_description: "S$12.80 at Toast Box",
         notes: "",
         skip: false,
@@ -351,7 +351,7 @@ To: BUS/MRT`;
         if (name === "fetch_context") {
           expect(args.budget_id).toBe("primary-budget-id");
           return {
-            accounts: [{ id: "acc-1", name: "DBS Yuu", closed: false }],
+            accounts: [{ id: "acc-1", name: "DBS Nova", closed: false }],
             categories: [],
             payees: [],
           };
@@ -391,11 +391,11 @@ To: BUS/MRT`;
           date: "2026-06-19",
           currency: "SGD",
           account_id: "acc-1",
-          account_name: "DBS Yuu",
+          account_name: "DBS Nova",
           raw_description: "S$12.80 at Toast Box",
           notes: "",
           skip: false,
-          reasoning: "Matched DBS Yuu",
+          reasoning: "Matched DBS Nova",
           notify_message: "S$12.80 at Toast Box, logged!",
         }),
       );
@@ -414,8 +414,8 @@ To: BUS/MRT`;
         if (name === "fetch_context")
           return {
             accounts: [
-              { id: "acc-real", name: "DBS Yuu", closed: false },
-              { id: "acc-2", name: "UOB One", closed: false },
+              { id: "acc-real", name: "DBS Nova", closed: false },
+              { id: "acc-2", name: "UOB Unity", closed: false },
             ],
             categories: [],
             payees: [],
@@ -449,7 +449,7 @@ To: BUS/MRT`;
           date: "2026-06-19",
           currency: "SGD",
           account_id: "acc-real",
-          account_name: "DBS Yuu",
+          account_name: "DBS Nova",
           raw_description: "S$12.80 at Toast Box",
           notes: "",
           skip: false,
@@ -466,8 +466,8 @@ To: BUS/MRT`;
       (m) => m.role === "user" && m.content.includes("account_id"),
     );
     expect(feedbackMsg).toBeDefined();
-    expect(feedbackMsg.content).toContain("DBS Yuu");
-    expect(feedbackMsg.content).toContain("UOB One");
+    expect(feedbackMsg.content).toContain("DBS Nova");
+    expect(feedbackMsg.content).toContain("UOB Unity");
   });
 
   it("retry exhausted returns null on persistent invalid account", async () => {
@@ -478,7 +478,7 @@ To: BUS/MRT`;
       executeTool: vi.fn(async (name) => {
         if (name === "fetch_context")
           return {
-            accounts: [{ id: "acc-real", name: "DBS Yuu", closed: false }],
+            accounts: [{ id: "acc-real", name: "DBS Nova", closed: false }],
             categories: [],
             payees: [],
           };
@@ -522,7 +522,7 @@ To: BUS/MRT`;
       executeTool: vi.fn(async (name) => {
         if (name === "fetch_context")
           return {
-            accounts: [{ id: "acc-dbs", name: "DBS Yuu", closed: false }],
+            accounts: [{ id: "acc-dbs", name: "DBS Nova", closed: false }],
             categories: [],
             payees: [],
           };
@@ -540,7 +540,7 @@ To: BUS/MRT`;
           date: "2026-09-03",
           currency: "SGD",
           account_id: "acc-dbs",
-          account_name: "DBS Yuu",
+          account_name: "DBS Nova",
           raw_description: "",
           notes: "",
           skip: false,
@@ -557,7 +557,7 @@ To: BUS/MRT`;
           date: "2026-09-03",
           currency: "SGD",
           account_id: "acc-dbs",
-          account_name: "DBS Yuu",
+          account_name: "DBS Nova",
           raw_description: "SGD 4.60 at BUS/MRT",
           notes: "",
           skip: false,
@@ -612,7 +612,7 @@ To: BUS/MRT`;
           return {
             accounts: [
               { id: "acc-dbs", name: "DBS Account", closed: false },
-              { id: "acc-yuu", name: "DBS Yuu Card", closed: false },
+              { id: "acc-nova", name: "DBS Nova Card", closed: false },
             ],
             categories: [],
             payees: [],
@@ -621,7 +621,7 @@ To: BUS/MRT`;
           return {
             results: [
               {
-                text: "Public Transport transactions belong to DBS Yuu Card account (acc-yuu)",
+                text: "Public Transport transactions belong to DBS Nova Card account (acc-nova)",
                 score: 0.8,
               },
             ],
@@ -649,19 +649,19 @@ To: BUS/MRT`;
           notify_message: "",
         }),
       )
-      // Retry: LLM picks correct DBS Yuu Card after seeing memory hints
+      // Retry: LLM picks correct DBS Nova Card after seeing memory hints
       .mockResolvedValueOnce(
         mockChatResponse({
           merchant: "BUS/MRT",
           amount_cents: -460,
           date: "2026-06-19",
           currency: "SGD",
-          account_id: "acc-yuu",
-          account_name: "DBS Yuu Card",
+          account_id: "acc-nova",
+          account_name: "DBS Nova Card",
           raw_description: "SGD 4.60 at BUS/MRT",
           notes: "",
           skip: false,
-          reasoning: "Memory says DBS Yuu Card",
+          reasoning: "Memory says DBS Nova Card",
           notify_message: "",
         }),
       );
@@ -669,13 +669,13 @@ To: BUS/MRT`;
     const result = await orch._runPhase1("Your DBS Account clocked SGD 4.60 at BUS/MRT");
     // Should trigger retry: 1 initial + 1 retry = 2 LLM calls
     expect(orch._llm.chat).toHaveBeenCalledTimes(2);
-    expect(result.account_id).toBe("acc-yuu");
+    expect(result.account_id).toBe("acc-nova");
     // Retry message should include memory hints
     const retryMsg = orch._llm.chat.mock.calls[1][0].find(
       (m) => m.role === "user" && m.content.includes("Memory"),
     );
     expect(retryMsg).toBeDefined();
-    expect(retryMsg.content).toContain("DBS Yuu Card");
+    expect(retryMsg.content).toContain("DBS Nova Card");
   });
 
   it("does NOT retry when memory confirms the same account", async () => {
@@ -687,7 +687,7 @@ To: BUS/MRT`;
         if (name === "fetch_context")
           return {
             accounts: [
-              { id: "acc-yuu", name: "DBS Yuu Card", closed: false },
+              { id: "acc-nova", name: "DBS Nova Card", closed: false },
               { id: "acc-dbs", name: "DBS Account", closed: false },
             ],
             categories: [],
@@ -697,7 +697,7 @@ To: BUS/MRT`;
           return {
             results: [
               {
-                text: "Public Transport transactions belong to DBS Yuu Card account (acc-yuu)",
+                text: "Public Transport transactions belong to DBS Nova Card account (acc-nova)",
                 score: 0.8,
               },
             ],
@@ -713,20 +713,20 @@ To: BUS/MRT`;
         amount_cents: -460,
         date: "2026-06-19",
         currency: "SGD",
-        account_id: "acc-yuu",
-        account_name: "DBS Yuu Card",
+        account_id: "acc-nova",
+        account_name: "DBS Nova Card",
         raw_description: "SGD 4.60 at BUS/MRT",
         notes: "",
         skip: false,
-        reasoning: "Matched DBS Yuu Card",
+        reasoning: "Matched DBS Nova Card",
         notify_message: "",
       }),
     );
 
-    const result = await orch._runPhase1("SGD 4.60 at BUS/MRT via DBS Yuu Card");
+    const result = await orch._runPhase1("SGD 4.60 at BUS/MRT via DBS Nova Card");
     // Memory confirms same account — no retry needed
     expect(orch._llm.chat).toHaveBeenCalledTimes(1);
-    expect(result.account_id).toBe("acc-yuu");
+    expect(result.account_id).toBe("acc-nova");
   });
 
   // ── Memory account override edge cases ──
@@ -746,7 +746,7 @@ To: BUS/MRT`;
           return {
             accounts: [
               { id: "acc-dbs", name: "DBS Account", closed: false },
-              { id: "acc-yuu", name: "DBS Yuu Card", closed: false },
+              { id: "acc-nova", name: "DBS Nova Card", closed: false },
               { id: "acc-closed", name: "Old Card", closed: true },
             ],
             categories: [],
@@ -778,7 +778,7 @@ To: BUS/MRT`;
   it("does NOT retry when memory results are below score threshold", async () => {
     const { orch } = await buildMemoryEdgeCaseOrch({
       results: [
-        { text: "DBS Yuu Card is a debit card account", score: 0.3 },
+        { text: "DBS Nova Card is a debit card account", score: 0.3 },
       ],
     });
     const result = await orch._runPhase1("SGD 4.60 at BUS/MRT");
@@ -853,15 +853,15 @@ describe("Phase 1: LLM-directed retrieval (multi-round tools)", () => {
           return {
             accounts: [
               { id: "acc-dbs", name: "DBS Account", closed: false },
-              { id: "acc-yuu", name: "DBS Yuu Card", closed: false },
-              { id: "acc-alt", name: "DBS Altitude Card", closed: false },
+              { id: "acc-nova", name: "DBS Nova Card", closed: false },
+              { id: "acc-alt", name: "DBS Vista Card", closed: false },
             ],
             categories: [],
             payees: [],
           };
         if (name === "search_memory") {
           if (args && String(args.query).includes("3255"))
-            return { results: [{ text: "Card ending 3255 belongs to DBS Yuu Card", score: 1 }] };
+            return { results: [{ text: "Card ending 3255 belongs to DBS Nova Card", score: 1 }] };
           return { results: [] };
         }
         return true;
@@ -892,8 +892,8 @@ describe("Phase 1: LLM-directed retrieval (multi-round tools)", () => {
     amount_cents: -230,
     date: "2026-08-25",
     currency: "SGD",
-    account_id: "acc-yuu",
-    account_name: "DBS Yuu Card",
+    account_id: "acc-nova",
+    account_name: "DBS Nova Card",
     raw_description: "SGD 2.30 at BUS/MRT",
     notes: "",
     skip: false,
@@ -918,7 +918,7 @@ describe("Phase 1: LLM-directed retrieval (multi-round tools)", () => {
     });
 
     expect(orch._llm.chat).toHaveBeenCalledTimes(3);
-    expect(result.account_id).toBe("acc-yuu");
+    expect(result.account_id).toBe("acc-nova");
     // every follow-up tool round still receives the tool schemas
     const round2Args = orch._llm.chat.mock.calls[1];
     expect(round2Args[1]).toBeDefined();
@@ -945,7 +945,7 @@ describe("Phase 1: LLM-directed retrieval (multi-round tools)", () => {
     });
 
     expect(orch._llm.chat).toHaveBeenCalledTimes(3);
-    expect(result.account_id).toBe("acc-yuu");
+    expect(result.account_id).toBe("acc-nova");
   });
 
   it("stops after tool budget with a JSON-only correction", async () => {
@@ -992,7 +992,7 @@ describe("Phase 1: LLM-directed retrieval (multi-round tools)", () => {
 
     const result = await orch._runPhase1("card ending 3255", {});
 
-    expect(result.account_id).toBe("acc-yuu");
+    expect(result.account_id).toBe("acc-nova");
     // Next request must contain tool response for every prior tool_call.
     const assistantCalls = correctionMessages
       .filter((m) => m.role === "assistant" && m.tool_calls)
@@ -1032,7 +1032,7 @@ describe("Phase 1: LLM-directed retrieval (multi-round tools)", () => {
 
     // deterministic override from cached tool results — no extra retry call
     expect(orch._llm.chat).toHaveBeenCalledTimes(2);
-    expect(result.account_id).toBe("acc-yuu");
+    expect(result.account_id).toBe("acc-nova");
   });
 
   it("ignores cross-bank suffix facts (UOB fact for DBS email)", async () => {
@@ -1044,15 +1044,15 @@ describe("Phase 1: LLM-directed retrieval (multi-round tools)", () => {
           return {
             accounts: [
               { id: "acc-dbs", name: "DBS Account", closed: false },
-              { id: "acc-yuu", name: "DBS Yuu Card", closed: false },
-              { id: "acc-uob", name: "UOB Ladies Card", closed: false },
+              { id: "acc-nova", name: "DBS Nova Card", closed: false },
+              { id: "acc-uob", name: "UOB Extra Card", closed: false },
             ],
             categories: [],
             payees: [],
           };
         if (name === "search_memory") {
           if (args && String(args.query).includes("3255"))
-            return { results: [{ text: "Card ending 3255 belongs to UOB Ladies Card", score: 0.9 }] };
+            return { results: [{ text: "Card ending 3255 belongs to UOB Extra Card", score: 0.9 }] };
           return { results: [] };
         }
         return true;
@@ -1084,14 +1084,14 @@ describe("Phase 1: LLM-directed retrieval (multi-round tools)", () => {
           return {
             accounts: [
               { id: "acc-dbs", name: "DBS Account", closed: false },
-              { id: "acc-yuu", name: "DBS Yuu Card", closed: false },
+              { id: "acc-nova", name: "DBS Nova Card", closed: false },
             ],
             categories: [],
             payees: [],
           };
         if (name === "search_memory") {
           if (args && String(args.query).includes("3255"))
-            return { results: [{ text: "Card ending 3255 belongs to DBS Yuu Card", score: 0.4 }] };
+            return { results: [{ text: "Card ending 3255 belongs to DBS Nova Card", score: 0.4 }] };
           return { results: [] };
         }
         return true;
@@ -1122,7 +1122,7 @@ describe("Phase 1: LLM-directed retrieval (multi-round tools)", () => {
       executeTool: vi.fn(async (name) => {
         if (name === "fetch_context")
           return {
-            accounts: [{ id: "acc-yuu", name: "DBS Yuu Card", closed: false }],
+            accounts: [{ id: "acc-nova", name: "DBS Nova Card", closed: false }],
             categories: [],
             payees: [],
           };
@@ -1130,7 +1130,7 @@ describe("Phase 1: LLM-directed retrieval (multi-round tools)", () => {
           return {
             results: [
               { text: "Affin Bank statement password is 20Apr1993", score: 0.9 },
-              { text: "Card ending 3255 belongs to DBS Yuu Card", score: 1 },
+              { text: "Card ending 3255 belongs to DBS Nova Card", score: 1 },
             ],
           };
         return true;
@@ -1150,11 +1150,11 @@ describe("Phase 1: LLM-directed retrieval (multi-round tools)", () => {
       senderBank: "DBS",
     });
 
-    expect(result.account_id).toBe("acc-yuu");
+    expect(result.account_id).toBe("acc-nova");
     const toolMsgs = capturedMessages.filter((m) => m.role === "tool");
     const toolText = JSON.stringify(toolMsgs);
     expect(toolText).not.toMatch(/password/i);
-    expect(toolText).toContain("Card ending 3255 belongs to DBS Yuu Card");
+    expect(toolText).toContain("Card ending 3255 belongs to DBS Nova Card");
   });
 
   it("falls back to deterministic suffix search when the LLM never searches", async () => {
@@ -1166,14 +1166,14 @@ describe("Phase 1: LLM-directed retrieval (multi-round tools)", () => {
           return {
             accounts: [
               { id: "acc-dbs", name: "DBS Account", closed: false },
-              { id: "acc-yuu", name: "DBS Yuu Card", closed: false },
+              { id: "acc-nova", name: "DBS Nova Card", closed: false },
             ],
             categories: [],
             payees: [],
           };
         if (name === "search_memory") {
           if (args && String(args.query) === "3255")
-            return { results: [{ text: "Card ending 3255 belongs to DBS Yuu Card", score: 1 }] };
+            return { results: [{ text: "Card ending 3255 belongs to DBS Nova Card", score: 1 }] };
           return { results: [] };
         }
         return true;
@@ -1190,8 +1190,8 @@ describe("Phase 1: LLM-directed retrieval (multi-round tools)", () => {
       senderBank: "DBS",
     });
 
-    // code-side fallback extracted 3255 and overrode to Yuu
-    expect(result.account_id).toBe("acc-yuu");
+    // code-side fallback extracted 3255 and overrode to Nova
+    expect(result.account_id).toBe("acc-nova");
     const fallbackCalls = tools.executeTool.mock.calls.filter(
       (c) => c[0] === "search_memory" && c[1] && c[1].query === "3255",
     );
@@ -1207,14 +1207,14 @@ describe("Phase 1: LLM-directed retrieval (multi-round tools)", () => {
           return {
             accounts: [
               { id: "acc-dbs", name: "DBS Account", closed: false },
-              { id: "acc-uob", name: "UOB Ladies Card", closed: false },
+              { id: "acc-uob", name: "UOB Extra Card", closed: false },
             ],
             categories: [],
             payees: [],
           };
         if (name === "search_memory") {
           if (args && String(args.query).includes("3255"))
-            return { results: [{ text: "Card ending 3255 belongs to UOB Ladies Card", score: 0.9 }] };
+            return { results: [{ text: "Card ending 3255 belongs to UOB Extra Card", score: 0.9 }] };
           return { results: [] };
         }
         return true;
@@ -1245,14 +1245,14 @@ describe("Phase 1: LLM-directed retrieval (multi-round tools)", () => {
           return {
             accounts: [
               { id: "acc-dbs", name: "DBS Account", closed: false },
-              { id: "acc-yuu", name: "DBS Yuu Card", closed: false },
+              { id: "acc-nova", name: "DBS Nova Card", closed: false },
             ],
             categories: [],
             payees: [],
           };
         if (name === "search_memory") {
           if (args && String(args.query) === "3255")
-            return { results: [{ text: "Card ending 3255 belongs to DBS Yuu Card", score: 1 }] };
+            return { results: [{ text: "Card ending 3255 belongs to DBS Nova Card", score: 1 }] };
           if (args && String(args.query).includes("BUS/MRT"))
             return { results: [{ text: "BUS/MRT maps to Public Transport payee", score: 1 }] };
           return { results: [] };
@@ -1274,8 +1274,8 @@ describe("Phase 1: LLM-directed retrieval (multi-round tools)", () => {
       senderBank: "DBS",
     });
 
-    // cache non-empty but useless → fallback still fires → override to Yuu
-    expect(result.account_id).toBe("acc-yuu");
+    // cache non-empty but useless → fallback still fires → override to Nova
+    expect(result.account_id).toBe("acc-nova");
     const fallbackCalls = tools.executeTool.mock.calls.filter(
       (c) => c[0] === "search_memory" && c[1] && c[1].query === "3255",
     );
@@ -1289,7 +1289,7 @@ describe("Phase 1: LLM-directed retrieval (multi-round tools)", () => {
       executeTool: vi.fn(async (name) => {
         if (name === "fetch_context")
           return {
-            accounts: [{ id: "acc-yuu", name: "DBS Yuu Card", closed: false }],
+            accounts: [{ id: "acc-nova", name: "DBS Nova Card", closed: false }],
             categories: [],
             payees: [],
           };
@@ -1297,7 +1297,7 @@ describe("Phase 1: LLM-directed retrieval (multi-round tools)", () => {
           return {
             results: [
               { text: "Affin Bank statement password is 20Apr1993", score: 0.9 },
-              { text: "Card ending 3255 belongs to DBS Yuu Card", score: 1 },
+              { text: "Card ending 3255 belongs to DBS Nova Card", score: 1 },
             ],
           };
         return true;
@@ -1321,11 +1321,11 @@ describe("Phase 1: LLM-directed retrieval (multi-round tools)", () => {
       senderBank: "DBS",
     });
 
-    expect(result.account_id).toBe("acc-yuu");
+    expect(result.account_id).toBe("acc-nova");
     const userMsgs = retryMessages.filter((m) => m.role === "user");
     const feedbackText = JSON.stringify(userMsgs);
     expect(feedbackText).not.toMatch(/password/i);
-    expect(feedbackText).toContain("Card ending 3255 belongs to DBS Yuu Card");
+    expect(feedbackText).toContain("Card ending 3255 belongs to DBS Nova Card");
   });
 
   it("does not override on bill-payment-shaped emails", async () => {
@@ -1335,7 +1335,7 @@ describe("Phase 1: LLM-directed retrieval (multi-round tools)", () => {
     const orch = new AgentOrchestrator(config, tools);
 
     const billPaymentText =
-      "Amount: SGD 104.21\nFrom: My Account (A/C ending 5750)\nTo: Yuu (Ref ending 3255)";
+      "Amount: SGD 104.21\nFrom: My Account (A/C ending 5750)\nTo: Nova (Ref ending 3255)";
 
     orch._llm.chat = vi
       .fn()
@@ -1345,7 +1345,7 @@ describe("Phase 1: LLM-directed retrieval (multi-round tools)", () => {
           {
             message: jsonMsg({
               ...yuuResult,
-              merchant: "Yuu",
+              merchant: "Nova",
               account_id: "acc-dbs",
               account_name: "DBS Account",
             }),
@@ -1368,14 +1368,14 @@ describe("Phase 1: LLM-directed retrieval (multi-round tools)", () => {
           return {
             accounts: [
               { id: "acc-dbs", name: "DBS Account", closed: false },
-              { id: "acc-yuu", name: "DBS Yuu Card", closed: false },
+              { id: "acc-nova", name: "DBS Nova Card", closed: false },
             ],
             categories: [],
             payees: [],
           };
         if (name === "search_memory") {
           if (args && String(args.query).includes("3255"))
-            return { results: [{ text: "Card ending 3255 belongs to DBS Yuu Card", score: 0.6 }] };
+            return { results: [{ text: "Card ending 3255 belongs to DBS Nova Card", score: 0.6 }] };
           return { results: [] };
         }
         return true;
@@ -1394,7 +1394,7 @@ describe("Phase 1: LLM-directed retrieval (multi-round tools)", () => {
       senderBank: "DBS",
     });
 
-    expect(result.account_id).toBe("acc-yuu");
+    expect(result.account_id).toBe("acc-nova");
   });
 
   it("does not extract suffixes from partial words (discard/pending)", async () => {
@@ -1412,7 +1412,7 @@ describe("Phase 1: LLM-directed retrieval (multi-round tools)", () => {
       senderBank: "DBS",
     });
 
-    expect(result.account_id).toBe("acc-yuu");
+    expect(result.account_id).toBe("acc-nova");
     const badQueries = tools.executeTool.mock.calls.filter(
       (c) => c[0] === "search_memory" && c[1] && String(c[1].query) === "123456",
     );
@@ -1427,7 +1427,7 @@ describe("Phase 1: LLM-directed retrieval (multi-round tools)", () => {
       executeTool: vi.fn(async (name) => {
         if (name === "fetch_context")
           return {
-            accounts: [{ id: "acc-yuu", name: "DBS Yuu Card", closed: false }],
+            accounts: [{ id: "acc-nova", name: "DBS Nova Card", closed: false }],
             categories: [],
             payees: [],
           };
@@ -1435,7 +1435,7 @@ describe("Phase 1: LLM-directed retrieval (multi-round tools)", () => {
           return {
             results: [
               { text: "Secretlab maps to Shopping category", score: 0.9 },
-              { text: "Card ending 3255 belongs to DBS Yuu Card", score: 1 },
+              { text: "Card ending 3255 belongs to DBS Nova Card", score: 1 },
             ],
           };
         return true;
@@ -1455,11 +1455,11 @@ describe("Phase 1: LLM-directed retrieval (multi-round tools)", () => {
       senderBank: "DBS",
     });
 
-    expect(result.account_id).toBe("acc-yuu");
+    expect(result.account_id).toBe("acc-nova");
     const toolMsgs = capturedMessages.filter((m) => m.role === "tool");
     const toolText = JSON.stringify(toolMsgs);
     expect(toolText).toContain("Secretlab maps to Shopping category");
-    expect(toolText).toContain("Card ending 3255 belongs to DBS Yuu Card");
+    expect(toolText).toContain("Card ending 3255 belongs to DBS Nova Card");
   });
 
   it("redacts secrets from memory-hint retry path (valid pick, merchant hints)", async () => {
@@ -1471,19 +1471,19 @@ describe("Phase 1: LLM-directed retrieval (multi-round tools)", () => {
           return {
             accounts: [
               { id: "acc-dbs", name: "DBS Account", closed: false },
-              { id: "acc-yuu", name: "DBS Yuu Card", closed: false },
+              { id: "acc-nova", name: "DBS Nova Card", closed: false },
             ],
             categories: [],
             payees: [],
           };
         if (name === "search_memory") {
           if (args && String(args.query) === "3255")
-            return { results: [{ text: "Card ending 3255 belongs to DBS Yuu Card", score: 1 }] };
+            return { results: [{ text: "Card ending 3255 belongs to DBS Nova Card", score: 1 }] };
           if (args && String(args.query).includes("BUS/MRT"))
             return {
               results: [
                 { text: "Affin Bank statement password is 20Apr1993", score: 0.9 },
-                { text: "BUS/MRT transactions belong to DBS Yuu Card", score: 1 },
+                { text: "BUS/MRT transactions belong to DBS Nova Card", score: 1 },
               ],
             };
           return { results: [] };
@@ -1510,11 +1510,11 @@ describe("Phase 1: LLM-directed retrieval (multi-round tools)", () => {
       senderBank: "DBS",
     });
 
-    expect(result.account_id).toBe("acc-yuu");
+    expect(result.account_id).toBe("acc-nova");
     const userMsgs = retryMessages.filter((m) => m.role === "user");
     const feedbackText = JSON.stringify(userMsgs);
     expect(feedbackText).not.toMatch(/password/i);
-    expect(feedbackText).toContain("BUS/MRT transactions belong to DBS Yuu Card");
+    expect(feedbackText).toContain("BUS/MRT transactions belong to DBS Nova Card");
   });
 
   it("does not force a retry when the merchant is a legitimate cross-bank transfer destination (transfer-shaped email)", async () => {
@@ -1601,14 +1601,14 @@ describe("Phase 1: LLM-directed retrieval (multi-round tools)", () => {
           return {
             accounts: [
               { id: "acc-dbs", name: "DBS Account", closed: false },
-              { id: "acc-yuu", name: "DBS Yuu Card", closed: false },
+              { id: "acc-nova", name: "DBS Nova Card", closed: false },
             ],
             categories: [],
             payees: [],
           };
         if (name === "search_memory") {
           if (args && String(args.query).includes("Toast Box"))
-            return { results: [{ text: "Toast Box purchases belong to DBS Yuu Card", score: 1 }] };
+            return { results: [{ text: "Toast Box purchases belong to DBS Nova Card", score: 1 }] };
           return { results: [] };
         }
         return true;
@@ -1640,7 +1640,7 @@ describe("Phase 1: LLM-directed retrieval (multi-round tools)", () => {
     const emailText = "Toast Box: SGD 12.80 was paid using your DBS Card just now, " + formatEmailDate(recentDate) + ".";
     const result = await orch._runPhase1(emailText, { senderBank: "DBS" });
 
-    expect(result.account_id).toBe("acc-yuu");
+    expect(result.account_id).toBe("acc-nova");
     expect(retryMessages).not.toBeNull();
   });
 
@@ -1694,7 +1694,7 @@ describe("Phase 1: LLM-directed retrieval (multi-round tools)", () => {
             accounts: [
               { id: "acc-dbs", name: "DBS Account", closed: false },
               { id: "acc-posb", name: "POSB Everyday Card", closed: false },
-              { id: "acc-yuu", name: "Yuu Card", closed: false },
+              { id: "acc-nova", name: "Nova Card", closed: false },
               { id: "acc-disc", name: "Discover Card", closed: false },
             ],
             categories: [],
@@ -1719,7 +1719,7 @@ describe("Phase 1: LLM-directed retrieval (multi-round tools)", () => {
       senderBank: "DBS",
     });
 
-    expect(result.account_id).toBe("acc-yuu");
+    expect(result.account_id).toBe("acc-nova");
     const ctx = JSON.parse(toolMessages[toolMessages.length - 1].content);
     expect(ctx.accounts.map((a) => a.name)).toEqual([
       "DBS Account",
@@ -1832,8 +1832,8 @@ describe("Phase 1: LLM-directed retrieval (multi-round tools)", () => {
           return {
             accounts: [
               { id: "acc-dbs", name: "DBS Account", closed: false },
-              { id: "acc-yuu", name: "DBS Yuu Card", closed: false },
-              { id: "acc-alt", name: "DBS Altitude Card", closed: false },
+              { id: "acc-nova", name: "DBS Nova Card", closed: false },
+              { id: "acc-alt", name: "DBS Vista Card", closed: false },
             ],
             categories: [],
             payees: [],
@@ -1842,8 +1842,8 @@ describe("Phase 1: LLM-directed retrieval (multi-round tools)", () => {
           if (args && String(args.query).includes("3255"))
             return {
               results: [
-                { text: "Card ending 3255 belongs to DBS Yuu Card", score: 1 },
-                { text: "Card ending 3255 belongs to DBS Altitude Card", score: 0.9 },
+                { text: "Card ending 3255 belongs to DBS Nova Card", score: 1 },
+                { text: "Card ending 3255 belongs to DBS Vista Card", score: 0.9 },
               ],
             };
           // merchant/other queries: no facts → memory-aware check stays quiet
@@ -1896,11 +1896,11 @@ describe("suffix-override helpers (unit)", () => {
     const { hasBankToken } = await import("../src/orchestrator.js");
     expect(hasBankToken("POSB Everyday Card")).toBe(true);
     expect(hasBankToken("Standard Chartered XtraSaver")).toBe(true);
-    expect(hasBankToken("DBS Yuu Card")).toBe(true);
+    expect(hasBankToken("DBS Nova Card")).toBe(true);
     expect(hasBankToken("CIMB FastSaver")).toBe(true);
     expect(hasBankToken("RYT Savings")).toBe(true);
     expect(hasBankToken("My Savings")).toBe(false);
-    expect(hasBankToken("Yuu Card")).toBe(false);
+    expect(hasBankToken("Nova Card")).toBe(false);
     expect(hasBankToken("")).toBe(false);
     expect(hasBankToken(null)).toBe(false);
   });
@@ -1908,14 +1908,14 @@ describe("suffix-override helpers (unit)", () => {
   it("nameMatchesBank: brand aliases and cross-bank rejection", async () => {
     const { nameMatchesBank } = await import("../src/orchestrator.js");
     expect(nameMatchesBank("POSB Everyday Card", "DBS")).toBe(true);
-    expect(nameMatchesBank("DBS Yuu Card", "POSB")).toBe(true);
+    expect(nameMatchesBank("DBS Nova Card", "POSB")).toBe(true);
     expect(nameMatchesBank("Standard Chartered XtraSaver", "SC")).toBe(true);
     expect(nameMatchesBank("Citibank Rewards", "Citi")).toBe(true);
     expect(nameMatchesBank("RHB RYT Savings", "Ryt")).toBe(true);
     expect(nameMatchesBank("CIMB FastSaver", "CIMB")).toBe(true);
-    expect(nameMatchesBank("UOB Ladies Card", "DBS")).toBe(false);
-    expect(nameMatchesBank("Yuu Card", "DBS")).toBe(false);
-    expect(nameMatchesBank("DBS Yuu Card", null)).toBe(false);
+    expect(nameMatchesBank("UOB Extra Card", "DBS")).toBe(false);
+    expect(nameMatchesBank("Nova Card", "DBS")).toBe(false);
+    expect(nameMatchesBank("DBS Nova Card", null)).toBe(false);
   });
 
   it("sanitizeResults: word-boundary secrets only", async () => {
@@ -1927,14 +1927,14 @@ describe("suffix-override helpers (unit)", () => {
       { text: "Secretlab maps to Shopping category", score: 0.9 },
       { text: "Token2049 conference map", score: 0.9 },
       { text: "Pineapple merchant mapping", score: 0.9 },
-      { text: "Card ending 3255 belongs to DBS Yuu Card", score: 1 },
+      { text: "Card ending 3255 belongs to DBS Nova Card", score: 1 },
     ];
     const safe = sanitizeResults(results);
     expect(safe.map((r) => r.text)).toEqual([
       "Secretlab maps to Shopping category",
       "Token2049 conference map",
       "Pineapple merchant mapping",
-      "Card ending 3255 belongs to DBS Yuu Card",
+      "Card ending 3255 belongs to DBS Nova Card",
     ]);
     expect(SECRET_RE.test("secretlab")).toBe(false);
     expect(SECRET_RE.test("my secret code")).toBe(true);
@@ -1946,7 +1946,7 @@ describe("suffix-override helpers (unit)", () => {
     const { BILL_PAYMENT_SHAPE_RE } = await import("../src/orchestrator.js");
     expect(
       BILL_PAYMENT_SHAPE_RE.test(
-        "Amount: SGD 104.21\nFrom: My Account (A/C ending 5750)\nTo: Yuu (Ref ending 3255)",
+        "Amount: SGD 104.21\nFrom: My Account (A/C ending 5750)\nTo: Nova (Ref ending 3255)",
       ),
     ).toBe(true);
     expect(
@@ -1960,19 +1960,19 @@ describe("suffix-override helpers (unit)", () => {
     // Resolution needs the live account list; a name that is not a live
     // account must never count as evidence.
     const liveAccounts = [
-      { id: "dbs-yuu", name: "DBS Yuu Card", closed: false },
+      { id: "dbs-yuu", name: "DBS Nova Card", closed: false },
       { id: "dbs-account", name: "DBS Account", closed: false },
-      { id: "uob-ladies", name: "UOB Ladies Card", closed: false },
+      { id: "uob-ladies", name: "UOB Extra Card", closed: false },
     ];
     const usable = [
-      { text: "Card ending 3255 belongs to DBS Yuu Card", score: 1 },
+      { text: "Card ending 3255 belongs to DBS Nova Card", score: 1 },
     ];
     expect(hasUsableSuffixFact(usable, email, "DBS", liveAccounts)).toBe(true);
     // Issue #331 end state: a fact written in the user's own words arms the net
     // because the name resolves to a live DBS account.
     expect(
       hasUsableSuffixFact(
-        [{ text: "Card ending 3255 belongs to Yuu", score: 1 }],
+        [{ text: "Card ending 3255 belongs to Nova", score: 1 }],
         email,
         "DBS",
         liveAccounts,
@@ -1981,7 +1981,7 @@ describe("suffix-override helpers (unit)", () => {
     // A slash-prefixed, full-stop-terminated fact is now readable too.
     expect(
       hasUsableSuffixFact(
-        [{ text: "Card/account ending 3255 belongs to DBS Yuu Card.", score: 1 }],
+        [{ text: "Card/account ending 3255 belongs to DBS Nova Card.", score: 1 }],
         email,
         "DBS",
         liveAccounts,
@@ -1991,7 +1991,7 @@ describe("suffix-override helpers (unit)", () => {
     expect(hasUsableSuffixFact(usable, email, "DBS")).toBe(false);
     expect(
       hasUsableSuffixFact(
-        [{ text: "Card ending 3255 belongs to DBS Yuu Card", score: 0.4 }],
+        [{ text: "Card ending 3255 belongs to DBS Nova Card", score: 0.4 }],
         email,
         "DBS",
         liveAccounts,
@@ -1999,7 +1999,7 @@ describe("suffix-override helpers (unit)", () => {
     ).toBe(false);
     expect(
       hasUsableSuffixFact(
-        [{ text: "Card ending 3255 belongs to UOB Ladies Card", score: 1 }],
+        [{ text: "Card ending 3255 belongs to UOB Extra Card", score: 1 }],
         email,
         "DBS",
         liveAccounts,
@@ -2016,7 +2016,7 @@ describe("suffix-override helpers (unit)", () => {
     ).toBe(false);
     expect(
       hasUsableSuffixFact(
-        [{ text: "Card ending 9001 belongs to DBS Yuu Card", score: 1 }],
+        [{ text: "Card ending 9001 belongs to DBS Nova Card", score: 1 }],
         email,
         "DBS",
         liveAccounts,
@@ -2371,7 +2371,7 @@ describe("Phase 2: Sign correction", () => {
           if (name === "search_memory")
             return {
               results: [
-                { text: "UOB One is a credit card account", score: 0.9 },
+                { text: "UOB Unity is a credit card account", score: 0.9 },
               ],
             };
           return true;
@@ -2379,7 +2379,7 @@ describe("Phase 2: Sign correction", () => {
       });
       const orch = new AgentOrchestrator(config, tools);
 
-      const result = await orch._detectAccountType("UOB One");
+      const result = await orch._detectAccountType("UOB Unity");
       expect(result).toBe("credit card");
     });
 
@@ -2391,8 +2391,8 @@ describe("Phase 2: Sign correction", () => {
           if (name === "search_memory")
             return {
               results: [
-                { text: "DBS Yuu Card is a credit card", score: 1.0 },
-                { text: "DBS Yuu Card maps to Food category", score: 1.0 },
+                { text: "DBS Nova Card is a credit card", score: 1.0 },
+                { text: "DBS Nova Card maps to Food category", score: 1.0 },
               ],
             };
           return true;
@@ -2400,7 +2400,7 @@ describe("Phase 2: Sign correction", () => {
       });
       const orch = new AgentOrchestrator(config, tools);
 
-      const result = await orch._detectAccountType("DBS Yuu Card");
+      const result = await orch._detectAccountType("DBS Nova Card");
       expect(result).toBe("credit card");
     });
 
@@ -2413,7 +2413,7 @@ describe("Phase 2: Sign correction", () => {
             return {
               results: [
                 // Semantic fallback can surface this for a "DBS Account" query.
-                { text: "DBS Yuu Card is a credit card account", score: 1.0 },
+                { text: "DBS Nova Card is a credit card account", score: 1.0 },
               ],
             };
           return true;
@@ -2435,7 +2435,7 @@ describe("Phase 2: Sign correction", () => {
           if (name === "search_memory")
             return {
               results: [
-                { text: "SC Bonus Saver is a bank account", score: 1.0 },
+                { text: "SC Plus Saver is a bank account", score: 1.0 },
               ],
             };
           return true;
@@ -2443,7 +2443,7 @@ describe("Phase 2: Sign correction", () => {
       });
       const orch = new AgentOrchestrator(config, tools);
 
-      const result = await orch._detectAccountType("SC Bonus Saver");
+      const result = await orch._detectAccountType("SC Plus Saver");
       expect(result).toBe("bank");
     });
 
@@ -2454,14 +2454,14 @@ describe("Phase 2: Sign correction", () => {
         executeTool: vi.fn(async (name) => {
           if (name === "search_memory")
             return {
-              results: [{ text: "OCBC 360 is a bank account", score: 0.9 }],
+              results: [{ text: "OCBC 111 is a bank account", score: 0.9 }],
             };
           return true;
         }),
       });
       const orch = new AgentOrchestrator(config, tools);
 
-      const result = await orch._detectAccountType("OCBC 360");
+      const result = await orch._detectAccountType("OCBC 111");
       expect(result).toBe("bank");
     });
 
@@ -2473,7 +2473,7 @@ describe("Phase 2: Sign correction", () => {
           if (name === "search_memory")
             return {
               results: [
-                { text: "DBS Yuu is a debit card account", score: 0.9 },
+                { text: "DBS Nova is a debit card account", score: 0.9 },
               ],
             };
           return true;
@@ -2481,7 +2481,7 @@ describe("Phase 2: Sign correction", () => {
       });
       const orch = new AgentOrchestrator(config, tools);
 
-      const result = await orch._detectAccountType("DBS Yuu");
+      const result = await orch._detectAccountType("DBS Nova");
       expect(result).toBe("debit card");
     });
 
@@ -2493,7 +2493,7 @@ describe("Phase 2: Sign correction", () => {
       });
       const orch = new AgentOrchestrator(config, tools);
 
-      const result = await orch._detectAccountType("DBS Altitude Visa");
+      const result = await orch._detectAccountType("DBS Vista Visa");
       expect(result).toBe("credit card");
     });
 
@@ -2532,7 +2532,7 @@ describe("Phase 2: Sign correction", () => {
           if (name === "search_memory") {
             return {
               results: [
-                { text: "UOB One is a credit card account", score: 0.9 },
+                { text: "UOB Unity is a credit card account", score: 0.9 },
               ],
             };
           }
@@ -2547,7 +2547,7 @@ describe("Phase 2: Sign correction", () => {
         date: "2026-06-19",
         currency: "SGD",
         account_id: "acc-1",
-        account_name: "UOB One",
+        account_name: "UOB Unity",
         budget_id: "primary-budget-id",
         action: "insert",
       };
@@ -2565,7 +2565,7 @@ describe("Phase 2: Sign correction", () => {
           if (name === "search_memory") {
             return {
               results: [
-                { text: "UOB One is a credit card account", score: 0.9 },
+                { text: "UOB Unity is a credit card account", score: 0.9 },
               ],
             };
           }
@@ -2580,7 +2580,7 @@ describe("Phase 2: Sign correction", () => {
         date: "2026-06-19",
         currency: "SGD",
         account_id: "acc-1",
-        account_name: "UOB One",
+        account_name: "UOB Unity",
         budget_id: "primary-budget-id",
         action: "insert",
       };
@@ -2629,7 +2629,7 @@ describe("Phase 2: Sign correction", () => {
           if (name === "search_memory") {
             return {
               results: [
-                { text: "DBS Yuu is a debit card account", score: 0.9 },
+                { text: "DBS Nova is a debit card account", score: 0.9 },
               ],
             };
           }
@@ -2644,7 +2644,7 @@ describe("Phase 2: Sign correction", () => {
         date: "2026-06-19",
         currency: "SGD",
         account_id: "acc-1",
-        account_name: "DBS Yuu",
+        account_name: "DBS Nova",
         budget_id: "primary-budget-id",
         action: "insert",
       };
@@ -2666,7 +2666,7 @@ describe("Phase 2: Sign correction", () => {
         date: "2026-06-19",
         currency: "SGD",
         account_id: "acc-1",
-        account_name: "UOB One",
+        account_name: "UOB Unity",
         budget_id: "primary-budget-id",
         action: "insert",
       };
@@ -2713,14 +2713,14 @@ describe("3-phase entry points", () => {
       date: "2026-06-19",
       currency: "SGD",
       account_id: "acc-1",
-      account_name: "DBS Yuu",
+      account_name: "DBS Nova",
       budget_id: "budget-sgd",
       action: "insert",
       payee_name: "",
       category_id: "",
       raw_description: "S$12.80 at Toast Box",
       notes: "",
-      reasoning: "Matched DBS Yuu",
+      reasoning: "Matched DBS Nova",
       notify_message: "S$12.80 at Toast Box, logged!",
       ...overrides,
     };
@@ -2927,7 +2927,7 @@ describe("3-phase entry points", () => {
       });
       const orch = new AgentOrchestrator(config, tools);
 
-      const phase1Out = fakePhase1Output({ account_name: "DBS Yuu" });
+      const phase1Out = fakePhase1Output({ account_name: "DBS Nova" });
       const phase2Out = fakePhase2Output(phase1Out, {
         payee_name: "Toast Box",
         category_id: "cat-food",
@@ -2941,7 +2941,7 @@ describe("3-phase entry points", () => {
 
       const learnCalls = executeCalls.filter((c) => c.name === "learn_fact");
       expect(learnCalls).toHaveLength(1);
-      expect(learnCalls[0].args.fact).toBe("DBS Yuu is a bank account");
+      expect(learnCalls[0].args.fact).toBe("DBS Nova is a bank account");
     });
 
     it("learns credit card account fact when sign was flipped", async () => {
@@ -2957,7 +2957,7 @@ describe("3-phase entry points", () => {
       });
       const orch = new AgentOrchestrator(config, tools);
 
-      const phase1Out = fakePhase1Output({ account_name: "UOB One" });
+      const phase1Out = fakePhase1Output({ account_name: "UOB Unity" });
       const phase2Out = fakePhase2Output(phase1Out, {
         payee_name: "Insurance",
         category_id: "cat-insurance",
@@ -2971,7 +2971,7 @@ describe("3-phase entry points", () => {
 
       const learnCalls = executeCalls.filter((c) => c.name === "learn_fact");
       expect(learnCalls).toHaveLength(1);
-      expect(learnCalls[0].args.fact).toBe("UOB One is a credit card account");
+      expect(learnCalls[0].args.fact).toBe("UOB Unity is a credit card account");
     });
 
     it("returns error on insert_transaction failure, does not mark read", async () => {
@@ -2988,7 +2988,7 @@ describe("3-phase entry points", () => {
       });
       const orch = new AgentOrchestrator(config, tools);
 
-      const p1 = fakePhase1Output({ account_name: "DBS Yuu" });
+      const p1 = fakePhase1Output({ account_name: "DBS Nova" });
       const p2 = fakePhase2Output(p1);
       orch._runPhase1 = vi.fn().mockResolvedValue(p1);
       orch._resolvePhase2 = vi.fn().mockResolvedValue(p2);

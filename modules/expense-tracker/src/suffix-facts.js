@@ -59,8 +59,8 @@ export function stopwords() {
 }
 
 /** Lowercase word tokens. Letters and digits only, so a symbol such as the
- *  degree sign in "OCBC 90°N" splits the token rather than gluing it, letting
- *  "90n" match "OCBC 90N". */
+ *  degree sign in "Beta 90°N" splits the token rather than gluing it, letting
+ *  "90n" match "Beta 90N". */
 export function accountTokens(text) {
   return String(text || "")
     .toLowerCase()
@@ -71,7 +71,7 @@ export function accountTokens(text) {
     .filter(Boolean);
 }
 
-/** Drop a parenthesised account id, e.g. "DBS Yuu Card (22caada9)". */
+/** Drop a parenthesised account id, e.g. "Epsilon Nova Card (22caada9)". */
 function stripParenthesisedId(text) {
   return String(text || "").replace(/\s*\([^)]*\)\s*/g, " ").trim();
 }
@@ -143,7 +143,7 @@ function refusal(reason) {
  *
  * The retry accepts only an EXACT token match against a live account. A
  * containment retry would turn a named-but-absent account into a live sibling:
- * "UOB One Account" would resolve to "UOB One Card". Keeping this here, rather
+ * "Delta One Account" would resolve to "Delta One Card". Keeping this here, rather
  * than in each caller, is what stops the three readers drifting apart.
  *
  * @returns the same shape as `matchAccountByName`.
@@ -167,18 +167,18 @@ export function resolveFactAccount(accountName, accounts) {
 /**
  * Resolve an account name written by a human or a model to an account.
  *
- * Deterministic word matching, not embeddings: measured against the real
- * account set, embedding similarity rejects names people obviously write
- * ("Yuu Card" 0.746, "UOB Ladies" 0.742, "Altitude" 0.554), and shorter names
- * score worse rather than better.
+ * Deterministic word matching, not embeddings: measured against the live
+ * account set before these fixtures were anonymised, embedding similarity
+ * rejected the three shortest written forms at scores of 0.746, 0.742 and
+ * 0.554, and shorter names score worse rather than better.
  *
  * Order matters. Exact matching runs BEFORE stopword removal, otherwise "DBS"
- * reduces to the same tokens as "DBS Account" and silently resolves to the
+ * reduces to the same tokens as "Epsilon Account" and silently resolves to the
  * wrong account — the exact failure this issue is about.
  *
  * CLOSED accounts stay in the candidate set on purpose. Filtering them out
  * first would let a fact naming a closed account resolve to a live sibling:
- * "DBS Account" would match "DBS Yuu Card" once the generic word "account" is
+ * "Epsilon Account" would match "Epsilon Nova Card" once the generic word "account" is
  * dropped. A closed twin must force ambiguity, and resolving to a closed
  * account is itself a refusal.
  *
@@ -225,15 +225,15 @@ export function matchAccountByName(nameText, accounts) {
 
   // Step 2 — containment over set-difference tokens (token SET, not substring).
   // Plural trimming happens only here, after the exact comparison, because
-  // trimming account names would turn "DBS Account" into "db" and make a bare
+  // trimming account names would turn "Epsilon Account" into "db" and make a bare
   // "DBS" resolve to the wrong account.
   const query = pluralTrim(raw.filter((w) => !ACCOUNT_STOPWORDS.has(w)));
   if (!query.length) return refusal("no distinctive words in the name");
 
   // "account" and "bank" are ordinary words in this domain, so they are dropped
   // as stopwords above — but a name that ends with one is naming a specific
-  // account KIND. Without this guard "DBS Account" would resolve to
-  // "DBS Yuu Card" and "Trust Bank" to "Trust Card" whenever the account the
+  // account KIND. Without this guard "Epsilon Account" would resolve to
+  // "Epsilon Nova Card" and "Zeta Bank" to "Zeta Card" whenever the account the
   // user actually named is absent or closed, which is a wrong-account booking.
   // A plural type word names the same kind, so it is normalised first.
   const kindWord =

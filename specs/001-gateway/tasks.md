@@ -81,7 +81,7 @@
   - Format as Hermes-compatible memory entries (compact, information-dense)
   - Write to `~/.hermes/memories/MEMORY.md`
 - [ ] T025 [US3] Run `scripts/migrate-memory.sh` locally — verify facts appear in Hermes memory
-- [ ] T026 [US3] Test semantic memory: start Hermes locally, ask "what credit card ends with 4605?" → verify it returns UOB Ladies from memory
+- [ ] T026 [US3] Test semantic memory: start Hermes locally, ask "what credit card ends with 4605?" → verify it returns Delta Extra from memory
 - [ ] T027 [US3] Test memory self-learning: process a test email, verify Hermes auto-adds new facts to MEMORY.md
 - [ ] T028 [US3] Save Hermes MEMORY.md + USER.md to `gateway/hermes/memories/` for Docker volume mount
 

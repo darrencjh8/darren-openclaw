@@ -39,14 +39,14 @@ describe("reconcile_transaction — fetch-compose-clear", () => {
 
         const result = await registry._handle_reconcile_transaction({
             ab_transaction_ids: ["id1"],
-            statement_ref: "DBS Yuu | 2026-06-01..2026-06-30",
+            statement_ref: "Epsilon Nova | 2026-06-01..2026-06-30",
             budget_id: "b",
         });
 
         expect(result.cleared).toBe(1);
         expect(posts).toHaveLength(1);
         expect(posts[0].body.notes).toBe(
-            "Merchant: WWW.TADA.G* N01A04E712\nStatement: DBS Yuu | 2026-06-01..2026-06-30\n\nmy note",
+            "Merchant: WWW.TADA.G* N01A04E712\nStatement: Epsilon Nova | 2026-06-01..2026-06-30\n\nmy note",
         );
     });
 

@@ -544,7 +544,7 @@ All logs are JSON-line format written to stdout and consumed via `docker compose
   "data": {
     "amount_cents": -1280,
     "currency": "SGD",
-    "account": "DBS Yuu",
+    "account": "Epsilon Nova",
     "merchant": "Toast Box",
     "transaction_id": "a9e755b1-f94f-45b0-be77-fe83c0180042"
   }

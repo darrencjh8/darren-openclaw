@@ -60,7 +60,7 @@ RULES:
 4b. For bill payment or inter-account transfer alerts with
    "From: [source account]" and "To: [destination]" in the body:
    - Match account_id to the SOURCE account (by account ending/suffix).
-   - Use the destination name as the merchant (e.g., "Altitude", "Yuu", "UOB CREDIT CARDS").
+   - Use the destination name as the merchant (e.g., "Vista", "Nova", "UOB CREDIT CARDS").
    - Amount is always negative (outgoing from source).
 5. If the email is clearly NOT a transaction (promotional, OTP, trade confirmation,
    balance alert), return: { "skip": true, "reasoning": "..." }
@@ -85,12 +85,12 @@ Respond ONLY with valid JSON (no markdown, no code fences):
   "date": "<YYYY-MM-DD from email>",
   "currency": "SGD",
   "account_id": "uuid-from-fetch_context",
-  "account_name": "DBS Yuu",
+  "account_name": "Epsilon Nova",
   "raw_description": "S\$12.80 at Toast Box",
   "raw_merchant_descriptor": "WWW.TADA.G* N01A04E712",
   "notes": "",
   "skip": false,
-  "reasoning": "Matched DBS Yuu account ending 1234",
+  "reasoning": "Matched Epsilon Nova account ending 1234",
   "notify_message": ""
 }`;
 }

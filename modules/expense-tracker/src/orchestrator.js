@@ -281,7 +281,7 @@ export function sanitizeResults(results) {
  *
  * The fact's account name is resolved through the shared account resolver
  * rather than compared literally. That is the whole point of issue #331: a fact written as
- * "Yuu" or "Altitude" must still arm the net, and the bank check must run
+ * "Nova" or "Vista" must still arm the net, and the bank check must run
  * against the resolved account rather than the words the user happened to type.
  * A name that resolves to no account still fails, so this does not loosen the
  * cross-bank guard.
@@ -335,7 +335,7 @@ export const MOVEMENT_LIKE =
  * the memory-aware account check specifically, which SUPPRESSES a safety net
  * rather than merely attempting an extra extraction pass. MOVEMENT_LIKE's
  * broader purchase-adjacent phrases ("using your", "was paid", "you've
- * received") also match ordinary card/wallet purchase alerts (e.g. Ryt Bank's
+ * received") also match ordinary card/wallet purchase alerts (e.g. Alpha Bank's
  * "RM200.00 was paid at MERCHANT using your Main Account on ..."), where the
  * merchant is a real merchant, not another tracked account — the memory
  * check must stay active for those.
@@ -1294,16 +1294,16 @@ export class AgentOrchestrator {
             });
             // Compare the fact's entity to this account with the SAME token
             // normaliser the resolver uses. Token overlap was wrong in both
-            // directions before: a stored short form ("DBS Yuu" against
-            // "DBS Yuu Card") was refused, losing the sign flip, while a
-            // sibling sharing one generic word ("Trust Bank" vs "Trust Card",
+            // directions before: a stored short form ("Epsilon Nova" against
+            // "Epsilon Nova Card") was refused, losing the sign flip, while a
+            // sibling sharing one generic word ("Zeta Bank" vs "Zeta Card",
             // both reducing to "trust") could be accepted.
             const wanted = accountTokens(
                 String(accountName).replace(/\s+account$/i, ""),
             );
             for (const r of mem?.results || []) {
                 // Non-greedy type so an entity containing the word "card"
-                // ("DBS Yuu Card is a credit card") still parses intact; a
+                // ("Epsilon Nova Card is a credit card") still parses intact; a
                 // trailing filler "account" is stripped from the TYPE below.
                 const m = (r.text || "").match(
                     /^(.+?)\s+is\s+(?:a|an)\s+(.+?)(?:\s+account)?\s*$/i,
@@ -1456,7 +1456,7 @@ export class AgentOrchestrator {
 
         // Step 2: Category resolution.
         // Never categorize own-account transfers: payee→category memory facts
-        // describe card spend ("DBS Yuu Card maps to Food category"), not a
+        // describe card spend ("Epsilon Nova Card maps to Food category"), not a
         // credit-card repayment between the user's own accounts.
         if (!output._is_transfer && !output.category_id) {
             let liveCategories = [];
