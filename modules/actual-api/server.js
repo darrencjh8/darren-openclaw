@@ -218,9 +218,8 @@ function getBudgetId(req) {
  * plain integer string whose value is a safe integer. Number() alone would also
  * accept true, an array like [5], "0x10", and "1e3", which would book 1, 5,
  * 16, or 1000 cents for input nobody sent as an amount. A nullish or blank
- * value is rejected too, because Number(null) and Number("") are both 0, and
- * the value
- * must be a safe integer because a longer digit string coerces to a rounded
+ * value is rejected too, because Number(null) and Number("") are both 0. The
+ * value must be a safe integer because a longer digit string coerces to a rounded
  * number. Both the request guard and the persisted-row parse use this, so the
  * two cannot drift apart.
  */
@@ -644,7 +643,8 @@ app.patch("/transactions/:id", async (req, res) => {
         const fields = {};
         if (req.body.payee !== undefined) fields.payee = req.body.payee;
         if (req.body.notes !== undefined) fields.notes = req.body.notes;
-        if (req.body.amount !== undefined) fields.amount = req.body.amount;
+        if (req.body.amount !== undefined)
+            fields.amount = Number(req.body.amount);
         if (req.body.date !== undefined) fields.date = req.body.date;
         if (req.body.category !== undefined)
             fields.category = req.body.category;

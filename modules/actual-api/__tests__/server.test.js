@@ -432,6 +432,26 @@ describe("Route handlers", () => {
             });
         });
 
+        it("coerces a plain integer string amount before updating", async () => {
+            const handler = findHandler("patch", "/transactions/:id");
+            const req = mockReq({
+                params: { id: "txn-string-amount" },
+                body: { amount: "500" },
+            });
+            const res = mockRes();
+
+            await handler(req, res);
+
+            expect(actual.updateTransaction).toHaveBeenCalledWith(
+                "txn-string-amount",
+                { amount: 500 },
+            );
+            expect(res.json).toHaveBeenCalledWith({
+                status: "updated",
+                id: "txn-string-amount",
+            });
+        });
+
         it("returns { status: 'updated', id } on success", async () => {
             const handler = findHandler("patch", "/transactions/:id");
             const req = mockReq({
