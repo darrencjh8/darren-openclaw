@@ -457,6 +457,49 @@ PY
 [ "$null_memory_status" -eq 0 ] && [ "$null_memory_result" = "pass" ] && ok "null reviewer memory migrates safely" || nope "null reviewer memory migration" "status=$null_memory_status result=$null_memory_result output=$null_memory_output"
 
 echo ""
+echo "=== hermes config seeding ==="
+
+# The seed script copies the baked canonical config into the live data dir, so
+# the seeded copy inherits whatever compression settings are baked here. Run the
+# real copy line against a fixture and parse the COPIED file, so the assertion
+# fails if the seeded output ever loses the compaction block.
+seed_cp_line=$(grep -F 'cp /opt/hermes-defaults/config.yaml /opt/data/config.yaml' "$SEED_SCRIPT") || seed_cp_line=""
+[ -n "$seed_cp_line" ] \
+    && ok "seed: copies baked config.yaml to /opt/data/config.yaml" \
+    || nope "seed: baked config copy" "expected 'cp /opt/hermes-defaults/config.yaml /opt/data/config.yaml'"
+
+mkdir -p "$TMPDIR/seed/hermes-defaults" "$TMPDIR/seed/data"
+cp "$SCRIPT_DIR/../config.yaml" "$TMPDIR/seed/hermes-defaults/config.yaml"
+seed_cp_line=${seed_cp_line//\/opt\/hermes-defaults/$TMPDIR/seed/hermes-defaults}
+seed_cp_line=${seed_cp_line//\/opt\/data/$TMPDIR/seed/data}
+bash -c "$seed_cp_line"
+seed_config="$TMPDIR/seed/data/config.yaml"
+
+seeded_threshold_tokens=$(python3 - "$seed_config" <<'PY'
+import sys
+import yaml
+
+config = yaml.safe_load(open(sys.argv[1], encoding="utf-8"))
+print(config["compression"]["threshold_tokens"])
+PY
+)
+[ "$seeded_threshold_tokens" = "300000" ] \
+    && ok "config: compression.threshold_tokens is 300000 (seeded copy inherits 300k)" \
+    || nope "compression.threshold_tokens" "expected 300000, got $seeded_threshold_tokens"
+
+seeded_threshold=$(python3 - "$seed_config" <<'PY'
+import sys
+import yaml
+
+config = yaml.safe_load(open(sys.argv[1], encoding="utf-8"))
+print(config["compression"]["threshold"])
+PY
+)
+[ "$seeded_threshold" = "0.5" ] \
+    && ok "config: compression.threshold is 0.50" \
+    || nope "compression.threshold" "expected 0.5, got $seeded_threshold"
+
+echo ""
 echo "=== opencode config seeding (merge, not clobber) ==="
 
 # The seed script must target BOTH runtime homes that opencode may read.

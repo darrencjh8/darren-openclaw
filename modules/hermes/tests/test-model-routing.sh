@@ -56,6 +56,15 @@ assert config["model"].get("default") == "auto-thinking"
 assert "base_url" not in config["model"]
 assert "api_key" not in config["model"]
 assert config["agent"]["reasoning_effort"] == "low"
+assert config["compression"]["threshold_tokens"] == 300000, (
+    f"compression.threshold_tokens: expected 300000, got {config['compression'].get('threshold_tokens')!r}"
+)
+assert config["compression"]["threshold"] == 0.50, (
+    f"compression.threshold: expected 0.50, got {config['compression'].get('threshold')!r}"
+)
+assert config["compression"]["enabled"] is True, (
+    f"compression.enabled: expected True, got {config['compression'].get('enabled')!r}"
+)
 assert config["fallback_providers"] == [deepseek_fallback], (
     "main fallback_providers must be deepseek-flash"
 )
