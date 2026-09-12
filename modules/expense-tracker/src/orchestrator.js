@@ -286,7 +286,7 @@ export function hasUsableSuffixFact(facts, emailText, senderBank, liveAccounts =
         const parsed = parseSuffixFact(f.text);
         if (!parsed) return false;
         const resolved = resolveFactAccount(parsed.accountName, liveAccounts);
-        if (!resolved) return false;
+        if (!resolved || !resolved.matched) return false;
         if (!nameMatchesBank(resolved.name, senderBank)) return false;
         return new RegExp(`\\b${parsed.suffix}\\b`).test(emailText);
     });
@@ -1089,7 +1089,7 @@ export class AgentOrchestrator {
                             parsed.accountName,
                             liveAccounts,
                         );
-                        if (!resolved) {
+                        if (!resolved || !resolved.matched) {
                             logger.info({
                                 event: "suffix_fact_unresolved",
                                 suffix,
@@ -1268,25 +1268,6 @@ export class AgentOrchestrator {
     // ═══════════════════════════════════════════════════════════════
     // Phase 2: Resolution (code-driven, LLM-assisted)
     // ═══════════════════════════════════════════════════════════════
-
-    /**
-     * Live accounts for a budget, or [] when unavailable. Used to resolve an
-     * account name to a real account before comparing identity.
-     */
-    async _liveAccounts(budgetId) {
-        for (const arg of [{ budget_id: budgetId }, {}]) {
-            try {
-                const ctx = await this._tools.executeTool("fetch_context", arg);
-                const accounts = (ctx?.accounts || []).filter(
-                    (a) => a && !a.closed,
-                );
-                if (accounts.length) return accounts;
-            } catch {
-                // try the next shape
-            }
-        }
-        return [];
-    }
 
     async _detectAccountType(accountName) {
         if (!accountName) return "bank";
