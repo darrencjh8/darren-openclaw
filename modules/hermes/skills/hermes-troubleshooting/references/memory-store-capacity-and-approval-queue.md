@@ -3,13 +3,17 @@
 Diagnostic reference for "how do I improve / expand my memory?" questions. Companion to
 the two memory sections in `SKILL.md`.
 
-## The three stores
+## The stores
 
-| Store | File | Default cap | Override key |
+| Store | File | Cap | Override key |
 |---|---|---|---|
-| Built-in memory | `<HERMES_HOME>/memories/MEMORY.md` | 2200 chars | `memory.memory_char_limit` |
-| User profile | `<HERMES_HOME>/memories/USER.md` | 1375 chars | `memory.user_char_limit` |
+| Built-in memory | `<HERMES_HOME>/memories/MEMORY.md` | upstream default 2200; **this deployment 2800** | `memory.memory_char_limit` |
+| User profile | `<HERMES_HOME>/memories/USER.md` | upstream default 1375; this deployment 1375 | `memory.user_char_limit` |
 | MCP facts (per module) | e.g. `<data>/MEMORY.md` | module-defined (expense-tracker: 300, auto-compacts to 250) | module config |
+| Topic files (tier 2) | `<HERMES_HOME>/memories/topics/*.md` | uncapped | — |
+
+The judge prompt quotes the configured caps, which it reads from the seeded
+`config.yaml` at seed time — the numbers are not hardcoded in the prompt text.
 
 Caps are **soft** — `MemoryStore.__init__` takes `memory_char_limit` / `user_char_limit`,
 loaded from config by both the live agent (`agent/agent_init.py`) and the agentless path
@@ -93,6 +97,36 @@ for f in sorted(glob.glob("/opt/data/pending/memory/*.json"), key=os.path.getmti
    `replace` alongside `add` so the net char delta is small or negative.
 5. **Show the proposed diff before writing** if the user is still in the loop — for a
    90+ op queue this is a reviewable change, not a housekeeping detail.
+
+## Tier 2 — topic files (`/opt/data/memories/topics/`)
+
+The always-on core is capped; sessions and skills cover procedures and history. Durable
+**facts** that still do not fit the core go to topic files, one file per domain
+(`infra.md`, `accounts.md`, `expenses.md`, `prefs.md`), indexed by `INDEX.md`.
+
+Rules that keep this from becoming a second junk drawer:
+
+- One fact per line, with **aliases on the label**:
+  `Groceries / supermarket / NTUC FairPrice / Cold Storage -> payee Groceries`. Aliases are
+  what let keyword search (`search_files`) cover near-synonyms without an embedding model.
+- The agent searches this directory before answering a recall question; the seed
+  writes a pointer line into `MEMORY.md` once (idempotent, and skipped with a report if
+  the core is full) so a session that never loads this skill still knows the directory
+  exists.
+- When the triage judge files a fact here it **discards** that queue record in the same run.
+  Filing *and* approving produces two copies that drift; never do both.
+- Read the queue with `memory-triage.sh list --full` before filing: the default `list`
+  truncates each op at 240 characters (`memory_triage.py`, `_summarize`).
+- **Backup and restore are split.** `memory-backup.sh` copies `MEMORY.md`, `USER.md` and
+  `topics/*.md` (the two stores are copied by name, so the topics copy is an explicit
+  block). The triage snapshot/restore covers `MEMORY.md`/`USER.md` only — a `restore` will
+  **not** roll topic files back; the git backup (every 6 h) is their restore path.
+- Address facts that look like credentials or env assignments can be refused by the skill
+  content scanner; expect a reported failure rather than a silent skip.
+
+Monthly: count entries in `MISSES.md`. If misses are paraphrase misses that aliases could
+not fix, that count — not a vendor benchmark — is the trigger for adding a semantic index
+over these same files.
 
 ## Prevention
 

@@ -63,6 +63,45 @@ expected="https://abc_ghs_token@example.com/owner/repo"
     || nope "ghs_ not at start" "got: $result"
 
 echo ""
+echo "=== topic files are copied into the backup repo ==="
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+TMPDIR=$(mktemp -d)
+trap 'rm -rf "$TMPDIR"' EXIT
+backup_script="$SCRIPT_DIR/../scripts/memory-backup.sh"
+topic_src="$TMPDIR/memories"
+topic_clone="$TMPDIR/memories-backup"
+mkdir -p "$topic_src/topics" "$topic_clone/.git" "$TMPDIR/stubbin"
+printf 'core fact\n' > "$topic_src/MEMORY.md"
+printf 'user fact\n' > "$topic_src/USER.md"
+printf 'card 4605 -> UOB Ladies\n' > "$topic_src/topics/accounts.md"
+printf 'NTUC FairPrice -> Groceries\n' > "$topic_src/topics/expenses.md"
+
+# Stub git so the copy loop runs without a real repository or network access.
+cat > "$TMPDIR/stubbin/git" <<'STUB'
+#!/bin/sh
+exit 0
+STUB
+chmod +x "$TMPDIR/stubbin/git"
+
+MEMORY_REPO_URL="https://example.com/owner/repo" \
+GITHUB_TOKEN="ghp_test_token" \
+MEMORY_SRC_DIR="$topic_src" \
+MEMORY_CLONE_DIR="$topic_clone" \
+PATH="$TMPDIR/stubbin:$PATH" \
+    bash "$backup_script" >/dev/null 2>&1 || true
+
+[ -f "$topic_clone/topics/accounts.md" ] && ok "topics/accounts.md copied" \
+    || nope "topics copied" "accounts.md missing from $topic_clone/topics"
+[ -f "$topic_clone/topics/expenses.md" ] && ok "topics/expenses.md copied" \
+    || nope "topics copied" "expenses.md missing from $topic_clone/topics"
+grep -q "card 4605" "$topic_clone/topics/accounts.md" 2>/dev/null \
+    && ok "topic file content preserved" \
+    || nope "topic content" "content not preserved"
+[ -f "$topic_clone/MEMORY.md" ] && ok "MEMORY.md still copied" \
+    || nope "MEMORY.md copy" "regression: core store not copied"
+
+echo ""
 echo "========================================="
 echo -e " Results: ${GREEN}$pass passed${NC}, ${RED}$fail failed${NC}"
 echo "========================================="

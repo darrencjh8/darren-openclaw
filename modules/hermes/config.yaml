@@ -47,6 +47,20 @@ memory:
     memory_enabled: true
     user_profile_enabled: true
     write_approval: true
+    # Headroom for the always-on core, not a target size. Durable facts that do not
+    # fit the core belong in /opt/data/memories/topics/*.md, which the triage judge
+    # and the troubleshooting skill reference describe. This limit exists so a batch
+    # of adds and removes from different sessions can still land (the cap is checked
+    # against the final state of a batch).
+    memory_char_limit: 2800
+
+sessions:
+    # Ended sessions are the only un-filed episodic record, so keep them searchable
+    # longer than the 90-day default. state.db is index-dominated (~600 MB at 90
+    # days); if it passes ~2 GB, lower retention_days back to 90. auto_prune stays on
+    # so the database cannot grow without bound.
+    auto_prune: true
+    retention_days: 180
 
 skills:
     guard_agent_created: true

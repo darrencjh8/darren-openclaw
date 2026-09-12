@@ -499,6 +499,21 @@ PY
     && ok "config: compression.threshold is 0.50" \
     || nope "compression.threshold" "expected 0.5, got $seeded_threshold"
 
+# The memory core limit and session retention are the knobs the tier-2 design
+# depends on: the judge prompt quotes the cap and retention decides how long the
+# un-filed episodic record survives. Assert the seeded copy, not the repo file.
+seeded_memory_limits=$(python3 - "$seed_config" <<'PY'
+import sys
+import yaml
+
+config = yaml.safe_load(open(sys.argv[1], encoding="utf-8"))
+print(config["memory"]["memory_char_limit"], config["sessions"]["retention_days"], config["sessions"]["auto_prune"])
+PY
+)
+[ "$seeded_memory_limits" = "2800 180 True" ] \
+    && ok "config: memory_char_limit 2800 + sessions.retention_days 180 + auto_prune on" \
+    || nope "memory/sessions config" "expected '2800 180 True', got '$seeded_memory_limits'"
+
 echo ""
 echo "=== opencode config seeding (merge, not clobber) ==="
 
@@ -625,6 +640,8 @@ checks = {
     "safe_rollback": "memory-triage.sh restore" in prompt,
     "cap": "--max-records" in prompt or "40 records" in prompt,
     "audit": "memory-triage-audit.jsonl" in prompt,
+    "topic_rule": "memories/topics" in prompt,
+    "untruncated_list": "list --full" in prompt,
 }
 bad = [k for k, v in checks.items() if not v]
 print("pass" if not bad else "fail " + repr(bad))
@@ -639,6 +656,128 @@ esac
 python3 -c "$mt_block_tmp" >/dev/null 2>&1
 mt2=$(python3 -c "import json;print(len(json.load(open('$TMPDIR/cron/jobs.json'))['jobs']))")
 [ "$mt2" = "1" ] && ok "idempotent: still 1 job on re-seed" || nope "memory-triage idempotent" "got $mt2"
+
+# Migration: an install that already has the job must get the managed fields updated
+# in place. The seed only appends when the job is missing, so a prompt change that
+# relied on the append path would never reach a running deployment.
+echo ""
+echo "=== memory-triage prompt migration (existing installs) ==="
+
+rm -rf "$TMPDIR/cron-legacy"
+mkdir -p "$TMPDIR/cron-legacy"
+cat > "$TMPDIR/triage-config.yaml" <<'CFG'
+memory:
+    memory_char_limit: 2800
+    user_char_limit: 1375
+CFG
+python3 - "$TMPDIR/cron-legacy/jobs.json" <<'PY'
+import json, sys
+legacy = "Triage the Hermes memory write-approval queue on this machine (HERMES_HOME=/opt/data).\n\nlegacy prompt without the topic-file rule"
+json.dump({"jobs": [{
+    "id": "legacy1234",
+    "name": "memory-triage",
+    "prompt": legacy,
+    "skills": ["hermes-troubleshooting"],
+    "skill": "hermes-troubleshooting",
+    "schedule": {"kind": "cron", "expr": "30 3 * * *", "display": "30 3 * * *"},
+    "schedule_display": "30 3 * * *",
+    "enabled": False,
+    "deliver": "local",
+    "context_from": ["self"],
+    "created_at": "2026-01-01T00:00:00+00:00",
+    "user_note": "keep me",
+}]}, open(sys.argv[1], "w"))
+PY
+
+mt_legacy_tmp=${mt_block//\/opt\/data\/cron\/jobs.json/$TMPDIR\/cron-legacy\/jobs.json}
+mt_legacy_tmp=${mt_legacy_tmp//\/opt\/data\/config.yaml/$TMPDIR\/triage-config.yaml}
+mt_migrate_out=$(python3 -c "$mt_legacy_tmp" 2>&1)
+
+mt_migrate=$(python3 - "$TMPDIR/cron-legacy/jobs.json" <<'PY'
+import json, sys
+jobs = json.load(open(sys.argv[1]))["jobs"]
+if len(jobs) != 1:
+    print("fail count=%d" % len(jobs)); sys.exit()
+j = jobs[0]
+prompt = j.get("prompt") or ""
+checks = {
+    "id_preserved": j.get("id") == "legacy1234",
+    "created_at_preserved": j.get("created_at") == "2026-01-01T00:00:00+00:00",
+    "user_field_preserved": j.get("user_note") == "keep me",
+    "prompt_updated": "memories/topics" in prompt,
+    "untruncated_list": "list --full" in prompt,
+    "schedule_not_reverted": j.get("schedule_display") == "30 3 * * *",
+    "disabled_stays_disabled": j.get("enabled") is False,
+    "deliver_not_reverted": j.get("deliver") == "local",
+    "cap_from_config": "memory 2800 chars" in prompt,
+}
+bad = [k for k, v in checks.items() if not v]
+print("pass" if not bad else "fail " + repr(bad))
+PY
+)
+case "$mt_migrate" in
+    pass) ok "existing job migrated in place (prompt only; schedule/enabled/deliver/user fields preserved)" ;;
+    *) nope "memory-triage migration" "$mt_migrate" ;;
+esac
+case "$mt_migrate_out" in
+    *migrated*) ok "migration is reported" ;;
+    *) nope "migration report" "got: $mt_migrate_out" ;;
+esac
+
+# The routing rule must name the topic-file directory the seed creates.
+grep -q "/opt/data/memories/topics" "$SEED_SCRIPT" \
+    && ok "seed creates the topic-file directory" \
+    || nope "topic-file directory" "seed does not reference /opt/data/memories/topics"
+
+# Without a pointer in the always-on core, tier 2 is write-only: a fresh session
+# that has not loaded the troubleshooting skill has no cue the files exist.
+echo ""
+echo "=== MEMORY.md topic-directory pointer ==="
+
+ptr_block=$(python3 - "$SEED_SCRIPT" <<'PY'
+import re, sys
+content = open(sys.argv[1], encoding="utf-8").read()
+blocks = re.findall(r"<<'PYPTR'[^\n]*\n(.*?)\nPYPTR", content, re.DOTALL)
+print(blocks[-1] if blocks else "")
+PY
+)
+[ -n "$ptr_block" ] && ok "seed has a MEMORY.md pointer block" || nope "pointer block" "not found"
+
+mkdir -p "$TMPDIR/memories"
+printf 'existing core line\n' > "$TMPDIR/memories/MEMORY.md"
+ptr_tmp=${ptr_block//\/opt\/data\/memories\/MEMORY.md/$TMPDIR\/memories\/MEMORY.md}
+ptr_tmp=${ptr_tmp//\/opt\/data\/config.yaml/$TMPDIR\/triage-config.yaml}
+python3 -c "$ptr_tmp" >/dev/null 2>&1
+
+grep -q "memories/topics" "$TMPDIR/memories/MEMORY.md" \
+    && ok "pointer added to MEMORY.md" \
+    || nope "pointer content" "MEMORY.md has no topic-directory pointer"
+grep -q "existing core line" "$TMPDIR/memories/MEMORY.md" \
+    && ok "pointer does not clobber existing entries" \
+    || nope "pointer clobber" "existing entry lost"
+
+python3 -c "$ptr_tmp" >/dev/null 2>&1
+ptr_count=$(grep -c "memories/topics" "$TMPDIR/memories/MEMORY.md")
+[ "$ptr_count" = "1" ] && ok "pointer is idempotent (added once)" || nope "pointer idempotency" "occurrences: $ptr_count"
+
+# A full core must not be pushed over its cap by the pointer.
+mkdir -p "$TMPDIR/fullmem"
+python3 - "$TMPDIR/fullmem/MEMORY.md" <<'PY'
+import sys
+open(sys.argv[1], "w").write("x" * 200 + "\n")
+PY
+cat > "$TMPDIR/tiny-config.yaml" <<'CFG'
+memory:
+    memory_char_limit: 100
+CFG
+ptr_full_tmp=${ptr_block//\/opt\/data\/memories\/MEMORY.md/$TMPDIR\/fullmem\/MEMORY.md}
+ptr_full_tmp=${ptr_full_tmp//\/opt\/data\/config.yaml/$TMPDIR\/tiny-config.yaml}
+ptr_full_out=$(python3 -c "$ptr_full_tmp" 2>&1)
+if grep -q "memories/topics" "$TMPDIR/fullmem/MEMORY.md"; then
+    nope "pointer cap guard" "pointer written past the configured limit"
+else
+    ok "pointer refused when the core is full (reports it)"
+fi
 
 # Reinstall survival: scripts + skill must be baked in the repo (image) so the
 # seed can restore them.
