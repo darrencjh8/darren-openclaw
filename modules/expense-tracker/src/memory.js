@@ -27,20 +27,24 @@ const MEMORY_TEMPLATE = `# Long-Term Memory
 
 `;
 
-/** @type {Array<{re: RegExp, rel: string}>} */
-const STRUCTURED_PATTERNS = [
-  {
-    re: /^(.+?)\s+merchant\s+maps\s+to\s+(.+?)\s+payee$/i,
-    rel: "merchant->payee",
-  },
-  { re: /^(.+?)\s+maps\s+to\s+(.+?)\s+payee$/i, rel: "->payee" },
-  { re: /^(.+?)\s+maps\s+to\s+(.+?)\s+category$/i, rel: "->category" },
-  { re: /^(.+?)\s+is\s+(?:a|an)\s+(.+?)\s+account$/i, rel: "is-account" },
-  {
-    re: /^(?:Card|Account)\s+ending\s+(\S+)\s+belongs\s+to\s+(.+?)$/i,
-    rel: "suffix->account",
-  },
-];
+// Imported for local use and re-exported, so fact handling has one import site.
+import {
+  CANONICAL_SUFFIX_RE,
+  STRUCTURED_PATTERNS,
+  canonicalSuffixFact,
+  matchAccountByName,
+  parseSuffixFact,
+  stopwords,
+} from "./suffix-facts.js";
+
+export {
+  CANONICAL_SUFFIX_RE,
+  STRUCTURED_PATTERNS,
+  canonicalSuffixFact,
+  matchAccountByName,
+  parseSuffixFact,
+  stopwords,
+};
 
 /** Semantic-dedup cosine-similarity threshold for free-form facts. */
 const SEMANTIC_THRESHOLD = 0.88;
@@ -335,6 +339,13 @@ export class MemoryStore {
    */
   async cleanup() {
     const before = this._facts.length;
+    let changed = false;
+
+    // Step 0: canonicalise suffix facts. Duplicates are NOT dropped here —
+    // dropping one spelling before contradiction resolution would change which
+    // conflicting mapping survives (last-wins runs over the remaining lines).
+    const normalised = this._canonicaliseSuffixFacts();
+    if (normalised.count > 0) changed = true;
 
     // Step 1: Resolve structured contradictions — newest wins
     const structuredContradictions = this._resolveContradictions();
@@ -375,15 +386,85 @@ export class MemoryStore {
     }
 
     this._rebuildIndices();
-    this._rewriteFile();
+    // Exact duplicates of one mapping are only safe to drop AFTER
+    // contradiction resolution, so the last-wins choice was already made from
+    // the full line set.
+    const dropped = this._dropDuplicateSuffixFacts();
+    if (dropped > 0) {
+      changed = true;
+      // The drop removed facts, so the structured index still holds entries
+      // whose `index` points past the new array. Rebuilding here is required:
+      // `update()` trusts that index and would otherwise overwrite an
+      // unrelated fact.
+      this._rebuildIndices();
+    }
+    // Rewriting unconditionally bumps the file mtime on every run, which races
+    // the 6-hourly memory backup and makes "did cleanup change anything?"
+    // unanswerable. Only write when something actually changed.
+    if (changed || before !== this._facts.length) this._rewriteFile();
 
     const after = this._facts.length;
     return {
       before,
       after,
       removed: before - after,
+      normalised: normalised.count,
       contradictions: structuredContradictions,
     };
+  }
+
+  /**
+   * Remove repeated spellings of one mapping, comparing the PARSED
+   * (suffix, account) pair rather than the raw text: two lines can read
+   * differently and still mean one mapping.
+   *
+   * Deliberately separate from canonicalisation so it cannot influence which
+   * conflicting mapping wins; call it after `_resolveContradictions`.
+   *
+   * @returns {number} how many duplicate lines were dropped.
+   */
+  _dropDuplicateSuffixFacts() {
+    const seen = new Set();
+    const kept = [];
+    let dropped = 0;
+    for (const fact of this._facts) {
+      const parsed = parseSuffixFact(fact);
+      if (!parsed) {
+        kept.push(fact);
+        continue;
+      }
+      const key = `${parsed.suffix}|||${parsed.accountName.toLowerCase()}`;
+      if (seen.has(key)) {
+        dropped++;
+        continue;
+      }
+      seen.add(key);
+      kept.push(fact);
+    }
+    this._facts = kept;
+    return dropped;
+  }
+
+  /**
+   * Rewrite suffix facts to their canonical form.
+   *
+   * Tolerance reads a "Card/account …" or trailing-full-stop phrasing but never
+   * rewrites it, so without this pass the file keeps the spelling a user or
+   * Hermes happened to produce. Comparison is on the raw line, so an already
+   * canonical fact is left untouched and repeated runs are no-ops.
+   *
+   * @returns {{count: number}} how many lines were rewritten.
+   */
+  _canonicaliseSuffixFacts() {
+    let count = 0;
+    this._facts = this._facts.map((fact) => {
+      const parsed = parseSuffixFact(fact);
+      if (!parsed) return fact;
+      const canonical = canonicalSuffixFact(parsed);
+      if (canonical !== fact) count++;
+      return canonical;
+    });
+    return { count };
   }
 
   /**

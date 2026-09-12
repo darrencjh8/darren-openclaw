@@ -249,7 +249,7 @@ const TOOLS = [
   {
     name: "cleanup_facts",
     description:
-      "Clean MEMORY.md by removing duplicate and contradictory facts. Uses structured parsing to detect same-entity different-value conflicts (newest wins) and semantic similarity for free-form facts. Returns {before, after, removed, contradictions} for review.",
+      "Clean MEMORY.md: rewrite card/account suffix facts to canonical form, drop duplicate spellings of one mapping, resolve same-entity different-value conflicts (newest wins) and deduplicate free-form facts by semantic similarity. Returns {before, after, removed, normalised, contradictions} for review. A non-zero normalised count means suffix facts were rewritten, so the file changed.",
     schema: { type: "object", properties: {} },
   },
   {
@@ -920,6 +920,7 @@ export class ToolRegistry {
         before: 0,
         after: 0,
         removed: 0,
+        normalised: 0,
         contradictions: [],
       };
     return this._memory.cleanup();

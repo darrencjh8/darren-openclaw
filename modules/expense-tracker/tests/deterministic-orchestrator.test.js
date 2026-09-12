@@ -1957,15 +1957,44 @@ describe("suffix-override helpers (unit)", () => {
   it("hasUsableSuffixFact: score/bank/suffix gates", async () => {
     const { hasUsableSuffixFact } = await import("../src/orchestrator.js");
     const email = "From: DBS/POSB card ending 3255 To: BUS/MRT";
+    // Resolution needs the live account list; a name that is not a live
+    // account must never count as evidence.
+    const liveAccounts = [
+      { id: "dbs-yuu", name: "DBS Yuu Card", closed: false },
+      { id: "dbs-account", name: "DBS Account", closed: false },
+      { id: "uob-ladies", name: "UOB Ladies Card", closed: false },
+    ];
     const usable = [
       { text: "Card ending 3255 belongs to DBS Yuu Card", score: 1 },
     ];
-    expect(hasUsableSuffixFact(usable, email, "DBS")).toBe(true);
+    expect(hasUsableSuffixFact(usable, email, "DBS", liveAccounts)).toBe(true);
+    // Issue #331 end state: a fact written in the user's own words arms the net
+    // because the name resolves to a live DBS account.
+    expect(
+      hasUsableSuffixFact(
+        [{ text: "Card ending 3255 belongs to Yuu", score: 1 }],
+        email,
+        "DBS",
+        liveAccounts,
+      ),
+    ).toBe(true);
+    // A slash-prefixed, full-stop-terminated fact is now readable too.
+    expect(
+      hasUsableSuffixFact(
+        [{ text: "Card/account ending 3255 belongs to DBS Yuu Card.", score: 1 }],
+        email,
+        "DBS",
+        liveAccounts,
+      ),
+    ).toBe(true);
+    // Without the account list there is nothing to resolve against.
+    expect(hasUsableSuffixFact(usable, email, "DBS")).toBe(false);
     expect(
       hasUsableSuffixFact(
         [{ text: "Card ending 3255 belongs to DBS Yuu Card", score: 0.4 }],
         email,
         "DBS",
+        liveAccounts,
       ),
     ).toBe(false);
     expect(
@@ -1973,13 +2002,16 @@ describe("suffix-override helpers (unit)", () => {
         [{ text: "Card ending 3255 belongs to UOB Ladies Card", score: 1 }],
         email,
         "DBS",
+        liveAccounts,
       ),
     ).toBe(false);
     expect(
+      // A name that resolves to no live account must not count as evidence.
       hasUsableSuffixFact(
-        [{ text: "Card ending 3255 belongs to Yuu Card", score: 1 }],
+        [{ text: "Card ending 3255 belongs to Nonexistent Card", score: 1 }],
         email,
         "DBS",
+        liveAccounts,
       ),
     ).toBe(false);
     expect(
@@ -1987,6 +2019,7 @@ describe("suffix-override helpers (unit)", () => {
         [{ text: "Card ending 9001 belongs to DBS Yuu Card", score: 1 }],
         email,
         "DBS",
+        liveAccounts,
       ),
     ).toBe(false);
     expect(hasUsableSuffixFact([], email, "DBS")).toBe(false);
@@ -2369,6 +2402,29 @@ describe("Phase 2: Sign correction", () => {
 
       const result = await orch._detectAccountType("DBS Yuu Card");
       expect(result).toBe("credit card");
+    });
+
+    it("ignores a SIBLING account's type fact (issue #331 review)", async () => {
+      const { AgentOrchestrator } = await import("../src/orchestrator.js");
+      const config = makeConfig();
+      const tools = makeTools({
+        executeTool: vi.fn(async (name) => {
+          if (name === "search_memory")
+            return {
+              results: [
+                // Semantic fallback can surface this for a "DBS Account" query.
+                { text: "DBS Yuu Card is a credit card account", score: 1.0 },
+              ],
+            };
+          return true;
+        }),
+      });
+      const orch = new AgentOrchestrator(config, tools);
+
+      // "DBS Account" reduces to the single token "dbs"; a sibling card fact
+      // must not be accepted as this account's type, because the type drives
+      // the credit-card sign flip.
+      await expect(orch._detectAccountType("DBS Account")).resolves.toBe("bank");
     });
 
     it("returns 'bank' from memory fact without 'account' suffix", async () => {

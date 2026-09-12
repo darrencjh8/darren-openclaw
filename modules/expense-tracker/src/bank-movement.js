@@ -1,3 +1,5 @@
+import { parseSuffixFact, resolveFactAccount } from "./suffix-facts.js";
+
 const BANK_ALIASES = [
   ["OCBC", /\b(?:ocbc|oversea\s*chinese\s*banking)\b/i],
   ["DBS", /\b(?:dbs|posb)\b/i],
@@ -286,22 +288,22 @@ export function identityMappingsFromFacts(facts, accounts) {
   const mappings = { suffix: new Map(), recipient: new Map() };
   for (const fact of facts || []) {
     const text = typeof fact === "string" ? fact : fact?.text || "";
-    const suffixMatch = text.match(/^(?:Account|Card) ending\s+(\d{4,})\s+belongs to\s+(.+)$/i);
-    if (suffixMatch) {
-      // Match the full name first: real account names may themselves end in
-      // "Account" (e.g. "DBS Account") and must not be truncated. A trailing
-      // filler "account" word ("belongs to X account") is only used as a
-      // fallback when the full form has no account match.
-      const rawName = suffixMatch[2].trim();
-      const candidates = [rawName];
-      if (/\s+account$/i.test(rawName)) candidates.push(rawName.replace(/\s+account$/i, ""));
-      const account = candidates
-        .map((name) => accounts.find((a) => a.name?.toLowerCase() === name.toLowerCase() && !a.closed))
-        .find(Boolean);
+    const parsed = parseSuffixFact(text);
+    if (parsed) {
+      // One shared resolver: normal matching, then a bounded filler-word
+      // retry that only accepts an exact account name. Never containment, so a
+      // named-but-absent account cannot resolve to a live sibling.
+      const resolution = resolveFactAccount(parsed.accountName, accounts);
+      const account = resolution.matched
+        ? accounts.find((a) => a.id === resolution.id)
+        : null;
       if (account) {
-        const known = mappings.suffix.get(suffixMatch[1]);
-        if (!mappings.suffix.has(suffixMatch[1])) mappings.suffix.set(suffixMatch[1], account);
-        else if (known && known.id !== account.id) mappings.suffix.set(suffixMatch[1], null);
+        const known = mappings.suffix.get(parsed.suffix);
+        if (!mappings.suffix.has(parsed.suffix)) {
+          mappings.suffix.set(parsed.suffix, account);
+        } else if (known && known.id !== account.id) {
+          mappings.suffix.set(parsed.suffix, null);
+        }
       }
       continue;
     }

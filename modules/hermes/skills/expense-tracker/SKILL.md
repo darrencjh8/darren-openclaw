@@ -2,6 +2,74 @@
 
 Process bank transaction alerts into Actual Budget. Trigger: email from UOB, CIMB, Maybank, transaction alert, spent, charged, receipt, payment.
 
+## Card/account suffix facts — how matching works, and how to repair it
+
+A "suffix fact" maps the card or account number in an alert to the account that
+should be booked. The tracker stores them in this shape:
+
+```
+Card ending 3255 belongs to DBS Yuu Card
+Account ending 5750 belongs to DBS Account
+```
+
+On every alert the tracker looks for a fact naming the number in the email. If it
+finds one, it books the account that fact resolves to and overrides a different
+LLM pick. If it finds none, or the fact cannot be resolved, the LLM's pick stands.
+
+**Reading is tolerant.** All of these are understood, so a user can write a fact
+in ordinary words:
+
+- `Card/account ending 3255 belongs to DBS Yuu Card.`
+- `card ending in 3255 belongs to DBS Yuu`
+- `Account/card ending 9001 belongs to OCBC 360`
+
+**Writing is canonical.** The stored form always uses `Card` for a card-named
+account and `Account` otherwise. `Card/account` is accepted on input but never
+written, because the parser keys on the suffix and the account, not the prefix.
+
+**Account names are matched by words, not exact text.** `Yuu` resolves to
+`DBS Yuu Card`, `Altitude` to `DBS Altitude Card`. Matching refuses when it is
+ambiguous: `DBS` matches three accounts, so it books nothing rather than
+guessing. A name that matches no live account also refuses, and a fact naming a
+live account from a different bank than the sender email is ignored.
+
+### Diagnosing a wrong booking
+
+The user says something like "card 3255 went to the wrong account" or "why did
+BUS/MRT book to DBS Account".
+
+1. `search_facts` with the card number, e.g. `search_facts("3255")`.
+2. Look for `belongs to` facts. Check whether the named account is the right one.
+3. `fetch_context` for both budgets to confirm the account exists, is open, and
+   belongs to the bank that sends the alerts.
+4. Then, depending on what is wrong:
+   - Names the wrong account → `update_fact` with the corrected canonical fact.
+   - Malformed, or duplicated in several spellings → `delete_fact` the bad line,
+     or `cleanup_facts` to canonicalise and drop duplicates. Its result includes
+     `normalised`, the count of suffix facts rewritten.
+   - Ambiguous or missing → ask the user which account; do not guess.
+5. Confirm to the user exactly what was stored.
+
+When the user teaches a new card ("card 3255 is the Yuu card"), `search_facts` and
+`fetch_context` first to confirm the account, then `learn_fact` with the canonical
+fact, and say what you saved.
+
+### Facts about facts
+
+- One mapping per number. Two facts for one number mean the later line wins by
+  file order, which is not a decision to leave implicit.
+- `9001` and `869001` pointing at the same account is correct, not a duplicate:
+  one OCBC format prints the short number and another prints the long one.
+- The pipeline never overwrites an existing account-type fact (`X is a bank
+  account`). A contradiction is logged. Fix a wrong type deliberately with
+  `update_fact`, because the type decides whether a purchase is booked negative.
+
+### Must not
+
+- Guess an account for a user, or store a fact the user did not confirm.
+- Edit Actual Budget transactions directly.
+- Use HTTP endpoints for these tools: `fetch_context` is MCP-only.
+
 ## Pipeline (3-phase design — see `src/orchestrator.js`)
 
 The expense-tracker orchestrator handles ALL phases internally. Hermes only routes emails — the orchestrator does LLM analysis, code-driven resolution, and execution. (Spec 021 replaced the earlier 4-phase / V2-V3 gate design.)

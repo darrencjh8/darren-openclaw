@@ -165,7 +165,7 @@ function createTools(server, registry) {
   );
   server.tool(
     "cleanup_facts",
-    "Clean expense-tracker memory: resolve contradictory facts (newest wins) and deduplicate free-form facts using semantic similarity. Returns {before, after, removed, contradictions} for review.",
+    "Clean expense-tracker memory: canonicalise card/account suffix facts, drop duplicate spellings of one mapping, resolve contradictory facts (newest wins) and deduplicate free-form facts by semantic similarity. Returns {before, after, removed, normalised, contradictions}. normalised counts suffix facts rewritten to canonical form.",
     {},
     async () => tx(await registry.executeTool("cleanup_facts", {})),
   );
