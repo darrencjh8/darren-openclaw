@@ -70,7 +70,10 @@ function acquireLock() {
     budgetLock = new Promise((resolve) => {
         release = resolve;
     });
-    return prev.then(() => release);
+    // The catch keeps a rejected tail from swallowing the release: without it
+    // the await throws before the caller receives release, and the mutex stays
+    // wedged for the life of the process. No current caller rejects prev.
+    return prev.catch(() => {}).then(() => release);
 }
 
 async function init() {
