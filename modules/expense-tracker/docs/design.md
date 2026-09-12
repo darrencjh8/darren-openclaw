@@ -89,7 +89,7 @@ src/
 ├── orchestrator.js              (876 lines) 3-phase alert pipeline (LLM Analysis → Resolution → Execute) + DeepSeekClient
 ├── prompts.js                   (88 lines)  Phase-1 prompt + category picker prompt
 ├── tools.js                     (1562 lines) ToolRegistry: tool schemas + handlers (Actual Budget CRUD, dedup, memory, resolve_merchant)
-├── memory.js                    (716 lines) MEMORY.md fact store with WASM semantic embeddings + dedup/cleanup
+├── memory.js                    (934 lines) MEMORY.md fact store with WASM semantic embeddings + dedup/cleanup
 ├── extractors.js                (194 lines) MIME-aware email content + PDF text (pdftotext via child_process)
 ├── imap.js                      (398 lines) IMAP IDLE (imapflow) + inbox browsing (list/read/extract)
 ├── classify.js                  (145 lines) Email pre-classification + dispatch routing
@@ -160,7 +160,7 @@ CREATE TABLE statement_transactions (
 
 ### Learned Facts (`data/MEMORY.md`)
 
-Learned mappings are stored as free-form + structured facts in `MEMORY.md` (config key `MEMORY_PATH`, default `data/MEMORY.md`), searched via WASM semantic embeddings (`src/memory.js`). On first run, the legacy `data/mappings.json` (accounts/payees/categories dictionaries) is migrated into `MEMORY.md` (`index.js:52-61`); `mappings.json` is no longer read afterward.
+Learned mappings are stored as free-form + structured facts in `MEMORY.md` (config key `MEMORY_PATH`, default `data/MEMORY.md`); structured facts are matched by key and free-form facts by WASM semantic embeddings (`src/memory.js`). On first run, the legacy `data/mappings.json` (accounts/payees/categories dictionaries) is migrated into `MEMORY.md` (`index.js:52-61`); `mappings.json` is no longer read afterward.
 
 ```
 # MEMORY.md (example facts)
@@ -170,6 +170,20 @@ Learned mappings are stored as free-form + structured facts in `MEMORY.md` (conf
 ```
 
 Memory tools: `search_memory`, `learn_fact`, `list_facts`, `update_fact`, `delete_fact`, `compact_facts`, `cleanup_facts`.
+
+#### Merchant matching: keys, not similarity (#472)
+
+A structured fact names an entity — `X maps to Y payee`, `X is a Y account`, or a canonical-suffix fact. Such a fact is authorized by key, never by similarity:
+
+- `MemoryStore._semanticSearch()` skips structured facts before embedding them, and `_acceptSemanticHit()` refuses any that reach it another way, so no cosine score can make a mapping usable.
+- `factNamesMerchant(fact, merchant)` accepts exactly two cases: the alert merchant equals the stored key (any length), or the key occurs inside it on a word boundary and is at least `MIN_ENTITY_LENGTH` (3) characters. `AMAZE` therefore does not match `AMAZE* GREATEASTERN`.
+- Retrieval is not authorization: `search_memory`'s substring lookup can return structured rows for a loose query, so each caller filters them through `factNamesMerchant` before trusting one — `orchestrator.js` (payee and category resolution) and `tools.js` (insert-time payee lookup, statement duplicate check).
+
+Consequence, accepted as risk in issue #472: a misspelled or abbreviated merchant that neither equals the stored key nor contains it as whole words can no longer reach that mapping through semantic search. It falls through to web classification and, failing that, `Misc`.
+
+Why the restriction is accepted: measured against the live fact set (238 facts, 159 of them structured — point-in-time, recorded in issue #472; `MEMORY.md` is not tracked in this repo), ranking by embedding similarity put a *different* merchant first for 68 of those 159 keys, and a wrong merchant scored at or above 0.60 for 60 of them. `AMAZE* GREATEASTERN` scored 0.623 against the `AMAZE* ALIPAYPROGRA SINGAPORE SGP` alert, which is the wrong booking that motivated the change. No numeric floor separates those wrong hits from legitimate spelling variants, because the score does not encode "same merchant". A stricter rule would need distinctive-token presence plus a similarity floor, measured before it is trusted; `factNamesMerchant` deliberately has no spelling-variant path, so issue #472's second acceptance box is not triggered.
+
+Pinned by `tests/memory.test.js`: key anchoring (a partial query must not select a neighbour's mapping), the structured-fact refusal (#420, #471), and the free-form similarity floor.
 
 ---
 

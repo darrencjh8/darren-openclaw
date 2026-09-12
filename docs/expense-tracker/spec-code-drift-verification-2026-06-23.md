@@ -149,7 +149,7 @@ Risk: if LLM misidentifies currency, code fallback uses different budget than LL
 - Memory facts like "TNG merchant maps to Touch 'n Go payee" ARE keyword->payee mappings
 
 **Arguments against drift:**
-- Payee matching uses semantic (embedding-based) search, not keyword table
+- Payee matching uses semantic (embedding-based) search, not keyword table *(superseded: since #471/#472 a structured fact is matched by key only, never by similarity — see `modules/expense-tracker/docs/design.md`, "Merchant matching: keys, not similarity")*
 - STRUCTURED_PATTERNS serve dedup/contradiction, not matching
 - mappings.json migration is backward-compat cleanup, not active feature
 - "Memory + web search" IS how code matches payees
