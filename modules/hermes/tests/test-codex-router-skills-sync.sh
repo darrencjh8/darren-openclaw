@@ -13,7 +13,6 @@ nope() { echo -e "  ${RED}FAIL${NC} $1 — $2"; fail=$((fail+1)); }
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 SYNC="$SCRIPT_DIR/../scripts/sync-codex-router-skills.sh"
-APPLY="$SCRIPT_DIR/../scripts/apply-codex-router-skills.sh"
 TMPDIR=$(mktemp -d)
 trap 'rm -rf "$TMPDIR"' EXIT
 
@@ -175,21 +174,30 @@ else
         "$(find "$PRIMARY/skills" "$PRIMARY/.agents/skills" "$SECONDARY/.agents/skills" -maxdepth 1 -name code-reviewer 2>/dev/null)"
 fi
 
-echo "=== concurrent writers serialize on the lock ==="
+echo "=== a busy lock fails closed, not silently ==="
 fresh_fixture
 mkdir -p "$PRIMARY/.codex-router-skills.lock"
 echo $$ > "$PRIMARY/.codex-router-skills.lock/pid"
+lock_rc=0
 lock_output=$(HERMES_SKILL_PRIMARY_HOME="$PRIMARY" \
     HERMES_SKILL_SECONDARY_HOME="$SECONDARY" \
     HERMES_MANIFEST_STATE_DIRS="$STATE" \
     HERMES_SKILL_LOCK_WAIT_SECONDS=1 \
-    sh "$SYNC" "$SOURCE" 2>&1)
-lock_rc=$?
+    sh "$SYNC" "$SOURCE" 2>&1) || lock_rc=$?
 rm -rf "$PRIMARY/.codex-router-skills.lock"
-if [[ "$lock_rc" -eq 0 && "$lock_output" == *"another reconcile"* && ! -e "$PRIMARY/skills/dev-loop" ]]; then
-    ok "a held lock makes the second writer skip instead of racing"
+if [[ "$lock_rc" -ne 0 && "$lock_output" == *"could not acquire"* && ! -e "$PRIMARY/skills/dev-loop" ]]; then
+    ok "a lock that cannot be acquired exits non-zero without writing"
 else
-    nope "a held lock makes the second writer skip instead of racing" "rc=$lock_rc out=$lock_output"
+    nope "a lock that cannot be acquired exits non-zero without writing" "rc=$lock_rc out=$lock_output"
+fi
+
+echo "=== the lock is released after a successful run ==="
+fresh_fixture
+run "$SOURCE" >/dev/null
+if [[ ! -e "$PRIMARY/.codex-router-skills.lock" ]]; then
+    ok "released the lock on exit"
+else
+    nope "released the lock on exit" "lock dir survived: $(find "$PRIMARY/.codex-router-skills.lock" 2>/dev/null)"
 fi
 
 echo "=== a corrupt managed-name file cannot escape the roots ==="
@@ -205,28 +213,29 @@ else
     nope "refused a managed name that is not a single path segment" "escaped the managed roots"
 fi
 
-echo "=== the container-side apply step runs end to end ==="
+echo "=== the staged swap and reconcile run in one call ==="
 fresh_fixture
 mkdir -p "$ROOT/staged/dev-loop"
 printf 'canonical dev-loop\n' > "$ROOT/staged/dev-loop/SKILL.md"
-if HERMES_SKILL_TMP_SYNC="$ROOT/absent-tmp-sync" \
-    HERMES_SKILL_SYNC_SCRIPT="$SYNC" \
-    HERMES_SKILL_PRIMARY_HOME="$PRIMARY" \
+if HERMES_SKILL_PRIMARY_HOME="$PRIMARY" \
     HERMES_SKILL_SECONDARY_HOME="$SECONDARY" \
     HERMES_SKILL_MANIFEST_STATE_DIRS="$STATE" \
-    sh "$APPLY" "$ROOT/staged" "$ROOT/final" >/dev/null 2>&1 \
+    sh "$SYNC" "$ROOT/final" "$ROOT/staged" >/dev/null 2>&1 \
     && [[ -f "$ROOT/final/dev-loop/SKILL.md" ]] \
     && [[ ! -e "$ROOT/staged" ]] \
-    && [[ -f "$PRIMARY/skills/dev-loop/SKILL.md" ]]; then
-    ok "apply moved the staged tree and reconciled the roots"
+    && [[ -f "$PRIMARY/skills/dev-loop/SKILL.md" ]] \
+    && [[ ! -e "$PRIMARY/.codex-router-skills.lock" ]]; then
+    ok "swapped the staged tree, reconciled the roots, released the lock"
 else
-    nope "apply moved the staged tree and reconciled the roots" \
+    nope "swapped the staged tree, reconciled the roots, released the lock" \
         "$(find "$ROOT" -maxdepth 3 2>/dev/null | head)"
 fi
-if sh "$APPLY" "$ROOT/absent-staged" "$ROOT/final2" >/dev/null 2>&1; then
-    nope "apply fails closed when nothing was staged" "exit 0"
+if HERMES_SKILL_PRIMARY_HOME="$PRIMARY" \
+    HERMES_SKILL_SECONDARY_HOME="$SECONDARY" \
+    sh "$SYNC" "$ROOT/final2" "$ROOT/absent-staged" >/dev/null 2>&1; then
+    nope "a missing staged tree fails closed" "exit 0"
 else
-    ok "apply fails closed when nothing was staged"
+    ok "a missing staged tree fails closed"
 fi
 
 echo "=== absent source is a no-op ==="

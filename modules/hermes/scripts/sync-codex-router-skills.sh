@@ -22,8 +22,10 @@
 #     deploy both run this script, and they must not swap the same staging and
 #     destination paths concurrently.
 #
-# Usage: sync-codex-router-skills.sh [SOURCE]
+# Usage: sync-codex-router-skills.sh [SOURCE] [STAGE_NEW]
 #   SOURCE defaults to /opt/data/.codex-router-skills, staged by the deploy.
+#   STAGE_NEW, when given, is moved onto SOURCE under the lock before the
+#   reconcile, so the deploy's staged swap cannot race the boot hook.
 #
 # shellcheck shell=sh
 # shellcheck disable=SC2086  # TARGETS, SHADOWS and STATE_DIRS are intentional space-split lists
@@ -31,17 +33,22 @@
 set -eu
 
 SOURCE=${1:-/opt/data/.codex-router-skills}
+# Optional second argument: a freshly staged tree to move onto SOURCE under the
+# lock before reconciling. The deploy stages there, so the swap happens inside
+# the same critical section as every other writer.
+STAGE_NEW=${2:-}
 PRIMARY_HOME=${HERMES_SKILL_PRIMARY_HOME:-/opt/data}
 SECONDARY_HOME=${HERMES_SKILL_SECONDARY_HOME:-/opt/data/home}
 MANAGED_FILE=${HERMES_SKILL_MANAGED_FILE:-$PRIMARY_HOME/.codex-router-managed-skills}
 LOCK_DIR=${HERMES_SKILL_LOCK_DIR:-$PRIMARY_HOME/.codex-router-skills.lock}
 LOCK_WAIT_SECONDS=${HERMES_SKILL_LOCK_WAIT_SECONDS:-120}
+LOCK_STALE_MINUTES=${HERMES_SKILL_LOCK_STALE_MINUTES:-10}
 # Ledger roots to refresh. `install-agents.sh` records under the secondary home;
 # `install-hermes.sh` takes `CODEX_ROUTER_SKILL_STATE_DIR`. Refresh whichever
 # exist so no ledger is left pointing at pre-reconcile bytes.
 STATE_DIRS=${HERMES_MANIFEST_STATE_DIRS:-${CODEX_ROUTER_SKILL_STATE_DIR:-} $SECONDARY_HOME/.local/state/codex-router $PRIMARY_HOME/.local/state/codex-router}
 
-if [ ! -d "$SOURCE" ]; then
+if [ ! -d "$SOURCE" ] && [ -z "$STAGE_NEW" ]; then
     echo "sync-codex-router-skills: no source at $SOURCE; skipping" >&2
     exit 0
 fi
@@ -51,8 +58,10 @@ fi
 # `rm -rf` path, so anything else is refused instead of sanitized.
 valid_name() {
     case "$1" in
-        ''|.|..) return 1 ;;
-        *[!A-Za-z0-9._-]*) return 1 ;;
+        ''|.|..|*[!A-Za-z0-9._-]*)
+            echo "sync-codex-router-skills: refusing unsafe skill name: $1" >&2
+            return 1
+            ;;
     esac
     return 0
 }
@@ -69,29 +78,55 @@ cleanup() {
         rm -f "$CURRENT"
     fi
     if [ "$LOCK_OWNED" = true ]; then
+        # The pid file is written after acquisition, so the directory is never
+        # empty; removing it is what actually releases the lock.
+        rm -f "$LOCK_DIR/pid"
         rmdir "$LOCK_DIR" 2>/dev/null || true
     fi
 }
 trap cleanup EXIT
 
-# Bounded wait for the lock; a lock left by a dead process is reclaimed.
+# Bounded wait for the lock. A lock is reclaimed when its recorded process is
+# gone, or when it is older than the stale bound so a pid recycled across a
+# container recreate cannot wedge every future writer.
 attempts=0
 while [ "$attempts" -lt "$LOCK_WAIT_SECONDS" ]; do
     if mkdir "$LOCK_DIR" 2>/dev/null; then
         LOCK_OWNED=true
         break
     fi
-    if [ -f "$LOCK_DIR/pid" ] && ! kill -0 "$(cat "$LOCK_DIR/pid" 2>/dev/null)" 2>/dev/null; then
-        rm -rf "$LOCK_DIR" 2>/dev/null || true
+    if [ -d "$LOCK_DIR" ]; then
+        if [ -f "$LOCK_DIR/pid" ] && ! kill -0 "$(cat "$LOCK_DIR/pid" 2>/dev/null)" 2>/dev/null; then
+            rm -rf "$LOCK_DIR" 2>/dev/null || true
+        elif [ -n "$(find "$LOCK_DIR" -maxdepth 0 -mmin "+$LOCK_STALE_MINUTES" 2>/dev/null)" ]; then
+            echo "sync-codex-router-skills: reclaiming a lock older than ${LOCK_STALE_MINUTES}m" >&2
+            rm -rf "$LOCK_DIR" 2>/dev/null || true
+        fi
     fi
     attempts=$((attempts + 1))
     sleep 1
 done
 if [ "$LOCK_OWNED" != true ]; then
-    echo "sync-codex-router-skills: another reconcile has held the lock for ${LOCK_WAIT_SECONDS}s; skipping" >&2
-    exit 0
+    # Fail closed: a caller that treats a skip as success would report a green
+    # deploy while every skill root keeps stale bytes.
+    echo "sync-codex-router-skills: could not acquire the reconcile lock within ${LOCK_WAIT_SECONDS}s" >&2
+    exit 1
 fi
 echo $$ > "$LOCK_DIR/pid"
+
+if [ -n "$STAGE_NEW" ]; then
+    if [ ! -d "$STAGE_NEW" ]; then
+        echo "sync-codex-router-skills: no staged tree at $STAGE_NEW" >&2
+        exit 1
+    fi
+    rm -rf "${SOURCE:?}"
+    mv "${STAGE_NEW:?}" "${SOURCE:?}"
+fi
+if [ ! -d "$SOURCE" ]; then
+    echo "sync-codex-router-skills: no source at $SOURCE; skipping" >&2
+    exit 0
+fi
+
 CURRENT="$PRIMARY_HOME/.codex-router-managed-skills.new.$$"
 : > "$CURRENT"
 

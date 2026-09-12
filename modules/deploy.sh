@@ -945,13 +945,17 @@ failed=0
 if should_deploy "codex-router" || should_deploy "hermes"; then
   SKILLS_SRC="$ROOT/modules/codex-router/codex/skills"
   SKILLS_SYNC="$ROOT/modules/hermes/scripts/sync-codex-router-skills.sh"
-  SKILLS_APPLY="$ROOT/modules/hermes/scripts/apply-codex-router-skills.sh"
+  # In CI the codex-router checkout and this script are asserted to exist, so a
+  # missing one is a hard failure rather than a green deploy with stale skills.
   if [ ! -d "$SKILLS_SRC" ]; then
-    echo "  (codex-router skills not checked out; skipping skill sync)"
-  elif [ ! -f "$SKILLS_SYNC" ] || [ ! -f "$SKILLS_APPLY" ]; then
-    echo "  (skill sync scripts missing; skipping skill sync)"
+    echo "  (codex-router skills not checked out; skipping skill sync)" >&2
+    [ -n "${GITHUB_ACTIONS:-}" ] && failed=$((failed + 1))
+  elif [ ! -f "$SKILLS_SYNC" ]; then
+    echo "  (skill reconciler missing; skipping skill sync)" >&2
+    [ -n "${GITHUB_ACTIONS:-}" ] && failed=$((failed + 1))
   elif ! docker inspect hermes >/dev/null 2>&1; then
-    echo "  (hermes container not present; skipping skill sync)"
+    echo "  (hermes container not present; skipping skill sync)" >&2
+    [ -n "${GITHUB_ACTIONS:-}" ] && failed=$((failed + 1))
   else
     ready=false
     for _ in $(seq 1 15); do
@@ -963,11 +967,12 @@ if should_deploy "codex-router" || should_deploy "hermes"; then
     sync_ok=false
     if [ "$ready" = true ]; then
       docker exec hermes rm -rf /opt/data/.codex-router-skills.new 2>/dev/null || true
+      # The reconciler owns the staged swap and the reconcile under one lock, so
+      # the boot hook and this run can never race on the same tree.
       if docker cp "$SKILLS_SRC/." hermes:/opt/data/.codex-router-skills.new \
           && docker cp "$SKILLS_SYNC" hermes:/tmp/sync-codex-router-skills.sh \
-          && docker cp "$SKILLS_APPLY" hermes:/tmp/apply-codex-router-skills.sh \
-          && docker exec hermes sh /tmp/apply-codex-router-skills.sh /opt/data/.codex-router-skills.new \
-          && docker exec hermes rm -f /tmp/sync-codex-router-skills.sh /tmp/apply-codex-router-skills.sh; then
+          && docker exec hermes sh /tmp/sync-codex-router-skills.sh /opt/data/.codex-router-skills /opt/data/.codex-router-skills.new \
+          && docker exec hermes rm -f /tmp/sync-codex-router-skills.sh; then
         sync_ok=true
       fi
     fi
