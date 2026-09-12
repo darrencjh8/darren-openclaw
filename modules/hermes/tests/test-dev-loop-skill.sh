@@ -62,6 +62,17 @@ grep -Fq -- 'modules/codex-router/codex/skills' "$DEPLOY_SCRIPT" \
 grep -Eq 'should_deploy "codex-router".*should_deploy "hermes"' "$DEPLOY_SCRIPT" \
     && ok "deploy.sh syncs on a router-only and a hermes deploy" \
     || nope "deploy.sh syncs on a router-only and a hermes deploy"
+# The docker staging path itself is integration-only (needs a running
+# container); pin its required moves and its failure accounting here.
+for expected in \
+    'docker cp "$SKILLS_SRC/." hermes:/opt/data/.codex-router-skills.new' \
+    'docker cp "$SKILLS_SYNC" hermes:/tmp/sync-codex-router-skills.sh' \
+    'rm -rf /opt/data/.codex-router-skills.new' \
+    'failed=$((failed + 1))'; do
+    grep -Fq -- "$expected" "$DEPLOY_SCRIPT" \
+        && ok "deploy.sh block contains: $expected" \
+        || nope "deploy.sh block contains: $expected"
+done
 
 echo "=== the retired reviewer slug is gone from the Hermes module ==="
 slug_hits=$(grep -rIl -- 'auto-thinking-free' \

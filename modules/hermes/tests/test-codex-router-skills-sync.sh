@@ -20,7 +20,7 @@ trap 'rm -rf "$TMPDIR"' EXIT
 run() {
     HERMES_SKILL_PRIMARY_HOME="$PRIMARY" \
     HERMES_SKILL_SECONDARY_HOME="$SECONDARY" \
-    HERMES_MANIFEST_STATE_DIR="$STATE" \
+    HERMES_MANIFEST_STATE_DIRS="$STATE" \
     sh "$SYNC" "$1"
 }
 
@@ -99,7 +99,11 @@ mkdir -p "$PRIMARY/.config/opencode/skills/dev-loop" \
 printf 'stale shadow\n' > "$PRIMARY/.config/opencode/skills/dev-loop/SKILL.md"
 printf 'stale shadow\n' > "$SECONDARY/.config/opencode/skills/code-reviewer/SKILL.md"
 printf 'user-owned\n' > "$PRIMARY/.config/opencode/skills/user-skill/SKILL.md"
-printf 'stale\n' > "$PRIMARY/skills/dev-loop.codex-router.bak"
+# The merged installer writes the compatibility backup as a DIRECTORY
+# (copytree); older runs left a single file. Both must be handled without
+# aborting the run.
+mkdir -p "$PRIMARY/skills/dev-loop.codex-router.bak"
+printf 'stale dir backup\n' > "$PRIMARY/skills/dev-loop.codex-router.bak/SKILL.md"
 printf 'stale\n' > "$SECONDARY/.agents/skills/code-reviewer.codex-router.bak"
 run "$SOURCE" >/dev/null
 if [[ ! -e "$PRIMARY/.config/opencode/skills/dev-loop" \
@@ -156,6 +160,18 @@ then
     ok "refreshed the manifest installed_hash"
 else
     nope "refreshed the manifest installed_hash" "ledger still records drift"
+fi
+
+echo "=== a whole skill dropped upstream is pruned ==="
+rm -rf "$SOURCE/code-reviewer"
+run "$SOURCE" >/dev/null
+if [[ ! -e "$PRIMARY/skills/code-reviewer" \
+      && ! -e "$PRIMARY/.agents/skills/code-reviewer" \
+      && ! -e "$SECONDARY/.agents/skills/code-reviewer" ]]; then
+    ok "pruned a skill the source no longer publishes"
+else
+    nope "pruned a skill the source no longer publishes" \
+        "$(find "$PRIMARY/skills" "$PRIMARY/.agents/skills" "$SECONDARY/.agents/skills" -maxdepth 1 -name code-reviewer 2>/dev/null)"
 fi
 
 echo "=== absent source is a no-op ==="

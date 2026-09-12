@@ -6,18 +6,35 @@
 # of truth for the skills it owns; this script replaces whatever copy is in the
 # runtime roots and leaves openclaw-owned skills and unrelated siblings alone.
 #
+# Contract:
+#   * Managed roots: /opt/data/skills, /opt/data/.agents/skills and
+#     /opt/data/home/.agents/skills.
+#   * A stale canonical copy under ~/.config/opencode/skills would shadow the
+#     reconciled copy, so each managed skill is also removed from those shadow
+#     roots. Unrelated user skills there are left alone.
+#   * A skill removed from the canonical source is removed from every root, so
+#     a retired skill cannot linger.
+#   * The manifest installer records a directory hash of what it installed and
+#     refuses a later run on drift. The refreshed bytes are canonical, so any
+#     ledger entry that points at a managed root is updated to match instead of
+#     being left to claim drift.
+#
 # Usage: sync-codex-router-skills.sh [SOURCE]
 #   SOURCE defaults to /opt/data/.codex-router-skills, staged by the deploy.
 #
 # shellcheck shell=sh
-# shellcheck disable=SC2086  # TARGETS and SHADOWS are intentional space-split lists
+# shellcheck disable=SC2086  # TARGETS, SHADOWS and STATE_DIRS are intentional space-split lists
 
 set -eu
 
 SOURCE=${1:-/opt/data/.codex-router-skills}
 PRIMARY_HOME=${HERMES_SKILL_PRIMARY_HOME:-/opt/data}
 SECONDARY_HOME=${HERMES_SKILL_SECONDARY_HOME:-/opt/data/home}
-MANIFEST_STATE=${HERMES_MANIFEST_STATE_DIR:-$SECONDARY_HOME/.local/state/codex-router}
+MANAGED_FILE=${HERMES_SKILL_MANAGED_FILE:-$PRIMARY_HOME/.codex-router-managed-skills}
+# Ledger roots to refresh. `install-agents.sh` records under the secondary home;
+# `install-hermes.sh` takes `CODEX_ROUTER_SKILL_STATE_DIR`. Refresh whichever
+# exist so no ledger is left pointing at pre-reconcile bytes.
+STATE_DIRS=${HERMES_MANIFEST_STATE_DIRS:-${CODEX_ROUTER_SKILL_STATE_DIR:-} $SECONDARY_HOME/.local/state/codex-router $PRIMARY_HOME/.local/state/codex-router}
 
 if [ ! -d "$SOURCE" ]; then
     echo "sync-codex-router-skills: no source at $SOURCE; skipping" >&2
@@ -25,20 +42,48 @@ if [ ! -d "$SOURCE" ]; then
 fi
 
 TARGETS="$PRIMARY_HOME/skills $PRIMARY_HOME/.agents/skills $SECONDARY_HOME/.agents/skills"
-# opencode also reads skills from ~/.config/opencode/skills. A stale canonical
-# copy there shadows the reconciled one, so each canonical skill is removed from
-# the shadow roots while any other user-owned skill there is left alone.
 SHADOWS="$PRIMARY_HOME/.config/opencode/skills $SECONDARY_HOME/.config/opencode/skills"
+
+mkdir -p "$PRIMARY_HOME" "$SECONDARY_HOME"
+CURRENT="$PRIMARY_HOME/.codex-router-managed-skills.new.$$"
+trap 'rm -f "$CURRENT"' EXIT
+: > "$CURRENT"
+
+# The canonical set for this run: only directories that carry SKILL.md. A stray
+# file or a non-skill directory in the source is never copied.
+for source_dir in "$SOURCE"/*/; do
+    [ -d "$source_dir" ] || continue
+    name=$(basename "$source_dir")
+    [ -f "$source_dir/SKILL.md" ] || continue
+    echo "$name" >> "$CURRENT"
+done
+
+# Prune a skill the canonical source no longer publishes. The managed-name list
+# is kept outside the staged source, which the deploy replaces wholesale.
+if [ -f "$MANAGED_FILE" ]; then
+    while IFS= read -r previous; do
+        [ -n "$previous" ] || continue
+        if grep -qxF -- "$previous" "$CURRENT"; then
+            continue
+        fi
+        for target in $TARGETS; do
+            rm -rf "${target:?}/${previous:?}"
+        done
+        for shadow in $SHADOWS; do
+            rm -rf "${shadow:?}/${previous:?}"
+        done
+    done < "$MANAGED_FILE"
+fi
 
 for target in $TARGETS; do
     mkdir -p "$target"
     for source_dir in "$SOURCE"/*/; do
         [ -d "$source_dir" ] || continue
         name=$(basename "$source_dir")
-        # Only canonical skill directories are managed; a stray file or a
-        # non-skill directory in the source is never copied.
         [ -f "$source_dir/SKILL.md" ] || continue
         dest="$target/$name"
+        # `diff -r` is the content comparison: identical trees are skipped so a
+        # rerun is a no-op.
         if [ -d "$dest" ] && diff -r "$source_dir" "$dest" >/dev/null 2>&1; then
             continue
         fi
@@ -48,37 +93,31 @@ for target in $TARGETS; do
         rm -rf "${dest:?}"
         mv "$staging" "$dest"
     done
-    # The pre-reconcile installer left single-file compatibility backups in the
-    # skills root; they are stale duplicates of a skill we now own.
+    # Compatibility backups left by a previous installer run are stale
+    # duplicates of a skill this script now owns. The merged installer writes
+    # them as a directory (`copytree`), older ones as a single file, so the
+    # removal must handle both shapes.
     for bak in "$target"/*.codex-router.bak; do
         if [ -e "$bak" ]; then
-            rm -f "$bak"
+            rm -rf "${bak:?}"
         fi
     done
 done
 
-for shadow in $SHADOWS; do
-    for source_dir in "$SOURCE"/*/; do
-        [ -d "$source_dir" ] || continue
-        name=$(basename "$source_dir")
-        [ -f "$source_dir/SKILL.md" ] || continue
-        if [ -d "${shadow:?}/${name:?}" ]; then
-            rm -rf "${shadow:?}/${name:?}"
-        fi
+while IFS= read -r name; do
+    [ -n "$name" ] || continue
+    for shadow in $SHADOWS; do
+        rm -rf "${shadow:?}/${name:?}"
     done
-done
+done < "$CURRENT"
 
 chown -R hermes:hermes \
     "$PRIMARY_HOME/skills" "$PRIMARY_HOME/.agents/skills" "$SECONDARY_HOME/.agents/skills" \
     2>/dev/null || true
 
-# The manifest installer records a directory hash of what it installed and
-# refuses a later run on drift. The synced bytes are now canonical, so refresh
-# the recorded hashes for the skills this run replaced instead of leaving a
-# ledger that claims drift.
-if [ -d "$MANIFEST_STATE/manifests" ]; then
-    # shellcheck disable=SC2086  # TARGETS is an intentional word-split list
-    python3 - "$MANIFEST_STATE" "$SOURCE" $TARGETS <<'PY'
+for state in $STATE_DIRS; do
+    [ -d "$state/manifests" ] || continue
+    python3 - "$state" "$SOURCE" $TARGETS <<'PY'
 import hashlib
 import json
 import pathlib
@@ -114,8 +153,9 @@ for manifest_file in state.glob("manifests/*/*.json"):
     manifest["canonical_source"] = str(canonical)
     manifest_file.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
     refreshed += 1
-print(f"sync-codex-router-skills: refreshed {refreshed} manifest record(s)")
+print(f"sync-codex-router-skills: refreshed {refreshed} manifest record(s) in {state}")
 PY
-fi
+done
 
+mv "$CURRENT" "$MANAGED_FILE"
 echo "sync-codex-router-skills: reconciled $(basename "$SOURCE") into the Hermes skill roots"
