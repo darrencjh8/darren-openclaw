@@ -148,20 +148,40 @@ function refusal(reason) {
  *
  * @returns the same shape as `matchAccountByName`.
  */
-export function resolveFactAccount(accountName, accounts) {
-  const first = matchAccountByName(accountName, accounts);
-  if (first.matched) return first;
-  const stripped = String(accountName || "")
-    .replace(/\s+accounts?$/i, "")
-    .trim();
-  if (stripped === String(accountName || "").trim()) return first;
-  const target = accountTokens(stripped).join(" ");
-  if (!target) return first;
-  const exact = (accounts || []).filter(
-    (a) => a && accountTokens(a.name).join(" ") === target,
-  );
-  if (exact.length !== 1) return first;
-  return matchAccountByName(exact[0].name, accounts);
+export function resolveFactAccount(accountName, accounts, aliases) {
+  // Aliases are a LAST RESORT. A name the resolver can place on its own —
+  // exactly, or through the bounded filler retry below — is never redirected.
+  // Review round 3 on 66d274d: substituting on the first call let an alias
+  // return an account the fact never named, bypassing the retry's
+  // exact-match-only invariant.
+  const withoutAliases = () => {
+    const first = matchAccountByName(accountName, accounts);
+    if (first.matched) return first;
+    const stripped = String(accountName || "")
+      .replace(/\s+accounts?$/i, "")
+      .trim();
+    if (stripped === String(accountName || "").trim()) return first;
+    const target = accountTokens(stripped).join(" ");
+    if (!target) return first;
+    const exact = (accounts || []).filter(
+      (a) => a && accountTokens(a.name).join(" ") === target,
+    );
+    if (exact.length !== 1) return first;
+    return matchAccountByName(exact[0].name, accounts);
+  };
+
+  const placed = withoutAliases();
+  // Either "nothing matched" reason may be redirected: a product name whose
+  // words are all stopwords ("My Card") is exactly the case aliases exist for.
+  // Any other refusal — closed, duplicate, ambiguous — means the name is owned
+  // by a real account and must not be moved. Review round 4 on 449366d.
+  const nothingMatched = () =>
+    placed.reason === "no account matches those words" ||
+    placed.reason === "no distinctive words in the name";
+  if (placed.matched || !nothingMatched() || !aliases || !aliases.size) {
+    return placed;
+  }
+  return matchAccountByName(accountName, accounts, aliases);
 }
 
 /**
@@ -187,7 +207,7 @@ export function resolveFactAccount(accountName, accounts) {
  *
  * @returns {{matched: boolean, id: string|null, name: string|null, reason?: string}}
  */
-export function matchAccountByName(nameText, accounts) {
+function matchWithoutAliases(nameText, accounts) {
   const all = (accounts || []).filter(Boolean);
   if (!all.length) return refusal("no live accounts");
 
@@ -251,4 +271,90 @@ export function matchAccountByName(nameText, accounts) {
   if (candidates.length === 0) return refusal("no account matches those words");
   if (candidates.length > 1) return refusal("ambiguous");
   return resolve(candidates[0]);
+}
+
+/**
+ * Resolve a written name, falling back to an alias only when the resolver
+ * itself cannot place the name.
+ *
+ * The guard is the resolver, not an exact-token comparison: the resolver also
+ * reaches accounts through plural trimming, a kind word and containment, and an
+ * exact-token check let a fact redirect a name the resolver could already place
+ * (verified: `Ryt Cards is a Ryt Bank account` redirected `Ryt Cards`, which
+ * otherwise resolves to `Ryt Card`). Issue #496, review round 2.
+ */
+export function matchAccountByName(nameText, accounts, aliases) {
+  const direct = matchWithoutAliases(nameText, accounts);
+  // Only a genuine "nothing matched" may be redirected. A refusal for a closed
+  // or duplicate account means the name is owned by a real account, and an alias
+  // must never move that account's alerts to a sibling. Review rounds 2 and 4.
+  const nothingMatched =
+    direct.reason === "no account matches those words" ||
+    direct.reason === "no distinctive words in the name";
+  if (direct.matched || !nothingMatched) {
+    return direct;
+  }
+  if (!aliases || !aliases.size) return direct;
+  const written = accountTokens(stripParenthesisedId(nameText)).join(" ");
+  const target = written ? aliases.get(written) : undefined;
+  if (!target) return direct;
+  return matchWithoutAliases(target, accounts);
+}
+
+/**
+ * Names a bank alert uses for an account that is not its Actual name:
+ * `Main Account is a Ryt Bank account`, `Trust Cashback card is a Trust Card
+ * account`. A product name cannot be matched against an account list at all, so
+ * the written name is looked up here first. Issue #496.
+ *
+ * Only facts whose target is a LIVE account become aliases, which is what keeps
+ * every type fact out of the map: `Citi Reward is a credit card account` targets
+ * `credit card`, and no account is called that. A target that is closed still
+ * becomes an alias; the closed-account refusal in `matchAccountByName` is what
+ * rejects it, so the behaviour is the same either way.
+ *
+ * @param {Array<{text?: string}|string>} facts records from `search_memory`
+ * @param {Array<{name: string}>} accounts live accounts
+ * @returns {Map<string, string>} normalised alias to the live account's name
+ */
+export function accountAliases(facts, accounts) {
+  const aliases = new Map();
+  // A product claimed for two different accounts is ambiguous. Remember it so a
+  // later fact cannot re-add it and let result order pick the winner.
+  const ambiguous = new Set();
+  for (const record of facts || []) {
+    const text = typeof record === "string" ? record : record?.text;
+    // Search results carry a score; an alias must be evidence for the merchant
+    // it was retrieved for, so the same floor the suffix path uses applies.
+    // Review round 1 on c1e1d10.
+    if (typeof record?.score === "number" && record.score < 0.5) continue;
+    const m = String(text || "").match(
+      /^(.+?)\s+is\s+(?:a|an)\s+(.+?)\s+account$/i,
+    );
+    if (!m) continue;
+    // The lookup strips a parenthesised id, so the key must too, or the alias
+    // is silently unreachable. Review round 1 on c1e1d10.
+    const alias = accountTokens(stripParenthesisedId(m[1])).join(" ");
+    const target = accountTokens(m[2]).join(" ");
+    if (!alias || !target) continue;
+    if (ambiguous.has(alias)) continue;
+    const targets = (accounts || []).filter(
+      (a) => a && accountTokens(stripParenthesisedId(a.name)).join(" ") === target,
+    );
+    // Only an account that can actually resolve may be a target. A closed or
+    // duplicate-named one never matches, and if it claimed the product the
+    // ambiguity guard below would drop a valid alias for the same key and the
+    // alias would be silently dead. Review round 5 on 493aad9.
+    const live = targets.length === 1 && !targets[0].closed ? targets[0] : null;
+    if (!live) continue;
+    if (aliases.has(alias)) {
+      if (aliases.get(alias) !== live.name) {
+        aliases.delete(alias);
+        ambiguous.add(alias);
+      }
+      continue;
+    }
+    aliases.set(alias, live.name);
+  }
+  return aliases;
 }

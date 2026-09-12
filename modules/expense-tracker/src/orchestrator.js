@@ -21,6 +21,7 @@ import {
     bankFromText,
 } from "./bank-movement.js";
 import {
+    accountAliases,
     accountTokens,
     canonicalSuffixFact,
     parseSuffixFact,
@@ -293,11 +294,17 @@ export function sanitizeResults(results) {
  *   count (the pre-#331 behaviour).
  */
 export function hasUsableSuffixFact(facts, emailText, senderBank, liveAccounts = []) {
+    // Built once, not per fact: the map only depends on the list.
+    const aliases = accountAliases(facts, liveAccounts);
     return (facts || []).some((f) => {
         if ((f.score ?? 0) < 0.5) return false;
         const parsed = parseSuffixFact(f.text);
         if (!parsed) return false;
-        const resolved = resolveFactAccount(parsed.accountName, liveAccounts);
+        const resolved = resolveFactAccount(
+            parsed.accountName,
+            liveAccounts,
+            aliases,
+        );
         if (!resolved || !resolved.matched) return false;
         if (!nameMatchesBank(resolved.name, senderBank)) return false;
         return new RegExp(`\\b${parsed.suffix}\\b`).test(emailText);
@@ -310,8 +317,8 @@ export function hasUsableSuffixFact(facts, emailText, senderBank, liveAccounts =
  * Without live accounts there is nothing to resolve against, so the fact is
  * treated as unusable. Callers must supply the account list.
  */
-export function resolveFactAccount(accountName, liveAccounts = []) {
-    return resolveFactAccountShared(accountName, liveAccounts);
+export function resolveFactAccount(accountName, liveAccounts = [], aliases) {
+    return resolveFactAccountShared(accountName, liveAccounts, aliases);
 }
 
 /** Bill-payment layout — override must never pick the destination card. */
@@ -1088,6 +1095,11 @@ export class AgentOrchestrator {
                     liveAccounts.length > 0
                 ) {
                     const candidates = new Map();
+                    // Built once for the list, not per fact.
+                    const suffixAliases = accountAliases(
+                        cachedSearchResults,
+                        liveAccounts,
+                    );
                     for (const fact of cachedSearchResults) {
                         if ((fact.score ?? 0) < 0.5) continue;
                         const parsed = parseSuffixFact(fact.text);
@@ -1100,6 +1112,7 @@ export class AgentOrchestrator {
                         const resolved = resolveFactAccount(
                             parsed.accountName,
                             liveAccounts,
+                            suffixAliases,
                         );
                         if (!resolved || !resolved.matched) {
                             logger.info({

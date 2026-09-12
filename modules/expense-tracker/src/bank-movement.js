@@ -293,6 +293,11 @@ export function identityMappingsFromFacts(facts, accounts) {
       // One shared resolver: normal matching, then a bounded filler-word
       // retry that only accepts an exact account name. Never containment, so a
       // named-but-absent account cannot resolve to a live sibling.
+      // Aliases are deliberately NOT applied on this path: it can run with an
+      // unknown bank (`evidence.bank` null leaves the candidate set unfiltered),
+      // so a cross-bank alias could book the wrong account. The orchestrator
+      // paths apply aliases and then check the resolved name against the sender
+      // bank. Review round 1 on c1e1d10.
       const resolution = resolveFactAccount(parsed.accountName, accounts);
       const account = resolution.matched
         ? accounts.find((a) => a.id === resolution.id)
