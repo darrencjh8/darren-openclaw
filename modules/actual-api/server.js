@@ -382,15 +382,13 @@ app.post("/transactions", async (req, res) => {
         // new ids), so read the row back to report its real id. Only a row
         // absent from the pre-insert snapshot qualifies; matching on amount or
         // payee alone could return a pre-existing transaction.
-        // @actual-app/api stamps sort_order from Date.now(), so the newest new
-        // row on the window is the inserted one in the normal case (a transfer
-        // adds its counterpart in the destination account, not here).
-        // ponytail: when a rule adds its own row on this window the id pick is a
-        // guess, so the response echoes the request's amount and date instead of
-        // that row's values. Claiming the true id would need addTransactions to
-        // return the ids it currently discards.
+        // ponytail: the diff shows which rows are new, not which one this
+        // request inserted. When more than one row is new — a concurrent POST,
+        // or a rule that also changes transactions on the window — nothing can
+        // be attributed, so the response reports a null id and the request's own
+        // fields. Claiming the true id would need addTransactions to return the
+        // ids it currently discards.
         let created = null;
-        let unique = false;
         if (beforeIds) {
             try {
                 const newRows = (
@@ -400,11 +398,9 @@ app.post("/transactions", async (req, res) => {
                         window.end,
                     )
                 ).filter((t) => !beforeIds.has(t.id));
-                unique = newRows.length === 1;
-                created =
-                    newRows.sort(
-                        (a, b) => (b.sort_order || 0) - (a.sort_order || 0),
-                    )[0] || null;
+                // All or nothing: a single new row is the insert, but adding a
+                // second would make both the id and the fields a guess.
+                if (newRows.length === 1) created = newRows[0];
             } catch {
                 // Read-back is best-effort; the insert already committed.
             }
@@ -414,15 +410,13 @@ app.post("/transactions", async (req, res) => {
             account: txn.account,
             // Prefer the persisted row: a transfer clears the category, and
             // rules can rewrite notes, amount, or date, so the request body can
-            // be stale. Only a unique new row can be attributed confidently, so
-            // an ambiguous pick falls back to the request's own fields.
-            // account, payee_name, and cleared have no comparable persisted
-            // value here, so they keep echoing the request.
-            date: unique ? created.date : txn.date,
-            amount: unique ? created.amount : txn.amount,
+            // be stale. account, payee_name, and cleared have no comparable
+            // persisted value here, so they keep echoing the request.
+            date: created?.date ?? txn.date,
+            amount: created?.amount ?? txn.amount,
             payee_name: txn.payee_name,
-            notes: unique ? created.notes : txn.notes,
-            category: (unique ? created.category : txn.category) || null,
+            notes: created?.notes ?? txn.notes,
+            category: (created ? created.category : txn.category) || null,
             cleared: txn.cleared,
         });
     } catch (e) {

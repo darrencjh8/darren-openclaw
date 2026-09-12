@@ -998,16 +998,22 @@ describe("POST /transactions enriched response", () => {
     });
 
     test("does not claim a pre-existing neighbour row on the widened window", async () => {
-        const existing = {
-            id: "yesterday",
-            account: "acc-1",
-            date: "2026-06-16",
-            amount: -425,
-            sort_order: 1,
-        };
-        // Present on both reads: if the snapshot window were narrower than the
-        // read-back window this row would look new and be reported as the id.
-        readBackDated([existing], [existing]);
+        // The row is visible to both reads, but only when the requested window
+        // covers it. A narrower read-back would see a row that the narrower
+        // snapshot saw too, and a snapshot narrower than the read-back would
+        // make this pre-existing row look new.
+        actual.getTransactions.mockImplementation(
+            async (account, start, end) => {
+                const row = {
+                    id: "yesterday",
+                    account: "acc-1",
+                    date: "2026-06-16",
+                    amount: -425,
+                    sort_order: 1,
+                };
+                return row.date >= start && row.date <= end ? [row] : [];
+            },
+        );
         const handler = findHandler("post", "/transactions");
         const res = mockRes();
 
@@ -1162,44 +1168,9 @@ describe("POST /transactions enriched response", () => {
         },
     );
 
-    test("picks the newest of two new rows on the window", async () => {
-        readBack(
-            [],
-            [
-                {
-                    id: "rule-created",
-                    account: "acc-1",
-                    date: "2026-06-16",
-                    amount: -10,
-                    sort_order: 100,
-                },
-                {
-                    id: "inserted",
-                    account: "acc-1",
-                    date: "2026-06-17",
-                    amount: -425,
-                    sort_order: 200,
-                },
-            ],
-        );
-        const handler = findHandler("post", "/transactions");
-        const res = mockRes();
-
-        await handler(
-            mockReq({
-                body: {
-                    account: "acc-1",
-                    date: "2026-06-17",
-                    amount: -425,
-                },
-            }),
-            res,
-        );
-
-        expect(res.json.mock.calls[0][0].id).toBe("inserted");
-    });
-
-    test("echoes the request fields when two new rows make the pick ambiguous", async () => {
+    test("echoes the request fields and reports no id when two rows look new", async () => {
+        // The other row is the newer one, so a response that trusted the pick
+        // would name that row as the insert and report its amount and date.
         readBack(
             [],
             [
@@ -1213,11 +1184,11 @@ describe("POST /transactions enriched response", () => {
                     sort_order: 100,
                 },
                 {
-                    id: "rule-created",
+                    id: "other",
                     account: "acc-1",
                     date: "2026-06-16",
                     amount: -10,
-                    notes: "rule note",
+                    notes: "other note",
                     category: null,
                     sort_order: 200,
                 },
@@ -1240,8 +1211,9 @@ describe("POST /transactions enriched response", () => {
         );
 
         const body = res.json.mock.calls[0][0];
-        // Only a unique new row can be attributed, so the response must not
-        // report the ambiguous pick's amount and date as the inserted values.
+        // Two new rows cannot be attributed, so neither the id nor the fields
+        // may be taken from either row.
+        expect(body.id).toBeNull();
         expect(body.amount).toBe(-425);
         expect(body.date).toBe("2026-06-17");
         expect(body.notes).toBe("Transport");
@@ -1285,6 +1257,40 @@ describe("POST /transactions enriched response", () => {
         expect(body.date).toBe("2026-06-18");
         expect(body.notes).toBe("rewritten");
         expect(body.category).toBeNull();
+    });
+
+    test("falls back to the request notes when the unique row has none", async () => {
+        readBack(
+            [],
+            [
+                {
+                    id: "only-new",
+                    account: "acc-1",
+                    date: "2026-06-17",
+                    amount: -425,
+                    notes: null,
+                    sort_order: 200,
+                },
+            ],
+        );
+        const handler = findHandler("post", "/transactions");
+        const res = mockRes();
+
+        await handler(
+            mockReq({
+                body: {
+                    account: "acc-1",
+                    date: "2026-06-17",
+                    amount: -425,
+                    notes: "Transport",
+                },
+            }),
+            res,
+        );
+
+        const body = res.json.mock.calls[0][0];
+        expect(body.id).toBe("only-new");
+        expect(body.notes).toBe("Transport");
     });
 });
 
