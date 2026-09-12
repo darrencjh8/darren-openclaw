@@ -330,11 +330,13 @@ app.get("/budgets", async (req, res) => {
         // Display-only deduplication: the library can list one budget once per
         // DATA_DIR copy, all sharing the sync id it switches on. Entries are
         // keyed by `syncIdOf`; an entry with no id cannot be proven a duplicate
-        // and is kept. When the copies disagree on a name, the configured
-        // `PRIMARY_BUDGET_FILE` wins so the operator sees the name the process
-        // actually loads.
+        // and is kept. When a later entry is named `PRIMARY_BUDGET_FILE` and the
+        // kept entry of the same sync id is not, the later one replaces it, so
+        // the operator sees the name the process actually loads. Otherwise the
+        // first entry of the group is kept.
         const seen = new Map(); // syncId -> index in `unique`
         const unique = [];
+        const drops = [];
         for (const b of budgets) {
             const syncId = syncIdOf(b);
             if (!syncId) {
@@ -347,19 +349,26 @@ app.get("/budgets", async (req, res) => {
                 continue;
             }
             const index = seen.get(syncId);
-            if (
-                unique[index].name !== PRIMARY_BUDGET_FILE &&
-                b.name === PRIMARY_BUDGET_FILE
-            ) {
+            const kept = unique[index];
+            // The configured name is preferred only when it appears later in the
+            // same sync-id group; an entry already named `PRIMARY_BUDGET_FILE`
+            // stays kept, as does the first entry when neither is configured.
+            const preferLater =
+                kept.name !== PRIMARY_BUDGET_FILE &&
+                b.name === PRIMARY_BUDGET_FILE;
+            if (preferLater) {
                 unique[index] = b;
             }
+            const dropped = preferLater ? kept : b;
+            drops.push(
+                `"${dropped.name}" (sync id ${syncId}, kept "${unique[index].name}")`,
+            );
         }
-        const dropped = budgets.length - unique.length;
-        if (dropped > 0) {
+        if (drops.length > 0) {
             console.log(
-                `getBudgets: dropped ${dropped} duplicate budget ${
-                    dropped === 1 ? "entry" : "entries"
-                }`,
+                `getBudgets: dropped ${drops.length} duplicate budget ${
+                    drops.length === 1 ? "entry" : "entries"
+                } — ${drops.join("; ")}`,
             );
         }
         res.json(

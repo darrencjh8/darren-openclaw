@@ -43,6 +43,10 @@ jest.mock("@actual-app/api", () => ({
     getAccountBalance: jest.fn(),
 }));
 
+// The switch cooldown is read when the server module loads; zero keeps the
+// later tests, which request budgets under other sync ids, from waiting.
+process.env.BUDGET_SWITCH_DELAY_MS = "0";
+
 const actual = require("@actual-app/api");
 require("../server");
 
@@ -120,10 +124,64 @@ test("logs dropped duplicates on every GET /budgets call, not once per process",
             ([message]) =>
                 typeof message === "string" && message.includes("dropped"),
         );
-        // Wording is deliberately not pinned beyond the word "dropped": only
-        // the per-call behaviour matters here.
         expect(dropLogs).toHaveLength(2);
+        // The drop must name the entry that went away and the entry that stayed,
+        // so a name collision between same-sync-id copies is diagnosable.
+        for (const [message] of dropLogs) {
+            expect(message).toContain('"Renamed SGD"');
+            expect(message).toContain("sync id g1");
+            expect(message).toContain('kept "test-budget"');
+        }
     } finally {
         logSpy.mockRestore();
     }
+});
+
+test("GET /budgets keeps the configured name when it is the first twin", async () => {
+    // Same-sync-id twins with the configured name first: the later entry must be
+    // dropped, not allowed to replace it, because the configured entry already
+    // names the budget the process loads.
+    actual.getBudgets.mockResolvedValue([
+        { name: "test-budget", groupId: "first-1", cloudFileId: "cloud-f1" },
+        { name: "Renamed Later", groupId: "first-1", cloudFileId: "cloud-f1" },
+    ]);
+    const handler = findHandler("get", "/budgets");
+    const res = mockRes();
+
+    await handler(mockReq(), res);
+
+    expect(res.status).not.toHaveBeenCalled();
+    expect(res.json).toHaveBeenCalledWith([
+        { name: "test-budget", groupId: "first-1", cloudFileId: "cloud-f1" },
+    ]);
+});
+
+test("duplicates in the raw getBudgets() list do not break name or sync-id resolution", async () => {
+    // The raw library list keeps both twins; only the display route deduplicates.
+    // A request that names the budget by its configured name and one that names
+    // it by sync id must both resolve it.
+    actual.getBudgets.mockResolvedValue([
+        { name: "Renamed Again", groupId: "dup-2", cloudFileId: "cloud-d2" },
+        { name: "test-budget", groupId: "dup-2", cloudFileId: "cloud-d2" },
+    ]);
+    actual.getAccounts.mockResolvedValue(ACCOUNTS);
+
+    const byName = mockRes();
+    await findHandler("get", "/accounts")(
+        mockReq({ query: { budget_id: "test-budget" } }),
+        byName,
+    );
+    expect(byName.status).not.toHaveBeenCalled();
+    expect(byName.json).toHaveBeenCalledWith(ACCOUNTS);
+
+    const bySyncId = mockRes();
+    await findHandler("get", "/accounts")(
+        mockReq({ query: { budget_id: "dup-2" } }),
+        bySyncId,
+    );
+    expect(bySyncId.status).not.toHaveBeenCalled();
+    expect(bySyncId.json).toHaveBeenCalledWith(ACCOUNTS);
+    expect(actual.downloadBudget).toHaveBeenCalledWith("dup-2", {
+        password: undefined,
+    });
 });
