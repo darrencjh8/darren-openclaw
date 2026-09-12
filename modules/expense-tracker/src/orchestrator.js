@@ -95,7 +95,7 @@ export class LLMClient {
             }
             const reasoning = opts.reasoning || "auto";
             if (route.provider === "deepseek") {
-                if (reasoning !== "disabled") {
+                if (reasoning !== "disabled" && (reasoning === "adaptive" || !toolChoice || toolChoice === "auto")) {
                     kwargs.thinking = { type: reasoning === "auto" ? this._reasoningEffort : reasoning };
                 }
             } else if (reasoning !== "disabled") {
