@@ -277,7 +277,15 @@ app.get("/health", (req, res) => res.json({ status: "ok" }));
 
 app.get("/budgets", async (req, res) => {
     try {
-        await init();
+        try {
+            await init();
+        } catch {
+            // init() fails fast when the configured primary budget name
+            // matches no budget. This endpoint exists to reveal the real
+            // names, so it must still answer: an operator who mistyped the
+            // name needs the list to fix it. A failure from actual.init()
+            // itself is re-raised by the getBudgets() call below.
+        }
         const budgets = await retryWithBackoff(() => actual.getBudgets());
         res.json(
             budgets.map((b) => ({

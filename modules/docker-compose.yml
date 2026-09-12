@@ -58,7 +58,6 @@ services:
             - ACTUAL_BUDGET_URL=${ACTUAL_BUDGET_URL}
             - ACTUAL_BUDGET_PASSWORD=${ACTUAL_BUDGET_PASSWORD}
             - ACTUAL_PRIMARY_BUDGET_FILE=${ACTUAL_PRIMARY_BUDGET_FILE}
-            - ACTUAL_SECONDARY_BUDGET_FILE=${ACTUAL_SECONDARY_BUDGET_FILE}
             - BUDGET_SWITCH_DELAY_MS=5000
         restart: unless-stopped
         logging: *default-logging
