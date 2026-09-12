@@ -28,6 +28,10 @@ import {
     resolveFactAccount as resolveFactAccountShared,
 } from "./suffix-facts.js";
 import { factNamesMerchant } from "./memory.js";
+import {
+    bookableAmountCents,
+    isBookableAmountCents,
+} from "./amounts.js";
 import { logger } from "./logging.js";
 
 export class LLMClient {
@@ -188,6 +192,16 @@ export const DOMAIN_BANK_MAP = {
     "cimb.com": "CIMB",
     "rytbank.my": "Ryt",
 };
+
+/**
+ * "SGD 12.80 " when the route would book this amount, otherwise "". Every
+ * amount printed in a message goes through here: a value the route rejects must
+ * never be turned into a plausible-looking money figure (#508).
+ */
+export function bookableAmountPrefix(value, currency) {
+    const cents = bookableAmountCents(value);
+    return cents === null ? "" : `${currency || "SGD"} ${Math.abs(cents) / 100} `;
+}
 
 /**
  * Extract a bank-name filter string from an email sender address/domain.
@@ -553,6 +567,10 @@ export class AgentOrchestrator {
     }
 
     async _resolveMovementToOutput(movement, { allowSuffixLearning = false } = {}) {
+        // A movement whose amount did not parse must not become a booking: the
+        // sign flip below turned `null` into -0, and the route accepts 0, so a
+        // malformed amount token used to post a fabricated 0-cent row (#508).
+        if (!isBookableAmountCents(movement?.amount_cents)) return null;
         const budgetId = movement.currency === this._config.primaryCurrency
             ? this._config.primaryBudgetFile
             : this._config.secondaryBudgetFile;
@@ -704,7 +722,16 @@ export class AgentOrchestrator {
             );
             const content = (response.choices || [{}])[0].message?.content || "";
             const parsed = this._parseJsonFromContent(content);
-            const amount = Number(parsed?.amount);
+            // Number() alone would turn null, "", true, [500] and "1e3" into
+            // bookable figures, so accept only a real number or a plain
+            // decimal string before falling through to the finite check (#508).
+            const rawAmount = parsed?.amount;
+            const amount =
+                typeof rawAmount === "number" ||
+                (typeof rawAmount === "string" &&
+                    /^-?\d+(\.\d+)?$/.test(rawAmount.trim()))
+                    ? Number(rawAmount)
+                    : NaN;
             const currency = String(parsed?.currency || "").toUpperCase();
             const direction = parsed?.direction === "incoming" ? "incoming" : "outgoing";
             if (!Number.isFinite(amount) || !["SGD", "MYR"].includes(currency)) return null;
@@ -983,7 +1010,10 @@ export class AgentOrchestrator {
                     llmOutput.amount_cents !== null &&
                     llmOutput.amount_cents !== ""
                 ) {
-                    if (isNaN(Number(llmOutput.amount_cents))) {
+                    // Only the shapes the route books count as an amount; the
+                    // rest ("1e3", "0x10", 1.5) are extraction failures and
+                    // must be retried, not quietly reinterpreted downstream.
+                    if (!isBookableAmountCents(llmOutput.amount_cents)) {
                         invalidFields.push("amount_cents");
                     }
                 }
@@ -1354,11 +1384,13 @@ export class AgentOrchestrator {
         // Sign correction: credit cards always flip to negative
         if (
             output.account_name &&
-            output.amount_cents != null &&
-            output.amount_cents !== ""
+            isBookableAmountCents(output.amount_cents)
         ) {
             const acctType = await this._detectAccountType(output.account_name);
             if (acctType === "credit card") {
+                // Number() here would reinterpret a malformed string ("1e3",
+                // "0x10") into a bookable figure, so the guard above only lets
+                // a value the route accepts reach this coercion.
                 output.amount_cents = -Math.abs(Number(output.amount_cents));
                 output._sign_flipped = true;
             }
@@ -1634,17 +1666,22 @@ export class AgentOrchestrator {
                     : llmOutput.category_id || undefined;
             let transferReservation = null;
 
-            // Check duplicate
-            const isDuplicate = await this._tools.executeTool(
-                "check_duplicate",
-                {
+            // Check duplicate. An absent amount must not be turned into 0 here:
+            // a 0-cent lookback can match an unrelated row, mark the email read,
+            // and drop the alert. Leave it absent so the insert refuses it.
+            // Presence, not integer-ness: the pipeline and the route both
+            // tolerate a quoted integer amount, and those must still dedup.
+            const hasAmount =
+                llmOutput.amount_cents != null && llmOutput.amount_cents !== "";
+            const isDuplicate =
+                hasAmount &&
+                (await this._tools.executeTool("check_duplicate", {
                     date: llmOutput.date || "",
-                    amount_cents: llmOutput.amount_cents || 0,
+                    amount_cents: llmOutput.amount_cents,
                     account_id: accountId,
                     payee_name: payeeName,
                     budget_id: llmOutput.budget_id || "",
-                },
-            );
+                }));
 
             if (isDuplicate) {
                 if (!silent)
@@ -1656,7 +1693,7 @@ export class AgentOrchestrator {
                 });
                 return {
                     action: "duplicate",
-                    details: `${llmOutput.currency || "SGD"} ${Math.abs(llmOutput.amount_cents || 0) / 100} at ${llmOutput.merchant || payeeName}`,
+                    details: `${bookableAmountPrefix(llmOutput.amount_cents, llmOutput.currency)}at ${llmOutput.merchant || payeeName}`,
                 };
             }
 
@@ -1685,7 +1722,7 @@ export class AgentOrchestrator {
                     account_id: accountId,
                     date:
                         llmOutput.date || new Date().toISOString().slice(0, 10),
-                    amount_cents: llmOutput.amount_cents || 0,
+                    amount_cents: llmOutput.amount_cents,
                     imported_description: payeeName,
                     category_id: categoryId,
                     payee_id: llmOutput.payee_id || undefined,
@@ -1708,9 +1745,16 @@ export class AgentOrchestrator {
             } catch (e) {
                 logger.error({ event: "insert_failed", error: e.message });
                 if (!silent) {
+                    // Never print a fabricated figure: show the amount only when
+                    // the route would accept it, so a malformed shape cannot be
+                    // converted into a plausible-looking money value here.
+                    const amountText = bookableAmountPrefix(
+                        llmOutput.amount_cents,
+                        llmOutput.currency,
+                    );
                     try {
                         await this._tools.executeTool("notify_user", {
-                            message: `Failed to insert ${llmOutput.currency || "SGD"} ${Math.abs(llmOutput.amount_cents || 0) / 100} at ${llmOutput.merchant || payeeName}: ${String(e.message).slice(0, 200)}`,
+                            message: `Failed to insert ${amountText}at ${llmOutput.merchant || payeeName}: ${String(e.message).slice(0, 200)}`,
                         });
                     } catch {} // prevent notify_user failure from triggering top-level catch
                 }
@@ -1731,9 +1775,11 @@ export class AgentOrchestrator {
                 // "Misc" is a catch-all, not a real payee — fall back to the
                 // raw merchant text there so the message stays informative.
                 const sym = llmOutput.currency === "MYR" ? "RM" : "S$";
-                const amt = (
-                    Math.abs(llmOutput.amount_cents || 0) / 100
-                ).toFixed(2);
+                const cents = bookableAmountCents(llmOutput.amount_cents);
+                const amountPrefix =
+                    cents === null
+                        ? ""
+                        : `${sym}${(Math.abs(cents) / 100).toFixed(2)} `;
                 const acct = llmOutput.account_name || "unknown account";
                 const dt = llmOutput.date || "today";
                 const displayPayee =
@@ -1744,7 +1790,7 @@ export class AgentOrchestrator {
                     ? ` → ${llmOutput.category_name}`
                     : "";
                 const notified = await this._tools.executeTool("notify_user", {
-                    message: `${sym}${amt} at ${displayPayee} via ${acct} on ${dt}${cat}, logged`,
+                    message: `${amountPrefix}at ${displayPayee} via ${acct} on ${dt}${cat}, logged`,
                 });
                 if (!notified) {
                     logger.error({
@@ -1813,7 +1859,7 @@ export class AgentOrchestrator {
                 timestamp: new Date().toISOString(),
             });
 
-            const summary = `${llmOutput.currency || "SGD"} ${Math.abs(llmOutput.amount_cents || 0) / 100} at ${llmOutput.merchant || payeeName} -> ${payeeName}`;
+            const summary = `${bookableAmountPrefix(llmOutput.amount_cents, llmOutput.currency)}at ${llmOutput.merchant || payeeName} -> ${payeeName}`;
             return { action: "inserted", details: summary };
         }
 
