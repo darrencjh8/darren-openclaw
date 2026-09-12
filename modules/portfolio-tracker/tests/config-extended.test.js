@@ -49,7 +49,7 @@ describe("Config — all 30+ fields", () => {
       MAPPINGS_PATH: "/data/custom/mappings.json",
 
       // User
-      USER_NAME: "Darren",
+      USER_NAME: "Example",
       SYSTEM_PROMPT_EXTRA: "Extra instructions here",
 
       // IMAP
@@ -105,7 +105,7 @@ describe("Config — all 30+ fields", () => {
     expect(cfg.mappingsPath).toBe("/data/custom/mappings.json");
 
     // User
-    expect(cfg.userName).toBe("Darren");
+    expect(cfg.userName).toBe("Example");
     expect(cfg.systemPromptExtra).toBe("Extra instructions here");
 
     // IMAP

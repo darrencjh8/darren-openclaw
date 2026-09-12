@@ -8,7 +8,7 @@ An internal transfer is only created when both sides resolve deterministically t
 
 ## Scope
 
-This work covers structured movement alerts from OCBC, Zeta Bank, and DBS, including DBS successful bill-payment alerts.
+This work covers structured movement alerts from OCBC, Trust, and DBS, including DBS successful bill-payment alerts.
 
 The DBS fixture below must be handled without an LLM when its source and destination account identities are configured and resolve uniquely:
 
@@ -172,8 +172,8 @@ Supported verified registry facts, used only as deterministic fallback:
 
 ```text
 Account ending 869001 belongs to OCBC 111
-Zeta Bank Singapore Limited account ending 310980 belongs to Zeta Card
-Zeta Bank alert recipient maps to Zeta Card account
+Trust Bank Singapore Limited account ending 310980 belongs to Zeta Card
+Trust Bank alert recipient maps to Zeta Card account
 DBS account ending 9302 belongs to Epsilon Vista
 UOB CREDIT CARDS account ending 4605 belongs to UOB Card
 CITI CREDIT CARDS account ending 4756 belongs to Citi Card
@@ -412,7 +412,7 @@ Mock `fetch` at the Actual adapter boundary and assert the exact HTTP request bo
 For the OCBC-to-Trust transfer, assert the request uses the field names and body shape the Actual adapter actually sends, including:
 
 ```text
-account: OCBC_360_ID
+account: OCBC_111_ID
 date: 2026-09-01
 amount: -1425
 payee: TRUST_CARD_TRANSFER_PAYEE_ID

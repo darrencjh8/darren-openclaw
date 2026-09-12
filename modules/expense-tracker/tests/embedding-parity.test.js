@@ -54,7 +54,7 @@ const QUERIES = [
     { query: "shell petrol station", expected: "Shell" },
     { query: "guardian pharmacy healthcare", expected: "Guardian" },
     { query: "card ending 1234", expected: "Epsilon Vista" },
-    { query: "beta 360 account", expected: "Beta 360" },
+    { query: "Beta 360 account", expected: "Beta 360" },
     { query: "foodpanda payee", expected: "Food panda" },
     { query: "cold storage grocery", expected: "Cold Storage" },
     { query: "esso petrol transport", expected: "Esso" },

@@ -192,7 +192,7 @@ export function resolveFactAccount(accountName, accounts, aliases) {
  * rejected the three shortest written forms at scores of 0.746, 0.742 and
  * 0.554, and shorter names score worse rather than better.
  *
- * Order matters. Exact matching runs BEFORE stopword removal, otherwise "DBS"
+ * Order matters. Exact matching runs BEFORE stopword removal, otherwise "Epsilon"
  * reduces to the same tokens as "Epsilon Account" and silently resolves to the
  * wrong account — the exact failure this issue is about.
  *
@@ -245,8 +245,8 @@ function matchWithoutAliases(nameText, accounts) {
 
   // Step 2 — containment over set-difference tokens (token SET, not substring).
   // Plural trimming happens only here, after the exact comparison, because
-  // trimming account names would turn "Epsilon Account" into "db" and make a bare
-  // "DBS" resolve to the wrong account.
+  // trimming account names would collapse "Epsilon Account" to "epsilon" and make a
+  // bare "Epsilon" resolve to the wrong account.
   const query = pluralTrim(raw.filter((w) => !ACCOUNT_STOPWORDS.has(w)));
   if (!query.length) return refusal("no distinctive words in the name");
 

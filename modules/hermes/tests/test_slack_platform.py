@@ -524,7 +524,7 @@ class SlackPlatformEnabledProbeTests(unittest.TestCase):
                 'platforms:\n  slack:\n    note: "a # b"\n    enabled: false\n'
             ),
             "apostrophe-at-top-level": (
-                'identity: "Darren\'s"\nplatforms:\n  slack:\n    enabled: false\n'
+                'identity: "Example\'s"\nplatforms:\n  slack:\n    enabled: false\n'
             ),
             "escaped-double-quote": (
                 'platforms:\n  slack:\n    note: "say \\"hi\\""\n    enabled: false\n'

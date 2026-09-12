@@ -26,7 +26,7 @@ Test file at `modules/hermes/tests/test-50-seed-defaults.sh` also contains the c
 The repo may not have `user.name`/`user.email` set. Configure before committing:
 
 ```bash
-git config user.name "Darren"
+git config user.name "Example"
 git config user.email "<your-github-noreply-email>"
 ```
 
