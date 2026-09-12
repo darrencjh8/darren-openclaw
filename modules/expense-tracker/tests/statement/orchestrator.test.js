@@ -570,6 +570,21 @@ describe("DeepSeekClient API format", () => {
     expect(kwargs.thinking).toEqual({ type: "adaptive" });
   });
 
+  it("uses low thinking on the statement deepseek route with the default effort", async () => {
+    const config = makeConfig({ llmReasoningEffort: "low" });
+    const client = new DeepSeekClient(config);
+
+    const mockCreate = vi.fn().mockResolvedValue({
+      choices: [{ finish_reason: "stop", message: { content: "ok" } }],
+    });
+    client._client.chat.completions.create = mockCreate;
+
+    const tools = [{ type: "function", function: { name: "fetch_history" } }];
+    await client.chat([{ role: "user", content: "reconcile" }], tools);
+
+    expect(mockCreate.mock.calls[0][0].thinking).toEqual({ type: "low" });
+  });
+
   it("retries on failure then succeeds on second attempt", async () => {
     const config = makeConfig();
     const client = new DeepSeekClient(config);

@@ -22,7 +22,7 @@ A **statement is authoritative** — it represents the bank's final record for a
 | **"No match"** | Insert new txn (cleared=false) | **Insert as outlier** (cleared=false, noted) |
 | **Result** | 1 txn inserted or skipped | Reconciliation report: X cleared, Y outliers inserted |
 | **Database** | dedup.db (prevent duplicates) | statement.db (prevent re-processing periods) |
-| **LLM Model** | deepseek-chat (thinking=off) | deepseek-chat (thinking=adaptive) |
+| **LLM Model** | deepseek-chat (thinking=off) | deepseek-chat (thinking=low) |
 | **Email disposition** | Read on insert; unread on skip/fail | Always marked read |
 
 ---

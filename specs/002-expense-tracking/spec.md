@@ -172,7 +172,7 @@ Exposed as MCP tool `resolve_merchant` (`src/mcp-server.js`). `budget_id` is req
 
 **Resolution chain** (`src/tools.js:_handle_resolve_merchant`), short-circuits on first match:
 1. `MemoryStore.search()` lookup in MEMORY.md → `source: "memory"`
-2. Web search (Brave, if `BRAVE_SEARCH_API_KEY` configured) + DeepSeek LLM classification (`temperature: 0.1`, reasoning `adaptive`) → `source: "web"`
+2. Web search (Brave, if `BRAVE_SEARCH_API_KEY` configured) + DeepSeek LLM classification (`temperature: 0.1`, reasoning `low`) → `source: "web"`
 3. `"Misc"` fallback → `source: "fallback"`
 
 **Behaviors:**
