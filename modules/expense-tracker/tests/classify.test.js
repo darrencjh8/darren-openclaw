@@ -43,7 +43,7 @@ describe("classifyEmail", () => {
   const config = {
     llmApiKey: "sk-test-classify",
     llmBaseUrl: "https://api.deepseek.com/v1",
-    llmModel: "deepseek-v4-pro",
+    llmModel: "deepseek-flash",
   };
 
   it("classifies a single-transaction email as 'transaction'", async () => {

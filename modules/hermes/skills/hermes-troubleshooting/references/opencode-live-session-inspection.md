@@ -50,4 +50,4 @@ for r in cur.execute("""SELECT id,title,model,directory,time_created,time_update
 
 ## Verified example (2026-09-09)
 
-A 46-min-old `opencode` TUI (PID in `/workspace/codex-router-mcp-auth`, Issue #38 worktree) had exactly one session — an 01:45 smoke test that replied `OPENCODE_SMOKE_OK` — and the branch sat 0 commits ahead of base with only an untracked implementation brief. Conclusion: run healthy but parked; the real prompt was never fed in. Model reported from session + message metadata: deepseek-v4-pro via codex-router provider. All reads done on a copied DB — zero impact on the live process.
+A 46-min-old `opencode` TUI (PID in `/workspace/codex-router-mcp-auth`, Issue #38 worktree) had exactly one session — an 01:45 smoke test that replied `OPENCODE_SMOKE_OK` — and the branch sat 0 commits ahead of base with only an untracked implementation brief. Conclusion: run healthy but parked; the real prompt was never fed in. Model reported from session + message metadata: deepseek-flash via codex-router provider. All reads done on a copied DB — zero impact on the live process.

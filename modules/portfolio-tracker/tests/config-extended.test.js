@@ -50,7 +50,7 @@ describe("Config — all 30+ fields", () => {
 
       // Logging
       LOG_LEVEL: "TRACE",
-      BALANCE_SYNC_MODEL: "deepseek-v3",
+      BALANCE_SYNC_MODEL: "deepseek-flash",
 
       // User
       USER_NAME: "Darren",
@@ -115,7 +115,7 @@ describe("Config — all 30+ fields", () => {
 
     // Logging
     expect(cfg.logLevel).toBe("TRACE");
-    expect(cfg.balanceSyncModel).toBe("deepseek-v3");
+    expect(cfg.balanceSyncModel).toBe("deepseek-flash");
 
     // User
     expect(cfg.userName).toBe("Darren");

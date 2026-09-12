@@ -14,7 +14,7 @@ Post-migration (spec 012), the expense-tracker is Node.js. No Python remains.
 | Layer | Choice | Rationale |
 |---|---|---|
 | Runtime | Node.js 24 (ESM) | Spec 012 migration — `"type": "module"` |
-| LLM (all pipelines) | DeepSeek `deepseek-chat` | Real API model name. Thinking level controls depth (`low` for statements, not used for classification) |
+| LLM (all pipelines) | DeepSeek `deepseek-flash` | Real API model name. Thinking level controls depth (`low` for statements, not used for classification) |
 | DB | `better-sqlite3` | Same pattern as dedup journal (migrated from Python sqlite3) |
 | HTTP | `fetch` (built-in) | Calls actual-api proxy at `http://actual-api:3000` |
 | PDF extraction | `pdftotext` (poppler-utils) | CLI tool, called via `execFile`. For encrypted PDFs: `qpdf --password=... --decrypt` pipe |
@@ -29,7 +29,7 @@ Post-migration (spec 012), the expense-tracker is Node.js. No Python remains.
 ```
 index.js: onNewEmail(msg)
     │
-    ├── 1. classifyEmail() — LLM pre-classification (deepseek-chat, no tools)
+    ├── 1. classifyEmail() — LLM pre-classification (deepseek-flash, no tools)
     │       "Classify: 'statement', 'transaction', or 'skip'"
     │
     ├── "transaction" → AgentOrchestrator.processEmail()
@@ -38,7 +38,7 @@ index.js: onNewEmail(msg)
     ├── "skip" → mark_email_read() (trade emails, ignored)
     │
     └── "statement"  → StatementProcessor.processStatement()
-                         (NEW — deepseek-chat, thinking=low, max 20 iterations)
+                         (NEW — deepseek-flash, thinking=low, max 20 iterations)
 ```
 
 ### Dispatch Diagram
@@ -60,7 +60,7 @@ Email → classifyEmail() → dispatch()
 Statement email dispatched
     │
     ▼
-StatementProcessor.processStatement() — model: deepseek-chat, thinking=low
+StatementProcessor.processStatement() — model: deepseek-flash, thinking=low
     │
     ├── Turn 1: Extract metadata + transactions
     │   tool_calls: [extract_email_content, fetch_statement_history]
@@ -217,7 +217,7 @@ app.get("/transactions", async (req, res) => {
 
 ## 8. System Prompts
 
-### 8.1 Pre-Classification Prompt (deepseek-chat, no tools)
+### 8.1 Pre-Classification Prompt (deepseek-flash, no tools)
 
 Located in `src/classify.js` as `CLASSIFICATION_PROMPT`.
 
@@ -226,7 +226,7 @@ Classifies emails into "statement", "transaction", or "skip":
 - "transaction" → Existing alert pipeline (unchanged)
 - "skip" → IBKR trades, portfolio reports → silently marked read
 
-### 8.2 Statement Reconciliation Prompt (deepseek-chat, thinking=low)
+### 8.2 Statement Reconciliation Prompt (deepseek-flash, thinking=low)
 
 Located in `src/statement/prompts.js` as `STATEMENT_PROMPT`.
 
@@ -249,7 +249,7 @@ Core rules:
 
 Currency routing: SGD → "My Budget", MYR → "My MYR Budget" (via ACTUAL_PRIMARY_BUDGET_FILE / ACTUAL_SECONDARY_BUDGET_FILE env vars).
 
-### 8.3 Portfolio Tracker Prompt — Missing-PDF Rule (deepseek-chat, thinking=low)
+### 8.3 Portfolio Tracker Prompt — Missing-PDF Rule (deepseek-flash, thinking=low)
 
 Located in `modules/portfolio-tracker/src/prompts.js` as `SYSTEM_PROMPT`.
 
@@ -299,7 +299,7 @@ out in the wrong section.
 modules/expense-tracker/
 ├── src/
 │   ├── statement/                    (4 files)
-│   │   ├── orchestrator.js           StatementProcessor (deepseek-chat, thinking=low, 20 iter)
+│   │   ├── orchestrator.js           StatementProcessor (deepseek-flash, thinking=low, 20 iter)
 │   │   ├── prompts.js                STATEMENT_PROMPT + STATEMENT_FEW_SHOT
 │   │   └── matcher.js                fuzzyMatch()
 │   ├── index.js                      MODIFIED (+statement pipeline wiring, +imapMailbox)
@@ -352,12 +352,12 @@ gateway/
 
 ## 11. Cost Estimate
 
-All pipelines use `deepseek-chat` with thinking level controlling depth.
+All pipelines use `deepseek-flash` with thinking level controlling depth.
 
 | Step | Model | Thinking | Input | Output | Cost |
 |---|---|---|---|---|---|
-| Pre-classification | deepseek-chat | _(not set)_ | ~500 tok | ~5 tok | ~$0.00014 |
-| Statement processing (15 txns) | deepseek-chat | low | ~6000 tok | ~2500 tok | ~$0.002 |
+| Pre-classification | deepseek-flash | _(not set)_ | ~500 tok | ~5 tok | ~$0.00014 |
+| Statement processing (15 txns) | deepseek-flash | low | ~6000 tok | ~2500 tok | ~$0.002 |
 | Per-email total | | | | | **~$0.002** |
 
 At 4 statements/month + ~100 alerts/month: **~$0.12/month total**.

@@ -483,27 +483,9 @@ PY
 )
 [ -n "$merge_block" ] && ok "seed script has opencode merge block" || nope "seed script has opencode merge block" "PYOPENCODE block missing"
 
-cat > "$TMPDIR/canonical.json" <<'EOF'
-{
-  "$schema": "https://opencode.ai/config.json",
-  "provider": {
-    "codex-router": {
-      "npm": "@ai-sdk/openai-compatible",
-      "name": "Codex Router",
-      "options": {
-        "baseURL": "http://codex-router:4100/v1",
-        "apiKey": "local"
-      },
-      "models": {
-        "auto-thinking": { "name": "Auto (routed)" },
-        "gpt-5.6-terra": { "name": "GPT-5.6 Terra" },
-        "deepseek-v4-flash": { "name": "DeepSeek V4 Flash" }
-      }
-    }
-  },
-  "model": "codex-router/auto-thinking"
-}
-EOF
+# Use the shipped catalog as the fixture so the test cannot drift from the file
+# the image bakes to /opt/hermes-defaults/opencode/opencode.json.
+cp "$SCRIPT_DIR/../opencode/opencode.json" "$TMPDIR/canonical.json"
 
 mkdir -p "$TMPDIR/home/.config/opencode"
 cat > "$TMPDIR/home/.config/opencode/opencode.json" <<'EOF'
@@ -516,7 +498,7 @@ cat > "$TMPDIR/home/.config/opencode/opencode.json" <<'EOF'
         "apiKey": "local"
       },
       "models": {
-        "deepseek-v4-pro": { "name": "DeepSeek V4 Pro" }
+        "deepseek-pro": { "name": "DeepSeek Pro" }
       }
     }
   },
@@ -544,9 +526,8 @@ c = json.load(open('$TMPDIR/home/.config/opencode/opencode.json'))
 models = c.get('provider', {}).get('codex-router', {}).get('models', {})
 checks = {
     'model_auto': c.get('model') == 'codex-router/auto-thinking',
-    'no_pro': 'deepseek-v4-pro' not in models,
-    'has_flash': 'deepseek-v4-flash' in models,
-    'has_auto': 'auto-thinking' in models,
+    'exact_models': set(models) == {'auto-thinking', 'gpt-5.6-terra'},
+    'no_stale': 'deepseek-pro' not in models,
     'kept_instructions': c.get('instructions') == ['custom instruction from install-agents.sh'],
     'kept_plugin': c.get('plugin') == ['some-plugin@1.0.0'],
 }

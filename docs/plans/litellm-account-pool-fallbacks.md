@@ -2,7 +2,7 @@
 
 ## Goal
 
-Route Hermes primary model calls through the Docker-hosted LiteLLM router while using ordered OpenAI subscription account pools. Use direct DeepSeek V4 Flash only after the relevant LiteLLM pool is exhausted or unavailable.
+Route Hermes primary model calls through the Docker-hosted LiteLLM router while using ordered OpenAI subscription account pools. Use direct `deepseek-flash` only after the relevant LiteLLM pool is exhausted or unavailable.
 
 ## Required routing
 
@@ -28,12 +28,12 @@ Use for compression, delegation, triage specification, profile description, and 
 gpt-5.6-sol
 ```
 
-Use for the Architect profile. Its fallback is direct DeepSeek V4 Flash.
+Use for the Architect profile. Its fallback is direct `deepseek-flash`.
 
 ### Direct fallback
 
 ```text
-deepseek-v4-flash
+deepseek-flash
 ```
 
 DeepSeek is the final direct fallback after the applicable LiteLLM route fails.
@@ -51,8 +51,8 @@ DeepSeek is the final direct fallback after the applicable LiteLLM route fails.
 ## Phase 2: darren-openclaw
 
 1. Keep Hermes primary roles pointed at `http://codex-router:4100/v1`.
-2. Use transparent pooled aliases (`gpt-5.6-terra`, `gpt-5.6-luna`, `gpt-5.6-sol`) so LiteLLM selects the account and handles intra-pool fallback; keep exactly one direct DeepSeek V4 Pro fallback per primary/profile route.
-3. Configure `auxiliary.compression.fallback_chain` to direct DeepSeek V4 Pro after LiteLLM Luna-pool exhaustion.
+2. Use transparent pooled aliases (`gpt-5.6-terra`, `gpt-5.6-luna`, `gpt-5.6-sol`) so LiteLLM selects the account and handles intra-pool fallback; keep exactly one direct `deepseek-flash` fallback per primary/profile route.
+3. Configure `auxiliary.compression.fallback_chain` to direct `deepseek-flash` after LiteLLM Luna-pool exhaustion.
 4. Replace `static-analyst` with persistent `code-reviewer`; remove `qa-engineer` and `quality-assurance` from source and startup runtime state.
 5. Keep `kanban.default_assignee` set to `code-reviewer`.
 6. Keep generated `.codex/` metadata ignored.

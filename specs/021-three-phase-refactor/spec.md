@@ -134,7 +134,7 @@ The spec 020 design (3 phases with deterministic Phase 1.5) was partially implem
 ### LLM Configuration
 
 ```
-Model: deepseek-chat
+Model: deepseek-flash
 Reasoning: low (Phase 1 keeps fetch_context but runs at low depth for cost)
 Tools: [ fetch_context ]
 Temperature: 0.1
@@ -224,7 +224,7 @@ ${liveCategories.map(c => `  ${c.id}: ${c.name}`).join('\n')}
 
 Respond: { "category_id": "uuid" } or { "category_id": null }`;
 
-// LLM config: reasoning="disabled", temperature=0, deepseek-chat
+// LLM config: reasoning="disabled", temperature=0, deepseek-flash
 const response = await llm.chat(
   [{ role: "user", content: pickerPrompt }],
   undefined, undefined,

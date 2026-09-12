@@ -25,7 +25,7 @@ import { logger } from "./logging.js";
 export class LLMClient {
     constructor(config) {
         this._provider = config.llmProvider || "deepseek";
-        this._model = config.llmModel || "deepseek-v4-pro";
+        this._model = config.llmModel || "deepseek-flash";
         this._reasoningEffort = config.llmReasoningEffort || "low";
         this._routes = [{
             provider: this._provider,
@@ -50,7 +50,7 @@ export class LLMClient {
         if (this._provider !== "deepseek") {
             this._routes.push({
                 provider: config.llmFinalFallbackProvider || "deepseek",
-                model: config.llmFinalFallbackModel || "deepseek-v4-flash",
+                model: config.llmFinalFallbackModel || "deepseek-flash",
                 apiKey: config.deepseekApiKey,
                 baseURL: "https://api.deepseek.com/v1",
                 retries: 1,

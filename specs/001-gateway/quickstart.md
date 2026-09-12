@@ -16,7 +16,7 @@ hermes setup --portal
 # → Select "Custom Provider"
 # → Base URL: https://api.deepseek.com/v1
 # → API Key: <your DEEPSEEK_API_KEY>
-# → Model: deepseek-v4-flash
+# → Model: deepseek-flash
 
 # Test chat
 hermes chat

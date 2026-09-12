@@ -239,7 +239,7 @@ Phase 4: Password Handling
 
 - [x] Create `src/statement/prompts.py`:
   - `CLASSIFICATION_PROMPT` — plan.md §8.1 (flash, single-word response)
-  - `STATEMENT_PROMPT` — plan.md §8.2 (v4-pro, full reconciliation instructions)
+  - `STATEMENT_PROMPT` — plan.md §8.2 (`deepseek-flash`, full reconciliation instructions)
   - `STATEMENT_FEW_SHOT` — 2 examples:
     1. 3 txn statement, 2 matched + 1 outlier → reconcile + insert → notify
     2. Duplicate period → fetch_statement_history returns record → stop
@@ -258,16 +258,16 @@ Phase 4: Password Handling
   - `test_process_statement_max_iterations_exceeded` — loops >20 → error → mark_read
   - `test_process_statement_notifies_and_marks_read_on_success` — verify notify_user + mark_email_read
   - `test_process_statement_notifies_and_marks_read_on_failure` — exception → notify + mark_read
-  - `test_process_statement_uses_v4_pro_model` — verify DeepSeekClient constructed with v4-pro
+  - `test_process_statement_uses_flash_model` — verify DeepSeekClient constructed with `deepseek-flash`
 - [x] **GREEN** Implement `src/statement/orchestrator.py`:
   - `StatementProcessor(config, tools, llm_client)`
   - `async process_statement(msg_id, raw_email, imap_handler) → dict`
     - Extract email content (text or PDF OCR)
     - Build conversation with STATEMENT_PROMPT + few-shot
-    - LLM loop (max 20 iter) with v4-pro model
+    - LLM loop (max 20 iter) with `deepseek-flash` model
     - Always `mark_email_read()` at end
     - Return `{ action, matched, outliers, details }`
-  - LLM client constructed as `DeepSeekClient(config, model="deepseek-v4-pro")`
+  - LLM client constructed as `DeepSeekClient(config, model="deepseek-flash")`
   - On any exception → `notify_user` + `mark_email_read` + log error
 
 **Validation:** `pytest tests/statement/test_statement_orchestrator.py -v` — 7 tests pass.
@@ -286,7 +286,7 @@ Phase 4: Password Handling
   - Returns: `"transaction"` | `"statement"` (defaults to `"transaction"` on error)
 - [x] Initialize `StatementProcessor` in `main()`:
   - `StatementJournal` with `data/statement.db`
-  - `StatementProcessor(config, tools, deepseek_v4_pro_client)`
+  - `StatementProcessor(config, tools, deepseek_flash_client)`
 - [x] Modify `on_new_email`:
   ```python
   async def on_new_email(msg):

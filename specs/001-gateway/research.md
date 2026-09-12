@@ -28,7 +28,7 @@ Repository: https://github.com/NousResearch/hermes-agent
 | Skills | SKILL.md files in workspace | SKILL.md with progressive disclosure, Skills Hub, auto-creation | Hermes skills are more sophisticated (agent can create/improve them) |
 | Channels | Telegram, WhatsApp | Telegram, Discord, Slack, WhatsApp, Signal, SMS, Email, Matrix, +12 more | Hermes has 20+ platforms native |
 | Dashboard | None | Web dashboard on port 9119 (optional) | OAuth-gated, multi-profile |
-| Thinking levels | `off/minimal/low/medium/high/xhigh/adaptive/max` | Model choice + delegation model override | Use V4 Flash for routine, V4 Pro for thinker sub-agent |
+| Thinking levels | `off/minimal/low/medium/high/xhigh/adaptive/max` | Model choice + delegation model override | Use `deepseek-flash` for routine work and for the thinker sub-agent |
 
 ### 2. Email Channel — IMAP Polling vs IDLE
 
@@ -75,7 +75,7 @@ Hermes `delegate_task` spawns isolated child agents with:
 - Fresh conversation context (no parent history)
 - Restricted toolsets (`terminal` = Docker CLI access)
 - Higher iteration limit (100 vs default 50)
-- Model override (V4 Pro for deeper analysis)
+- Model override (`deepseek-flash` for deeper analysis)
 
 Key constraints:
 - Sub-agents CANNOT auto-execute dangerous commands — approval gate applies

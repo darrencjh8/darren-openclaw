@@ -86,7 +86,7 @@ Full schema + copy-paste query: `references/opencode-live-session-inspection.md`
 
 Don't answer from the session system-prompt header alone, and don't answer from config alone — they answer different questions:
 
-- **Session header** (`Model:`/`Provider:` in the system prompt) = what ACTUALLY served this session. It can differ from config's primary — e.g. config primary `custom:codex-router`/`gpt-5.6-terra` while a session runs `deepseek`/`deepseek-v4-flash` because the primary failed and fallback engaged. Trust the header for "what ran", config for "what was intended".
+- **Session header** (`Model:`/`Provider:` in the system prompt) = what ACTUALLY served this session. It can differ from config's primary — e.g. config primary `custom:codex-router`/`gpt-5.6-terra` while a session runs `deepseek`/`deepseek-flash` because the primary failed and fallback engaged. Trust the header for "what ran", config for "what was intended".
 - **`config.yaml` model topology** — map these keys separately:
   - `model.provider` + `model.default` — configured primary chat model
   - `fallback_providers` — where the chat loop drops after 3 failed attempts
@@ -400,7 +400,7 @@ Full catalog + provider table + diagnostic transcript: `references/image-gen-bac
 **Wiring:**
 ```bash
 hermes config set auxiliary.vision.provider deepseek
-hermes config set auxiliary.vision.model deepseek-v4-flash-vision-exp
+hermes config set auxiliary.vision.model deepseek-flash
 ```
 
 **Verify the router resolves it:**
@@ -409,7 +409,7 @@ from agent.auxiliary_client import resolve_vision_provider_client
 # prints (provider, client, model)
 ```
 
-**Pitfall — empty content despite HTTP 200:** deepseek-v4-flash-vision-exp spends tokens on `reasoning_content`; with small `max_tokens` the visible `content` comes back empty while usage shows ~400 tokens. Use max_tokens ≥ 300 for short replies.
+**Pitfall — empty content despite HTTP 200:** deepseek-flash spends tokens on `reasoning_content`; with small `max_tokens` the visible `content` comes back empty while usage shows ~400 tokens. Use max_tokens ≥ 300 for short replies.
 
 ## Delegation batch stalls silently
 

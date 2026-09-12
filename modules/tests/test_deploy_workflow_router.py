@@ -56,7 +56,7 @@ class DeployWorkflowRouterTests(unittest.TestCase):
         self.assertIn("LLM_REASONING_EFFORT: ${{ vars.LLM_REASONING_EFFORT || 'low' }}", workflow)
         self.assertIn("LLM_FALLBACK_MODEL: ${{ vars.LLM_FALLBACK_MODEL || 'gpt-5.6-terra' }}", workflow)
         self.assertIn("LLM_FINAL_FALLBACK_PROVIDER: ${{ vars.LLM_FINAL_FALLBACK_PROVIDER || 'deepseek' }}", workflow)
-        self.assertIn("LLM_FINAL_FALLBACK_MODEL: ${{ vars.LLM_FINAL_FALLBACK_MODEL || 'deepseek-v4-flash' }}", workflow)
+        self.assertIn("LLM_FINAL_FALLBACK_MODEL: ${{ vars.LLM_FINAL_FALLBACK_MODEL || 'deepseek-flash' }}", workflow)
 
         # Credentials remain in secrets
         self.assertIn("LLM_API_KEY: ${{ secrets.LLM_API_KEY }}", workflow)
@@ -72,7 +72,7 @@ class DeployWorkflowRouterTests(unittest.TestCase):
         self.assertIn("LLM_MODEL=${LLM_MODEL:-auto-thinking}", env_list)
         self.assertIn("LLM_FALLBACK_MODEL=${LLM_FALLBACK_MODEL:-gpt-5.6-terra}", env_list)
         self.assertIn("LLM_FINAL_FALLBACK_PROVIDER=${LLM_FINAL_FALLBACK_PROVIDER:-deepseek}", env_list)
-        self.assertIn("LLM_FINAL_FALLBACK_MODEL=${LLM_FINAL_FALLBACK_MODEL:-deepseek-v4-flash}", env_list)
+        self.assertIn("LLM_FINAL_FALLBACK_MODEL=${LLM_FINAL_FALLBACK_MODEL:-deepseek-flash}", env_list)
 
     def test_opencode_zen_key_is_not_passed_to_codex_router(self):
         compose = yaml.safe_load(COMPOSE_FILE.read_text(encoding="utf-8"))
