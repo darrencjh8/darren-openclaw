@@ -1,7 +1,7 @@
 #!/bin/bash
 # Verify docker-compose.yml has required env vars for the hermes service.
-# HERMES_WRITE_SAFE_ROOT must include both /opt/data and /workspace
-# so Hermes can write to both its internal data volume and git worktrees.
+# HERMES_WRITE_SAFE_ROOT must include /opt/data, /workspace, and /tmp
+# so Hermes can write to its internal data volume, git worktrees, and scratch space.
 set -euo pipefail
 
 RED='\033[0;31m' GREEN='\033[0;32m' NC='\033[0m'
@@ -52,6 +52,17 @@ test_has_workspace() {
     fi
 }
 
+# Test: HERMES_WRITE_SAFE_ROOT includes /tmp
+test_has_tmp() {
+    local val
+    val=$(grep 'HERMES_WRITE_SAFE_ROOT' "$COMPOSE_FILE" | head -1)
+    if echo "$val" | grep -q '/tmp'; then
+        ok "HERMES_WRITE_SAFE_ROOT includes /tmp"
+    else
+        nope "HERMES_WRITE_SAFE_ROOT includes /tmp" "value: $val"
+    fi
+}
+
 # Test: /workspace volume mount exists for hermes service
 test_has_workspace_volume() {
     if grep -A 50 'hermes:' "$COMPOSE_FILE" | grep -q '/workspace'; then
@@ -64,6 +75,7 @@ test_has_workspace_volume() {
 test_has_safe_root
 test_has_opt_data
 test_has_workspace
+test_has_tmp
 test_has_workspace_volume
 
 echo ""

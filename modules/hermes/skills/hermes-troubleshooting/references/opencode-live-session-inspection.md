@@ -15,7 +15,7 @@ Cross-check repo progress: `git log --oneline -8`, `git status --short`, `git re
 
 ## 2. Where opencode keeps state
 
-`~/.local/share/opencode/opencode.db` — SQLite in **WAL mode**: also copy `opencode.db-wal` and `opencode.db-shm`. Copy all three into a scratch dir under the write-safe root (`/workspace/oc-inspect` works; write_file refuses `/tmp`), then query the copy. No sqlite3 CLI on the host — use python3's sqlite3 module with a read-only URI.
+`~/.local/share/opencode/opencode.db` — SQLite in **WAL mode**: also copy `opencode.db-wal` and `opencode.db-shm`. Copy all three into a scratch dir under the write-safe root (`/workspace/oc-inspect` and `/tmp` both work), then query the copy. No sqlite3 CLI on the host — use python3's sqlite3 module with a read-only URI.
 
 ## 3. Key tables
 
