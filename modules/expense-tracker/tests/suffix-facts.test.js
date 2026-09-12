@@ -11,54 +11,58 @@ import {
   parseSuffixFact,
   stopwords,
 } from "../src/memory.js";
+// memory.js does not re-export this one, and the plural filler retry lives on it.
+import { resolveFactAccount } from "../src/suffix-facts.js";
 
-// The live account names, captured from production MEMORY.md. This fixture is
-// the whole point of the tests: the resolver must work on the real set, not on
-// a convenient subset.
+// Synthetic account names, deliberately shaped like a real portfolio: several
+// accounts share a brand token, some are card-named and some account-named, one
+// is a single generic word, and one carries a digit+letter token. The fixture is
+// the whole point of the tests: the resolver must work on a full set with shared
+// tokens, not on a convenient subset.
 const ACCOUNTS = [
-  "Ryt Bank",
-  "OCBC 360",
-  "SC Bonus Saver",
-  "UOB Ladies Card",
-  "DBS Account",
-  "Trust Bank",
-  "Citi Reward",
-  "HSBC Revolution",
-  "POSB Cashback",
-  "Trust Card",
-  "DBS Altitude Card",
-  "UOB One Account",
-  "SC Journeys",
-  "DBS Yuu Card",
-  "Deposit",
-  "OCBC 90N",
+  "Alpha Bank",
+  "Beta 360",
+  "Eta Plus Saver",
+  "Delta Extra Card",
+  "Epsilon Account",
+  "Zeta Bank",
+  "Theta Reward",
+  "Iota Freedom",
+  "Kappa Cashback",
+  "Zeta Card",
+  "Epsilon Vista Card",
+  "Delta One Account",
+  "Eta Journeys",
+  "Epsilon Nova Card",
+  "Savings",
+  "Beta 90N",
 ];
 
 const asRecords = (names) => names.map((name) => ({ id: name, name, closed: false }));
 
 describe("parseSuffixFact (tolerant reader)", () => {
   it.each([
-    ["Card ending 3255 belongs to DBS Yuu Card", "3255", "DBS Yuu Card"],
-    ["Account ending 5750 belongs to DBS Account", "5750", "DBS Account"],
+    ["Card ending 3255 belongs to Epsilon Nova Card", "3255", "Epsilon Nova Card"],
+    ["Account ending 5750 belongs to Epsilon Account", "5750", "Epsilon Account"],
     // The shape Hermes actually stored during the live probe.
-    ["Card/account ending 9999 belongs to DBS Yuu Card.", "9999", "DBS Yuu Card"],
-    ["Account/card ending 9001 belongs to OCBC 360", "9001", "OCBC 360"],
-    ["card ending in 3255 belongs to DBS Yuu", "3255", "DBS Yuu"],
-    ["  Card Ending 3255 Belongs To DBS Yuu Card  ", "3255", "DBS Yuu Card"],
-    ["Card ending 3255 belongs to DBS Yuu Card,", "3255", "DBS Yuu Card"],
+    ["Card/account ending 9999 belongs to Epsilon Nova Card.", "9999", "Epsilon Nova Card"],
+    ["Account/card ending 9001 belongs to Beta 360", "9001", "Beta 360"],
+    ["card ending in 3255 belongs to Epsilon Nova", "3255", "Epsilon Nova"],
+    ["  Card Ending 3255 Belongs To Epsilon Nova Card  ", "3255", "Epsilon Nova Card"],
+    ["Card ending 3255 belongs to Epsilon Nova Card,", "3255", "Epsilon Nova Card"],
   ])("parses %j", (text, suffix, accountName) => {
     expect(parseSuffixFact(text)).toEqual({ suffix, accountName });
   });
 
   it.each([
     ["BUS/MRT maps to Public Transport payee"],
-    ["DBS Yuu Card is a credit card account"],
-    ["Trust alert recipient maps to Trust Bank account"],
+    ["Epsilon Nova Card is a credit card account"],
+    ["Zeta alert recipient maps to Zeta Bank account"],
     ["CARD FACTORY 2048 belongs to X"],
     ["Card ending 3255"],
-    ["Darren SC A/C ending 6445 maps to Household stuffs payee"],
+    ["Example Eta A/C ending 6445 maps to Household stuffs payee"],
     [
-      "OverseaChinese Banking Corporation Ltd A/C ending 9001 maps to OCBC 360 payee",
+      "Example Banking Corporation Ltd A/C ending 9001 maps to Beta 360 payee",
     ],
     [""],
   ])("rejects %j", (text) => {
@@ -67,7 +71,7 @@ describe("parseSuffixFact (tolerant reader)", () => {
 
   it("never returns a prefix, so a slash form cannot propagate", () => {
     const parsed = parseSuffixFact(
-      "Card/account ending 9999 belongs to DBS Yuu Card.",
+      "Card/account ending 9999 belongs to Epsilon Nova Card.",
     );
     expect(Object.keys(parsed).sort()).toEqual(["accountName", "suffix"]);
   });
@@ -80,14 +84,14 @@ describe("parseSuffixFact (tolerant reader)", () => {
 describe("canonicalSuffixFact (deterministic prefix)", () => {
   it("uses Card for card-named accounts", () => {
     expect(
-      canonicalSuffixFact({ suffix: "3255", accountName: "DBS Yuu Card" }),
-    ).toBe("Card ending 3255 belongs to DBS Yuu Card");
+      canonicalSuffixFact({ suffix: "3255", accountName: "Epsilon Nova Card" }),
+    ).toBe("Card ending 3255 belongs to Epsilon Nova Card");
   });
 
   it("uses Account for everything else", () => {
     expect(
-      canonicalSuffixFact({ suffix: "5750", accountName: "DBS Account" }),
-    ).toBe("Account ending 5750 belongs to DBS Account");
+      canonicalSuffixFact({ suffix: "5750", accountName: "Epsilon Account" }),
+    ).toBe("Account ending 5750 belongs to Epsilon Account");
   });
 
   it("keeps the word boundary, so Cardiff is not a card", () => {
@@ -99,11 +103,11 @@ describe("canonicalSuffixFact (deterministic prefix)", () => {
   it("round-trips through the parser", () => {
     const fact = canonicalSuffixFact({
       suffix: "9302",
-      accountName: "DBS Altitude Card",
+      accountName: "Epsilon Vista Card",
     });
     expect(parseSuffixFact(fact)).toEqual({
       suffix: "9302",
-      accountName: "DBS Altitude Card",
+      accountName: "Epsilon Vista Card",
     });
   });
 });
@@ -115,40 +119,40 @@ describe("matchAccountByName (word containment)", () => {
   const refuseReason = (input) => matchAccountByName(input, accounts).reason;
 
   it.each([
-    ["Yuu", "DBS Yuu Card"],
-    ["Yuu Card", "DBS Yuu Card"],
-    ["yuu", "DBS Yuu Card"],
-    ["DBS Yuu", "DBS Yuu Card"],
-    ["Altitude", "DBS Altitude Card"],
-    ["DBS Altitude", "DBS Altitude Card"],
-    ["UOB Ladies", "UOB Ladies Card"],
-    ["Ladies", "UOB Ladies Card"],
-    ["HSBC", "HSBC Revolution"],
-    ["Citi Rewards", "Citi Reward"],
-    ["POSB", "POSB Cashback"],
-    ["Ryt", "Ryt Bank"],
-    ["360", "OCBC 360"],
-    ["90n", "OCBC 90N"],
-    ["90°n", "OCBC 90N"],
-    ["Bonus Saver", "SC Bonus Saver"],
-    ["Journeys", "SC Journeys"],
-    ["Deposit", "Deposit"],
+    ["Nova", "Epsilon Nova Card"],
+    ["Nova Card", "Epsilon Nova Card"],
+    ["nova", "Epsilon Nova Card"],
+    ["Epsilon Nova", "Epsilon Nova Card"],
+    ["Vista", "Epsilon Vista Card"],
+    ["Epsilon Vista", "Epsilon Vista Card"],
+    ["Delta Extra", "Delta Extra Card"],
+    ["Extra", "Delta Extra Card"],
+    ["Iota", "Iota Freedom"],
+    ["Theta Rewards", "Theta Reward"],
+    ["Kappa", "Kappa Cashback"],
+    ["Alpha", "Alpha Bank"],
+    ["360", "Beta 360"],
+    ["90n", "Beta 90N"],
+    ["90°n", "Beta 90N"],
+    ["Plus Saver", "Eta Plus Saver"],
+    ["Journeys", "Eta Journeys"],
+    ["Savings", "Savings"],
     // Regression: with exact match AFTER stopword removal these both collapse
-    // to "trust" and get refused.
-    ["Trust Bank", "Trust Bank"],
-    ["Trust Card", "Trust Card"],
+    // to "zeta" and get refused.
+    ["Zeta Bank", "Zeta Bank"],
+    ["Zeta Card", "Zeta Card"],
     // Full live names must keep working.
-    ["DBS Account", "DBS Account"],
-    ["DBS Yuu Card", "DBS Yuu Card"],
+    ["Epsilon Account", "Epsilon Account"],
+    ["Epsilon Nova Card", "Epsilon Nova Card"],
   ])("resolves %j -> %j", (input, expected) => {
     expect(resolvedName(input)).toBe(expected);
   });
 
   it.each([
-    // Ambiguous: three DBS accounts.
-    ["DBS"],
-    ["DBS Card"],
-    ["my OCBC account"],
+    // Ambiguous: three Epsilon accounts.
+    ["Epsilon"],
+    ["Epsilon Card"],
+    ["my Beta account"],
     // No account can contain these.
     ["Nonexistent Bank"],
     ["Random Merchant"],
@@ -164,14 +168,14 @@ describe("matchAccountByName (word containment)", () => {
   );
 
   it("reports why it refused", () => {
-    expect(refuseReason("DBS")).toContain("ambiguous");
+    expect(refuseReason("Epsilon")).toContain("ambiguous");
     expect(refuseReason("Nonexistent Bank")).toContain("no account matches");
   });
 
   it("uses token-set containment, not substring", () => {
-    const live = asRecords(["DBS Visa 1234", "DBS Visa 12345"]);
+    const live = asRecords(["Epsilon Visa 1234", "Epsilon Visa 12345"]);
     // Substring matching would accept both; token sets pick the exact one.
-    expect(matchAccountByName("DBS 1234", live).name).toBe("DBS Visa 1234");
+    expect(matchAccountByName("Epsilon 1234", live).name).toBe("Epsilon Visa 1234");
   });
 
   it("does not plural-trim Plus or Bonus into a different word", () => {
@@ -181,26 +185,26 @@ describe("matchAccountByName (word containment)", () => {
   });
 
   it("strips a parenthesised account id before matching", () => {
-    expect(resolvedName("DBS Yuu Card (22caada9)")).toBe("DBS Yuu Card");
+    expect(resolvedName("Epsilon Nova Card (abc12345)")).toBe("Epsilon Nova Card");
   });
 
   it("refuses duplicate live account names instead of picking by order", () => {
     const dupes = [
-      { id: "a", name: "DBS Yuu Card", closed: false },
-      { id: "b", name: "DBS Yuu Card", closed: false },
+      { id: "a", name: "Epsilon Nova Card", closed: false },
+      { id: "b", name: "Epsilon Nova Card", closed: false },
     ];
-    const result = matchAccountByName("DBS Yuu Card", dupes);
+    const result = matchAccountByName("Epsilon Nova Card", dupes);
     expect(result.matched).toBe(false);
     expect(result.reason).toBe("duplicate account name");
   });
 
   it("ignores closed accounts", () => {
-    const live = [{ id: "a", name: "DBS Yuu Card", closed: true }];
-    expect(matchAccountByName("Yuu", live).matched).toBe(false);
+    const live = [{ id: "a", name: "Epsilon Nova Card", closed: true }];
+    expect(matchAccountByName("Nova", live).matched).toBe(false);
   });
 
   it("never returns a fact-like object: callers must read .account", () => {
-    expect(matchAccountByName("Yuu", accounts)).toHaveProperty("matched", true);
+    expect(matchAccountByName("Nova", accounts)).toHaveProperty("matched", true);
   });
 });
 
@@ -222,14 +226,14 @@ describe("MemoryStore.cleanup — canonicalisation of suffix facts", () => {
 
   it("rewrites a slash form to canonical and drops the duplicate spelling", async () => {
     const { store, path } = await storeWith([
-      "- Card/account ending 3255 belongs to DBS Yuu Card.",
-      "- Card ending 3255 belongs to DBS Yuu Card",
+      "- Card/account ending 3255 belongs to Epsilon Nova Card.",
+      "- Card ending 3255 belongs to Epsilon Nova Card",
     ]);
     const result = await store.cleanup();
     expect(result.normalised).toBeGreaterThan(0);
     const { readFileSync } = await import("fs");
     const written = readFileSync(path, "utf8");
-    expect(written).toContain("Card ending 3255 belongs to DBS Yuu Card");
+    expect(written).toContain("Card ending 3255 belongs to Epsilon Nova Card");
     expect(written).not.toContain("Card/account");
     expect(
       written.split("\n").filter((l) => l.includes("ending 3255")).length,
@@ -238,8 +242,8 @@ describe("MemoryStore.cleanup — canonicalisation of suffix facts", () => {
 
   it("reports a same-suffix conflict instead of hiding it", async () => {
     const { store, path } = await storeWith([
-      "- Card ending 3255 belongs to DBS Yuu Card",
-      "- Card ending 3255 belongs to DBS Altitude Card",
+      "- Card ending 3255 belongs to Epsilon Nova Card",
+      "- Card ending 3255 belongs to Epsilon Vista Card",
     ]);
     const result = await store.cleanup();
     const { readFileSync } = await import("fs");
@@ -253,7 +257,7 @@ describe("MemoryStore.cleanup — canonicalisation of suffix facts", () => {
 
   it("is idempotent: a second run reports no normalisation", async () => {
     const { store } = await storeWith([
-      "- Card ending 3255 belongs to DBS Yuu Card",
+      "- Card ending 3255 belongs to Epsilon Nova Card",
     ]);
     const first = await store.cleanup();
     expect(first.normalised).toBe(0);
@@ -262,74 +266,78 @@ describe("MemoryStore.cleanup — canonicalisation of suffix facts", () => {
     expect(second.removed).toBe(0);
   });
 
-  it("preserves the OCBC 9001 / 869001 alias pair (distinct suffixes, one account)", async () => {
+  it("preserves the Beta 9001 / 869001 alias pair (distinct suffixes, one account)", async () => {
     const { store, path } = await storeWith([
-      "- Account ending 869001 belongs to OCBC 360",
-      "- Account ending 9001 belongs to OCBC 360",
+      "- Account ending 869001 belongs to Beta 360",
+      "- Account ending 9001 belongs to Beta 360",
     ]);
     await store.cleanup();
     const { readFileSync } = await import("fs");
     const written = readFileSync(path, "utf8");
-    expect(written).toContain("Account ending 869001 belongs to OCBC 360");
-    expect(written).toContain("Account ending 9001 belongs to OCBC 360");
+    expect(written).toContain("Account ending 869001 belongs to Beta 360");
+    expect(written).toContain("Account ending 9001 belongs to Beta 360");
   });
 });
 
 describe("regressions found in dev-loop review round 1", () => {
   it("does not resolve a closed account's name to a live sibling", () => {
     const withClosedTwin = [
-      { id: "dbs-account", name: "DBS Account", closed: true },
-      { id: "dbs-yuu", name: "DBS Yuu Card", closed: false },
+      { id: "eps-account", name: "Epsilon Account", closed: true },
+      { id: "eps-nova", name: "Epsilon Nova Card", closed: false },
     ];
-    const result = matchAccountByName("DBS Account", withClosedTwin);
+    const result = matchAccountByName("Epsilon Account", withClosedTwin);
     expect(result.matched).toBe(false);
 
-    // Also when the closed account is absent from the list entirely: "DBS
-    // Account" must not degrade into "DBS Yuu Card" just because "account" is
+    // Also when the closed account is absent from the list entirely: "Epsilon
+    // Account" must not degrade into "Epsilon Nova Card" just because "account" is
     // a stopword.
-    const onlyYuu = [{ id: "dbs-yuu", name: "DBS Yuu Card", closed: false }];
-    expect(matchAccountByName("DBS Account", onlyYuu).matched).toBe(false);
-    expect(matchAccountByName("Trust Bank", [
-      { id: "trust-card", name: "Trust Card", closed: false },
+    const onlyNova = [{ id: "eps-nova", name: "Epsilon Nova Card", closed: false }];
+    expect(matchAccountByName("Epsilon Account", onlyNova).matched).toBe(false);
+    expect(matchAccountByName("Zeta Bank", [
+      { id: "zeta-card", name: "Zeta Card", closed: false },
     ]).matched).toBe(false);
   });
 
   it("still resolves the account that is actually present", () => {
     const live = [
-      { id: "dbs-account", name: "DBS Account", closed: false },
-      { id: "dbs-yuu", name: "DBS Yuu Card", closed: false },
+      { id: "eps-account", name: "Epsilon Account", closed: false },
+      { id: "eps-nova", name: "Epsilon Nova Card", closed: false },
     ];
-    expect(matchAccountByName("DBS Yuu", live).name).toBe("DBS Yuu Card");
-    expect(matchAccountByName("DBS Account", live).name).toBe("DBS Account");
+    expect(matchAccountByName("Epsilon Nova", live).name).toBe("Epsilon Nova Card");
+    expect(matchAccountByName("Epsilon Account", live).name).toBe("Epsilon Account");
   });
 });
 
 describe("regressions found in dev-loop review rounds 2-3", () => {
   it("does not let a filler-word retry resolve an absent account to a sibling", async () => {
     const { identityMappingsFromFacts } = await import("../src/bank-movement.js");
-    // "UOB One Account" is absent; a containment retry would reach "UOB One Card".
+    // "Delta One Account" is absent; a containment retry would reach "Delta One Card".
     const m = identityMappingsFromFacts(
-      ["Account ending 4321 belongs to UOB One Account"],
-      [{ id: "uob-card", name: "UOB One Card", closed: false }],
+      ["Account ending 4321 belongs to Delta One Account"],
+      [{ id: "delta-card", name: "Delta One Card", closed: false }],
     );
     expect(m.suffix.get("4321")).toBeUndefined();
 
     // The legitimate filler case still resolves by exact name.
     const ok = identityMappingsFromFacts(
-      ["Account ending 869001 belongs to OCBC 360 account"],
-      [{ id: "ocbc", name: "OCBC 360", closed: false }],
+      ["Account ending 869001 belongs to Beta 360 account"],
+      [{ id: "beta", name: "Beta 360", closed: false }],
     );
-    expect(ok.suffix.get("869001")?.name).toBe("OCBC 360");
+    expect(ok.suffix.get("869001")?.name).toBe("Beta 360");
   });
 
   it("arms the safety net for a filler-word fact too", async () => {
     const { hasUsableSuffixFact } = await import("../src/orchestrator.js");
-    const live = [{ id: "ocbc", name: "OCBC 360", closed: false }];
+    // This fixture keeps a real bank brand token on purpose: nameMatchesBank
+    // needs hasBankToken() to hit its hardcoded known-bank list, and it refuses
+    // unknown banks by design ("never assume"), so a fully synthetic brand name
+    // cannot exercise this path. The account product name itself is invented.
+    const live = [{ id: "dbs-example", name: "DBS Example", closed: false }];
     expect(
       hasUsableSuffixFact(
-        [{ text: "Account ending 9001 belongs to OCBC 360 account", score: 1 }],
-        "From: OCBC card ending 9001",
-        "OCBC",
+        [{ text: "Account ending 9001 belongs to DBS Example account", score: 1 }],
+        "From: DBS card ending 9001",
+        "DBS",
         live,
       ),
     ).toBe(true);
@@ -357,15 +365,15 @@ describe("regressions found in dev-loop review rounds 2-3", () => {
         if (name === "search_memory")
           return {
             results: [
-              { text: "Trust Card is a credit card account", score: 1 },
+              { text: "Zeta Card is a credit card account", score: 1 },
             ],
           };
         return true;
       },
     };
     const orch = new AgentOrchestrator(config, tools);
-    // Only one generic token is shared ("trust"), so this must not decide.
-    await expect(orch._detectAccountType("Trust Bank")).resolves.toBe("bank");
+    // Only one generic token is shared ("zeta"), so this must not decide.
+    await expect(orch._detectAccountType("Zeta Bank")).resolves.toBe("bank");
 
     // A genuine same-account fact still decides, including a short stored form.
     const tools2 = {
@@ -373,11 +381,11 @@ describe("regressions found in dev-loop review rounds 2-3", () => {
       setEmailContext: () => {},
       executeTool: async (name) =>
         name === "search_memory"
-          ? { results: [{ text: "DBS Yuu is a credit card account", score: 1 }] }
+          ? { results: [{ text: "Epsilon Nova is a credit card account", score: 1 }] }
           : true,
     };
     const orch2 = new AgentOrchestrator(config, tools2);
-    await expect(orch2._detectAccountType("DBS Yuu Card")).resolves.toBe(
+    await expect(orch2._detectAccountType("Epsilon Nova Card")).resolves.toBe(
       "credit card",
     );
   });
@@ -396,8 +404,8 @@ describe("regressions found in dev-loop review rounds 2-3", () => {
         "",
         "## Facts",
         "",
-        "- Card/account ending 3255 belongs to DBS Yuu Card.",
-        "- Card ending 3255 belongs to DBS Yuu Card",
+        "- Card/account ending 3255 belongs to Epsilon Nova Card.",
+        "- Card ending 3255 belongs to Epsilon Nova Card",
         "- BUS/MRT maps to Public Transport payee",
         "",
       ].join("\n"),
@@ -406,11 +414,130 @@ describe("regressions found in dev-loop review rounds 2-3", () => {
     await store.cleanup();
     // A later update must not overwrite an unrelated fact through a stale index.
     await store.update(
-      "Card ending 3255 belongs to DBS Yuu Card",
-      "Card ending 3255 belongs to DBS Altitude Card",
+      "Card ending 3255 belongs to Epsilon Nova Card",
+      "Card ending 3255 belongs to Epsilon Vista Card",
     );
     const written = readFileSync(path, "utf8");
     expect(written).toContain("Public Transport payee");
-    expect(written).toContain("DBS Altitude Card");
+    expect(written).toContain("Epsilon Vista Card");
+  });
+});
+
+/**
+ * Issue #469 item 1 — the kind-word guard must treat a plural type word exactly
+ * as it treats the singular one, and the filler retry must accept the plural
+ * filler without becoming a containment match.
+ *
+ * Fixtures below are invented on purpose: the guard is about word shapes, so a
+ * synthetic set proves the same property without carrying real account names.
+ */
+describe("issue #469 item 1: plural type words follow the singular guard", () => {
+  const live = (names) =>
+    names.map((name) =>
+      typeof name === "string" ? { id: name, name, closed: false } : name,
+    );
+
+  // A trailing "bank"/"card"/"account" names an account KIND. The guard exists
+  // so a kind word cannot be dropped and the name silently resolve to a
+  // sibling; plural forms must refuse exactly like the singular does.
+  it.each([
+    ["Alpha account", ["Alpha Bank"]],
+    ["Alpha accounts", ["Alpha Bank"]],
+    ["Alpha cards", ["Alpha Bank"]],
+    ["Beta accounts", ["Beta Card"]],
+    ["Beta banks", ["Beta Card"]],
+    ["Beta cards", ["Beta Bank"]],
+    ["Gamma One accounts", ["Gamma One Card"]],
+    ["Gamma One cards", ["Gamma One Bank"]],
+  ])("refuses %s against only %s", (query, names) => {
+    expect(matchAccountByName(query, live(names)).matched).toBe(false);
+  });
+
+  // Plural must not cost a match that the words actually support.
+  it.each([
+    ["Alpha banks", ["Alpha Bank"], "Alpha Bank"],
+    ["Alpha cards", ["Alpha Card"], "Alpha Card"],
+    ["Gamma One accounts", ["Gamma One Account"], "Gamma One Account"],
+  ])("resolves %s against %s", (query, names, expected) => {
+    expect(matchAccountByName(query, live(names)).name).toBe(expected);
+  });
+
+  // A real account whose own name is plural still resolves, both exactly and
+  // through the stopword-stripped path.
+  it.each([
+    ["Alpha Accounts", ["Alpha Accounts"]],
+    ["Alpha account", ["Alpha Accounts"]],
+    ["Alpha accounts", ["Alpha Accounts"]],
+  ])("resolves the plural-named account for %s", (query, names) => {
+    expect(matchAccountByName(query, live(names)).name).toBe("Alpha Accounts");
+  });
+
+  // Documented behaviour change: a plural type word now picks the single
+  // kind-matching account instead of refusing as ambiguous. This is exactly
+  // what the singular form already did before the change, so it is pinned
+  // rather than treated as a fix.
+  it("resolves a plural type word the same way the singular already does", () => {
+    const set = ["Delta Account", "Delta Nova Card"];
+    expect(matchAccountByName("Delta account", live(set)).name).toBe(
+      "Delta Account",
+    );
+    expect(matchAccountByName("Delta accounts", live(set)).name).toBe(
+      "Delta Account",
+    );
+    expect(matchAccountByName("Beta cards", live(["Beta Bank", "Beta Card"])).name).toBe(
+      "Beta Card",
+    );
+  });
+
+  it("still refuses a closed twin on a plural type word", () => {
+    const set = [{ id: "a", name: "Alpha Account", closed: true }, "Alpha Card"];
+    expect(matchAccountByName("Alpha accounts", live(set)).matched).toBe(false);
+  });
+
+  it("still refuses duplicate account names on a plural type word", () => {
+    expect(
+      matchAccountByName("Alpha banks", live(["Alpha Bank", "Alpha Bank"]))
+        .matched,
+    ).toBe(false);
+  });
+});
+
+describe("issue #469 item 1: the filler retry accepts the plural filler", () => {
+  const live = (names) => names.map((name) => ({ id: name, name, closed: false }));
+
+  // The retry only strips the generic trailing "account" filler, so a name the
+  // words do not support must still be refused. It stays exact-name-only.
+  it.each([
+    ["Beta 360 accounts", ["Beta 360"], "Beta 360"],
+    ["Alpha Rewards accounts", ["Alpha Rewards"], "Alpha Rewards"],
+    ["Delta Deposit accounts", ["Delta Deposit"], "Delta Deposit"],
+  ])("resolves %s against %s", (query, names, expected) => {
+    expect(resolveFactAccount(query, live(names)).name).toBe(expected);
+  });
+
+  it.each([
+    ["Alpha accounts", ["Alpha Bank"]],
+    ["Gamma One accounts", ["Gamma One Card"]],
+    ["Alpha accounts", ["Alpha Card"]],
+  ])("does not let the plural retry reach a sibling: %s vs %s", (query, names) => {
+    expect(resolveFactAccount(query, live(names)).matched).toBe(false);
+  });
+});
+
+describe("issue #469 item 1: writing an exact account name always resolves", () => {
+  const synthetic = [
+    "Alpha Bank",
+    "Alpha Card",
+    "Alpha Accounts",
+    "Beta 360",
+    "Gamma Rewards",
+    "Delta Deposit",
+    "Delta Nova Card",
+  ];
+
+  it.each(synthetic)("resolves %s when it is the only account", (name) => {
+    expect(
+      matchAccountByName(name, [{ id: name, name, closed: false }]).name,
+    ).toBe(name);
   });
 });

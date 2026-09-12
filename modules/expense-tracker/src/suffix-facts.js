@@ -117,6 +117,20 @@ function pluralTrim(tokens) {
   );
 }
 
+/**
+ * A trailing type word names a specific account KIND, so the guard below must
+ * treat a plural as the same kind word. "accounts" and "cards" are stopwords,
+ * so without this map they vanish from `raw` and the guard silently stops
+ * firing: "Alpha accounts" would resolve to "Alpha Card" exactly as the
+ * singular form is refused. "banks" is not a stopword and already survives, but
+ * it maps too so the guard reads the same for all three kinds.
+ *
+ * Only the kind word is normalised. `raw`, `query` and the exact comparison keep
+ * their own plural handling, which is what stops a type word from degrading a
+ * named account into a sibling.
+ */
+const KIND_WORD_SINGULAR = { accounts: "account", banks: "bank", cards: "card" };
+
 /** Refusal result. Always an object, so callers can log why resolution failed. */
 function refusal(reason) {
   return { matched: false, id: null, name: null, reason };
@@ -138,7 +152,7 @@ export function resolveFactAccount(accountName, accounts) {
   const first = matchAccountByName(accountName, accounts);
   if (first.matched) return first;
   const stripped = String(accountName || "")
-    .replace(/\s+account$/i, "")
+    .replace(/\s+accounts?$/i, "")
     .trim();
   if (stripped === String(accountName || "").trim()) return first;
   const target = accountTokens(stripped).join(" ");
@@ -221,7 +235,9 @@ export function matchAccountByName(nameText, accounts) {
   // account KIND. Without this guard "DBS Account" would resolve to
   // "DBS Yuu Card" and "Trust Bank" to "Trust Card" whenever the account the
   // user actually named is absent or closed, which is a wrong-account booking.
-  const kindWord = raw[raw.length - 1];
+  // A plural type word names the same kind, so it is normalised first.
+  const kindWord =
+    KIND_WORD_SINGULAR[raw[raw.length - 1]] || raw[raw.length - 1];
   const requiresKindWord =
     kindWord === "account" ||
     kindWord === "bank" ||
