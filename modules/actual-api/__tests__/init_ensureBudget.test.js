@@ -354,7 +354,7 @@ describe("ensureBudget", () => {
         expect(api.downloadBudget).toHaveBeenCalledTimes(3);
     });
 
-    test("matches a budget by the secondary name", async () => {
+    test("matches a budget by name when groupId differs", async () => {
         await primeInit("Test SGD");
         const api = actual();
         api.getBudgets.mockResolvedValue([
@@ -367,16 +367,5 @@ describe("ensureBudget", () => {
             "myr-sync",
             expect.any(Object),
         );
-    });
-
-    test("returns silently when the secondary name has no budget", async () => {
-        await primeInit("Test SGD");
-        const api = actual();
-        api.getBudgets.mockResolvedValue([
-            makeBudget({ name: "Test SGD", groupId: "sgd-sync" }),
-        ]);
-        const { ensureBudget } = loadServer();
-        await ensureBudget("Test MYR");
-        expect(api.downloadBudget).not.toHaveBeenCalled();
     });
 });

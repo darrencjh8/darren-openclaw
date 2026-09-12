@@ -19,25 +19,17 @@
  * "0" before the require so the switches in these tests do not wait out the
  * production cooldown. The cooldown can only delay a switch after the first:
  * `lastSwitchTime` starts at 0, so `Date.now() - 0` already exceeds any sane
- * delay. A configured `ACTUAL_SECONDARY_BUDGET_FILE` must not turn an unknown
- * `budget_id` into a fallback, so it is set to a name that does exist while an
- * unknown id is still requested. Both values are restored in `afterAll`
- * because `process.env` is shared by every test file in a jest worker.
+ * delay. The previous value is restored in `afterAll` because `process.env` is
+ * shared by every test file in a jest worker.
  */
-const previousEnv = {
-    BUDGET_SWITCH_DELAY_MS: process.env.BUDGET_SWITCH_DELAY_MS,
-    ACTUAL_SECONDARY_BUDGET_FILE: process.env.ACTUAL_SECONDARY_BUDGET_FILE,
-};
+const previousDelay = process.env.BUDGET_SWITCH_DELAY_MS;
 process.env.BUDGET_SWITCH_DELAY_MS = "0";
-process.env.ACTUAL_SECONDARY_BUDGET_FILE = "MYR";
 
 jest.mock("fs", () => ({ mkdirSync: jest.fn() }));
 
 afterAll(() => {
-    for (const [key, value] of Object.entries(previousEnv)) {
-        if (value === undefined) delete process.env[key];
-        else process.env[key] = value;
-    }
+    if (previousDelay === undefined) delete process.env.BUDGET_SWITCH_DELAY_MS;
+    else process.env.BUDGET_SWITCH_DELAY_MS = previousDelay;
 });
 
 const mockApp = {

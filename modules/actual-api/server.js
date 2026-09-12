@@ -112,7 +112,7 @@ async function resolveBudgetTarget(budgetIdOrName) {
     if (!budgetIdOrName) return null;
 
     const budgets = await retryWithBackoff(() => actual.getBudgets());
-    let target = budgets.find(
+    const target = budgets.find(
         (b) =>
             (b.groupId || b.cloudFileId) === budgetIdOrName ||
             b.name === budgetIdOrName,
