@@ -79,12 +79,15 @@ fi
 echo "=== a permission change in the source propagates ==="
 printf 'loop v1\n' > "$SOURCE/dev-loop/scripts/loop.py"
 chmod 755 "$SOURCE/dev-loop/scripts/loop.py"
+chmod 700 "$SOURCE/dev-loop/scripts"
 run "$SOURCE" >/dev/null
-if [[ "$(stat -c '%a' "$PRIMARY/skills/dev-loop/scripts/loop.py")" == 755 ]]; then
-    ok "applied a source permission change to an identical tree"
+file_mode=$(stat -c '%a' "$PRIMARY/skills/dev-loop/scripts/loop.py")
+dir_mode=$(stat -c '%a' "$PRIMARY/skills/dev-loop/scripts")
+if [[ "$file_mode" == 755 && "$dir_mode" == 700 ]]; then
+    ok "applied a source permission change to an identical tree (file and directory)"
 else
-    nope "applied a source permission change to an identical tree" \
-        "got mode $(stat -c '%a' "$PRIMARY/skills/dev-loop/scripts/loop.py" 2>/dev/null)"
+    nope "applied a source permission change to an identical tree (file and directory)" \
+        "file=$(stat -c '%a' "$PRIMARY/skills/dev-loop/scripts/loop.py" 2>/dev/null) dir=$dir_mode"
 fi
 
 echo "=== files dropped upstream are removed ==="
@@ -296,9 +299,9 @@ fi
 echo "=== a lock left by a dead process is reclaimed ==="
 fresh_fixture
 mkdir -p "$PRIMARY/.codex-router-skills.lock.d"
-# 4194304 exceeds /proc/sys/kernel/pid_max on a 64-bit Linux host, so the pid
-# can never name a live process.
-echo 4194304 > "$PRIMARY/.codex-router-skills.lock.d/pid"
+# 4194304 is /proc/sys/kernel/pid_max here, so use one past it: no live pid can
+# ever name it, and the reclaim path must clear the lock.
+echo 4194305 > "$PRIMARY/.codex-router-skills.lock.d/pid"
 stale_rc=0
 stale_output=$(HERMES_SKILL_PRIMARY_HOME="$PRIMARY" \
     HERMES_SKILL_SECONDARY_HOME="$SECONDARY" \
@@ -313,40 +316,46 @@ else
     nope "reclaimed a fallback lock whose holder is gone" "rc=$stale_rc out=$stale_output"
 fi
 
-echo "=== a preempted writer cannot delete its successor's lock ==="
-# Simulate the fallback reclaim race: our own shell owns the lock and its pid is
-# live, but the reconciler runs as a different user whose non-destructive
-# `kill -0` probe fails with EPERM instead of ESRCH. EPERM means "still alive",
-# so the holder must leave the lock alone and fail closed on the timeout. Needs
-# passwordless sudo to drop privileges; skipped otherwise.
+echo "=== a live lock the reconciler cannot probe is never reclaimed ==="
 fresh_fixture
 mkdir -p "$PRIMARY/.codex-router-skills.lock.d"
 echo $$ > "$PRIMARY/.codex-router-skills.lock.d/pid"
-same_pid=0
-if command -v sudo >/dev/null 2>&1 && sudo -n true 2>/dev/null; then
-    holder_rc=0
-    holder_output=$(sudo -n env HERMES_SKILL_PRIMARY_HOME="$PRIMARY" \
-        HERMES_SKILL_SECONDARY_HOME="$SECONDARY" \
-        HERMES_MANIFEST_STATE_DIRS="$STATE" \
-        HERMES_SKILL_LOCK_MODE=mkdir \
-        HERMES_SKILL_LOCK_WAIT_SECONDS=1 \
-        sh "$SYNC" "$SOURCE" 2>&1) || holder_rc=$?
-    survivor_pid=$(cat "$PRIMARY/.codex-router-skills.lock.d/pid" 2>/dev/null)
-    [ "$survivor_pid" = "$$" ] && same_pid=1
-    # The holder must not have reclaimed the lock: the pid file is still ours
-    # (proving the live lock survived), and it reported the timeout.
-    if [[ "$holder_rc" -ne 0 && "$same_pid" -eq 1 \
-          && "$holder_output" == *"could not acquire"* ]]; then
-        ok "left the live holder's lock in place when the pid probe failed with EPERM"
-    else
-        nope "left the live holder's lock in place when the pid probe failed with EPERM" \
-            "rc=$holder_rc pid=${survivor_pid:-none} out=$holder_output"
-    fi
+ep_rc=0
+ep_output=$(HERMES_SKILL_PRIMARY_HOME="$PRIMARY" \
+    HERMES_SKILL_SECONDARY_HOME="$SECONDARY" \
+    HERMES_MANIFEST_STATE_DIRS="$STATE" \
+    HERMES_SKILL_LOCK_MODE=mkdir \
+    HERMES_SKILL_LOCK_WAIT_SECONDS=1 \
+    sh "$SYNC" "$SOURCE" 2>&1) || ep_rc=$?
+ep_pid=$(cat "$PRIMARY/.codex-router-skills.lock.d/pid" 2>/dev/null)
+if [[ "$ep_rc" -ne 0 && "$ep_pid" == "$$" \
+      && "$ep_output" == *"could not acquire"* ]]; then
+    ok "left a live lock in place instead of reclaiming it"
 else
-    ok "preempted-holder case skipped (no passwordless sudo; EPERM cannot be simulated)"
+    nope "left a live lock in place instead of reclaiming it" \
+        "rc=$ep_rc pid=${ep_pid:-none} out=$ep_output"
 fi
-if [ "$same_pid" -eq 0 ]; then
-    rm -rf "$PRIMARY/.codex-router-skills.lock.d"
+rm -rf "$PRIMARY/.codex-router-skills.lock.d"
+
+echo "=== a corrupt pid file is reclaimed ==="
+# A truncated write (`echo $$ > pid` failing on ENOSPC) leaves an empty file.
+# `/proc//stat` resolves to `/proc/stat`, which is readable, so the empty pid
+# must be handled before the /proc probe or the lock is stuck forever.
+fresh_fixture
+mkdir -p "$PRIMARY/.codex-router-skills.lock.d"
+: > "$PRIMARY/.codex-router-skills.lock.d/pid"
+corrupt_rc=0
+corrupt_output=$(HERMES_SKILL_PRIMARY_HOME="$PRIMARY" \
+    HERMES_SKILL_SECONDARY_HOME="$SECONDARY" \
+    HERMES_MANIFEST_STATE_DIRS="$STATE" \
+    HERMES_SKILL_LOCK_MODE=mkdir \
+    HERMES_SKILL_LOCK_WAIT_SECONDS=5 \
+    sh "$SYNC" "$SOURCE" 2>&1) || corrupt_rc=$?
+if [[ "$corrupt_rc" -eq 0 && ! -e "$PRIMARY/.codex-router-skills.lock.d" \
+      && -f "$PRIMARY/skills/dev-loop/SKILL.md" ]]; then
+    ok "reclaimed a lock whose pid file is empty"
+else
+    nope "reclaimed a lock whose pid file is empty" "rc=$corrupt_rc out=$corrupt_output"
 fi
 
 echo "=== an empty source never prunes the managed set ==="

@@ -130,11 +130,21 @@ while [ "$attempts" -lt "$LOCK_WAIT_SECONDS" ]; do
             # ponytail: Linux-only (this runs in the container); the mkdir
             # fallback is test-only, and flock is the production primitive.
             holder=$(cat "$MKDIR_LOCK/pid" 2>/dev/null) || holder=""
-            if kill -0 "$holder" 2>/dev/null; then
-                :
-            elif [ ! -r "/proc/$holder/stat" ]; then
-                rm -rf "$MKDIR_LOCK" 2>/dev/null || true
-            fi
+            case $holder in
+                ''|*[!0-9]*)
+                    # A truncated or corrupt pid file names no process. Reclaim
+                    # it; otherwise `/proc//stat` resolves to `/proc/stat`, which
+                    # is always readable, and the lock is stuck forever.
+                    rm -rf "$MKDIR_LOCK" 2>/dev/null || true
+                    ;;
+                *)
+                    if kill -0 "$holder" 2>/dev/null; then
+                        :
+                    elif [ ! -r "/proc/$holder/stat" ]; then
+                        rm -rf "$MKDIR_LOCK" 2>/dev/null || true
+                    fi
+                    ;;
+            esac
         fi
     fi
     attempts=$((attempts + 1))
@@ -182,9 +192,9 @@ same_modes() {
     srclist="$MODES_TMP.src"
     dstlist="$MODES_TMP.dst"
     printf '%s\n' "$(stat -c '%a' "$src")" > "$srclist"
-    find "$src" -type d -o -type f -printf '%P %m\n' >> "$srclist"
+    find "$src" \( -type d -o -type f \) -printf '%P %m\n' >> "$srclist"
     printf '%s\n' "$(stat -c '%a' "$dst")" > "$dstlist"
-    find "$dst" -type d -o -type f -printf '%P %m\n' >> "$dstlist"
+    find "$dst" \( -type d -o -type f \) -printf '%P %m\n' >> "$dstlist"
     diff "$srclist" "$dstlist" >/dev/null 2>&1
 }
 
