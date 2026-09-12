@@ -18,6 +18,9 @@
 #     refuses a later run on drift. The refreshed bytes are canonical, so any
 #     ledger entry that points at a managed root is updated to match instead of
 #     being left to claim drift.
+#   * Writers serialize on a lock directory. The container's boot hook and a
+#     deploy both run this script, and they must not swap the same staging and
+#     destination paths concurrently.
 #
 # Usage: sync-codex-router-skills.sh [SOURCE]
 #   SOURCE defaults to /opt/data/.codex-router-skills, staged by the deploy.
@@ -31,6 +34,8 @@ SOURCE=${1:-/opt/data/.codex-router-skills}
 PRIMARY_HOME=${HERMES_SKILL_PRIMARY_HOME:-/opt/data}
 SECONDARY_HOME=${HERMES_SKILL_SECONDARY_HOME:-/opt/data/home}
 MANAGED_FILE=${HERMES_SKILL_MANAGED_FILE:-$PRIMARY_HOME/.codex-router-managed-skills}
+LOCK_DIR=${HERMES_SKILL_LOCK_DIR:-$PRIMARY_HOME/.codex-router-skills.lock}
+LOCK_WAIT_SECONDS=${HERMES_SKILL_LOCK_WAIT_SECONDS:-120}
 # Ledger roots to refresh. `install-agents.sh` records under the secondary home;
 # `install-hermes.sh` takes `CODEX_ROUTER_SKILL_STATE_DIR`. Refresh whichever
 # exist so no ledger is left pointing at pre-reconcile bytes.
@@ -41,12 +46,53 @@ if [ ! -d "$SOURCE" ]; then
     exit 0
 fi
 
+# A skill name is a single path segment. The managed-name file and the source
+# tree are both on a user-writable volume, and every name is used to build an
+# `rm -rf` path, so anything else is refused instead of sanitized.
+valid_name() {
+    case "$1" in
+        ''|.|..) return 1 ;;
+        *[!A-Za-z0-9._-]*) return 1 ;;
+    esac
+    return 0
+}
+
 TARGETS="$PRIMARY_HOME/skills $PRIMARY_HOME/.agents/skills $SECONDARY_HOME/.agents/skills"
 SHADOWS="$PRIMARY_HOME/.config/opencode/skills $SECONDARY_HOME/.config/opencode/skills"
 
 mkdir -p "$PRIMARY_HOME" "$SECONDARY_HOME"
+
+LOCK_OWNED=false
+CURRENT=""
+cleanup() {
+    if [ -n "$CURRENT" ]; then
+        rm -f "$CURRENT"
+    fi
+    if [ "$LOCK_OWNED" = true ]; then
+        rmdir "$LOCK_DIR" 2>/dev/null || true
+    fi
+}
+trap cleanup EXIT
+
+# Bounded wait for the lock; a lock left by a dead process is reclaimed.
+attempts=0
+while [ "$attempts" -lt "$LOCK_WAIT_SECONDS" ]; do
+    if mkdir "$LOCK_DIR" 2>/dev/null; then
+        LOCK_OWNED=true
+        break
+    fi
+    if [ -f "$LOCK_DIR/pid" ] && ! kill -0 "$(cat "$LOCK_DIR/pid" 2>/dev/null)" 2>/dev/null; then
+        rm -rf "$LOCK_DIR" 2>/dev/null || true
+    fi
+    attempts=$((attempts + 1))
+    sleep 1
+done
+if [ "$LOCK_OWNED" != true ]; then
+    echo "sync-codex-router-skills: another reconcile has held the lock for ${LOCK_WAIT_SECONDS}s; skipping" >&2
+    exit 0
+fi
+echo $$ > "$LOCK_DIR/pid"
 CURRENT="$PRIMARY_HOME/.codex-router-managed-skills.new.$$"
-trap 'rm -f "$CURRENT"' EXIT
 : > "$CURRENT"
 
 # The canonical set for this run: only directories that carry SKILL.md. A stray
@@ -55,6 +101,7 @@ for source_dir in "$SOURCE"/*/; do
     [ -d "$source_dir" ] || continue
     name=$(basename "$source_dir")
     [ -f "$source_dir/SKILL.md" ] || continue
+    valid_name "$name" || continue
     echo "$name" >> "$CURRENT"
 done
 
@@ -63,6 +110,7 @@ done
 if [ -f "$MANAGED_FILE" ]; then
     while IFS= read -r previous; do
         [ -n "$previous" ] || continue
+        valid_name "$previous" || continue
         if grep -qxF -- "$previous" "$CURRENT"; then
             continue
         fi
@@ -81,6 +129,7 @@ for target in $TARGETS; do
         [ -d "$source_dir" ] || continue
         name=$(basename "$source_dir")
         [ -f "$source_dir/SKILL.md" ] || continue
+        valid_name "$name" || continue
         dest="$target/$name"
         # `diff -r` is the content comparison: identical trees are skipped so a
         # rerun is a no-op.
@@ -106,6 +155,7 @@ done
 
 while IFS= read -r name; do
     [ -n "$name" ] || continue
+    valid_name "$name" || continue
     for shadow in $SHADOWS; do
         rm -rf "${shadow:?}/${name:?}"
     done
@@ -136,8 +186,9 @@ def directory_hash(path: pathlib.Path) -> str:
     return digest.hexdigest()
 
 
-refreshed = 0
-for manifest_file in state.glob("manifests/*/*.json"):
+# Rewriting the ledger erases the installer's drift signal for the copy that
+# was just overwritten, so every refreshed record is named in the log.
+for manifest_file in sorted(state.glob("manifests/*/*.json")):
     try:
         manifest = json.loads(manifest_file.read_text())
     except (OSError, ValueError):
@@ -148,12 +199,15 @@ for manifest_file in state.glob("manifests/*/*.json"):
     canonical = source / installed.name
     if not (canonical / "SKILL.md").is_file():
         continue
+    previous = manifest.get("installed_hash")
     manifest["installed_hash"] = directory_hash(installed)
     manifest["canonical_hash"] = directory_hash(canonical)
     manifest["canonical_source"] = str(canonical)
     manifest_file.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
-    refreshed += 1
-print(f"sync-codex-router-skills: refreshed {refreshed} manifest record(s) in {state}")
+    print(
+        f"sync-codex-router-skills: refreshed {manifest_file} "
+        f"({str(previous)[:12]} -> {manifest['installed_hash'][:12]})"
+    )
 PY
 done
 
