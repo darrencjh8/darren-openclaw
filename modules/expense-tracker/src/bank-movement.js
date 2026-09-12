@@ -296,15 +296,33 @@ export function identityMappingsFromFacts(facts, accounts) {
       // to a sibling account.
       //
       // "belongs to OCBC 360 account" carries a filler trailing word, so retry
-      // without it when the full name does not resolve. That retry cannot
-      // rescue a genuine account kind such as "DBS Account", because the
-      // matcher requires a printed kind word to exist in the candidate.
+      // without it when the full name does not resolve.
+      //
+      // The retry is allowed only when the stripped name still carries a
+      // distinctive word ("OCBC 360 account" -> "OCBC 360"). A kind word with
+      // nothing else is a real account kind ("DBS Account" -> "DBS",
+      // "Trust Bank" -> "Trust"), and stripping it there would resolve a
+      // closed or absent account to a live sibling — the wrong-account booking
+      // #331 is about.
+      const stripped = parsed.accountName
+        .replace(/\s+account$/i, "")
+        .trim();
+      const generic = new Set([
+        "account",
+        "accounts",
+        "bank",
+        "card",
+        "cards",
+        "my",
+        "the",
+      ]);
+      const distinctive = stripped
+        .toLowerCase()
+        .split(/\s+/)
+        .filter((t) => t && !generic.has(t));
       let resolution = matchAccountByName(parsed.accountName, accounts);
-      if (!resolution.matched && /\s+account$/i.test(parsed.accountName)) {
-        resolution = matchAccountByName(
-          parsed.accountName.replace(/\s+account$/i, ""),
-          accounts,
-        );
+      if (!resolution.matched && distinctive.length >= 2) {
+        resolution = matchAccountByName(stripped, accounts);
       }
       const account = resolution.matched
         ? accounts.find((a) => a.id === resolution.id)

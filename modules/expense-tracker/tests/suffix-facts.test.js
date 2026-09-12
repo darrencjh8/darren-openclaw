@@ -6,7 +6,6 @@
  */
 import { describe, expect, it } from "vitest";
 import {
-  CANONICAL_SUFFIX_RE,
   canonicalSuffixFact,
   matchAccountByName,
   parseSuffixFact,
@@ -71,10 +70,6 @@ describe("parseSuffixFact (tolerant reader)", () => {
       "Card/account ending 9999 belongs to DBS Yuu Card.",
     );
     expect(Object.keys(parsed).sort()).toEqual(["accountName", "suffix"]);
-  });
-
-  it("CANONICAL_SUFFIX_RE is the same grammar", () => {
-    expect("Card ending 3255 belongs to DBS Yuu Card").toMatch(CANONICAL_SUFFIX_RE);
   });
 
   it("exposes the stopword list for callers", () => {
@@ -277,12 +272,6 @@ describe("MemoryStore.cleanup — canonicalisation of suffix facts", () => {
     const written = readFileSync(path, "utf8");
     expect(written).toContain("Account ending 869001 belongs to OCBC 360");
     expect(written).toContain("Account ending 9001 belongs to OCBC 360");
-  });
-
-  it("empty string coverage sanity", () => {
-    expect("Card ending 3255 belongs to DBS Yuu Card").toMatch(
-      /ending 3255/,
-    );
   });
 });
 

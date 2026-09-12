@@ -21,10 +21,10 @@ import {
     bankFromText,
 } from "./bank-movement.js";
 import {
-    CANONICAL_SUFFIX_RE,
     canonicalSuffixFact,
     matchAccountByName,
     parseSuffixFact,
+    stopwords,
 } from "./memory.js";
 import { logger } from "./logging.js";
 
@@ -190,16 +190,6 @@ export function bankFromSender(sender) {
 }
 
 // ── Suffix-override helpers (LLM-directed retrieval) ────────────────
-
-/**
- * "Card ending 3255 belongs to DBS Yuu Card" — learned suffix facts.
- *
- * Delegates to the shared grammar in memory.js so the tracker's safety net,
- * the memory index and bank-movement's identity mapping can never drift apart.
- * Tolerant on input (a `Card/account` prefix, an optional "in", casing,
- * trailing punctuation); canonical on write.
- */
-export const SUFFIX_RE = CANONICAL_SUFFIX_RE;
 
 /** Secret-looking fact texts — redacted before the LLM sees them. */
 export const SECRET_RE =
@@ -1283,6 +1273,25 @@ export class AgentOrchestrator {
     // Phase 2: Resolution (code-driven, LLM-assisted)
     // ═══════════════════════════════════════════════════════════════
 
+    /**
+     * Live accounts for a budget, or [] when unavailable. Used to resolve an
+     * account name to a real account before comparing identity.
+     */
+    async _liveAccounts(budgetId) {
+        for (const arg of [{ budget_id: budgetId }, {}]) {
+            try {
+                const ctx = await this._tools.executeTool("fetch_context", arg);
+                const accounts = (ctx?.accounts || []).filter(
+                    (a) => a && !a.closed,
+                );
+                if (accounts.length) return accounts;
+            } catch {
+                // try the next shape
+            }
+        }
+        return [];
+    }
+
     async _detectAccountType(accountName) {
         if (!accountName) return "bank";
         // Entity equality, not "first memory hit". search_memory returns every
@@ -1290,39 +1299,48 @@ export class AgentOrchestrator {
         // matching fact let an unrelated or stale fact line decide the account
         // type — and the type drives the credit-card sign flip, i.e. whether a
         // purchase is booked negative. Only a fact about THIS account counts.
-        const wanted = String(accountName)
-            .replace(/\s+account$/i, "")
-            .replace(/\s+/g, " ")
-            .trim()
-            .toLowerCase();
-        const wantedTokens = wanted.split(" ");
         try {
             const mem = await this._tools.executeTool("search_memory", {
                 query: accountName,
             });
+            // Compare the fact's entity to this account with the SAME word
+            // normalisation the suffix resolver uses, instead of raw text.
+            // Raw comparison was wrong in both directions: a stored short form
+            // ("DBS Yuu" against "DBS Yuu Card") was refused, losing the sign
+            // flip, while a sibling sharing a word prefix could be accepted.
+            const norm = (t) =>
+                String(t || "")
+                    .toLowerCase()
+                    .replace(/[^\p{L}\p{N}]+/gu, " ")
+                    .split(/\s+/)
+                    .filter((w) => w && !stopwords().includes(w));
+            const wanted = norm(
+                String(accountName).replace(/\s+account$/i, ""),
+            );
             for (const r of mem?.results || []) {
+                // Non-greedy type, so a fact whose entity holds the word
+                // "card" ("DBS Yuu Card is a credit card") still parses with
+                // the entity intact. A trailing filler "account" is stripped
+                // from the TYPE separately.
                 const m = (r.text || "").match(
                     /^(.+?)\s+is\s+(?:a|an)\s+(.+?)(?:\s+account)?\s*$/i,
                 );
                 if (!m) continue;
-                const entityTokens = m[1]
-                    .replace(/\s+account$/i, "")
-                    .replace(/\s+/g, " ")
-                    .trim()
-                    .toLowerCase()
-                    .split(" ");
-                // Accept only a fact about THIS account. Exact entity, or the
-                // queried name as a multi-word prefix of the entity ("UOB One"
-                // for "UOB One is a credit card account"). A single generic word
-                // such as the "DBS" left after stripping "DBS Account" must not
-                // let a sibling account's fact decide the sign of this one.
-                const entity =
-                    entityTokens.length >= wantedTokens.length &&
-                    wantedTokens.length >= 2 &&
-                    wantedTokens.every((t, i) => entityTokens[i] === t);
-                const exactEntity =
-                    entityTokens.join(" ") === wantedTokens.join(" ");
-                if (entity || exactEntity) return m[2].toLowerCase();
+                const entity = norm(m[1].replace(/\s+account$/i, ""));
+                // Same account when one token list is a prefix of the other.
+                // A single-token match needs at least two shared tokens, so the
+                // bare "DBS" left after stripping "DBS Account" cannot let a
+                // sibling's fact decide this account's sign.
+                const shorter =
+                    entity.length <= wanted.length ? entity : wanted;
+                const longer =
+                    entity.length <= wanted.length ? wanted : entity;
+                const isPrefix =
+                    shorter.length > 0 &&
+                    shorter.every((t, i) => longer[i] === t);
+                if (!isPrefix) continue;
+                if (shorter.length < 2 && longer.length > 1) continue;
+                return m[2].replace(/\s+account$/i, "").trim().toLowerCase();
             }
         } catch {}
         // Fallback: keyword match on account name

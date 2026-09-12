@@ -390,7 +390,14 @@ export class MemoryStore {
     // contradiction resolution, so the last-wins choice was already made from
     // the full line set.
     const dropped = this._dropDuplicateSuffixFacts();
-    if (dropped > 0) changed = true;
+    if (dropped > 0) {
+      changed = true;
+      // The drop removed facts, so the structured index still holds entries
+      // whose `index` points past the new array. Rebuilding here is required:
+      // `update()` trusts that index and would otherwise overwrite an
+      // unrelated fact.
+      this._rebuildIndices();
+    }
     // Rewriting unconditionally bumps the file mtime on every run, which races
     // the 6-hourly memory backup and makes "did cleanup change anything?"
     // unanswerable. Only write when something actually changed.
