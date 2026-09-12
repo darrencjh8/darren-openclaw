@@ -187,23 +187,11 @@ export function resolveFactAccount(accountName, accounts, aliases) {
  *
  * @returns {{matched: boolean, id: string|null, name: string|null, reason?: string}}
  */
-export function matchAccountByName(nameText, accounts, aliases) {
+function matchWithoutAliases(nameText, accounts) {
   const all = (accounts || []).filter(Boolean);
   if (!all.length) return refusal("no live accounts");
 
-  // An alert may name the product ("Main Account", "Trust Cashback card"),
-  // which no account is called. Substitute the live account the alias points at
-  // before matching; everything below then behaves exactly as before. #496.
-  //
-  // Only as a FALLBACK: a written name that already matches a live account is
-  // never redirected, so a fact cannot shadow a real account and send its alerts
-  // elsewhere. Review round 1 on c1e1d10.
-  const written = accountTokens(stripParenthesisedId(nameText)).join(" ");
-  const namesLiveAccount = all.some(
-    (a) => accountTokens(stripParenthesisedId(a.name)).join(" ") === written,
-  );
-  const aliased = namesLiveAccount ? undefined : aliases?.get(written);
-  const raw = accountTokens(stripParenthesisedId(aliased || nameText));
+  const raw = accountTokens(stripParenthesisedId(nameText));
   if (!raw.length) return refusal("empty account name");
 
   const nameCounts = new Map();
@@ -266,6 +254,31 @@ export function matchAccountByName(nameText, accounts, aliases) {
 }
 
 /**
+ * Resolve a written name, falling back to an alias only when the resolver
+ * itself cannot place the name.
+ *
+ * The guard is the resolver, not an exact-token comparison: the resolver also
+ * reaches accounts through plural trimming, a kind word and containment, and an
+ * exact-token check let a fact redirect a name the resolver could already place
+ * (verified: `Ryt Cards is a Ryt Bank account` redirected `Ryt Cards`, which
+ * otherwise resolves to `Ryt Card`). Issue #496, review round 2.
+ */
+export function matchAccountByName(nameText, accounts, aliases) {
+  const direct = matchWithoutAliases(nameText, accounts);
+  // Only a genuine "nothing matched" may be redirected. A refusal for a closed
+  // or duplicate account means the name is owned by a real account, and an alias
+  // must never move that account's alerts to a sibling.
+  if (direct.matched || direct.reason !== "no account matches those words") {
+    return direct;
+  }
+  if (!aliases || !aliases.size) return direct;
+  const written = accountTokens(stripParenthesisedId(nameText)).join(" ");
+  const target = written ? aliases.get(written) : undefined;
+  if (!target) return direct;
+  return matchWithoutAliases(target, accounts);
+}
+
+/**
  * Names a bank alert uses for an account that is not its Actual name:
  * `Main Account is a Ryt Bank account`, `Trust Cashback card is a Trust Card
  * account`. A product name cannot be matched against an account list at all, so
@@ -303,7 +316,7 @@ export function accountAliases(facts, accounts) {
     if (!alias || !target) continue;
     if (ambiguous.has(alias)) continue;
     const live = (accounts || []).find(
-      (a) => a && accountTokens(a.name).join(" ") === target,
+      (a) => a && accountTokens(stripParenthesisedId(a.name)).join(" ") === target,
     );
     if (!live) continue;
     if (aliases.has(alias)) {
