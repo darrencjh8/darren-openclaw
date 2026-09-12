@@ -326,10 +326,11 @@ limit; recent learnings are missing from memory even though the agent clearly sa
 - **topic files** (`/opt/data/memories/topics/*.md`) — durable facts that are too big a
   family for the always-on core. One file per domain, one fact per line, **aliases on the
   label** (`Groceries / supermarket / NTUC FairPrice -> payee Groceries`) so keyword search
-  finds it. The agent searches this directory before answering a recall question. When the
-  triage judge files a fact here, it **discards** the queue record in the same run — never
-  both, or the two copies drift. Restore is partial: the triage snapshot covers
-  `MEMORY.md`/`USER.md` only, topic files come back from `memory-backup` (every 6h).
+  finds it. The seed writes a pointer to this directory into `MEMORY.md`, and the agent
+  searches it before answering a recall question. When the triage judge files a fact here,
+  it **discards** the queue record in the same run — never both, or the two copies drift.
+  Restore is partial: the triage snapshot covers `MEMORY.md`/`USER.md` only, topic files
+  come back from `memory-backup` (every 6h).
 - **skills** — procedures, runbooks, tool-usage patterns (unbounded, loaded on demand).
   A procedure parked in memory is a procedure that never gets its own room.
 - **skill `references/`** — long-form detail, transcripts, schemas.

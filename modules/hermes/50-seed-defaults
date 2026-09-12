@@ -198,6 +198,42 @@ if [ -n "${MEMORY_REPO_URL}" ] && [ ! -f "/opt/data/memories/MEMORY.md" ]; then
     rm -rf /tmp/friday-memory-clone || true
 fi
 
+# The always-on core must point at the topic directory or tier 2 is write-only:
+# a fresh session that has not loaded the troubleshooting skill has no other cue
+# that the files exist. Runs after the first-boot restore above (which would
+# otherwise overwrite it), is idempotent, and refuses to push the core over its
+# configured cap.
+python3 <<'PYPTR' || true
+import re
+
+core = "/opt/data/memories/MEMORY.md"
+pointer = "Durable facts too big for this core live in /opt/data/memories/topics/ - search that directory before answering a recall question."
+limit = 2800
+
+try:
+    with open("/opt/data/config.yaml") as handle:
+        match = re.search(r"^\s*memory_char_limit:\s*(\d+)", handle.read(), re.MULTILINE)
+    if match:
+        limit = int(match.group(1))
+except OSError:
+    pass
+
+try:
+    with open(core) as handle:
+        content = handle.read()
+except FileNotFoundError:
+    content = ""
+
+if pointer not in content:
+    candidate = (content.rstrip("\n") + "\n" + pointer + "\n") if content.strip() else pointer + "\n"
+    if len(candidate) <= limit:
+        with open(core, "w") as handle:
+            handle.write(candidate)
+        print("memory: topic-directory pointer added to MEMORY.md")
+    else:
+        print("memory: pointer skipped, core is full - trim MEMORY.md first")
+PYPTR
+
 # Seed portfolio-sync cron job (no_agent — zero-token REST call)
 python3 <<'PYEOF' || true
 import os, json, uuid, datetime
@@ -288,9 +324,10 @@ STEPS
    - DISCARD (archived, not applied) — duplicates or paraphrases of a fact already present in /opt/data/memories/MEMORY.md, USER.md, or the topic files, or of another op you just approved; procedures/runbooks (those belong in a skill, not memory); raw task progress, completed-work logs, one-off dated state, anything superseded.
    - HOLD (list in NEITHER array) — ambiguous, contradictory, or unverifiable. Contradictions get held, never resolved by guessing.
 4. Dedupe AGGRESSIVELY. When several ops carry the same fact, approve at most ONE consolidated version (clearest, most self-contained wording) and discard the other instances.
-5. Respect the store caps: memory 2800 chars and user 1375. If an add would overflow, prefer a replace/remove that frees room and discard lower-value adds. If a fact is durable but still will not fit:
-   - append it to the matching topic file under /opt/data/memories/topics/ (create the file if missing; the index lists the domains), one fact per line, aliases on the label so keyword search finds it;
+5. Respect the store caps: memory __MEM_CAP__ chars and user __USER_CAP__. If an add would overflow, prefer a replace/remove that frees room and discard lower-value adds. If a fact is durable but still will not fit:
+   - append it to the matching topic file under /opt/data/memories/topics/ (create the file if missing; the index lists the domains), one fact per line, aliases on the label so keyword search finds it. Skip the append if the identical line is already there — an earlier run may have appended it before failing;
    - then list that record in "discard" as well. Never file a fact and approve it in the same run — two copies of one fact will drift apart.
+   Do the topic-file appends as the last thing before writing the plan, so a crash mid-run leaves the queue record staged rather than filed twice.
    Contradictory or unverifiable records are still held, never filed.
 6. Write the verdict plan to /opt/data/tmp/triage-plan.json as {"approve": ["<id>", ...], "discard": ["<id>", ...]}
 7. Apply it: bash /opt/data/scripts/memory-triage.sh apply --plan /opt/data/tmp/triage-plan.json
@@ -304,14 +341,34 @@ STEPS
 
 Do not stop until the apply step has actually run and been verified. If a step fails, say so plainly rather than reporting success."""
 
-# Managed fields are migrated in place, not just appended when the job is missing.
-# The job already exists on every long-lived install, so an append-only seed would
+
+# The caps the judge quotes come from the seeded config, not from a copy pasted
+# into this prompt: a config change must not silently desync the judge's arithmetic.
+def _configured_cap(key, default):
+    try:
+        import re as _re
+        with open("/opt/data/config.yaml") as handle:
+            match = _re.search(rf"^\s*{key}:\s*(\d+)", handle.read(), _re.MULTILINE)
+        return int(match.group(1)) if match else default
+    except OSError:
+        return default
+
+
+PROMPT = PROMPT.replace("__MEM_CAP__", str(_configured_cap("memory_char_limit", 2200)))
+PROMPT = PROMPT.replace("__USER_CAP__", str(_configured_cap("user_char_limit", 1375)))
+
+# Only behaviour-defining fields are migrated in place for an existing job: the
+# job already exists on every long-lived install, so an append-only seed would
 # never deliver a prompt change (this is how the topic-file routing rule reaches
-# production). User-owned fields are left alone.
+# production). Scheduling fields are minted once at creation and left alone
+# afterwards, so a dashboard change to the time, enabled flag, or delivery target
+# is not reverted on every boot.
 MANAGED = {
     "prompt": PROMPT,
     "skills": ["hermes-troubleshooting"],
     "skill": "hermes-troubleshooting",
+}
+DEFAULTS = {
     "schedule": {"kind": "cron", "expr": "0 9 * * *", "display": "0 9 * * *"},
     "schedule_display": "0 9 * * *",
     "enabled": True,
@@ -330,6 +387,7 @@ if existing is None:
         "context_from": ["self"],
         "next_run_at": None,
         "created_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        **DEFAULTS,
         **MANAGED,
     })
     print("cron: memory-triage seeded")
