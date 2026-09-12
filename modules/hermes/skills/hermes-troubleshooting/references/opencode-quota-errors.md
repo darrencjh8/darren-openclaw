@@ -4,15 +4,19 @@ When model-fallback warnings show free/relay models failing (e.g. `mimo-v2.5-fre
 via opencode-zen), the key is usually VALID and the model EXISTS — the account's
 quota buckets are exhausted. Diagnose by probing, not by re-checking config.
 
-## This host's routes (config.yaml `fallback_providers` + `auxiliary.*.fallback_chain`)
+## Relay routes (historical — no longer configured on this host)
+
+This host's current main fallback is the direct `deepseek` provider with
+`deepseek-flash`. The relay rows below are retained for hosts that still configure
+`opencode-zen` / `opencode-go`; they are not in this repo's `config.yaml`.
 
 | Provider | base_url | Key env var | Models seen |
 |---|---|---|---|
 | opencode-zen | `https://opencode.ai/zen/v1` | `OPENCODE_ZEN_API_KEY` | `opencode/mimo-v2.5-free`, gemini-3.8-flash, muse-spark-*-free, ling-3.0-flash-fin-free, nemotron-3-ultra-free |
 | opencode-go | `https://opencode.ai/zen/go/v1` | `OPENCODE_GO_API_KEY` | glm-5.2, kimi-k2 |
-| deepseek | (provider default) | `DEEPSEEK_API_KEY` | deepseek-flash |
 
-Fallback order (main model): glm-5.2 (go) → mimo-v2.5-free (zen) → deepseek-flash.
+Historical fallback order (main model): glm-5.2 (go) → mimo-v2.5-free (zen) → deepseek-flash.
+Current fallback order (main model): direct `deepseek-flash` only.
 Provider profiles live in `/opt/hermes/plugins/model-providers/opencode-zen/__init__.py`
 (per-model reasoning knobs, max_tokens caps, attribution headers).
 Config may ALSO override base_url per fallback entry — trust the config entry.
@@ -64,7 +68,7 @@ Consequences:
   profile). Even `OpenCode/1.2.3 (Hermes Agent)` passes — the gate is on the
   UA prefix, not on honest identity.
 - Keyless (no Authorization header at all) 429s the same way with a foreign UA.
-- **Two-factor gate (verified 2026-09-09):** the UA check is only ONE factor — the free tier ALSO requires an `x-opencode-session` header; without it zen returns 400 `MissingSessionID` regardless of UA. Full matrix on mimo-v2.5-free, same key + IP: no session header → 400 MissingSessionID (any UA); session + `opencode` UA → 200; session + `HermesAgent/0.21.0` → 429 FreeUsageLimitError. When diagnosing a relay that proxies free-tier models (e.g. codex-router's zen hops), reproduce BOTH factors — and remember such a relay forwards its client's UA, so its final free hop can be structurally dead for agent clients even with healthy quota.
+- **Two-factor gate (verified 2026-09-09):** the UA check is only ONE factor — the free tier ALSO requires an `x-opencode-session` header; without it zen returns 400 `MissingSessionID` regardless of UA. Full matrix on mimo-v2.5-free, same key + IP: no session header → 400 MissingSessionID (any UA); session + `opencode` UA → 200; session + `HermesAgent/0.21.0` → 429 FreeUsageLimitError. When diagnosing a relay that proxies free-tier models (historically codex-router's zen hops, since removed), reproduce BOTH factors — and remember such a relay forwards its client's UA, so its final free hop can be structurally dead for agent clients even with healthy quota.
 - The provider plugin documents this pattern for other free models
   ("big-pickle 429s every client except the opencode CLI's own User-Agent").
 

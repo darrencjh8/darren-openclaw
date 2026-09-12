@@ -82,20 +82,20 @@ A background `opencode` TUI or `run` can be parked or working without producing 
 
 Full schema + copy-paste query: `references/opencode-live-session-inspection.md`. Host quirk: inline `python3 -c` trips an approval card — write scratch scripts under /workspace with write_file and run `python3 file.py` instead.
 
-## Model-identity questions — "which model are you / why does config say GLM 5.2?"
+## Model-identity questions — "which model are you / why does config mention a model I never picked?"
 
 Don't answer from the session system-prompt header alone, and don't answer from config alone — they answer different questions:
 
-- **Session header** (`Model:`/`Provider:` in the system prompt) = what ACTUALLY served this session. It can differ from config's primary — e.g. config primary `custom:codex-router`/`gpt-5.6-terra` while a session runs `deepseek`/`deepseek-flash` because the primary failed and fallback engaged. Trust the header for "what ran", config for "what was intended".
+- **Session header** (`Model:`/`Provider:` in the system prompt) = what ACTUALLY served this session. It can differ from config's primary — e.g. config primary `custom:codex-router`/`auto-thinking` while a session runs `deepseek`/`deepseek-flash` because the primary failed and fallback engaged. Trust the header for "what ran", config for "what was intended".
 - **`config.yaml` model topology** — map these keys separately:
   - `model.provider` + `model.default` — configured primary chat model
   - `fallback_providers` — where the chat loop drops after 3 failed attempts
   - `delegation.provider`/`model` — subagents (distinct from main chat!)
   - `auxiliary.*` (vision, web_extract, compression, approval, triage_specifier, profile_describer) — each task type has its own provider/model + `fallback_chain`
 
-**A model visible in config is often fallback-only.** Example (Darren's host, 2026-09): `glm-5.2` appears ONLY under provider `opencode-go`, inside `fallback_providers` and auxiliary `fallback_chain`s — never as a primary. So "why GLM 5.2?" means either the codex-router primary was down/overloaded and the route fell through to opencode-go, or the user is reading the fallback list and mistaking it for the active brain. Answer with a table of role → provider → model so the fallback-only status is visible.
+**A model visible in config is often fallback-only or slot-specific.** Example (Darren's host, 2026-09): `deepseek-flash` is never a *router-backed* primary — the router-backed primaries are `auto-thinking` (main, delegation, code-reviewer) and the pooled GPT aliases (`gpt-5.6-terra`, `gpt-5.6-luna`, `gpt-5.6-sol` for the auxiliary slots and the other profiles). `deepseek-flash` appears inside `fallback_providers` and the auxiliary `fallback_chain`s, plus exactly one direct primary: `auxiliary.kanban_decomposer` (direct `deepseek` provider, no router hop). So "why DeepSeek?" means either the codex-router primary was down/overloaded and the route fell through to the direct `deepseek` provider, or the slot is the kanban decomposer, or the user is reading the fallback list and mistaking it for the active brain. Answer with a table of role → provider → model so the status is visible.
 
-**Diagnostic:** `env | grep -iE 'model|provider|glm|deepseek'` (redact key values), then read `/opt/data/config.yaml` sections `model:`, `fallback_providers:`, `auxiliary:`, `delegation:`; per-profile overrides live at `/opt/data/profiles/<name>/config.yaml`.
+**Diagnostic:** `env | grep -iE 'model|provider|deepseek'` (redact key values), then read `/opt/data/config.yaml` sections `model:`, `fallback_providers:`, `auxiliary:`, `delegation:`; per-profile overrides live at `/opt/data/profiles/<name>/config.yaml`.
 
 ## Docker cleanup: orphans → images → system prune
 
