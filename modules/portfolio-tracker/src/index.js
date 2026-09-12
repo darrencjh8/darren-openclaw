@@ -117,7 +117,6 @@ async function main() {
         dedupJournal,
         memoryStore,
         ppBridge,
-        null,
         factsMemory,
     );
     const orchestrator = new AgentOrchestrator(cfg, registry);

@@ -43,7 +43,7 @@ A future agent reading 002 first gets a Python, 4-phase, keyword-based mental mo
 - Canonical baseline = `specs/003-portfolio-tracker/spec.md` (already mostly code-accurate).
 - Fix internal contradictions (SSE wrapper wording, 19 vs 20 REST, 6 vs 10 MCP tools, token_path, AB→PP wording, budget_id, response shape).
 - `CONTEXT.md` → align transport (Streamable HTTP) and tool count (10).
-- `README.md` / spec.md → reconcile `GOOGLE_SERVICE_ACCOUNT_JSON` optional-vs-required.
+- `README.md` / spec.md → reconcile `GOOGLE_SERVICE_ACCOUNT_JSON` optional-vs-required. **Resolved (#261): docs say required, guard unchanged.**
 
 ---
 
@@ -53,10 +53,10 @@ Most rows are **doc fixes** (code is source of truth). A few need a **code decis
 
 | Item | Options |
 |------|---------|
-| Dead `_abClient` (158) | (a) remove field, (b) build AB-write path — **still open** |
+| Dead `_abClient` (158) | (a) remove field, (b) build AB-write path — **resolved: dead `abClient` plumbing removed (#261)** |
 | Dead `classifyEmail()` (216) | (a) remove, (b) wire into dispatch — **removed** |
 | Dead config `BALANCE_SYNC_MODEL`/`LOG_LEVEL` (217), category vars (211) | (a) remove from config, (b) implement — **removed** |
-| `GOOGLE_SERVICE_ACCOUNT_JSON` fail-fast vs optional (218) | (a) make guard conditional, (b) doc as required — **docs say required; guard unchanged** |
+| `GOOGLE_SERVICE_ACCOUNT_JSON` fail-fast vs optional (218) | (a) make guard conditional, (b) doc as required — **docs say required; guard unchanged** (resolved in #261) |
 | Stale `index.js:195` SSE comment (220) | trivial code comment fix — **already fixed** |
 
 The dead-config and dead-code items (211, 216, 217) were removed in the docs + stale-code-removal pass. See `code-notes.md` for the current status of every item.

@@ -23,7 +23,7 @@ import { ToolRegistry } from "../src/tools.js";
 
 function makeRegistry(factsMemory) {
   // dedup/memory/ppBridge are unused by the tools under test
-  return new ToolRegistry({}, null, null, null, null, factsMemory);
+  return new ToolRegistry({}, null, null, null, factsMemory);
 }
 
 beforeEach(() => {

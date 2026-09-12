@@ -447,7 +447,6 @@ export class ToolRegistry {
      * @param {import('./dedup.js').DedupJournal} dedupJournal
      * @param {import('./memory.js').MemoryStore} memoryStore
      * @param {import('./java_bridge.js').PpJavaBridge|null} ppBridge
-     * @param {object|null} abClient - Actual Budget client (optional)
      * @param {import('./memory_facts.js').FactsMemory|null} factsMemory - semantic facts/password store
      */
     constructor(
@@ -455,14 +454,12 @@ export class ToolRegistry {
         dedupJournal,
         memoryStore,
         ppBridge = null,
-        abClient = null,
         factsMemory = null,
     ) {
         this._config = config;
         this._dedup = dedupJournal;
         this._memory = memoryStore;
         this.__ppBridge = ppBridge;
-        this._abClient = abClient;
         this._facts = factsMemory;
         this._currentPdfBytes = Buffer.alloc(0);
         this._currentRawEmail = Buffer.alloc(0);
