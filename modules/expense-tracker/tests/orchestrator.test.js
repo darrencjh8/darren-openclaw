@@ -1502,7 +1502,7 @@ describe("LLMClient truncation and reasoning-disabled handling", () => {
         expect(createMock.mock.calls[0][0].thinking).toEqual({ type: "adaptive" });
     });
 
-    it("defaults the deepseek route to low thinking when no reasoning is requested", async () => {
+    it("never sends a thinking type DeepSeek rejects when no reasoning is requested", async () => {
         const config = makeConfig();
         const client = new LLMClient(config);
         const createMock = vi.fn().mockResolvedValue({
@@ -1512,7 +1512,30 @@ describe("LLMClient truncation and reasoning-disabled handling", () => {
 
         await client.chat([{ role: "user", content: "hi" }]);
 
-        expect(createMock.mock.calls[0][0].thinking).toEqual({ type: "low" });
+        // DeepSeek accepts only adaptive/enabled/disabled. The low/medium/high
+        // effort scale has no equivalent on this route, and sending it makes the
+        // API reject the whole request with `thinking.type: unknown variant`.
+        expect(["adaptive", "enabled", "disabled"]).toContain(
+            createMock.mock.calls[0][0].thinking.type,
+        );
+    });
+
+    it("never sends a thinking type DeepSeek rejects when the caller asks for low effort", async () => {
+        const config = makeConfig();
+        const client = new LLMClient(config);
+        const createMock = vi.fn().mockResolvedValue({
+            choices: [{ message: { content: "{}" }, finish_reason: "stop" }],
+        });
+        client._client.chat.completions.create = createMock;
+
+        // The phase-1 and statement callers pass `reasoning: "low"`.
+        await client.chat([{ role: "user", content: "hi" }], undefined, "auto", {
+            reasoning: "low",
+        });
+
+        expect(["adaptive", "enabled", "disabled"]).toContain(
+            createMock.mock.calls[0][0].thinking.type,
+        );
     });
 
     it("retries when a response has empty content, no tool_calls, and a non-stop finish_reason (truncated)", async () => {
