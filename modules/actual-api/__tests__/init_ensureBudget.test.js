@@ -1,5 +1,16 @@
 jest.mock("fs", () => ({ mkdirSync: jest.fn() }));
 
+// `ACTUAL_PRIMARY_BUDGET_FILE` is read when the server module loads, and these
+// tests change it per case. Restore the shared value so a later file in the
+// same jest worker still sees the configured name.
+const previousPrimaryBudgetFile = process.env.ACTUAL_PRIMARY_BUDGET_FILE;
+
+afterAll(() => {
+    if (previousPrimaryBudgetFile === undefined)
+        delete process.env.ACTUAL_PRIMARY_BUDGET_FILE;
+    else process.env.ACTUAL_PRIMARY_BUDGET_FILE = previousPrimaryBudgetFile;
+});
+
 const mockApp = {
     get: jest.fn(),
     post: jest.fn(),
