@@ -13,9 +13,9 @@ The original docs-only phase (#262) recorded the code issues below without touch
 | C-3 | `config.js` — `logLevel`, `balanceSyncModel` | #217 | **Resolved — removed** | Both were read from `LOG_LEVEL` / `BALANCE_SYNC_MODEL` and never consumed. Removed the assignments and every test assertion. The env vars were never in `.env.example`. |
 | C-4 | `config.js` — `abEmergencyPrimaryCategory`, `abEmergencySecondaryCategory`, `abWarchestCategory` | #211 | **Resolved — removed** | Category config was set from `AB_*_CATEGORY` env vars but never consumed by the sync logic (balance amounts come from `sgd/myr.*_total`). Removed the assignments, the `.env.example` block, and every test assertion. |
 | C-5 | `index.js` — MCP transport comment | #220 | **Resolved — already fixed** | Comment now reads `// Register MCP Streamable HTTP transport (POST/GET/DELETE /mcp)`, matching `createMcpServer()`. |
-| C-6 | `index.js` `guardEnv()` vs `tools.js` `_exportTaxonomiesToSheet()` | #218 | **Resolved — docs say required, guard unchanged (#261)** | `GOOGLE_SERVICE_ACCOUNT_JSON` / `GOOGLE_SHEET_ID` still cause `process.exit(1)` at startup even though the runtime export path skips gracefully. Docs now describe them as required, matching the running code. | Make the guard conditional on taxonomy config, OR keep as required and leave docs as-is. **Resolved in #261: docs say required, guard unchanged.** |
+| C-6 | `index.js` `guardEnv()` vs `tools.js` `_exportTaxonomiesToSheet()` | #218 | **Resolved — docs say required, guard unchanged (no #261 change)** | `GOOGLE_SERVICE_ACCOUNT_JSON` / `GOOGLE_SHEET_ID` still cause `process.exit(1)` at startup even though the runtime export path skips gracefully. Docs now describe them as required, matching the running code. | Make the guard conditional on taxonomy config, OR keep as required and leave docs as-is. **No #261 change: the docs already required these vars; nothing was edited.** |
 | C-7 | `config.js` — `REQUIRED_ENV_VARS` | #229 | **Open — deferred** | `REQUIRED_ENV_VARS` still omits `ACTUAL_SECONDARY_BUDGET_FILE`, which `index.js guardEnv()` does require. Defense-in-depth gap only. | Add `ACTUAL_SECONDARY_BUDGET_FILE` to `REQUIRED_ENV_VARS`. |
-| C-8 | `prompts.js` — system prompt + few-shot examples | #213, #228 | **Open — deferred** | Prompt still describes manual IBKR ingestion via email/Telegram while `pp-sync-all` auto-pulls via the IBKR Flex Web Service (`ibkr_flex.js`). Not a hard contradiction — the manual paths still exist — but it trains a stale-leaning workflow. | Refresh prompt/examples toward the API-driven sync. |
+| C-8 | `prompts.js` — system prompt + few-shot examples | #213, #228 | **Partially resolved (#261) — manual path scoped, not removed** | Prompt still describes manual IBKR ingestion via email/Telegram while `pp-sync-all` auto-pulls via the IBKR Flex Web Service (`ibkr_flex.js`). Not a hard contradiction — the manual paths still exist — but it trains a stale-leaning workflow. Resolved in #261: rules 2 and 6 are now explicitly scoped to the manual/fallback path and point the automated path at `pp-sync-all`, and the MANUAL TRADE step 8 note no longer overstates the dedup guarantee. The manual email/Telegram rules and few-shot examples remain intentionally. | Refresh prompt/examples toward the API-driven sync. |
 
 ## Expense-tracker
 
@@ -25,7 +25,7 @@ The expense-tracker's `classifyEmail()` (`src/classify.js`) is a **different, li
 
 ## Doc-vs-doc reconciliation note (resolved in docs, no code change)
 
-`GOOGLE_SERVICE_ACCOUNT_JSON` and `GOOGLE_SHEET_ID` are documented as **required** to match the running `guardEnv()`. Flip C-6 if you would rather make them optional at startup. **Resolved in #261: docs say required, guard unchanged.**
+`GOOGLE_SERVICE_ACCOUNT_JSON` and `GOOGLE_SHEET_ID` are documented as **required** to match the running `guardEnv()`. Flip C-6 if you would rather make them optional at startup. **No #261 change: the docs already said required; nothing was edited.**
 
 ## Operational note for the removals (C-2, C-3, C-4)
 

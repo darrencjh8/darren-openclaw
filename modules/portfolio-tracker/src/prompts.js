@@ -127,9 +127,10 @@ WORKFLOW — MANUAL TRADE (email PDF or Telegram upload):
 7. pp-push — persist changes to OneDrive BEFORE calling pp-sync-all
 8. pp-sync-all — pulls latest, syncs AB balances, pushes back,
    exports taxonomies to Google Sheets
-   (pp-sync-all re-pulls and imports the flex query itself, so a manual
-   insert followed by pp-sync-all relies on the Java-side duplicate check
-   to avoid re-importing the same XML)
+   (pp-sync-all re-pulls and imports the flex query itself. Its Java
+   importer's duplicate check covers trades only — dividends and other
+   transaction items are not dedup-checked — so verify with the
+   duplicate-check tooling before re-importing a manual flex query.)
 9. notify_user with summary
 10. learn_mapping for each successful match
 11. log_decision
