@@ -8,6 +8,7 @@ import { join, dirname } from "path";
 import Database from "better-sqlite3";
 import { simpleParser } from "mailparser";
 import { DedupJournal } from "./dedup.js";
+import { isBookableAmountCents } from "./amounts.js";
 import { extractPdfFromBuffer, extractEmailContent } from "./extractors.js";
 import { LLMClient } from "./orchestrator.js";
 import { factNamesMerchant } from "./memory.js";
@@ -235,6 +236,16 @@ function ambiguousPayeeError(message) {
   const error = new Error(message);
   error.code = "AMBIGUOUS_PAYEE";
   return error;
+}
+
+/**
+ * Normalise a quoted integer amount to a number (#508), leaving all else as-is
+ * so the route rejects it rather than it being reinterpreted here.
+ */
+function normalizeAmountCents(value) {
+  return typeof value === "string" && isBookableAmountCents(value)
+    ? Number(value)
+    : value;
 }
 
 const TOOLS = [
@@ -1140,6 +1151,10 @@ export class ToolRegistry {
     if (!args.date) return { error: "date is required" };
     if (!args.amount_cents && args.amount_cents !== 0)
       return { error: "amount_cents is required" };
+    // A quoted integer is an accepted shape: the route trims and coerces it, so
+    // normalise it here too, or the POST body and the dedup journal would carry
+    // a string that hashes differently from the same row's number.
+    const amountCents = normalizeAmountCents(args.amount_cents);
 
     // The payee is either one explicit ID or one resolved name. A caller-supplied
     // ID is sent alone, because its name is validated from that same ID while the
@@ -1224,7 +1239,7 @@ export class ToolRegistry {
       {
         account: args.account_id,
         date: args.date,
-        amount: args.amount_cents || 0,
+        amount: amountCents,
         // A payee ID wins over a name, so an explicit ID is sent alone.
         ...(explicitId ? {} : { payee_name: payee_name || "Misc" }),
         notes: args.notes || "",
@@ -1237,7 +1252,7 @@ export class ToolRegistry {
     // Record in dedup journal AFTER successful insert (not before)
     this._dedup.record(
       args.date,
-      args.amount_cents || 0,
+      amountCents,
       args.account_id,
       payee_name || "",
     );
@@ -1295,18 +1310,17 @@ export class ToolRegistry {
     payee_name,
     budget_id,
   }) {
+    // A quoted integer is an accepted extraction shape, but Actual rows carry
+    // numbers: compare numerically so strict equality can match, and hash the
+    // journal on the same value it would record either way.
+    const amount = normalizeAmountCents(amount_cents);
     // Check local dedup first, then AB API
     if (
-      this._dedup.checkDuplicate(
-        date,
-        amount_cents,
-        account_id,
-        payee_name || "",
-      )
+      this._dedup.checkDuplicate(date, amount, account_id, payee_name || "")
     ) {
       return true;
     }
-    return this._check_ab_duplicate(date, amount_cents, account_id, budget_id);
+    return this._check_ab_duplicate(date, amount, account_id, budget_id);
   }
 
   async _check_ab_duplicate(date, amount_cents, account_id, budget_id = "") {

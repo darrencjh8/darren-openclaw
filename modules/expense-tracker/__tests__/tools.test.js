@@ -420,6 +420,86 @@ describe("ToolRegistry — budget_id validation", () => {
             expect(recordSpy).not.toHaveBeenCalled();
         });
 
+        test("an absent amount_cents is refused before any request (#508)", async () => {
+            const recordSpy = vi.spyOn(registry._dedup, "record");
+
+            for (const missing of [undefined, null, NaN, ""]) {
+                mockFetch.mockClear();
+                recordSpy.mockClear();
+
+                const result = await registry.executeTool("insert_transaction", {
+                    budget_id: "My Budget",
+                    account_id: "acc-1",
+                    date: "2026-06-17",
+                    amount_cents: missing,
+                    imported_description: "Deposit",
+                });
+
+                // The route rejects a missing amount, so the tool must not turn
+                // it into a 0-cent booking on the way there.
+                expect(result).toEqual({ error: "amount_cents is required" });
+                expect(mockFetch).not.toHaveBeenCalled();
+                expect(recordSpy).not.toHaveBeenCalled();
+            }
+        });
+
+        test("a quoted amount is posted and journalled as a number (#508)", async () => {
+            const recordSpy = vi.spyOn(registry._dedup, "record");
+            mockFetch
+                .mockResolvedValueOnce({
+                    ok: true,
+                    json: () => [{ id: "payee-1", name: "Deposit" }],
+                })
+                .mockResolvedValueOnce({
+                    ok: true,
+                    json: () => ({ id: "txn-quoted" }),
+                });
+
+            await registry.executeTool("insert_transaction", {
+                budget_id: "My Budget",
+                account_id: "acc-1",
+                date: "2026-06-17",
+                amount_cents: " -1280 ",
+                imported_description: "Deposit",
+            });
+
+            // The route trims and coerces this shape, so the body and the
+            // journal must carry the same number or a re-delivery hashes
+            // differently and the duplicate is missed.
+            const postBody = JSON.parse(mockFetch.mock.calls[1][1].body);
+            expect(postBody.amount).toBe(-1280);
+            expect(recordSpy).toHaveBeenCalledWith(
+                "2026-06-17",
+                -1280,
+                "acc-1",
+                "Deposit",
+            );
+        });
+
+        test("a zero amount is still posted (#508)", async () => {
+            mockFetch
+                .mockResolvedValueOnce({
+                    ok: true,
+                    json: () => [{ id: "payee-1", name: "Deposit" }],
+                })
+                .mockResolvedValueOnce({
+                    ok: true,
+                    json: () => ({ id: "txn-zero" }),
+                });
+
+            await registry.executeTool("insert_transaction", {
+                budget_id: "My Budget",
+                account_id: "acc-1",
+                date: "2026-06-17",
+                amount_cents: 0,
+                imported_description: "Deposit",
+            });
+
+            expect(mockFetch).toHaveBeenCalledTimes(2);
+            const postBody = JSON.parse(mockFetch.mock.calls[1][1].body);
+            expect(postBody.amount).toBe(0);
+        });
+
         test("an unverifiable explicit payee_id fails closed (#483)", async () => {
             mockFetch.mockRejectedValueOnce(new Error("AB unreachable"));
 
@@ -781,6 +861,67 @@ describe("ToolRegistry — budget_id validation", () => {
             // dedup check will fail silently (fetch not mocked), returns false
             expect(result).toBe(false);
         });
+
+        test("matches a quoted amount against a numeric Actual row (#508)", async () => {
+            mockFetch.mockResolvedValueOnce({
+                ok: true,
+                json: () => [
+                    {
+                        id: "txn-1",
+                        amount: -1280,
+                        date: "2026-06-17",
+                        account: "acc-1",
+                    },
+                ],
+            });
+
+            const result = await registry.executeTool("check_duplicate", {
+                date: "2026-06-17",
+                amount_cents: "-1280",
+                account_id: "acc-1",
+                payee_name: "Toast Box",
+                budget_id: "My Budget",
+            });
+
+            // The extractor tolerates a quoted integer; strict equality against
+            // the numeric row would miss the duplicate and book it again.
+            expect(result).toBe(true);
+        });
+
+        test.each([
+            ["0x10", 16, false],
+            ["1e3", 1000, false],
+            ["+1280", 1280, false],
+            ["99999999999999999999", 1e20, false],
+            [" 16 ", 16, true],
+        ])(
+            "coerces only a strict integer string: %s against a %i row (#508)",
+            async (amount, rowAmount, expected) => {
+                mockFetch.mockResolvedValueOnce({
+                    ok: true,
+                    json: () => [
+                        {
+                            id: "txn-1",
+                            amount: rowAmount,
+                            date: "2026-06-17",
+                            account: "acc-1",
+                        },
+                    ],
+                });
+
+                const result = await registry.executeTool("check_duplicate", {
+                    date: "2026-06-17",
+                    amount_cents: amount,
+                    account_id: "acc-1",
+                    payee_name: "Toast Box",
+                    budget_id: "My Budget",
+                });
+
+                // Only the shape the Actual route accepts may be reinterpreted;
+                // hex and scientific strings must not become a false duplicate.
+                expect(result).toBe(expected);
+            },
+        );
     });
 
     describe("resolve_merchant", () => {
