@@ -342,6 +342,25 @@ describe("ToolRegistry — budget_id validation", () => {
             expect(patchBody.payee).toBe("payee-misc");
             expect(patchBody.category).toBeNull();
         });
+
+        test("rejects supplying both payee_id and payee_name (#421)", async () => {
+            mockFetch.mockResolvedValueOnce({
+                ok: true,
+                json: () => [{ id: "payee-plain", name: "Deposit" }],
+            });
+
+            const result = await registry.executeTool("update_transaction", {
+                id: "txn-1",
+                budget_id: "My Budget",
+                payee_id: "payee-plain",
+                payee_name: "Deposit",
+            });
+
+            // Silently preferring the ID would hide a caller mistake.
+            expect(result).toEqual({
+                error: "Provide payee_id or payee_name, not both.",
+            });
+        });
     });
 
     describe("check_duplicate", () => {

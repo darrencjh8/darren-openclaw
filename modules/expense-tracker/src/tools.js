@@ -1683,6 +1683,11 @@ export class ToolRegistry {
     // Build fields to update
     const fields = {};
     let updatedPayee = null;
+    if (payee_id !== undefined && payee_name !== undefined) {
+      // The ID would win and the name would be ignored silently. Require one.
+      // Issue #421.
+      return { error: "Provide payee_id or payee_name, not both." };
+    }
     if (payee_id !== undefined) {
       // An explicit ID is the only way to pick the plain payee when a transfer
       // payee shares its name. Issue #421.
