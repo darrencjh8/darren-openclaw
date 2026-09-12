@@ -26,10 +26,11 @@ const schemas = {
         id: z.string().min(1),
         budget_id: z.string().min(1),
         payee_name: z.string().optional(),
+        payee_id: z.string().optional(),
         notes: z.string().optional(),
         amount: z.number().optional(),
         date: z.string().optional(),
-        category_id: z.string().optional(),
+        category_id: z.string().nullable().optional(),
         account_id: z.string().optional(),
     }),
     resolve_merchant: z.object({
@@ -182,6 +183,29 @@ describe("MCP Zod schemas — budget_id rejects empty string", () => {
                 budget_id: "My Budget",
             });
             expect(r.success).toBe(true);
+        });
+
+        test("keeps payee_id, which selects a payee when a name collides (#421)", () => {
+            // Zod strips unknown keys, so a field missing from this shape never
+            // reaches the handler — the disambiguator has to be listed here too.
+            const r = schemas.update_transaction.safeParse({
+                id: "txn-1",
+                budget_id: "My Budget",
+                payee_name: "Deposit",
+                payee_id: "payee-plain",
+            });
+            expect(r.success).toBe(true);
+            expect(r.data.payee_id).toBe("payee-plain");
+        });
+
+        test("accepts a null category_id, which the handler uses to clear (#421)", () => {
+            const r = schemas.update_transaction.safeParse({
+                id: "txn-1",
+                budget_id: "My Budget",
+                category_id: null,
+            });
+            expect(r.success).toBe(true);
+            expect(r.data.category_id).toBeNull();
         });
     });
 

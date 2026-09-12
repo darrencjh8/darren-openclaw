@@ -216,6 +216,151 @@ describe("ToolRegistry — budget_id validation", () => {
             // Must send payee ID, not payee name
             expect(patchBody.payee).toBe("payee-uuid-123");
         });
+
+        test("prefers the transfer payee when a plain payee shares its name (#421)", async () => {
+            mockFetch
+                .mockResolvedValueOnce({
+                    ok: true,
+                    json: () => [
+                        { id: "payee-plain", name: "Deposit" },
+                        {
+                            id: "payee-transfer",
+                            name: "Deposit",
+                            transfer_acct: "acct-deposit",
+                        },
+                    ],
+                })
+                .mockResolvedValueOnce({
+                    ok: true,
+                    json: () => ({ status: "updated", id: "txn-1" }),
+                });
+
+            await registry.executeTool("update_transaction", {
+                id: "txn-1",
+                budget_id: "My Budget",
+                payee_name: "Deposit",
+            });
+
+            const patchBody = JSON.parse(mockFetch.mock.calls[1][1].body);
+            // The transfer payee is the only one that creates a transfer, so it
+            // is what a bare name implies; the plain one needs an explicit ID.
+            expect(patchBody.payee).toBe("payee-transfer");
+        });
+
+        test("an explicit payee_id selects the plain payee of the same name (#421)", async () => {
+            mockFetch
+                .mockResolvedValueOnce({
+                    ok: true,
+                    json: () => [
+                        { id: "payee-plain", name: "Deposit" },
+                        {
+                            id: "payee-transfer",
+                            name: "Deposit",
+                            transfer_acct: "acct-deposit",
+                        },
+                    ],
+                })
+                .mockResolvedValueOnce({
+                    ok: true,
+                    json: () => ({ status: "updated", id: "txn-1" }),
+                });
+
+            await registry.executeTool("update_transaction", {
+                id: "txn-1",
+                budget_id: "My Budget",
+                payee_id: "payee-plain",
+            });
+
+            const patchBody = JSON.parse(mockFetch.mock.calls[1][1].body);
+            expect(patchBody.payee).toBe("payee-plain");
+        });
+
+        test("rejects a payee_id that is not in the live list (#421)", async () => {
+            mockFetch.mockResolvedValueOnce({
+                ok: true,
+                json: () => [{ id: "payee-plain", name: "Deposit" }],
+            });
+
+            const result = await registry.executeTool("update_transaction", {
+                id: "txn-1",
+                budget_id: "My Budget",
+                payee_id: "missing-payee",
+            });
+
+            expect(result).toEqual({
+                error: 'Payee ID "missing-payee" not found in payee list.',
+            });
+        });
+
+        test("a bare name matching a transfer payee creates the transfer (#421)", async () => {
+            mockFetch
+                .mockResolvedValueOnce({
+                    ok: true,
+                    json: () => [
+                        { id: "payee-misc", name: "Misc" },
+                        {
+                            id: "payee-misc-transfer",
+                            name: "Misc",
+                            transfer_acct: "acct-misc",
+                        },
+                    ],
+                })
+                .mockResolvedValueOnce({
+                    ok: true,
+                    json: () => ({ status: "updated", id: "txn-1" }),
+                });
+
+            await registry.executeTool("update_transaction", {
+                id: "txn-1",
+                budget_id: "My Budget",
+                payee_name: "Misc",
+            });
+
+            const patchBody = JSON.parse(mockFetch.mock.calls[1][1].body);
+            expect(patchBody.payee).toBe("payee-misc-transfer");
+        });
+
+        test("payee_id resolves the payee for the category-clear guard (#421)", async () => {
+            mockFetch
+                .mockResolvedValueOnce({
+                    ok: true,
+                    json: () => [{ id: "payee-misc", name: "Misc" }],
+                })
+                .mockResolvedValueOnce({
+                    ok: true,
+                    json: () => ({ status: "updated", id: "txn-1" }),
+                });
+
+            await registry.executeTool("update_transaction", {
+                id: "txn-1",
+                budget_id: "My Budget",
+                payee_id: "payee-misc",
+                category_id: null,
+            });
+
+            const patchBody = JSON.parse(mockFetch.mock.calls[1][1].body);
+            expect(patchBody.payee).toBe("payee-misc");
+            expect(patchBody.category).toBeNull();
+        });
+
+        test("rejects supplying both payee_id and payee_name (#421)", async () => {
+            mockFetch.mockResolvedValueOnce({
+                ok: true,
+                json: () => [{ id: "payee-plain", name: "Deposit" }],
+            });
+
+            const result = await registry.executeTool("update_transaction", {
+                id: "txn-1",
+                budget_id: "My Budget",
+                payee_id: "payee-plain",
+                payee_name: "Deposit",
+            });
+
+            // Silently preferring the ID would hide a caller mistake.
+            expect(result).toEqual({
+                error: "Provide payee_id or payee_name, not both.",
+            });
+        });
     });
 
     describe("check_duplicate", () => {
