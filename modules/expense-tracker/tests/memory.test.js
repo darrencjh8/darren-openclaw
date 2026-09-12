@@ -1966,6 +1966,13 @@ describe("merchant mapping lookup", () => {
     expect(factNamesMerchant(greateastern, "AMAZE* GREATEASTERN")).toBe(true);
   });
 
+  it("treats a non-ASCII run as part of the word, not a boundary (round-2 Low)", () => {
+    expect(factNamesMerchant("TAOBAO maps to Food payee", "信用卡taobao")).toBe(
+      false,
+    );
+    expect(factNamesMerchant("TAOBAO maps to Food payee", "taobao")).toBe(true);
+  });
+
   it("never reaches a structured mapping by similarity (#420, #471)", () => {
     const path = tempFile(
       ".md",

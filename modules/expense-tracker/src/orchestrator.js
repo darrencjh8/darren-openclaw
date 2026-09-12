@@ -1473,7 +1473,20 @@ export class AgentOrchestrator {
                 const catMem = await this._tools.executeTool("search_memory", {
                     query: output.payee_name,
                 });
+                // A category fact is keyed by the entity it names, which is the
+                // payee in the auto-learned shape and the merchant in older
+                // facts. Either may name it; a fact naming neither must not
+                // supply the category. Issues #471, #420.
+                const categoryKeys = [output.payee_name, output.merchant].filter(
+                    Boolean,
+                );
                 for (const r of catMem?.results || []) {
+                    if (
+                        !categoryKeys.some((key) =>
+                            factNamesMerchant(r.text, key),
+                        )
+                    )
+                        continue;
                     const m = (r.text || "").match(/maps to (.+?) category/i);
                     if (m) {
                         const matched = liveCategories.find(

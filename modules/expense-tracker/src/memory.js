@@ -60,6 +60,9 @@ const SEARCH_MIN_SIMILARITY = 0.6;
 /** Shortest structured entity that may match inside a longer merchant string. */
 const MIN_ENTITY_LENGTH = 3;
 
+/** A letter or digit in any script, so a non-ASCII run is not a word boundary. */
+const WORD_CHAR = /[\p{L}\p{N}]/u;
+
 /** True when `needle` occurs in `haystack` on word boundaries, not inside a word. */
 function containsWord(haystack, needle) {
   if (!needle) return false;
@@ -67,7 +70,7 @@ function containsWord(haystack, needle) {
   while (at !== -1) {
     const before = at === 0 ? "" : haystack[at - 1];
     const after = haystack[at + needle.length] || "";
-    if (!/[a-z0-9]/.test(before) && !/[a-z0-9]/.test(after)) return true;
+    if (!WORD_CHAR.test(before) && !WORD_CHAR.test(after)) return true;
     at = haystack.indexOf(needle, at + 1);
   }
   return false;
