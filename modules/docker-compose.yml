@@ -185,6 +185,11 @@ services:
             - FRIDAY_PAT=${FRIDAY_PAT}
             - GH_TOKEN=${FRIDAY_PAT}
             - EXPENSE_TRACKER_DATA=/opt/data/expense-tracker-data
+            # Machine-wide cap for concurrent dev-loop `opencode run` invocations
+            # (shared across every worktree). Defaults to 4; raise it by setting
+            # the CODEX_ROUTER_OPENCODE_MAX_RUNS GitHub Variable. The `:-4` mirrors
+            # the driver default so a missing shell var cannot inject an empty value.
+            - CODEX_ROUTER_OPENCODE_MAX_RUNS=${CODEX_ROUTER_OPENCODE_MAX_RUNS:-4}
         mem_limit: 3g
         networks:
             - default
