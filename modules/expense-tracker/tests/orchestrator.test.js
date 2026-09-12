@@ -726,6 +726,78 @@ describe("AgentOrchestrator", () => {
         expect(orch._llm.chat.mock.calls.length).toBeGreaterThan(1);
     });
 
+    it.each([
+        ["null", null],
+        ["an empty string", ""],
+        ["true", true],
+        ["an array", [500]],
+        ['the string "1e3"', "1e3"],
+    ])(
+        "refuses an LLM movement whose amount is %s (#508)",
+        async (_label, amount) => {
+            const orch = new AgentOrchestrator(makeConfig(), makeTools());
+            // Resolution is a separate concern with its own coverage; stub it so
+            // the extractor's own amount handling is what is asserted.
+            orch._resolveMovementToOutput = vi.fn(async (m) => m);
+            orch._llm.chat = vi.fn().mockResolvedValue({
+                choices: [
+                    {
+                        message: {
+                            content: JSON.stringify({
+                                amount,
+                                currency: "SGD",
+                                direction: "outgoing",
+                                occurred_at: "2026-09-01T01:05:00+08:00",
+                                from_account: "Vista (-869001)",
+                                to_account: "Example Trust (-310980)",
+                            }),
+                        },
+                    },
+                ],
+            });
+
+            const movement = await orch._llmExtractMovement(
+                "raw email body",
+                "OCBC",
+                "2026-09-01T01:05:00+08:00",
+            );
+
+            // A non-shape amount is an extraction failure, not money: Number()
+            // would have made null/""/true/[500]/"1e3" bookable (#508).
+            expect(movement).toBeNull();
+            expect(orch._resolveMovementToOutput).not.toHaveBeenCalled();
+        },
+    );
+
+    it("still extracts a plain decimal movement amount (#508)", async () => {
+        const orch = new AgentOrchestrator(makeConfig(), makeTools());
+        orch._resolveMovementToOutput = vi.fn(async (m) => m);
+        orch._llm.chat = vi.fn().mockResolvedValue({
+            choices: [
+                {
+                    message: {
+                        content: JSON.stringify({
+                            amount: "14.25",
+                            currency: "SGD",
+                            direction: "outgoing",
+                            occurred_at: "2026-09-01T01:05:00+08:00",
+                            from_account: "Vista (-869001)",
+                            to_account: "Example Trust (-310980)",
+                        }),
+                    },
+                },
+            ],
+        });
+
+        const movement = await orch._llmExtractMovement(
+            "raw email body",
+            "OCBC",
+            "2026-09-01T01:05:00+08:00",
+        );
+
+        expect(movement.amount_cents).toBe(-1425);
+    });
+
     it("does not mark email read when insert_transaction fails", async () => {
         const config = makeConfig();
         const tools = makeTools({

@@ -722,7 +722,16 @@ export class AgentOrchestrator {
             );
             const content = (response.choices || [{}])[0].message?.content || "";
             const parsed = this._parseJsonFromContent(content);
-            const amount = Number(parsed?.amount);
+            // Number() alone would turn null, "", true, [500] and "1e3" into
+            // bookable figures, so accept only a real number or a plain
+            // decimal string before falling through to the finite check (#508).
+            const rawAmount = parsed?.amount;
+            const amount =
+                typeof rawAmount === "number" ||
+                (typeof rawAmount === "string" &&
+                    /^-?\d+(\.\d+)?$/.test(rawAmount.trim()))
+                    ? Number(rawAmount)
+                    : NaN;
             const currency = String(parsed?.currency || "").toUpperCase();
             const direction = parsed?.direction === "incoming" ? "incoming" : "outgoing";
             if (!Number.isFinite(amount) || !["SGD", "MYR"].includes(currency)) return null;
