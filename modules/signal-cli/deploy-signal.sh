@@ -14,6 +14,11 @@ echo ""
 echo "--- Ensuring shared network ---"
 docker network create hermes_shared --driver bridge 2>/dev/null || true
 
+# Validate this stack's compose file before touching the running container:
+# deploy.sh validates modules/docker-compose.yml only, and it does not deploy
+# signal-cli, so a bad config here would otherwise surface after the pull.
+docker compose config -q
+
 # Ensure data dir
 mkdir -p /home/runner/data/signal-cli
 

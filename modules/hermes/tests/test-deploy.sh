@@ -285,6 +285,28 @@ else
 fi
 
 echo ""
+echo "=== deploy-signal.sh: compose preflight ==="
+
+# deploy.sh validates modules/docker-compose.yml only, and it does not deploy
+# signal-cli. That stack deploys its own compose file, so it has to validate
+# that file itself before pulling or starting anything.
+SIGNAL_SCRIPT="$SCRIPT_DIR/../../signal-cli/deploy-signal.sh"
+if [ -f "$SIGNAL_SCRIPT" ]; then
+    # Anchor to a live command line so a commented-out or disabled preflight
+    # cannot satisfy the assertion, and accept either compose spelling because
+    # the issue's own wording uses docker-compose.
+    signal_config_line=$(grep -nE '^[[:space:]]*(docker-compose|docker compose)[^|]*config -q' "$SIGNAL_SCRIPT" | head -1 | cut -d: -f1 || true)
+    signal_pull_line=$(grep -nE '^[[:space:]]*(docker-compose|docker compose)[^|]*pull' "$SIGNAL_SCRIPT" | head -1 | cut -d: -f1 || true)
+    if [ -n "$signal_config_line" ] && [ -n "$signal_pull_line" ] && [ "$signal_config_line" -lt "$signal_pull_line" ]; then
+        ok "signal-cli compose config validated before pull"
+    else
+        nope "signal-cli compose config validated before pull" "config_line=$signal_config_line pull_line=$signal_pull_line"
+    fi
+else
+    nope "deploy-signal.sh exists" "file not found at $SIGNAL_SCRIPT"
+fi
+
+echo ""
 echo "=== deploy.sh: retired modules ==="
 # ktmb-booking must never enter the resolved service list for "all"
 if grep -q "grep -vx ktmb-booking" "$DEPLOY_SCRIPT"; then
