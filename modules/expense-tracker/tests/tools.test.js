@@ -415,7 +415,7 @@ describe("ToolRegistry", () => {
         const registry = new ToolRegistry(cfg);
 
         const accounts = [
-            { id: "a1", name: "DBS Yuu", closed: false },
+            { id: "a1", name: "Epsilon Nova", closed: false },
             { id: "a2", name: "OCBC Closed", closed: true },
         ];
         const categories = [{ id: "c1", name: "Food" }];
@@ -445,7 +445,7 @@ describe("ToolRegistry", () => {
                 budget_id: "test-budget",
             });
             expect(result.accounts).toEqual([
-                { id: "a1", name: "DBS Yuu", closed: false, balance: 50000 },
+                { id: "a1", name: "Epsilon Nova", closed: false, balance: 50000 },
             ]);
             expect(result.categories).toEqual(categories);
             expect(result.payees).toEqual(payees);
@@ -462,7 +462,7 @@ describe("ToolRegistry", () => {
         const registry = new ToolRegistry(cfg);
 
         const accounts = [
-            { id: "a1", name: "DBS Yuu", closed: false },
+            { id: "a1", name: "Epsilon Nova", closed: false },
         ];
         const categories = [{ id: "c1", name: "Food" }];
         const payees = [{ id: "p1", name: "Coffee" }];
@@ -498,7 +498,7 @@ describe("ToolRegistry", () => {
         const registry = new ToolRegistry(cfg);
 
         const accounts = [
-            { id: "a1", name: "DBS Yuu", closed: false },
+            { id: "a1", name: "Epsilon Nova", closed: false },
             { id: "a2", name: "OCBC Closed", closed: true },
         ];
 

@@ -113,8 +113,8 @@ describe("getPhase1Prompt", () => {
   });
 
   it("provides transfer merchant examples in rule 4b", () => {
-    expect(prompt).toContain("Altitude");
-    expect(prompt).toContain("Yuu");
+    expect(prompt).toContain("Vista");
+    expect(prompt).toContain("Nova");
     expect(prompt).toContain("UOB CREDIT CARDS");
   });
 

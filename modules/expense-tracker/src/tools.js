@@ -714,7 +714,7 @@ const TOOLS = [
         raw_text: {
           type: "string",
           description:
-            "Raw text of the transaction alert (e.g., 'S$12.80 Toast Box on DBS Yuu').",
+            "Raw text of the transaction alert (e.g., 'S$12.80 Toast Box on Epsilon Nova').",
         },
       },
       required: ["raw_text"],

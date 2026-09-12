@@ -74,7 +74,7 @@ topic_clone="$TMPDIR/memories-backup"
 mkdir -p "$topic_src/topics" "$topic_clone/.git" "$TMPDIR/stubbin"
 printf 'core fact\n' > "$topic_src/MEMORY.md"
 printf 'user fact\n' > "$topic_src/USER.md"
-printf 'card 4605 -> UOB Ladies\n' > "$topic_src/topics/accounts.md"
+printf 'card 4605 -> Delta Extra\n' > "$topic_src/topics/accounts.md"
 printf 'NTUC FairPrice -> Groceries\n' > "$topic_src/topics/expenses.md"
 
 # Stub git so the copy loop runs without a real repository or network access.

@@ -88,7 +88,7 @@ All modules expose an MCP server. Hermes connects to each via `mcp_servers` conf
 
 **Why this priority**: Memory is critical for correct transaction classification. Without migration, the agent loses all learned facts and makes bad categorization decisions.
 
-**Independent Test**: Hermes memory contains entries like "Card ending 4605 belongs to UOB Ladies credit card" and "TOASTBOX is Dining Out".
+**Independent Test**: Hermes memory contains entries like "Card ending 4605 belongs to Delta Extra credit card" and "TOASTBOX is Dining Out".
 
 **Acceptance Scenarios**:
 

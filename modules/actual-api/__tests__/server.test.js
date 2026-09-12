@@ -553,7 +553,7 @@ describe("GET /transactions/:id", () => {
         actual.getTransactions.mockResolvedValue([
             {
                 id: "txn-43",
-                notes: "Merchant: WWW.TADA.G* N01A04E712\nStatement: DBS Yuu | 2026-06-01..2026-06-30\n\nuser note",
+                notes: "Merchant: WWW.TADA.G* N01A04E712\nStatement: Epsilon Nova | 2026-06-01..2026-06-30\n\nuser note",
             },
         ]);
         const handler = findHandler("get", "/transactions/:id");
@@ -563,7 +563,7 @@ describe("GET /transactions/:id", () => {
 
         expect(res.json).toHaveBeenCalledWith({
             id: "txn-43",
-            notes: "Merchant: WWW.TADA.G* N01A04E712\nStatement: DBS Yuu | 2026-06-01..2026-06-30\n\nuser note",
+            notes: "Merchant: WWW.TADA.G* N01A04E712\nStatement: Epsilon Nova | 2026-06-01..2026-06-30\n\nuser note",
         });
     });
 

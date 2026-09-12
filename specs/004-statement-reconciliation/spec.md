@@ -111,7 +111,7 @@ A **statement is authoritative** — it represents the bank's final record for a
 
 **Acceptance Criteria:**
 - [ ] After processing, a Telegram notification is sent:
-  - "DBS Yuu statement for May 2026 processed:"
+  - "Epsilon Nova statement for May 2026 processed:"
   - "✅ 12 transactions reconciled and cleared"
   - "⚠️ 3 outliers inserted but not cleared: [date, amount, description for each]"
 - [ ] If all items reconciled (0 outliers) → simpler message: "✅ All 12 transactions reconciled and cleared"

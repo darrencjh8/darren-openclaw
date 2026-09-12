@@ -8,8 +8,8 @@ A "suffix fact" maps the card or account number in an alert to the account that
 should be booked. The tracker stores them in this shape:
 
 ```
-Card ending 3255 belongs to DBS Yuu Card
-Account ending 5750 belongs to DBS Account
+Card ending 3255 belongs to Epsilon Nova Card
+Account ending 5750 belongs to Epsilon Account
 ```
 
 On every alert the tracker looks for a fact naming the number in the email. If it
@@ -19,16 +19,16 @@ LLM pick. If it finds none, or the fact cannot be resolved, the LLM's pick stand
 **Reading is tolerant.** All of these are understood, so a user can write a fact
 in ordinary words:
 
-- `Card/account ending 3255 belongs to DBS Yuu Card.`
-- `card ending in 3255 belongs to DBS Yuu`
-- `Account/card ending 9001 belongs to OCBC 360`
+- `Card/account ending 3255 belongs to Epsilon Nova Card.`
+- `card ending in 3255 belongs to Epsilon Nova`
+- `Account/card ending 9001 belongs to Beta 360`
 
 **Writing is canonical.** The stored form always uses `Card` for a card-named
 account and `Account` otherwise. `Card/account` is accepted on input but never
 written, because the parser keys on the suffix and the account, not the prefix.
 
-**Account names are matched by words, not exact text.** `Yuu` resolves to
-`DBS Yuu Card`, `Altitude` to `DBS Altitude Card`. Matching refuses when it is
+**Account names are matched by words, not exact text.** `Nova` resolves to
+`Epsilon Nova Card`, `Vista` to `Epsilon Vista Card`. Matching refuses when it is
 ambiguous: `DBS` matches three accounts, so it books nothing rather than
 guessing. A name that matches no live account also refuses, and a fact naming a
 live account from a different bank than the sender email is ignored.
@@ -36,7 +36,7 @@ live account from a different bank than the sender email is ignored.
 ### Diagnosing a wrong booking
 
 The user says something like "card 3255 went to the wrong account" or "why did
-BUS/MRT book to DBS Account".
+BUS/MRT book to Epsilon Account".
 
 1. `search_facts` with the card number, e.g. `search_facts("3255")`.
 2. Look for `belongs to` facts. Check whether the named account is the right one.
@@ -50,7 +50,7 @@ BUS/MRT book to DBS Account".
    - Ambiguous or missing → ask the user which account; do not guess.
 5. Confirm to the user exactly what was stored.
 
-When the user teaches a new card ("card 3255 is the Yuu card"), `search_facts` and
+When the user teaches a new card ("card 3255 is the Nova card"), `search_facts` and
 `fetch_context` first to confirm the account, then `learn_fact` with the canonical
 fact, and say what you saved.
 

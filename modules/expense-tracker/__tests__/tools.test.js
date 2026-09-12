@@ -561,7 +561,7 @@ describe("notify_user cooldown prevents double-notification for same email", () 
         mockFetch.mockResolvedValue({ ok: true });
         const first = await registry.executeTool("notify_user", {
             message:
-                "RM10.00 sent to CHONG JIN HENG via Ryt Bank on 2026-06-22, logged!",
+                "RM10.00 sent to Example Payee via Alpha Bank on 2026-06-22, logged!",
         });
         expect(first).toBe(true);
         expect(loggerInfoMock).toHaveBeenCalledWith(
@@ -574,7 +574,7 @@ describe("notify_user cooldown prevents double-notification for same email", () 
 
         // Second notify_user: should be suppressed by cooldown
         const second = await registry.executeTool("notify_user", {
-            message: "Transaction recorded: MYR 10 at CHONG JIN HENG",
+            message: "Transaction recorded: MYR 10 at Example Payee",
         });
         expect(second).toBe(true);
         expect(loggerInfoMock).toHaveBeenCalledWith(

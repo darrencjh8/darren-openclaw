@@ -53,13 +53,13 @@ describe("MemoryStore", () => {
   beforeEach(() => {
     tempMemoryPath = tempFile(
       ".md",
-      "# Long-Term Memory\n\n## Facts\n\n- DBS Yuu is a debit card account\n- Toast Box merchant maps to Food payee\n- Grab merchant maps to Transport payee\n",
+      "# Long-Term Memory\n\n## Facts\n\n- Epsilon Nova is a debit card account\n- Toast Box merchant maps to Food payee\n- Grab merchant maps to Transport payee\n",
     );
     emptyMemoryPath = tempFile(".md", "# Long-Term Memory\n\n## Facts\n\n");
     mappingsPath = tempFile(
       ".json",
       JSON.stringify({
-        accounts: { "DBS Yuu": "debit card" },
+        accounts: { "Epsilon Nova": "debit card" },
         payees: { "toast box": "Food" },
         categories: { food: "Food" },
       }),
@@ -80,7 +80,7 @@ describe("MemoryStore", () => {
       const store = new MemoryStore(tempMemoryPath);
       const facts = store.listFacts();
       expect(facts.length).toBe(3);
-      expect(facts.some((f) => f.includes("DBS Yuu"))).toBe(true);
+      expect(facts.some((f) => f.includes("Epsilon Nova"))).toBe(true);
     });
 
     it("handles empty file gracefully", () => {
@@ -105,7 +105,7 @@ describe("MemoryStore", () => {
       MemoryStore.migrateFromMappings(mappingsPath, memoryPath);
       expect(existsSync(memoryPath)).toBe(true);
       const content = require("fs").readFileSync(memoryPath, "utf8");
-      expect(content).toContain("DBS Yuu is a debit card account");
+      expect(content).toContain("Epsilon Nova is a debit card account");
       expect(content).toContain("toast box merchant maps to Food payee");
       try {
         unlinkSync(memoryPath);
@@ -191,9 +191,9 @@ describe("MemoryStore", () => {
       const store = new MemoryStore(tempMemoryPath);
       store._model = null; // force substring fallback
 
-      const results = await store.search("DBS Yuu");
+      const results = await store.search("Epsilon Nova");
       expect(results.length).toBe(1);
-      expect(results[0].text).toContain("DBS Yuu");
+      expect(results[0].text).toContain("Epsilon Nova");
       expect(results[0].score).toBe(1.0);
     });
   });
@@ -217,11 +217,11 @@ describe("MemoryStore", () => {
       expect(store._embeddingCache.size).toBeGreaterThan(0);
 
       // Verify the fact is cached
-      const dbsFact = factsBefore.find((f) => f.includes("DBS Yuu"));
+      const dbsFact = factsBefore.find((f) => f.includes("Epsilon Nova"));
       expect(store._embeddingCache.has(dbsFact)).toBe(true);
 
       // Remove the fact
-      store.remove("DBS Yuu");
+      store.remove("Epsilon Nova");
 
       // Cache should no longer contain the removed fact
       expect(store._embeddingCache.has(dbsFact)).toBe(false);
@@ -358,8 +358,8 @@ describe("MemoryStore", () => {
 
     it("rejects duplicates of facts loaded from file", async () => {
       const store = new MemoryStore(tempMemoryPath);
-      // tempMemoryPath has "DBS Yuu is a debit card account"
-      const r = await store.add("DBS Yuu is a debit card account");
+      // tempMemoryPath has "Epsilon Nova is a debit card account"
+      const r = await store.add("Epsilon Nova is a debit card account");
       expect(r).toEqual({
         added: false,
         skipped: true,
@@ -385,7 +385,7 @@ describe("MemoryStore", () => {
       // Should have facts from mappings.json
       expect(store.listFacts().length).toBeGreaterThan(0);
       // Dedup set should be populated — re-adding a migrated fact is rejected
-      const r = await store.add("DBS Yuu is a debit card account");
+      const r = await store.add("Epsilon Nova is a debit card account");
       expect(r).toEqual({
         added: false,
         skipped: true,
@@ -573,10 +573,10 @@ describe("MemoryStore", () => {
     it("parses ->payee pattern", () => {
       const store = new MemoryStore(emptyMemoryPath);
       const parsed = store._parseStructured(
-        "CHONG JIN HENG maps to Transfer payee",
+        "Example Payee maps to Transfer payee",
       );
       expect(parsed).toEqual({
-        entity: "chong jin heng",
+        entity: "example payee",
         relation: "->payee",
         value: "transfer",
       });
@@ -594,9 +594,9 @@ describe("MemoryStore", () => {
 
     it("parses is-account pattern", () => {
       const store = new MemoryStore(emptyMemoryPath);
-      const parsed = store._parseStructured("DBS Yuu is a debit card account");
+      const parsed = store._parseStructured("Epsilon Nova is a debit card account");
       expect(parsed).toEqual({
-        entity: "dbs yuu",
+        entity: "epsilon nova",
         relation: "is-account",
         value: "debit card",
       });
@@ -608,7 +608,7 @@ describe("MemoryStore", () => {
         store._parseStructured("KOUFU is a food court chain in Singapore"),
       ).toBeNull();
       expect(
-        store._parseStructured("CHONG JIN HENG is Darren himself"),
+        store._parseStructured("Example Payee is Example User"),
       ).toBeNull();
       expect(store._parseStructured("The sky is blue")).toBeNull();
     });
@@ -631,8 +631,8 @@ describe("MemoryStore", () => {
 
     it("normalizes account account typo in is-account pattern", () => {
       const store = new MemoryStore(emptyMemoryPath);
-      const clean = store._parseStructured("OCBC 360 is a bank account");
-      const typo = store._parseStructured("OCBC 360 is a bank account account");
+      const clean = store._parseStructured("Beta 360 is a bank account");
+      const typo = store._parseStructured("Beta 360 is a bank account account");
       expect(clean.value).toBe("bank");
       expect(typo.value).toBe("bank");
       expect(clean.entity).toBe(typo.entity);
@@ -668,44 +668,44 @@ describe("MemoryStore", () => {
     it("parses suffix->account pattern (Card ending)", () => {
       const store = new MemoryStore(emptyMemoryPath);
       const parsed = store._parseStructured(
-        "Card ending 3255 belongs to DBS Yuu Card",
+        "Card ending 3255 belongs to Epsilon Nova Card",
       );
       expect(parsed).toEqual({
         entity: "3255",
         relation: "suffix->account",
-        value: "dbs yuu card",
+        value: "epsilon nova card",
       });
     });
 
     it("parses suffix->account pattern (Account ending)", () => {
       const store = new MemoryStore(emptyMemoryPath);
       const parsed = store._parseStructured(
-        "Account ending 8901 belongs to DBS Account",
+        "Account ending 8901 belongs to Epsilon Account",
       );
       expect(parsed).toEqual({
         entity: "8901",
         relation: "suffix->account",
-        value: "dbs",
+        value: "epsilon",
       });
     });
 
     it("blocks suffix->account contradiction (same suffix, different account)", async () => {
       const store = new MemoryStore(emptyMemoryPath);
-      await store.add("Card ending 3255 belongs to DBS Yuu Card");
-      const r = await store.add("Card ending 3255 belongs to DBS Altitude Card");
+      await store.add("Card ending 3255 belongs to Epsilon Nova Card");
+      const r = await store.add("Card ending 3255 belongs to Epsilon Vista Card");
       expect(r).toEqual({
         added: false,
         skipped: true,
         reason: "contradiction",
-        existing: "Card ending 3255 belongs to DBS Yuu Card",
+        existing: "Card ending 3255 belongs to Epsilon Nova Card",
       });
     });
 
     it("allows different suffixes for different accounts", async () => {
       const store = new MemoryStore(emptyMemoryPath);
-      const r1 = await store.add("Card ending 3255 belongs to DBS Yuu Card");
+      const r1 = await store.add("Card ending 3255 belongs to Epsilon Nova Card");
       expect(r1.added).toBe(true);
-      const r2 = await store.add("Card ending 4605 belongs to UOB Ladies Card");
+      const r2 = await store.add("Card ending 4605 belongs to Delta Extra Card");
       expect(r2.added).toBe(true);
       expect(store.listFacts().length).toBe(2);
     });
@@ -730,8 +730,8 @@ describe("MemoryStore", () => {
           "",
           "- Grab merchant maps to Transport payee",
           "- Grab merchant maps to Food payee",
-          "- OCBC 360 is a bank account",
-          "- OCBC 360 is a savings account",
+          "- Beta 360 is a bank account",
+          "- Beta 360 is a savings account",
         ].join("\n") + "\n",
       );
       store.reload();
@@ -746,15 +746,15 @@ describe("MemoryStore", () => {
           new: "Grab merchant maps to Food payee",
         },
         {
-          old: "OCBC 360 is a bank account",
-          new: "OCBC 360 is a savings account",
+          old: "Beta 360 is a bank account",
+          new: "Beta 360 is a savings account",
         },
       ]);
       const facts = store.listFacts();
       expect(facts).toContain("Grab merchant maps to Food payee");
-      expect(facts).toContain("OCBC 360 is a savings account");
+      expect(facts).toContain("Beta 360 is a savings account");
       expect(facts).not.toContain("Grab merchant maps to Transport payee");
-      expect(facts).not.toContain("OCBC 360 is a bank account");
+      expect(facts).not.toContain("Beta 360 is a bank account");
     });
 
     it("preserves non-contradictory facts", async () => {
@@ -773,14 +773,14 @@ describe("MemoryStore", () => {
       const store = new MemoryStore(emptyMemoryPath);
       await store.add("Kopitiam merchant maps to Food payee");
       await store.add("KOUFU PTE LTD is a food court chain in Singapore");
-      await store.add("CHONG JIN HENG is Darren himself");
+      await store.add("Example Payee is Example User");
 
       const result = await store.cleanup();
       const facts = store.listFacts();
       expect(facts).toContain(
         "KOUFU PTE LTD is a food court chain in Singapore",
       );
-      expect(facts).toContain("CHONG JIN HENG is Darren himself");
+      expect(facts).toContain("Example Payee is Example User");
       expect(facts).toContain("Kopitiam merchant maps to Food payee");
     });
 
@@ -998,16 +998,16 @@ describe("MemoryStore", () => {
 
     it("updates ->payee pattern facts (non-merchant)", () => {
       const store = new MemoryStore(emptyMemoryPath);
-      store._facts = ["CHONG JIN HENG maps to Transfer payee"];
+      store._facts = ["Example Payee maps to Transfer payee"];
       store._rebuildIndices();
       const result = store.update(
-        "CHONG JIN HENG maps to Transfer payee",
-        "CHONG JIN HENG maps to Personal Transfer payee",
+        "Example Payee maps to Transfer payee",
+        "Example Payee maps to Personal Transfer payee",
       );
       expect(result.updated).toBe(true);
-      expect(result.old).toBe("CHONG JIN HENG maps to Transfer payee");
+      expect(result.old).toBe("Example Payee maps to Transfer payee");
       expect(store.listFacts()).toContain(
-        "CHONG JIN HENG maps to Personal Transfer payee",
+        "Example Payee maps to Personal Transfer payee",
       );
     });
 
@@ -1027,14 +1027,14 @@ describe("MemoryStore", () => {
     it("updates is-account pattern facts", () => {
       const store = new MemoryStore(tempMemoryPath);
       const result = store.update(
-        "DBS Yuu is a debit card account",
-        "DBS Yuu is a credit card account",
+        "Epsilon Nova is a debit card account",
+        "Epsilon Nova is a credit card account",
       );
       expect(result.updated).toBe(true);
-      expect(result.old).toBe("DBS Yuu is a debit card account");
-      expect(store.listFacts()).toContain("DBS Yuu is a credit card account");
+      expect(result.old).toBe("Epsilon Nova is a debit card account");
+      expect(store.listFacts()).toContain("Epsilon Nova is a credit card account");
       expect(store.listFacts()).not.toContain(
-        "DBS Yuu is a debit card account",
+        "Epsilon Nova is a debit card account",
       );
     });
 
@@ -1243,7 +1243,7 @@ describe("MemoryStore", () => {
       store._facts = [
         "Toast Box merchant maps to Food payee",
         "Grab merchant maps to Transport payee",
-        "DBS Yuu is a debit card account",
+        "Epsilon Nova is a debit card account",
       ];
       store._rebuildIndices();
       const result = store.update(
@@ -1258,7 +1258,7 @@ describe("MemoryStore", () => {
       expect(store.listFacts()).toContain(
         "Grab merchant maps to Transport payee",
       );
-      expect(store.listFacts()).toContain("DBS Yuu is a debit card account");
+      expect(store.listFacts()).toContain("Epsilon Nova is a debit card account");
     });
 
     it("updates a fact at the last index", () => {
@@ -1266,16 +1266,16 @@ describe("MemoryStore", () => {
       store._facts = [
         "Toast Box merchant maps to Food payee",
         "Grab merchant maps to Transport payee",
-        "DBS Yuu is a debit card account",
+        "Epsilon Nova is a debit card account",
       ];
       store._rebuildIndices();
       const result = store.update(
-        "DBS Yuu is a debit card account",
-        "DBS Yuu is a credit card account",
+        "Epsilon Nova is a debit card account",
+        "Epsilon Nova is a credit card account",
       );
       expect(result.updated).toBe(true);
       const facts = store.listFacts();
-      expect(facts[2]).toBe("DBS Yuu is a credit card account");
+      expect(facts[2]).toBe("Epsilon Nova is a credit card account");
       expect(facts).toContain("Toast Box merchant maps to Food payee");
       expect(facts).toContain("Grab merchant maps to Transport payee");
     });
@@ -1618,16 +1618,16 @@ describe("MemoryStore", () => {
 
     it("updates is-account to →payee for the same entity", () => {
       const store = new MemoryStore(emptyMemoryPath);
-      store._facts = ["DBS Yuu is a debit card account"];
+      store._facts = ["Epsilon Nova is a debit card account"];
       store._rebuildIndices();
       const result = store.update(
-        "DBS Yuu is a debit card account",
-        "DBS Yuu maps to Banking payee",
+        "Epsilon Nova is a debit card account",
+        "Epsilon Nova maps to Banking payee",
       );
       expect(result.updated).toBe(true);
       const facts = store.listFacts();
-      expect(facts).toContain("DBS Yuu maps to Banking payee");
-      expect(facts).not.toContain("DBS Yuu is a debit card account");
+      expect(facts).toContain("Epsilon Nova maps to Banking payee");
+      expect(facts).not.toContain("Epsilon Nova is a debit card account");
     });
 
     // ── Structured index + dedup set consistency after complex updates ─
@@ -1723,16 +1723,16 @@ describe("MemoryStore", () => {
     it("persists to disk after remove", () => {
       const store = new MemoryStore(tempMemoryPath);
       const factsBefore = store.listFacts();
-      expect(factsBefore.some((f) => f.includes("DBS Yuu"))).toBe(true);
+      expect(factsBefore.some((f) => f.includes("Epsilon Nova"))).toBe(true);
 
-      store.remove("DBS Yuu");
+      store.remove("Epsilon Nova");
 
       // In-memory: fact should be gone
-      expect(store.listFacts().some((f) => f.includes("DBS Yuu"))).toBe(false);
+      expect(store.listFacts().some((f) => f.includes("Epsilon Nova"))).toBe(false);
 
       // On-disk: fact should be gone (reload to verify)
       const store2 = new MemoryStore(tempMemoryPath);
-      expect(store2.listFacts().some((f) => f.includes("DBS Yuu"))).toBe(false);
+      expect(store2.listFacts().some((f) => f.includes("Epsilon Nova"))).toBe(false);
     });
 
     // ── Real-world issue #100 scenario ──────────────────────
@@ -1815,7 +1815,7 @@ describe("MemoryStore", () => {
       store._facts = [
         "Toast Box merchant maps to Food payee",
         "Grab merchant maps to Transport payee",
-        "DBS Yuu is a debit card account",
+        "Epsilon Nova is a debit card account",
         "Fact 4",
         "Fact 5",
         "Fact 6",
@@ -2004,15 +2004,15 @@ describe("merchant mapping lookup", () => {
   it("keeps a free-form hit above the floor and drops one below it", () => {
     const path = tempFile(
       ".md",
-      "# Long-Term Memory\n\n## Facts\n\n- Darren identifies this as a work expense\n",
+      "# Long-Term Memory\n\n## Facts\n\n- Example User identifies this as a work expense\n",
     );
     const store = new MemoryStore(path);
 
     expect(
-      store._acceptSemanticHit("Darren identifies this as a work expense", 0.61),
+      store._acceptSemanticHit("Example User identifies this as a work expense", 0.61),
     ).toBe(true);
     expect(
-      store._acceptSemanticHit("Darren identifies this as a work expense", 0.59),
+      store._acceptSemanticHit("Example User identifies this as a work expense", 0.59),
     ).toBe(false);
     unlinkSync(path);
   });
