@@ -1032,9 +1032,10 @@ export class ToolRegistry {
     if (this._memory) {
       const results = await this._memory.search(payee_name);
       if (results && results.length > 0) {
-        // Extract a payee name from the top result
-        const top = results[0].text || "";
-        const payeeMatch = top.match(/maps to (.+?) payee/i);
+        // Only a hit that names this payee may supply its canonical name.
+        // Issue #471.
+        const hit = results.find((r) => factNamesMerchant(r.text, payee_name));
+        const payeeMatch = hit && (hit.text || "").match(/maps to (.+?) payee/i);
         if (payeeMatch) return payeeMatch[1];
       }
     }

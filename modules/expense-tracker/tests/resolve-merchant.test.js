@@ -279,6 +279,24 @@ describe("resolve_merchant pipeline", () => {
     expect(result).toEqual({ payee: "Misc", source: "fallback" });
   });
 
+  it("refuses a partial query that only prefixes a neighbour's key (round-1 High)", async () => {
+    const memory = mockMemoryStore();
+    // Both keys contain "AMAZE"; a truncated alert line must not pick one.
+    memory.search = vi.fn(async () => [
+      { text: "AMAZE* GREATEASTERN maps to Insurance payee", score: 1 },
+      { text: "AMAZE* ALIPAYPROGRA maps to Misc payee, no category", score: 1 },
+    ]);
+    const config = mockConfig({ braveSearchApiKey: undefined });
+    const registry = new ToolRegistry(config, memory);
+
+    const result = await registry._handle_resolve_merchant({
+      merchant: "AMAZE",
+      budget_id: "test-budget",
+    });
+
+    expect(result).toEqual({ payee: "Misc", source: "fallback" });
+  });
+
   it("falls back to Misc when no memory fact (keyword removed)", async () => {
     const memory = mockMemoryStore();
     const config = mockConfig();

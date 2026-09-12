@@ -34,7 +34,7 @@ vi.mock("@xenova/transformers", () => {
   };
 });
 
-import { MemoryStore } from "../src/memory.js";
+import { MemoryStore, factNamesMerchant } from "../src/memory.js";
 
 function tempFile(suffix, content) {
   const path = join(
@@ -1953,6 +1953,17 @@ describe("merchant mapping lookup", () => {
 
     expect(await store.search("taxiway")).toEqual([]);
     unlinkSync(path);
+  });
+
+  it("anchors the match to the fact's own key, not to any text (round-1 High)", () => {
+    const greateastern = "AMAZE* GREATEASTERN maps to Insurance payee";
+
+    expect(factNamesMerchant(greateastern, "AMAZE")).toBe(false);
+    expect(factNamesMerchant(greateastern, "AMAZE*")).toBe(false);
+    expect(
+      factNamesMerchant(greateastern, "AMAZE* GREATEASTERN SINGAPORE SGP"),
+    ).toBe(true);
+    expect(factNamesMerchant(greateastern, "AMAZE* GREATEASTERN")).toBe(true);
   });
 
   it("never reaches a structured mapping by similarity (#420, #471)", () => {

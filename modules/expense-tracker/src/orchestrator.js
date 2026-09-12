@@ -26,6 +26,7 @@ import {
     parseSuffixFact,
     resolveFactAccount as resolveFactAccountShared,
 } from "./suffix-facts.js";
+import { factNamesMerchant } from "./memory.js";
 import { logger } from "./logging.js";
 
 export class LLMClient {
@@ -1362,6 +1363,10 @@ export class AgentOrchestrator {
 
             let payeeMatch = null;
             for (const r of memResults) {
+                // Only a hit that actually names the merchant may supply its
+                // payee. Without this, a same-shaped neighbour's mapping books
+                // the neighbour's payee and then that payee's category. #471.
+                if (!factNamesMerchant(r.text, searchTerm)) continue;
                 const m = (r.text || "").match(/maps to (.+?) payee/i);
                 if (m) {
                     payeeMatch = m[1];

@@ -50,10 +50,10 @@ export {
 const SEMANTIC_THRESHOLD = 0.88;
 
 /**
- * Minimum cosine similarity for a free-form semantic hit to be returned.
- * Measured against the live fact set, an unrelated merchant still scores 0.62,
- * so this floor is a backstop for free-form notes only — merchant mappings are
- * matched structurally, never by similarity. Issues #420, #471.
+ * Minimum cosine similarity for a free-form semantic hit to be returned. This
+ * only quiets `search_memory` noise: a mapping is matched by key, never by
+ * similarity, so no score can make a neighbour's mapping usable. Issues #420,
+ * #471.
  */
 const SEARCH_MIN_SIMILARITY = 0.6;
 
@@ -100,19 +100,19 @@ function mappingEntity(fact) {
 }
 
 /**
- * True when `fact` is a mapping for `merchant`: the fact text contains the whole
- * query, or the fact's key occurs in the merchant on word boundaries. The second
- * direction matters because an alert merchant carries words the stored key does
- * not — `AMAZE* ALIPAYPROGRA SINGAPORE SGP` versus the stored key
- * `AMAZE* ALIPAYPROGRA`. Issue #471.
+ * True when `fact` is the mapping for `merchant`. The test is anchored to the
+ * fact's own key, never to arbitrary text: a partial query must not select a
+ * neighbour's mapping, so `AMAZE` does not match `AMAZE* GREATEASTERN`. The key
+ * may still sit inside a longer alert merchant, because a bank alert carries
+ * words the stored key does not — `AMAZE* ALIPAYPROGRA SINGAPORE SGP` versus the
+ * stored key `AMAZE* ALIPAYPROGRA`. Issue #471.
  */
 export function factNamesMerchant(fact, merchant) {
-  const text = String(fact || "").toLowerCase();
   const query = String(merchant || "").toLowerCase().trim();
-  if (!text || !query) return false;
-  if (text.includes(query)) return true;
+  if (!query) return false;
   const entity = mappingEntity(fact);
   if (!entity || entity.length < MIN_ENTITY_LENGTH) return false;
+  if (query === entity) return true;
   return containsWord(query, entity);
 }
 
