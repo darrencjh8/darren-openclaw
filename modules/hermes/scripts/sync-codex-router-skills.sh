@@ -154,9 +154,10 @@ while [ "$attempts" -lt "$LOCK_WAIT_SECONDS" ]; do
             # the tests pin the adjacent cases (a dead or empty pid is
             # reclaimed, a live lock with no proof of death is left alone).
             holder=$(cat "$MKDIR_LOCK/pid" 2>/dev/null) || holder=""
-            # Strip whitespace before the digit test: `kill -0 " 123"` honours
-            # the embedded pid, so reclaiming a padded pid file would steal a
-            # live lock.
+            # Strip whitespace so a padded pid file is probed as the pid it
+            # names. Without this, " 123" fails the digit test below and is
+            # never probed, so a padded dead pid could never be reclaimed (a
+            # padded live pid is left alone either way).
             holder=$(printf '%s' "$holder" | tr -d '[:space:]')
             case $holder in
                 '')
