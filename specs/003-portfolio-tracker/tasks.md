@@ -27,7 +27,7 @@
 ### T003: Create MCP server module ✅
 
 - **File**: `modules/portfolio-tracker/src/mcp-server.js` (NEW)
-- **Action**: Create MCP SSE server following `modules/expense-tracker/src/mcp-server.js` pattern
+- **Action**: Create MCP Streamable HTTP server following `modules/expense-tracker/src/mcp-server.js` pattern
 - **Tools** (6 total):
   - `portfolio_sync` — calls `registry._computeSyncAll()` (deterministic, no LLM; includes IBKR flex pull)
   - `portfolio_onedrive_auth_url` — calls `getAuthUrl()` from `onedrive_oauth.js`
@@ -35,7 +35,7 @@
   - `portfolio_onedrive_status` — checks if refresh token file exists
   - `portfolio_onedrive_pull` — calls `pullFromOneDrive()` from `src/onedrive.js`
   - `portfolio_onedrive_push` — calls `pushToOneDrive()` from `src/onedrive.js`
-- **Transport**: `GET /sse` + `POST /messages` (same SSE pattern)
+- **Transport**: Streamable HTTP on `POST/GET/DELETE /mcp` (the earlier SSE `GET /sse` + `POST /messages` design was replaced during implementation)
 - **Effort**: 1.5 h
 
 ### T004: Register MCP routes in index.js ✅
@@ -82,15 +82,16 @@
 
 ### T008: Local MCP smoke test ✅
 
-- **Action**: Verified syntax — `createMcpServer` wired in index.js, `GET /sse` + `POST /messages` defined in mcp-server.js. Full runtime test in Docker container.
+- **Action**: Verified syntax — `createMcpServer` wired in index.js, `POST/GET/DELETE /mcp` defined in mcp-server.js. Full runtime test in Docker container.
 - **Effort**: 15 min
 
-### T008a: Cleanup dead/unnecessary env vars 📝
+### T008a: Cleanup dead/unnecessary env vars ✅
 
-- **Action**: Note for later — audit user's actual `.env` for:
-  - `LOG_LEVEL`, `BALANCE_SYNC_MODEL` — never read in code
-  - `DEDUP_DB_PATH`, `MAPPINGS_PATH` — same as defaults
-- **Detail**: Keep `USER_NAME`, `SYSTEM_PROMPT_EXTRA`, `OPENCLAW_GATEWAY_*` — actively used with non-default values
+- **Action**: Resolved by removing the dead configuration instead of documenting it:
+  - `LOG_LEVEL`, `BALANCE_SYNC_MODEL` — parsed into `Config` but never consumed. Removed from `src/config.js` and their tests; they were never in `.env.example`.
+  - `AB_EMERGENCY_PRIMARY_CATEGORY`, `AB_EMERGENCY_SECONDARY_CATEGORY`, `AB_WARCHEST_CATEGORY` — parsed into `Config` but never consumed (balance amounts come from `sgd/myr.*_total`). Removed from `src/config.js`, from `.env.example`, and from their tests.
+- **Detail**: `DEDUP_DB_PATH` and `MAPPINGS_PATH` are kept — they are legitimate overrides even though they match the defaults. `USER_NAME`, `SYSTEM_PROMPT_EXTRA`, `IBKR_FLEX_*` and the `PP_*_ACCOUNT` vars are actively used.
+- **Tracks**: issues #211, #217, #261 (C-3, C-4)
 - **Effort**: 10 min
 
 ---
@@ -103,9 +104,12 @@
 - **Action**: Added under `mcp_servers:`:
   ```yaml
   portfolio-tracker:
-      url: http://portfolio-tracker:8081/sse
-      transport: sse
+      url: http://portfolio-tracker:8081/mcp
+      tools:
+          exclude: []
+      supports_parallel_tool_calls: false
   ```
+  The `transport: sse` key shown in the original plan is not used — the server is Streamable HTTP at `/mcp`.
 - **Effort**: 5 min
 
 ### T010: Add Hermes cron for portfolio_sync ✅

@@ -124,18 +124,3 @@ function cleanText(text, maxLength = 8000) {
     }
     return result;
 }
-
-/**
- * Classify an email based on subject and body content.
- */
-export function classifyEmail(subject, body) {
-    const text = `${subject || ""} ${body || ""}`.toLowerCase();
-    if (text.includes("flex query") || text.includes("flex report"))
-        return "ibkr_flex";
-    if (text.includes("trade confirmation")) return "trade_confirmation";
-    if (text.includes("statement") || text.includes("activity"))
-        return "statement";
-    if (text.includes("dividend") || text.includes("distribution"))
-        return "dividend";
-    return "unknown";
-}

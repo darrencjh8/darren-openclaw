@@ -6,7 +6,7 @@
 
 ## Summary
 
-Add an MCP SSE server to portfolio-tracker exposing tools in three groups: **sync** (includes IBKR flex pull), **OneDrive auth** (interactive OAuth setup), and **OneDrive IO** (pull/push). Follows the expense-tracker MCP pattern (spec 021) — a thin wrapper over existing tool logic. REST endpoints, IMAP IDLE, and the LLM orchestrator are all preserved.
+Add an MCP Streamable HTTP server to portfolio-tracker exposing tools in three groups: **sync** (includes IBKR flex pull), **OneDrive auth** (interactive OAuth setup), and **OneDrive IO** (pull/push). Follows the expense-tracker MCP pattern (spec 021) — a thin wrapper over existing tool logic. REST endpoints, IMAP IDLE, and the LLM orchestrator are all preserved.
 
 **Key design change from v1.0.0:** IBKR flex import is no longer a standalone MCP tool. A new `src/ibkr_flex.js` module pulls the latest flex XML from IBKR Flex Web Service REST endpoint. This is folded into the `portfolio_sync` pipeline. The IMAP handler no longer processes IBKR flex emails — it handles PDF trade confirmations only.
 
@@ -21,7 +21,7 @@ flowchart LR
     end
 
     subgraph PT["Portfolio Tracker :8081"]
-        MCP_S["MCP Server<span style='color:green'> NEW</span><br/>GET /sse<br/>POST /messages"]
+        MCP_S["MCP Server<span style='color:green'> NEW</span><br/>POST/GET/DELETE /mcp<br/>(Streamable HTTP)"]
         REST["REST API<br/>19 /tools/*<br/>(unchanged)"]
         ORCH["LLM Orchestrator<br/>DeepSeek loop<br/>(unchanged — PDF only)"]
         SYNC["_computeSyncAll()<br/>flex pull → import → push → sync → taxonomy"]
@@ -32,7 +32,7 @@ flowchart LR
 
     CRON --> MCP_C
     TG --> MCP_C
-    MCP_C <-->|"SSE"| MCP_S
+    MCP_C <-->|"Streamable HTTP /mcp"| MCP_S
     MCP_S -->|"portfolio_sync"| SYNC
     MCP_S -->|"portfolio_onedrive_*"| OD
     IMAP -->|"dispatchEmail()<br/>PDF only"| ORCH
@@ -58,7 +58,7 @@ flowchart LR
 
 ## Key Decisions
 
-1. **MCP transport**: HTTP SSE (not stdio). portfolio-tracker runs in separate container — same as expense-tracker.
+1. **MCP transport**: Streamable HTTP at `/mcp` (not stdio, and not the SSE transport originally planned). portfolio-tracker runs in a separate container — same as expense-tracker.
 2. **Tool naming**: `portfolio_sync`, `portfolio_onedrive_*` (not the internal REST names).
 3. **Email stays in portfolio-tracker**: Hermes does NOT handle portfolio email. IMAP IDLE on "Trades" folder handles PDF trade confirmations only.
 4. **IBKR flex pulled via web service**: New `src/ibkr_flex.js` fetches from IBKR Flex Web Service REST endpoint. No email-based IBKR processing. Deterministic, no LLM.
@@ -71,13 +71,13 @@ flowchart LR
 ## Files Changed
 
 ### New Files
-- `modules/portfolio-tracker/src/mcp-server.js` — MCP SSE server (~120 LOC)
+- `modules/portfolio-tracker/src/mcp-server.js` — MCP Streamable HTTP server (~120 LOC)
 - `modules/portfolio-tracker/src/onedrive_oauth.js` — OneDrive OAuth helpers (auth URL generation, code→token exchange) (~40 LOC)
 - `modules/portfolio-tracker/src/ibkr_flex.js` — IBKR Flex Web Service pull (~50 LOC)
 
 ### Modified Files
 - `modules/portfolio-tracker/package.json` — Add `@modelcontextprotocol/sdk`, `zod`
-- `modules/portfolio-tracker/src/index.js` — Register `GET /sse` + `POST /messages`
+- `modules/portfolio-tracker/src/index.js` — Register `POST/GET/DELETE /mcp`
 - `modules/portfolio-tracker/src/tools.js` — Add IBKR flex pull to `_computeSyncAll()` pipeline
 - `modules/portfolio-tracker/src/config.js` — Add `IBKR_FLEX_TOKEN`, `IBKR_FLEX_QUERY_ID` env vars
 - `modules/hermes/config.yaml` — Add `portfolio-tracker` MCP server + cron config
@@ -222,4 +222,4 @@ If MCP causes issues:
 1. Comment out `portfolio-tracker` from Hermes `mcp_servers:` and restart Hermes
 2. REST endpoints and IMAP IDLE continue working independently
 3. Internal apscheduler continues running cron syncs
-4. Remove `GET /sse` + `POST /messages` routes if needed (no-op without Hermes connecting)
+4. Remove the `/mcp` routes if needed (no-op without Hermes connecting)

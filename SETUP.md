@@ -1,6 +1,6 @@
-# Linux Machine Setup — darren-openclaw
+# Friday — Linux Machine Setup
 
-Production server running Hermes Agent + 6 microservices via Docker Compose.
+Production server running Hermes Agent and supporting services via Docker Compose (`modules/docker-compose.yml`).
 
 ## Machine
 
@@ -44,6 +44,8 @@ Both users are in the `docker` group — either can run `docker` commands.
         │   └── google-service-account.json  # → /app/config/ in portfolio-tracker (ro)
 ```
 
+`.github/workflows/deploy.yml` pre-creates `expense-tracker/data`, `portfolio-tracker/data`, and `hermes/{data,workspace}` on every deploy (`mkdir -p /home/runner/data/...`). The `onedrive_token/` and `google-service-account.json` paths are created out-of-band and mounted read-write/read-only by `modules/docker-compose.yml`.
+
 ---
 
 ## Permissions Model
@@ -85,13 +87,13 @@ This changes the group to `runner` and adds group read permission without touchi
 
 | Service | Container | Host Port | Internal Port | Healthcheck |
 |---------|-----------|-----------|---------------|-------------|
-| Hermes Gateway | `hermes` | 8642, 8644, 9119 | same | depends on others |
+| Hermes | `hermes` | 8642, 9119, 8644 | same | waits on expense-tracker + portfolio-tracker |
 | Expense Tracker | `modules-expense-tracker-1` | 127.0.0.1:8080 | 8080 | `/health` |
 | Portfolio Tracker | `modules-portfolio-tracker-1` | 127.0.0.1:8081 | 8081 | `/health` |
 | Actual API | `modules-actual-api-1` | 127.0.0.1:3000 | 3000 | — |
-| Image Gen | `modules-image-gen-1` | 127.0.0.1:8083 | 8083 | — |
+| Codex Router | `modules-codex-router-1` | 0.0.0.0:4100 | 4100 | `/health/liveliness` |
 
-All services except Hermes bind to `127.0.0.1` (localhost only) — not exposed to the network.
+Expense Tracker, Portfolio Tracker, and Actual API bind to `127.0.0.1` (localhost only). Hermes publishes `8642`, `9119`, `8644` on all interfaces, and Codex Router publishes `4100` on all interfaces so Hermes providers can reach `http://codex-router:4100/v1`.
 
 ---
 
@@ -100,7 +102,7 @@ All services except Hermes bind to `127.0.0.1` (localhost only) — not exposed 
 | Volume | Mounted To | Service |
 |--------|-----------|---------|
 | `onedrive_data` | `/data/onedrive` | portfolio-tracker |
-| `image_gen_media` | `/app/.openclaw/workspace/media` | image-gen |
+| `codex_router_state` | `/app/state` | codex-router |
 
 Named volumes live at `/var/lib/docker/volumes/` — managed by Docker, not directly accessible.
 
@@ -108,17 +110,11 @@ Named volumes live at `/var/lib/docker/volumes/` — managed by Docker, not dire
 
 ## Deploy
 
-```bash
-# From /home/darren/darren-openclaw
-git pull
-./modules/deploy.sh --component all --non-interactive
-```
+Shipping is CI/CD only: pushing to `main` triggers `.github/workflows/deploy.yml` on the self-hosted runner, which detects changed components, builds with `modules/build.sh`, then runs `modules/deploy.sh <components> --non-interactive --skip-build`.
 
-Or per service:
+Never run `modules/deploy.sh` (or `git pull`) manually on this host. Without `--skip-build`, `modules/deploy.sh` performs its own `git pull` and image build, which bypasses the pipeline's change detection and health gate. Merges to `main` are the only shipping path.
 
-```bash
-./modules/deploy.sh --component hermes --non-interactive
-```
+`modules/deploy.sh` requires at least one `--component`. Available: `all`, `hermes`, `portfolio-tracker`, `expense-tracker`, `actual-api`, `image-gen`, `codex-router`. Running it with no component prints usage and exits 1.
 
 ---
 

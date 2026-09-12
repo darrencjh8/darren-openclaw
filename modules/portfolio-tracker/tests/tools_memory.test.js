@@ -17,7 +17,6 @@ vi.mock("../src/email_handler.js", () => ({
     ex.emailPw.push(password);
     return "EMAIL TEXT";
   }),
-  classifyEmail: vi.fn(),
 }));
 
 import { ToolRegistry } from "../src/tools.js";

@@ -3,7 +3,7 @@
  * Ported from tests/test_email_handler.py
  */
 import { describe, it, expect } from "vitest";
-import { extractEmailContent, classifyEmail } from "../src/email_handler.js";
+import { extractEmailContent } from "../src/email_handler.js";
 
 describe("extractEmailContent — HTML extraction", () => {
   it("strips HTML tags and returns plain text", async () => {
@@ -95,44 +95,6 @@ describe("extractEmailContent — multipart", () => {
     const result = await extractEmailContent(rawEmail);
     expect(result).toContain("S$12.80");
     expect(result).toContain("Toast Box");
-  });
-});
-
-describe("classifyEmail", () => {
-  it("classifies IBKR flex query emails", () => {
-    expect(
-      classifyEmail(
-        "Your IBKR Flex Query Report",
-        "Please find attached your flex query statement",
-      ),
-    ).toBe("ibkr_flex");
-  });
-
-  it("classifies trade confirmation emails", () => {
-    expect(
-      classifyEmail(
-        "Trade Confirmation: AAPL",
-        "This is a trade confirmation for your recent order",
-      ),
-    ).toBe("trade_confirmation");
-  });
-
-  it("classifies statement/activity emails", () => {
-    expect(
-      classifyEmail("Monthly Statement", "Your monthly activity report"),
-    ).toBe("statement");
-  });
-
-  it("classifies dividend/distribution emails", () => {
-    expect(
-      classifyEmail("Dividend Notification", "A distribution has been paid"),
-    ).toBe("dividend");
-  });
-
-  it("returns unknown for unrecognized emails", () => {
-    expect(classifyEmail("Random Subject", "Some unrelated body text")).toBe(
-      "unknown",
-    );
   });
 });
 

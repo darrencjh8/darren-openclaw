@@ -68,14 +68,6 @@ export class Config {
         this.ppJarPath = env.PP_JAR_PATH || "/app/pp-cli.jar";
         this.ppPassword = env.PP_PASSWORD || "";
 
-        // Actual Budget categories
-        this.abEmergencyPrimaryCategory =
-            env.AB_EMERGENCY_PRIMARY_CATEGORY || "Emergency Fund SGD";
-        this.abEmergencySecondaryCategory =
-            env.AB_EMERGENCY_SECONDARY_CATEGORY || "Emergency Fund MYR";
-        this.abWarchestCategory =
-            env.AB_WARCHEST_CATEGORY || "General Investment Fund";
-
         // PP account UUIDs for balance sync
         this.ppEmergencyPrimaryAccount = env.PP_EMERGENCY_PRIMARY_ACCOUNT || "";
         this.ppEmergencySecondaryAccount =
@@ -88,12 +80,6 @@ export class Config {
         // Semantic facts/password store (separate from mappings.json)
         this.portfolioMemoryPath =
             env.PORTFOLIO_MEMORY_PATH || "data/MEMORY.md";
-
-        // Logging
-        this.logLevel = env.LOG_LEVEL || "INFO";
-
-        // Scheduling
-        this.balanceSyncModel = env.BALANCE_SYNC_MODEL || "";
 
         // User
         this.userName = env.USER_NAME || "there";

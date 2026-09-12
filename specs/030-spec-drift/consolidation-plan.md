@@ -53,13 +53,13 @@ Most rows are **doc fixes** (code is source of truth). A few need a **code decis
 
 | Item | Options |
 |------|---------|
-| Dead `_abClient` (158) | (a) remove field, (b) build AB-write path |
-| Dead `classifyEmail()` (216) | (a) remove, (b) wire into dispatch |
-| Dead config `BALANCE_SYNC_MODEL`/`LOG_LEVEL` (217), category vars (211) | (a) remove from config, (b) implement |
-| `GOOGLE_SERVICE_ACCOUNT_JSON` fail-fast vs optional (218) | (a) make guard conditional, (b) doc as required |
-| Stale `index.js:195` SSE comment (220) | trivial code comment fix |
+| Dead `_abClient` (158) | (a) remove field, (b) build AB-write path — **still open** |
+| Dead `classifyEmail()` (216) | (a) remove, (b) wire into dispatch — **removed** |
+| Dead config `BALANCE_SYNC_MODEL`/`LOG_LEVEL` (217), category vars (211) | (a) remove from config, (b) implement — **removed** |
+| `GOOGLE_SERVICE_ACCOUNT_JSON` fail-fast vs optional (218) | (a) make guard conditional, (b) doc as required — **docs say required; guard unchanged** |
+| Stale `index.js:195` SSE comment (220) | trivial code comment fix — **already fixed** |
 
-These will be confirmed with you before any code edit (only docs by default).
+The dead-config and dead-code items (211, 216, 217) were removed in the docs + stale-code-removal pass. See `code-notes.md` for the current status of every item.
 
 ---
 

@@ -38,11 +38,6 @@ describe("Config — required fields", () => {
 });
 
 describe("Config — defaults", () => {
-    it("uses default log level", () => {
-        const cfg = new Config(REQUIRED_ENV);
-        expect(cfg.logLevel).toBe("INFO");
-    });
-
     it("uses default dedupDbPath when not provided", () => {
         const cfg = new Config(REQUIRED_ENV);
         expect(cfg.dedupDbPath).toBe("data/dedup.db");
@@ -61,11 +56,6 @@ describe("Config — defaults", () => {
     it("uses default imapFolder", () => {
         const cfg = new Config(REQUIRED_ENV);
         expect(cfg.imapFolder).toBe("Trades");
-    });
-
-    it("has balanceSyncModel default", () => {
-        const cfg = new Config(REQUIRED_ENV);
-        expect(cfg.balanceSyncModel).toBe("");
     });
 
     it("parses taxonomy names from env", () => {
@@ -104,14 +94,6 @@ describe("Config — defaults", () => {
 });
 
 describe("Config — custom values", () => {
-    it("loads custom log level", () => {
-        const cfg = new Config({
-            ...REQUIRED_ENV,
-            LOG_LEVEL: "DEBUG",
-        });
-        expect(cfg.logLevel).toBe("DEBUG");
-    });
-
     it("loads custom ppXmlPath", () => {
         const cfg = new Config({
             ...REQUIRED_ENV,
@@ -176,14 +158,7 @@ describe("Config — taxonomy and mappings", () => {
     });
 });
 
-describe("Config — AB and PP fields", () => {
-    it("loads emergency fund categories with defaults", () => {
-        const cfg = new Config(REQUIRED_ENV);
-        expect(cfg.abEmergencyPrimaryCategory).toBe("Emergency Fund SGD");
-        expect(cfg.abEmergencySecondaryCategory).toBe("Emergency Fund MYR");
-        expect(cfg.abWarchestCategory).toBe("General Investment Fund");
-    });
-
+describe("Config — PP fields", () => {
     it("loads PP account UUIDs", () => {
         const cfg = new Config({
             ...REQUIRED_ENV,
@@ -269,21 +244,6 @@ describe("Config — data paths", () => {
             PORTFOLIO_MEMORY_PATH: "/data/custom/MEMORY.md",
         });
         expect(cfg.portfolioMemoryPath).toBe("/data/custom/MEMORY.md");
-    });
-});
-
-describe("Config — balance sync", () => {
-    it("loads balance sync model", () => {
-        const cfg = new Config({
-            ...REQUIRED_ENV,
-            BALANCE_SYNC_MODEL: "deepseek-flash",
-        });
-        expect(cfg.balanceSyncModel).toBe("deepseek-flash");
-    });
-
-    it("defaults balance sync model to empty string", () => {
-        const cfg = new Config(REQUIRED_ENV);
-        expect(cfg.balanceSyncModel).toBe("");
     });
 });
 
