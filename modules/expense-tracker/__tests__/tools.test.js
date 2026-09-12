@@ -321,7 +321,42 @@ describe("ToolRegistry — budget_id validation", () => {
             );
         });
 
-        test("an unverifiable explicit payee_id fails closed (#483)", async () => {            mockFetch.mockRejectedValueOnce(new Error("AB unreachable"));
+        test("a rejected fractional amount leaves the dedup journal empty (#517)", async () => {
+            const recordSpy = vi.spyOn(registry._dedup, "record");
+            mockFetch
+                .mockResolvedValueOnce({
+                    ok: true,
+                    json: () => [{ id: "payee-1", name: "Deposit" }],
+                })
+                .mockResolvedValueOnce({
+                    ok: false,
+                    status: 400,
+                    json: () => ({
+                        error: "Amount must be an integer number of cents",
+                    }),
+                });
+
+            await expect(
+                registry.executeTool("insert_transaction", {
+                    budget_id: "My Budget",
+                    account_id: "acc-1",
+                    date: "2026-06-17",
+                    amount_cents: 12.34,
+                    imported_description: "Deposit",
+                }),
+            ).rejects.toThrow("actual-api 400");
+
+            // The fraction itself must reach the API: a rounding or coercion
+            // change would still reject here, so pin the posted value.
+            expect(mockFetch).toHaveBeenCalledTimes(2);
+            const postBody = JSON.parse(mockFetch.mock.calls[1][1].body);
+            expect(postBody.amount).toBe(12.34);
+            // A rejected insert must not be recorded as processed.
+            expect(recordSpy).not.toHaveBeenCalled();
+        });
+
+        test("an unverifiable explicit payee_id fails closed (#483)", async () => {
+            mockFetch.mockRejectedValueOnce(new Error("AB unreachable"));
 
             const result = await registry.executeTool("insert_transaction", {
                 budget_id: "My Budget",
