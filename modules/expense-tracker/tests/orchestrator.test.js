@@ -2431,4 +2431,51 @@ describe("_resolvePhase2 transfer detection", () => {
         expect(insertCall).toBeDefined();
         expect(insertCall[1].payee_id).toBe("p-transfer");
     });
+
+    // Issue #556: two real transfers of the same amount are indistinguishable to
+    // the amount+account duplicate check, so a second real transfer was silently
+    // dropped (OCBC 360 -> Trust Bank, S$1.00, twice on 2026-09-13). A recognised
+    // transfer must book: its event identity comes from the message and the
+    // reservation, never from the money.
+    it("books a second identical transfer instead of dropping it as a duplicate (#556)", async () => {
+        const config = makeConfig();
+        const tools = makeTools({
+            executeTool: vi.fn(async (name) => {
+                if (name === "check_duplicate") return true;
+                if (name === "reserve_transfer")
+                    return { status: "reserved", entry: { id: "resv-2" } };
+                return true;
+            }),
+        });
+        const orch = new AgentOrchestrator(config, tools);
+
+        const p1 = fakePhase1Output({
+            amount_cents: -100,
+            account_id: "acc-ocbc",
+        });
+        const p2 = fakePhase2Output(p1, {
+            payee_id: "p-transfer",
+            _is_transfer: true,
+            _transfer: {
+                source_account_id: "acc-ocbc",
+                destination_account_id: "acc-trust",
+                amount_cents: 100,
+                budget_id: "budget-sgd",
+                occurred_at: "2026-09-13T08:53:20.000Z",
+            },
+        });
+        orch._runPhase1 = vi.fn().mockResolvedValue(p1);
+        orch._resolvePhase2 = vi.fn().mockResolvedValue(p2);
+
+        const result = await orch.processEmail(
+            "test-second-transfer",
+            "raw email",
+        );
+
+        expect(result.action).toBe("inserted");
+        expect(tools.executeTool).toHaveBeenCalledWith(
+            "insert_transaction",
+            expect.anything(),
+        );
+    });
 });

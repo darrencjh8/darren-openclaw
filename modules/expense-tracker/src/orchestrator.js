@@ -1673,7 +1673,12 @@ export class AgentOrchestrator {
             // tolerate a quoted integer amount, and those must still dedup.
             const hasAmount =
                 llmOutput.amount_cents != null && llmOutput.amount_cents !== "";
+            // A structured transfer dedups on its reservation below, never on
+            // money: an amount+account lookback cannot tell two real transfers of
+            // the same amount apart, so it silently dropped the second one
+            // (issue #556, OCBC 360 -> Trust Bank S$1.00 twice on 2026-09-13).
             const isDuplicate =
+                !llmOutput._transfer &&
                 hasAmount &&
                 (await this._tools.executeTool("check_duplicate", {
                     date: llmOutput.date || "",

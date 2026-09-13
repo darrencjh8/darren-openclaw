@@ -8,6 +8,15 @@ import { createHash } from "crypto";
 import { mkdirSync } from "fs";
 import { dirname } from "path";
 
+/**
+ * Two alerts for one transfer arrive seconds apart, so a reservation is matched
+ * against a narrow window. It must stay narrow: a genuine second transfer of the
+ * same amount is ordinary (issue #556, four minutes apart), and the journal has
+ * no bank reference to tell two events apart. Reprocessing a single email is
+ * guarded separately, by message identity.
+ */
+const TRANSFER_MATCH_WINDOW_MS = 2 * 60 * 1000;
+
 export class DedupJournal {
     /** @param {string} dbPath - Path to dedup.db */
     constructor(dbPath = "data/dedup.db") {
@@ -111,8 +120,12 @@ export class DedupJournal {
         occurred_at,
     }) {
         const occurredAt = new Date(occurred_at).toISOString();
-        const start = new Date(new Date(occurredAt).getTime() - 10 * 60 * 1000).toISOString();
-        const end = new Date(new Date(occurredAt).getTime() + 10 * 60 * 1000).toISOString();
+        const start = new Date(
+            new Date(occurredAt).getTime() - TRANSFER_MATCH_WINDOW_MS,
+        ).toISOString();
+        const end = new Date(
+            new Date(occurredAt).getTime() + TRANSFER_MATCH_WINDOW_MS,
+        ).toISOString();
         const reserve = this._db.transaction(() => {
             const rows = this._db.prepare(`
               SELECT * FROM transfer_journal
