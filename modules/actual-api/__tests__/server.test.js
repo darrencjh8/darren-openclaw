@@ -26,6 +26,7 @@ jest.mock("@actual-app/api", () => ({
     deleteTransaction: jest.fn(),
     updateTransaction: jest.fn(),
     getAccountBalance: jest.fn(),
+    getBudgetMonth: jest.fn(),
 }));
 
 const { getBudgetId, buildTransaction, readWindow } = require("../server");
@@ -213,6 +214,7 @@ describe("Route handlers", () => {
         actual.updateTransaction.mockReset();
         actual.addTransactions.mockReset();
         actual.deleteTransaction.mockReset();
+        actual.getBudgetMonth.mockReset();
 
         actual.init.mockResolvedValue(undefined);
         actual.getBudgets.mockResolvedValue([
@@ -223,6 +225,7 @@ describe("Route handlers", () => {
         actual.updateTransaction.mockResolvedValue(undefined);
         actual.addTransactions.mockResolvedValue(["txn-new"]);
         actual.deleteTransaction.mockResolvedValue(undefined);
+        actual.getBudgetMonth.mockResolvedValue({ month: "2026-08" });
     });
 
     test("GET /health returns { status: 'ok' }", () => {
@@ -555,6 +558,64 @@ describe("GET /budgets", () => {
 
         expect(res.status).toHaveBeenCalledWith(500);
         expect(res.json).toHaveBeenCalledWith({ error: "Boom" });
+    });
+});
+
+describe("GET /budget-month", () => {
+    const actual = require("@actual-app/api");
+
+    function findHandler(method, path) {
+        const call = mockApp[method].mock.calls.find(([p]) => p === path);
+        return call ? call[1] : null;
+    }
+
+    function mockReq(overrides = {}) {
+        return { query: {}, body: null, params: {}, ...overrides };
+    }
+
+    function mockRes() {
+        return {
+            json: jest.fn().mockReturnThis(),
+            status: jest.fn().mockReturnThis(),
+        };
+    }
+
+    beforeEach(() => {
+        actual.init.mockReset();
+        actual.getBudgets.mockReset();
+        actual.downloadBudget.mockReset();
+        actual.getBudgetMonth.mockReset();
+
+        actual.init.mockResolvedValue(undefined);
+        actual.getBudgets.mockResolvedValue([
+            { name: "test-budget", groupId: "g1" },
+        ]);
+        actual.downloadBudget.mockResolvedValue(undefined);
+        actual.getBudgetMonth.mockResolvedValue({ month: "2026-08" });
+    });
+
+    test("rejects an impossible month before calling Actual", async () => {
+        const handler = findHandler("get", "/budget-month");
+        const res = mockRes();
+
+        await handler(mockReq({ query: { month: "2026-13" } }), res);
+
+        expect(res.status).toHaveBeenCalledWith(400);
+        expect(res.json).toHaveBeenCalledWith({
+            error: "month must be YYYY-MM",
+        });
+        expect(actual.getBudgetMonth).not.toHaveBeenCalled();
+        expect(actual.getBudgets).not.toHaveBeenCalled();
+    });
+
+    test("passes a valid month through", async () => {
+        const handler = findHandler("get", "/budget-month");
+        const res = mockRes();
+
+        await handler(mockReq({ query: { month: "2026-08" } }), res);
+
+        expect(actual.getBudgetMonth).toHaveBeenCalledWith("2026-08");
+        expect(res.json).toHaveBeenCalledWith({ month: "2026-08" });
     });
 });
 

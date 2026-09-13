@@ -411,6 +411,9 @@ app.get("/budget-month", async (req, res) => {
     try {
         // The month is request-shaped, so it is settled before the lock.
         const month = req.query.month || new Date().toISOString().slice(0, 7);
+        if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) {
+            return res.status(400).json({ error: "month must be YYYY-MM" });
+        }
         const budgetMonth = await withBudget(req, () =>
             actual.getBudgetMonth(month),
         );

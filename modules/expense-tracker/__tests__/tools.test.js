@@ -175,11 +175,11 @@ describe("ToolRegistry — budget_id validation", () => {
                 .getToolSchemas()
                 .find((t) => t.function.name === "fetch_budget_month");
             expect(tool.function.parameters.properties.month.pattern).toBe(
-                "^\\d{4}-\\d{2}$",
+                "^\\d{4}-(0[1-9]|1[0-2])$",
             );
         });
 
-        test.each(["2026-8", "2026-13-01", "August 2026", ""])(
+        test.each(["2026-8", "2026-13-01", "August 2026", "", "2026-13", "2026-00"])(
             "rejects the malformed month %j before calling actual-api",
             async (month) => {
                 const result = await registry.executeTool(
