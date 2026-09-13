@@ -68,6 +68,17 @@ describe("MCP Zod schemas — budget_id rejects empty string", () => {
             });
             expect(r.success).toBe(false);
         });
+
+        test.each(["2026-13", "2026-00"])(
+            "rejects the impossible month %s",
+            (month) => {
+                const r = schemas.fetch_budget_month.safeParse({
+                    budget_id: "My MYR Budget",
+                    month,
+                });
+                expect(r.success).toBe(false);
+            },
+        );
     });
 
     describe("fetch_recent_transactions", () => {

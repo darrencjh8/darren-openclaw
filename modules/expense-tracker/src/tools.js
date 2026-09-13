@@ -362,7 +362,7 @@ const TOOLS = [
         },
         month: {
           type: "string",
-          pattern: "^\\d{4}-\\d{2}$",
+          pattern: "^\\d{4}-(0[1-9]|1[0-2])$",
           description: "Month as YYYY-MM; defaults to the current month",
         },
       },
@@ -1049,7 +1049,8 @@ export class ToolRegistry {
     if (!budget_id) return { error: "budget_id is required" };
     // The actual-api route only accepts YYYY-MM; validate here so REST and
     // orchestrator callers get a validation error instead of an opaque 500.
-    if (month !== undefined && !/^\d{4}-\d{2}$/.test(month)) {
+    // The month range is checked too, so "2026-13" cannot reach Actual.
+    if (month !== undefined && !/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) {
       return { error: "month must be YYYY-MM" };
     }
     // Omitting the month lets actual-api default to the current month (in

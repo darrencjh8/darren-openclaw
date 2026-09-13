@@ -20,7 +20,7 @@ export const toolShapes = {
     budget_id: z.string().min(1),
     month: z
       .string()
-      .regex(/^\d{4}-\d{2}$/)
+      .regex(/^\d{4}-(0[1-9]|1[0-2])$/)
       .optional(),
   },
   fetch_recent_transactions: {
