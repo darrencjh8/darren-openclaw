@@ -2866,6 +2866,35 @@ describe("_resolvePhase2 transfer detection", () => {
         expect(result._transfer.payee_id).toBe("p-trust-transfer");
     });
 
+    it("holds the literal OCBC-to-closed-card FAST incident before a transfer payee can materialise its counterpart (#563)", async () => {
+        const tools = makeTools({
+            executeTool: vi.fn(async (name, args) => {
+                if (name === "fetch_context") return {
+                    // fetch_context's production shape omits the closed card but
+                    // still exposes its transfer payee.
+                    accounts: [{ id: "ocbc", name: "OCBC 360", closed: false }],
+                    categories: [],
+                    payees: [{ id: "stan-chart-transfer", name: "Stan Chart Card", transfer_acct: "stan-chart" }],
+                };
+                if (name === "search_memory" && args?.query === "Standard Chartered Bank Singapore")
+                    return { results: [{ text: "Standard Chartered Bank Singapore maps to Stan Chart Card payee", score: 1 }] };
+                return { results: [] };
+            }),
+        });
+        const orch = new AgentOrchestrator(makeConfig(), tools);
+        const resolved = await orch._resolvePhase2({
+            merchant: "Standard Chartered Bank Singapore", amount_cents: -250000,
+            currency: "SGD", account_id: "ocbc", budget_id: "test-budget", action: "insert",
+        });
+
+        expect(resolved).toMatchObject({
+            payee_name: "Misc", payee_source: "transfer_destination_refused",
+            _hold_unresolved_transfer: true,
+        });
+        await orch._executePhase3Core(resolved, { silent: false });
+        expect(tools.executeTool).not.toHaveBeenCalledWith("insert_transaction", expect.anything());
+    });
+
     it("refuses ambiguous, closed, credit-card, and self transfer destinations (#563)", async () => {
         const config = makeConfig();
         const tools = makeTools({

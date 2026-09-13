@@ -1034,7 +1034,12 @@ describe("Category validation in insert_transaction", () => {
         ok: true,
         json: async () => [{ id: "p-transfer", name: "Touch N Go", transfer_acct: "acct-tng" }],
       })
-      // 2) _post("/transactions") - no name lookup for the payee
+      // 2) _get("/accounts") validates the transfer destination
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => [{ id: "acct-tng", name: "Touch N Go", closed: false }],
+      })
+      // 3) _post("/transactions") - no name lookup for the payee
       .mockResolvedValueOnce({
         ok: true,
         json: async () => ({ id: "tx-transfer" }),
@@ -1050,13 +1055,83 @@ describe("Category validation in insert_transaction", () => {
       payee_id: "p-transfer",
     });
 
-    const postCall = fetchMock.mock.calls[1];
+    const postCall = fetchMock.mock.calls[2];
     const postBody = JSON.parse(postCall[1].body);
     // The explicit ID is the only payee field; a name from the same
     // imported_description could resolve to a different payee. Issue #483.
     expect(postBody.payee_name).toBeUndefined();
     expect(postBody.payee).toBe("p-transfer");
 
+    vi.unstubAllGlobals();
+  });
+
+  it.each([
+    ["closed", "closed", [{ id: "target", name: "Closed Target", closed: true }], "closed or unavailable"],
+    ["absent", "missing", [], "closed or unavailable"],
+    ["self", "source", [{ id: "source", name: "Source", closed: false }], "cannot be its source"],
+  ])("rejects %s transfer target through the shared REST/MCP write boundary", async (_label, target, accounts, error) => {
+    const registry = new ToolRegistry(mockConfig(), mockMemoryStore());
+    const fetchMock = vi.fn(async (url, options) => {
+      if (String(url).includes("/payees")) return { ok: true, json: async () => [
+        { id: "transfer", name: "Transfer Target", transfer_acct: target },
+      ] };
+      if (String(url).includes("/accounts/balance/")) return { ok: true, json: async () => ({ balance: 0 }) };
+      if (String(url).includes("/accounts")) return { ok: true, json: async () => accounts };
+      if (options?.method === "POST") return { ok: true, json: async () => ({ id: "should-not-post" }) };
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await registry.executeTool("insert_transaction", {
+      date: "2026-06-16", amount_cents: -3000, account_id: "source",
+      budget_id: "bud-1", imported_description: "Transfer Target",
+    });
+
+    expect(result.error).toContain(error);
+    expect(fetchMock.mock.calls.some(([, options]) => options?.method === "POST")).toBe(false);
+    vi.unstubAllGlobals();
+  });
+
+  it("fails closed when a memory-resolved transfer name cannot be checked", async () => {
+    const registry = new ToolRegistry(
+      mockConfig(), mockMemoryStore(["Merchant maps to Transfer Target payee"]),
+    );
+    const fetchMock = vi.fn().mockRejectedValue(new Error("payees unavailable"));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await registry.executeTool("insert_transaction", {
+      date: "2026-06-16", amount_cents: -3000, account_id: "source",
+      budget_id: "bud-1", imported_description: "Merchant",
+    });
+
+    expect(result.error).toContain("Could not validate transfer destination");
+    expect(fetchMock.mock.calls.some(([, options]) => options?.method === "POST")).toBe(false);
+    vi.unstubAllGlobals();
+  });
+
+  it("allows an open non-self transfer target through the shared REST/MCP write boundary", async () => {
+    const registry = new ToolRegistry(mockConfig(), mockMemoryStore());
+    const fetchMock = vi.fn(async (url, options) => {
+      if (String(url).includes("/payees")) return { ok: true, json: async () => [
+        { id: "transfer", name: "Transfer Target", transfer_acct: "target" },
+      ] };
+      if (String(url).includes("/accounts/balance/")) return { ok: true, json: async () => ({ balance: 0 }) };
+      if (String(url).includes("/accounts")) return { ok: true, json: async () => [
+        { id: "target", name: "Target", closed: false },
+      ] };
+      if (options?.method === "POST") return { ok: true, json: async () => ({ id: "transfer-row" }) };
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await registry.executeTool("insert_transaction", {
+      date: "2026-06-16", amount_cents: -3000, account_id: "source",
+      budget_id: "bud-1", imported_description: "Transfer Target",
+    });
+
+    expect(result).toMatchObject({ id: "transfer-row" });
+    const postCall = fetchMock.mock.calls.find(([, options]) => options?.method === "POST");
+    expect(JSON.parse(postCall[1].body).payee).toBe("transfer");
     vi.unstubAllGlobals();
   });
 
