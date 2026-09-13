@@ -2615,6 +2615,98 @@ describe("_resolvePhase2 transfer detection", () => {
         );
     });
 
+    // Issue #561: a PayNow credit that cannot be resolved to an own account is
+    // held, never booked as an uncategorised positive inflow (income). The
+    // deterministic parser already declines it; the LLM path still fell through
+    // to a Misc insert.
+    it("holds an unresolved PayNow credit instead of booking it as income (#561)", async () => {
+        const config = makeConfig({ USER_NAME: "there" });
+        const tools = makeTools({
+            executeTool: vi.fn(async (name) => {
+                if (name === "list_facts") return { facts: [] };
+                if (name === "fetch_context")
+                    return {
+                        accounts: [{ id: "ocbc", name: "OCBC 360", closed: false }],
+                        categories: [],
+                        payees: [],
+                    };
+                if (name === "search_memory")
+                    return {
+                        results: [{ text: "CHONG JIN HENG maps to Spotify payee", score: 1 }],
+                    };
+                return true;
+            }),
+        });
+        const orch = new AgentOrchestrator(config, tools);
+
+        const p1 = fakePhase1Output({
+            merchant: "CHONG JIN HENG",
+            amount_cents: 474,
+            account_id: "ocbc",
+            _is_paynow: true,
+        });
+        const p2 = await orch._resolvePhase2(p1);
+
+        expect(p2.payee_name).toBe("Misc");
+        expect(p2.category_id).toBeNull();
+        expect(p2._is_transfer).toBeUndefined();
+        expect(p2._hold_unresolved_paynow).toBe(true);
+
+        const result = await orch._executePhase3Core(p2, { silent: false });
+
+        expect(result.action).toBe("notified");
+        expect(tools.executeTool).not.toHaveBeenCalledWith(
+            "insert_transaction",
+            expect.anything(),
+        );
+    });
+
+    it("holds a self-identity PayNow credit with no transfer payee (#561)", async () => {
+        const config = makeConfig({ USER_NAME: "there" });
+        const tools = makeTools({
+            executeTool: vi.fn(async (name) => {
+                if (name === "list_facts") return { facts: [] };
+                if (name === "fetch_context")
+                    return {
+                        accounts: [
+                            { id: "trust", name: "Trust Bank", closed: false },
+                            { id: "ocbc", name: "OCBC 360", closed: false },
+                        ],
+                        categories: [{ id: "banking", name: "Banking" }],
+                        // No payee carries transfer_acct, so no transfer can be
+                        // reserved for the sending account.
+                        payees: [],
+                    };
+                if (name === "search_memory")
+                    return {
+                        results: [{ text: "Trust Bank maps to Banking category", score: 1 }],
+                    };
+                return true;
+            }),
+        });
+        const orch = new AgentOrchestrator(config, tools);
+
+        const p1 = fakePhase1Output({
+            merchant: "Trust Bank",
+            amount_cents: 474,
+            account_id: "ocbc",
+            _is_paynow: true,
+        });
+        const p2 = await orch._resolvePhase2(p1);
+
+        expect(p2.payee_name).toBe("Trust Bank");
+        expect(p2.payee_source).toBe("self_identity");
+        expect(p2.category_id).toBeNull();
+
+        const result = await orch._executePhase3Core(p2, { silent: false });
+
+        expect(result.action).toBe("notified");
+        expect(tools.executeTool).not.toHaveBeenCalledWith(
+            "insert_transaction",
+            expect.anything(),
+        );
+    });
+
     it("reserves a transfer recognised by account name (#557)", async () => {
         const config = makeConfig();
         const tools = makeTools();

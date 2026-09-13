@@ -1459,10 +1459,19 @@ export class AgentOrchestrator {
                     output.payee_name = "Misc";
                     output.payee_source = "paynow_unresolved";
                 }
+                // A PayNow credit that resolves to no known merchant must be
+                // held, not booked as income. Only a credit is affected: a debit
+                // is an ordinary payment and still books normally.
+                if (!output._paynow_merchant && Number(output.amount_cents) > 0) {
+                    output._hold_unresolved_paynow = true;
+                }
             } catch (error) {
                 logger.warn({ event: "paynow_identity_failed", merchant: searchTerm, budget_id: output.budget_id || "", error: error.message });
                 output.payee_name = "Misc";
                 output.payee_source = "paynow_unresolved";
+                if (Number(output.amount_cents) > 0) {
+                    output._hold_unresolved_paynow = true;
+                }
             }
         }
         if (!output.payee_name && searchTerm) {
@@ -1493,6 +1502,9 @@ export class AgentOrchestrator {
             if (payeeMatch) {
                 output.payee_name = payeeMatch;
                 output.payee_source = "memory";
+                // A learned merchant mapping settles the unresolved PayNow: it is
+                // a real payee, not a self-transfer left dangling.
+                delete output._hold_unresolved_paynow;
             } else {
                 try {
                     const resolved = await this._tools.executeTool(
@@ -1505,6 +1517,12 @@ export class AgentOrchestrator {
                     if (resolved?.payee) {
                         output.payee_name = resolved.payee;
                         output.payee_source = resolved.source || "fallback";
+                        // Any real payee settles the unresolved PayNow: there is
+                        // nothing left to hold. A "Misc" fallback is not real, so
+                        // the hold stays and the credit is notified instead.
+                        if (resolved.payee.toLowerCase() !== "misc") {
+                            delete output._hold_unresolved_paynow;
+                        }
                     }
                 } catch (e) {
                     // resolve_merchant failed — leave payee blank, fall through to Misc
@@ -1739,6 +1757,24 @@ export class AgentOrchestrator {
         }
 
         if (action === "insert") {
+            // Issue #561: a PayNow credit whose sender resolves to no own
+            // account must never be booked as an uncategorised positive inflow
+            // (income). A self-transfer is not income, and the sender account
+            // has to be known to reserve the right way round, so hold it and
+            // let the user resolve it.
+            if (llmOutput._hold_unresolved_paynow) {
+                if (!silent) {
+                    await this._tools.executeTool("notify_user", {
+                        message: `Held: a PayNow credit of ${bookableAmountPrefix(llmOutput.amount_cents, llmOutput.currency)}from "${llmOutput.merchant || "unknown"}" could not be matched to one of your accounts, so it was not booked as income. Transfer it in Actual or tell me which account sent it.`,
+                    });
+                }
+                await this._tools.executeTool("log_decision", {
+                    action: "held_unresolved_paynow",
+                    reasoning: llmOutput.reasoning || "",
+                    timestamp: new Date().toISOString(),
+                });
+                return { action: "notified", details: "Held an unresolved PayNow credit" };
+            }
             const payeeName = llmOutput.payee_name || "Misc";
             const accountId = llmOutput.account_id || "";
             const categoryId =
