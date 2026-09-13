@@ -1228,6 +1228,15 @@ export class ToolRegistry {
     const explicitId = args.payee_id || null;
     let payeeId = explicitId;
     let payee_name = null;
+    const validateTransferTarget = async (payee) => {
+      if (!payee?.transfer_acct) return null;
+      const accounts = await this._handle_fetch_accounts({ budget_id });
+      if (!Array.isArray(accounts)) return "Could not validate transfer destination.";
+      if (payee.transfer_acct === args.account_id) return "Transfer destination cannot be its source account.";
+      if (!accounts.some((account) => account.id === payee.transfer_acct))
+        return "Transfer destination is closed or unavailable.";
+      return null;
+    };
     if (explicitId) {
       // An explicit ID comes from the caller or from Phase 2 transfer detection,
       // so it is validated here and never second-guessed by a name lookup.
@@ -1245,6 +1254,8 @@ export class ToolRegistry {
       const explicit = payees.find((p) => p.id === explicitId);
       if (!explicit)
         return { error: `Payee ID "${explicitId}" not found in payee list.` };
+      const transferError = await validateTransferTarget(explicit);
+      if (transferError) return { error: transferError };
       // The journal keys duplicates by payee name, so an explicit ID must still
       // record a non-empty name; fall back to the imported description when the
       // payee itself has no name.
@@ -1274,6 +1285,8 @@ export class ToolRegistry {
             const match = resolvePayeeMatch(payees, payee_name);
             if (match?.error) return { error: match.error, code: match.code };
             if (match) {
+              const transferError = await validateTransferTarget(match);
+              if (transferError) return { error: transferError };
               payeeId = match.id;
               payee_name = match.name;
             }

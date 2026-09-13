@@ -2873,20 +2873,21 @@ describe("_resolvePhase2 transfer detection", () => {
                 if (name === "fetch_context")
                     return {
                         accounts: [
-                            { id: "ocbc", name: "OCBC 360", closed: false, type: "checking" },
-                            { id: "bonus", name: "SC Bonus Saver", closed: false, type: "checking" },
-                            { id: "journeys", name: "SC Journeys Card", closed: false, type: "credit" },
-                            { id: "smart", name: "SC Smart Card", closed: true, type: "credit" },
+                            { id: "ocbc", name: "OCBC 360", closed: false },
+                            { id: "bonus", name: "SC Bonus Saver", closed: false },
+                            { id: "journeys", name: "SC Journeys Card", closed: false },
                         ],
                         categories: [],
                         payees: [
-                            { id: "bonus-transfer", transfer_acct: "bonus" },
-                            { id: "journeys-transfer", transfer_acct: "journeys" },
-                            { id: "smart-transfer", transfer_acct: "smart" },
+                            { id: "bonus-transfer", name: "SC Bonus Saver", transfer_acct: "bonus" },
+                            { id: "journeys-transfer", name: "SC Journeys Card", transfer_acct: "journeys" },
+                            { id: "smart-transfer", name: "SC Smart Card", transfer_acct: "smart" },
                         ],
                     };
                 if (name === "search_memory" && args?.query === "Standard Chartered Bank Singapore")
                     return { results: [{ text: "Standard Chartered Bank Singapore maps to SC Bonus Saver payee", score: 1 }] };
+                if (name === "search_memory" && args?.query === "SC Journeys Card")
+                    return { results: [{ text: "SC Journeys Card is a credit card", score: 1 }] };
                 return { results: [] };
             }),
         });

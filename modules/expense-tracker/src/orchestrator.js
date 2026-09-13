@@ -285,10 +285,6 @@ export function nameMatchesBank(name, bank) {
     return aliases.some((t) => new RegExp(`\\b${t}\\b`, "i").test(lower));
 }
 
-function isTransferDestination(account) {
-    return account && !account.closed && !["credit", "investment"].includes(account.type);
-}
-
 function transferDestinationIsAmbiguous(name, destination, accounts) {
     const direct = matchAccountByName(name, accounts);
     if (direct.matched && direct.id === destination.id) return false;
@@ -1039,6 +1035,11 @@ export class AgentOrchestrator {
                 // field so untrusted Phase-1 output cannot persist a
                 // fabricated suffix→account fact.
                 delete output._suffix_mappings;
+                delete output.payee_id;
+                delete output._transfer;
+                delete output._is_transfer;
+                delete output._hold_unresolved_paynow;
+                delete output._hold_unresolved_transfer;
 
                 // Date fallback: if the email body contains no recognisable
                 // date and the LLM returned a date that differs from today,
@@ -1611,10 +1612,17 @@ export class AgentOrchestrator {
                 const accountMatch = liveAccounts.find(
                     (a) => a.name && a.name.toLowerCase() === output.payee_name.toLowerCase(),
                 );
-                if (accountMatch && (
-                    !isTransferDestination(accountMatch) ||
+                const payees = Array.isArray(cachedCtx.payees) ? cachedCtx.payees : [];
+                const transferPayee = payees.find((payee) =>
+                    payee.transfer_acct && (payee.transfer_acct === accountMatch?.id ||
+                        payee.name?.toLowerCase() === output.payee_name.toLowerCase()),
+                );
+                if (transferPayee && (
+                    !accountMatch ||
+                    accountMatch.closed ||
                     accountMatch.id === output.account_id ||
-                    transferDestinationIsAmbiguous(searchTerm, accountMatch, liveAccounts)
+                    await this._detectAccountType(accountMatch.name) === "credit card" ||
+                    (!output._structured_movement && transferDestinationIsAmbiguous(searchTerm, accountMatch, liveAccounts))
                 )) {
                     // A closed/card/investment account, self target, or bank-only
                     // name with several own accounts cannot identify a transfer leg.
@@ -1623,9 +1631,6 @@ export class AgentOrchestrator {
                     output.category_id = null;
                     output._hold_unresolved_transfer = true;
                 } else if (accountMatch) {
-                    const payees = Array.isArray(cachedCtx.payees)
-                        ? cachedCtx.payees
-                        : [];
                     const transferPayee = payees.find(
                         (p) => p.transfer_acct === accountMatch.id,
                     );
