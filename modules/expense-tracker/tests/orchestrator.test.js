@@ -530,6 +530,38 @@ describe("AgentOrchestrator", () => {
         expect(notifyCall).toBeDefined();
         expect(notifyCall[1].message).toContain("Failed to insert");
         expect(notifyCall[1].message).toContain("Toast Box");
+        expect(notifyCall[1].message).not.toContain("merge them in Actual");
+    });
+
+    it("tells the user to merge an ambiguous payee instead of quoting payee_id (#551)", async () => {
+        const config = makeConfig();
+        const tools = makeTools({
+            executeTool: vi.fn(async (name) => {
+                if (name === "check_duplicate") return false;
+                if (name === "insert_transaction")
+                    return {
+                        error: 'Payee "Food" is ambiguous; pass payee_id (candidates: aaa, bbb).',
+                        code: "AMBIGUOUS_PAYEE",
+                    };
+                return true;
+            }),
+        });
+        const orch = new AgentOrchestrator(config, tools);
+
+        const p1 = fakePhase1Output();
+        const p2 = fakePhase2Output(p1);
+        orch._runPhase1 = vi.fn().mockResolvedValue(p1);
+        orch._resolvePhase2 = vi.fn().mockResolvedValue(p2);
+
+        await orch.processEmail("test-ambiguous", "raw email");
+
+        const notifyCall = tools.executeTool.mock.calls.find(
+            (c) => c[0] === "notify_user",
+        );
+        expect(notifyCall).toBeDefined();
+        // The raw refusal orders the model to pass payee_id; the human reading
+        // the notification cannot act on that, so it carries the instruction.
+        expect(notifyCall[1].message).toContain("merge them in Actual");
     });
 
     it("refuses the insert when Phase 1 extracted no amount (#508)", async () => {
