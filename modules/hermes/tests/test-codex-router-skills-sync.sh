@@ -481,29 +481,37 @@ echo "=== the ownerless-lock debounce restarts for each new lock ==="
 # counter's trace separates the two behaviours exactly: a latched counter counts
 # 0 1 2 3 4 before the second reclaim and stops (one value above the limit), a
 # re-armed counter counts 0 1 2 3 then 0 1 2 3 again (two values below it).
-# The watcher polls tightly so a slow, loaded runner does not let the run
-# reacquire the freed lock before the watcher notices it.
+# The second lock is supplied by the sleep shim below, so the case no longer
+# depends on a background watcher winning a scheduling race.
 fresh_fixture
 mkdir -p "$PRIMARY/.codex-router-skills.lock.d"
-# The watcher recreates the ownerless lock the instant this run frees it, so the
-# run meets a second pid-less lock immediately instead of acquiring the freed
-# directory first.
-(
-    while [ -d "$PRIMARY/.codex-router-skills.lock.d" ]; do sleep 0.02; done
-    mkdir -p "$PRIMARY/.codex-router-skills.lock.d"
-) &
-dbg_watch=$!
+# The second lock is presented deterministically: a PATH shim for `sleep`
+# recreates the ownerless lock on the first sleep that observes it absent, which
+# is exactly the sleep after the run's first reclaim and therefore immediately
+# before the run's next acquire. No background watcher and no timing window:
+# a loaded runner cannot lose this race (#539).
+shim_dir="$ROOT/sleep-shim"
+mkdir -p "$shim_dir"
+cat > "$shim_dir/sleep" <<'SHIM'
+#!/bin/sh
+if [ ! -e "$SHIM_ONCE" ] && [ ! -d "$SHIM_LOCK" ]; then
+    mkdir -p "$SHIM_LOCK" && : > "$SHIM_ONCE"
+fi
+# Absolute path on purpose: `command -v sleep` would find this shim again.
+exec /bin/sleep "$@"
+SHIM
+chmod +x "$shim_dir/sleep"
+dbg_once="$ROOT/dbg-second-lock"
 dbg_rc=0
-HERMES_SKILL_PRIMARY_HOME="$PRIMARY" \
+PATH="$shim_dir:$PATH" \
+    SHIM_ONCE="$dbg_once" \
+    SHIM_LOCK="$PRIMARY/.codex-router-skills.lock.d" \
+    HERMES_SKILL_PRIMARY_HOME="$PRIMARY" \
     HERMES_SKILL_SECONDARY_HOME="$SECONDARY" \
     HERMES_MANIFEST_STATE_DIRS="$STATE" \
     HERMES_SKILL_LOCK_MODE=mkdir \
     HERMES_SKILL_LOCK_WAIT_SECONDS=20 \
     sh -x "$SYNC" "$SOURCE" >/dev/null 2>"$ROOT/trace" || dbg_rc=$?
-# The watcher may still be running if the run left the lock directory behind;
-# kill it rather than risk `wait` hanging the suite.
-kill "$dbg_watch" 2>/dev/null || true
-wait "$dbg_watch" 2>/dev/null || true
 dbg_looks=$(awk '/^\+ missing_pid=[0-9]+$/ {v=$0; sub(/.*=/, "", v); if (v < 3) c++} END {print c+0}' \
     "$ROOT/trace" 2>/dev/null)
 rm -rf "$PRIMARY/.codex-router-skills.lock.d"
