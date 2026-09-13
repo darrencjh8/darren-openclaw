@@ -1,4 +1,9 @@
-import { parseSuffixFact, resolveFactAccount } from "./suffix-facts.js";
+import {
+  accountAliases,
+  matchAccountByName,
+  parseSuffixFact,
+  resolveFactAccount,
+} from "./suffix-facts.js";
 
 const BANK_ALIASES = [
   ["OCBC", /\b(?:ocbc|oversea\s*chinese\s*banking)\b/i],
@@ -301,7 +306,11 @@ function resolveAccount(evidence, accounts) {
 }
 
 export function identityMappingsFromFacts(facts, accounts) {
-  const mappings = { suffix: new Map(), recipient: new Map() };
+  const mappings = {
+    suffix: new Map(),
+    recipient: new Map(),
+    aliases: accountAliases(facts, accounts),
+  };
   for (const fact of facts || []) {
     const text = typeof fact === "string" ? fact : fact?.text || "";
     const parsed = parseSuffixFact(text);
@@ -394,21 +403,35 @@ export function resolveMovementAccounts(movement, accounts, payees, mappings = {
         ? mappings.recipient.get(movement.recipient_bank) || null
         : null)
   );
+  const namedOther = movement.counterparty?.name
+    ? matchAccountByName(movement.counterparty.name, accounts, mappings.aliases)
+    : null;
   const other = otherConflict ? null : (
     resolveMappedAccount(movement.counterparty, mappings)
       || resolveAccount(movement.counterparty, accounts)
+      || (namedOther?.matched
+        ? accounts.find((account) => account.id === namedOther.id) || null
+        : null)
   );
   const destination = movement.direction === "outgoing" ? other : own;
   // For a one-sided incoming movement (deposit into own account, no counterparty),
   // the source is the own account that received the funds.
   const source = movement.direction === "outgoing" ? own : (other || own);
+  const sourcePayee = source
+    ? payees.find((payee) => payee.transfer_acct === source.id) || null
+    : null;
   const destinationPayee = destination
     ? payees.find((payee) => payee.transfer_acct === destination.id) || null
     : null;
+  // Incoming alerts are booked on the credited account, so prefer the sending
+  // account's transfer payee; legacy alerts can still reserve with destination.
+  const transferPayee = movement.direction === "incoming"
+    ? sourcePayee || destinationPayee
+    : destinationPayee;
   return {
     source_account: source,
     destination_account: destination,
-    destination_payee: destinationPayee,
-    internal: !!(source && destination && source.id !== destination.id && destinationPayee),
+    destination_payee: transferPayee,
+    internal: !!(source && destination && source.id !== destination.id && transferPayee),
   };
 }

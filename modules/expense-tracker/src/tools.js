@@ -297,6 +297,7 @@ const TOOLS = [
           type: "string",
           description: "Complete natural-language sentence",
         },
+        budget_id: { type: "string", description: "Budget containing accounts" },
       },
       required: ["fact"],
     },
@@ -314,6 +315,7 @@ const TOOLS = [
       properties: {
         old_text: { type: "string" },
         new_text: { type: "string" },
+        budget_id: { type: "string", description: "Budget containing accounts" },
       },
       required: ["old_text", "new_text"],
     },
@@ -1001,10 +1003,13 @@ export class ToolRegistry {
     return { results: await this._memory.search(query) };
   }
 
-  async _handle_learn_fact({ fact }) {
+  async _handle_learn_fact({ fact, budget_id }) {
     if (!this._memory)
       return { added: false, skipped: false, reason: "no memory store" };
-    return await this._memory.add(fact);
+    const accounts = await this._handle_fetch_accounts({
+      budget_id: budget_id || this._config.primaryBudgetFile,
+    });
+    return await this._memory.add(fact, Array.isArray(accounts) ? accounts : []);
   }
 
   async _handle_list_facts() {
@@ -1033,9 +1038,16 @@ export class ToolRegistry {
     return this._memory.cleanup();
   }
 
-  async _handle_update_fact({ old_text, new_text }) {
+  async _handle_update_fact({ old_text, new_text, budget_id }) {
     if (!this._memory) return { updated: false, found: false };
-    const result = this._memory.update(old_text, new_text);
+    const accounts = await this._handle_fetch_accounts({
+      budget_id: budget_id || this._config.primaryBudgetFile,
+    });
+    const result = this._memory.update(
+      old_text,
+      new_text,
+      Array.isArray(accounts) ? accounts : [],
+    );
     if (result.updated) this._cooldown.clear();
     return result;
   }

@@ -108,29 +108,6 @@ function isMaskedKey(entity) {
   return /[＊*]{2,}/u.test(entity);
 }
 
-function selfIdentityEntities(facts) {
-  const identities = new Set();
-  for (const fact of facts) {
-    const suffix = parseSuffixFact(fact);
-    if (suffix) identities.add(suffix.accountName.toLowerCase());
-    const account = String(fact).match(/^(.+?)\s+is\s+(?:a|an)\s+(.+?)\s+account$/i);
-    if (account && /\b(?:bank|card|debit|credit|savings|current|wallet|cash)\b/i.test(account[2])) {
-      identities.add(account[1].trim().toLowerCase());
-    }
-  }
-  for (const fact of facts) {
-    const account = String(fact).match(/^(.+?)\s+is\s+(?:a|an)\s+(.+?)\s+account$/i);
-    if (account && identities.has(account[2].trim().toLowerCase())) {
-      identities.add(account[1].trim().toLowerCase());
-    }
-    const match = String(fact).match(/^(.+?)\s+(?:merchant\s+)?maps\s+to\s+(.+?)\s+payee$/i);
-    if (match && identities.has(match[2].trim().toLowerCase())) {
-      identities.add(match[1].trim().toLowerCase());
-    }
-  }
-  return identities;
-}
-
 /**
  * True when `fact` is the mapping for `merchant`. The test is anchored to the
  * fact's own key, never to arbitrary text: a partial query must not select a
@@ -224,7 +201,7 @@ export class MemoryStore {
    *  2. Structured key match (O(1)) — contradiction → skip + warn
    *  3. Semantic cosine similarity (O(N), free-form only)
    */
-  async add(fact) {
+  async add(fact, accounts = []) {
     fact = fact.trim();
     if (!fact) return { added: false, skipped: false, reason: "empty fact" };
 
@@ -237,7 +214,7 @@ export class MemoryStore {
     // ── Level 2: structured dedup (O(1) Map lookup) ──
     const parsed = this._parseStructured(fact);
     if (parsed) {
-      const identityReason = this._identityValidationReason(fact, parsed);
+      const identityReason = this._identityValidationReason(fact, parsed, accounts);
       if (identityReason) {
         return { added: false, skipped: true, reason: identityReason };
       }
@@ -341,7 +318,7 @@ export class MemoryStore {
    * Returns { updated, found, old } — old is the matched fact text
    * so callers can verify the correct fact was updated.
    */
-  update(oldText, newText) {
+  update(oldText, newText, accounts = []) {
     const normNew = newText.trim();
     const normOld = (oldText || "").trim();
 
@@ -349,7 +326,7 @@ export class MemoryStore {
     if (!normOld) {
       return { updated: false, found: false };
     }
-    const identityReason = this._identityValidationReason(normNew);
+    const identityReason = this._identityValidationReason(normNew, undefined, accounts);
     if (identityReason) {
       return { updated: false, found: false, reason: identityReason };
     }
@@ -634,21 +611,16 @@ export class MemoryStore {
    * @param {string} fact
    * @returns {{entity: string, relation: string, value: string} | null}
    */
-  _identityValidationReason(fact, parsed = this._parseStructured(fact)) {
+  _identityValidationReason(fact, parsed = this._parseStructured(fact), accounts = []) {
     if (!parsed) return null;
     if (isMaskedKey(parsed.entity)) return "masked key";
-    const identities = selfIdentityEntities(this._facts);
     const suffixKey = /^(?:card|account)\s+ending\s+\d{4,6}$/i.test(parsed.entity);
+    const accountKey = matchAccountByName(parsed.entity, accounts).matched;
     if (
-      parsed.relation === "->category" &&
-      (suffixKey || identities.has(parsed.entity))
-    ) {
-      return "self identity";
-    }
-    if (
-      (parsed.relation === "merchant->payee" || parsed.relation === "->payee") &&
-      identities.has(parsed.entity) &&
-      !identities.has(parsed.value)
+      (parsed.relation === "->category" ||
+        parsed.relation === "merchant->payee" ||
+        parsed.relation === "->payee") &&
+      (suffixKey || accountKey)
     ) {
       return "self identity";
     }

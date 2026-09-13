@@ -213,6 +213,52 @@ From your account : Trust Bank (-869001)
     });
   });
 
+  it("keeps a PayNow credit from an own identity as a transfer, not income (#561)", async () => {
+    const { AgentOrchestrator } = await import("../src/orchestrator.js");
+    const tools = {
+      executeTool: vi.fn(async (name, args) => {
+        if (name === "fetch_context") return {
+          accounts: [
+            { id: "trust", name: "Trust Bank", closed: false },
+            { id: "ocbc", name: "OCBC 360 9001", closed: false },
+          ],
+          categories: [],
+          payees: [{ id: "transfer-trust", transfer_acct: "trust" }],
+        };
+        if (name === "search_memory" && args?.query === "TestUser") {
+          return { results: [{ text: "TestUser is a Trust Bank account", score: 1 }] };
+        }
+        return { results: [] };
+      }),
+      getPhase1ToolSchemas: vi.fn(() => []),
+      setEmailContext: vi.fn(),
+    };
+    const orch = new AgentOrchestrator({
+      primaryCurrency: "SGD", secondaryCurrency: "MYR",
+      primaryBudgetFile: "budget-sgd", secondaryBudgetFile: "budget-myr",
+      llmProvider: "deepseek", llmApiKey: "test", deepseekApiKey: "test",
+    }, tools);
+    orch._llm.chat = vi.fn();
+
+    const output = await orch._runPhase1(`
+PayNow transfer from TestUser
+Time of deposit : 19:34 PM SGT
+Amount : SGD 4.74
+Account that money was deposited in : OCBC 360 (-9001)
+`, { senderBank: "OCBC", receivedAt: "2026-09-01T19:35:00+08:00" });
+
+    expect(output).toMatchObject({
+      account_id: "ocbc",
+      amount_cents: 474,
+      category_id: null,
+      _is_transfer: true,
+      _transfer: {
+        source_account_id: "trust",
+        destination_account_id: "ocbc",
+      },
+    });
+  });
+
   it("declines an ordinary card-purchase alert whose 'To:' is a merchant, not an account (issue #398)", () => {
     // Regression test: this DBS "Card Transaction Alert" happens to use
     // generic From:/To:/Amount: labels, but "To: BUS/MRT" is a merchant

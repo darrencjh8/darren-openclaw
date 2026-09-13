@@ -598,6 +598,7 @@ export class AgentOrchestrator {
         const queries = new Set([
             movement.own_account?.suffix,
             movement.counterparty?.suffix,
+            movement.counterparty?.name,
             movement.recipient_bank ? `${movement.recipient_bank} alert recipient` : "",
         ].filter(Boolean));
         for (const query of queries) {
@@ -615,19 +616,24 @@ export class AgentOrchestrator {
         if (!source || !date) return null;
 
         if (resolved.internal) {
+            const incoming = movement.direction === "incoming";
+            const bookedAccount = incoming ? destination : source;
+            const otherAccount = incoming ? source : destination;
             return {
-                merchant: movement.counterparty?.name || destination.name,
-                amount_cents: -Math.abs(movement.amount_cents),
+                merchant: movement.counterparty?.name || otherAccount.name,
+                amount_cents: incoming
+                    ? Math.abs(movement.amount_cents)
+                    : -Math.abs(movement.amount_cents),
                 date,
                 currency: movement.currency,
-                account_id: source.id,
-                account_name: source.name,
+                account_id: bookedAccount.id,
+                account_name: bookedAccount.name,
                 budget_id: budgetId,
                 action: "insert",
-                payee_name: destination.name,
+                payee_name: otherAccount.name,
                 payee_id: resolved.destination_payee.id,
                 category_id: null,
-                raw_description: `Transfer to ${movement.counterparty?.name || destination.name}`,
+                raw_description: `Transfer ${incoming ? "from" : "to"} ${movement.counterparty?.name || otherAccount.name}`,
                 raw_merchant_descriptor: "",
                 notes: movement.reference_number ? `Statement: ${movement.reference_number}` : "",
                 reasoning: "Deterministic structured bank transfer",

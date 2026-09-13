@@ -1668,6 +1668,7 @@ describe("MemoryStore", () => {
         store.update(
           "Epsilon Nova is a debit card account",
           "Epsilon Nova maps to Banking payee",
+          [{ id: "epsilon", name: "Epsilon Nova", closed: false }],
         ),
       ).toEqual({ updated: false, found: false, reason: "self identity" });
       expect(store.listFacts()).toContain("Epsilon Nova is a debit card account");
@@ -2065,29 +2066,39 @@ describe("self-identity fact validation (#561)", () => {
   it("rejects category and merchant mappings keyed by own identities or masks", async () => {
     const path = tempFile(".md", "# Long-Term Memory\n\n## Facts\n\n");
     const store = new MemoryStore(path);
-    await store.add("OCBC 360 is a bank account");
-    await store.add("Test User is an OCBC 360 account");
-    await store.add("Card ending 1234 belongs to OCBC 360");
+    const accounts = [{ id: "ocbc", name: "OCBC 360", closed: false }];
 
-    await expect(store.add("OCBC 360 maps to Banking category")).resolves.toMatchObject({
+    await expect(store.add("OCBC 360 maps to Banking category", accounts)).resolves.toMatchObject({
       added: false,
       reason: "self identity",
     });
-    await expect(store.add("OCBC 360 maps to Spotify payee")).resolves.toMatchObject({
+    await expect(store.add("OCBC 360 maps to Spotify payee", accounts)).resolves.toMatchObject({
       added: false,
       reason: "self identity",
     });
-    await expect(store.add("Test User maps to Spotify payee")).resolves.toMatchObject({
-      added: false,
-      reason: "self identity",
-    });
-    await expect(store.add("T*** U*** maps to Spotify payee")).resolves.toMatchObject({
+    await expect(store.add("T*** U*** maps to Spotify payee", accounts)).resolves.toMatchObject({
       added: false,
       reason: "masked key",
     });
     await store.add("Toast Box maps to Food payee");
     expect(
-      store.update("Toast Box maps to Food payee", "OCBC 360 maps to Spotify payee"),
+      store.update("Toast Box maps to Food payee", "OCBC 360 maps to Spotify payee", accounts),
+    ).toEqual({ updated: false, found: false, reason: "self identity" });
+    unlinkSync(path);
+  });
+
+  it("uses live accounts even before identity facts exist (#561)", async () => {
+    const path = tempFile(".md", "# Long-Term Memory\n\n## Facts\n\n");
+    const store = new MemoryStore(path);
+    const accounts = [{ id: "ocbc", name: "OCBC  360", closed: false }];
+
+    await expect(store.add("OCBC 360. maps to Banking category", accounts)).resolves.toMatchObject({
+      added: false,
+      reason: "self identity",
+    });
+    await store.add("Toast Box maps to Food payee");
+    expect(
+      store.update("Toast Box maps to Food payee", "OCBC 360 maps to Spotify payee", accounts),
     ).toEqual({ updated: false, found: false, reason: "self identity" });
     unlinkSync(path);
   });
