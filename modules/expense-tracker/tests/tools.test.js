@@ -620,7 +620,7 @@ describe("reserve_transfer far-side reconciliation (#557)", () => {
         payee_id: "p-uob-transfer",
     };
 
-    it("replaces a stale unidentified deposit on the destination account", async () => {
+    it("reports a possible far-side duplicate without deleting anything", async () => {
         const cfg = new Config(testEnv);
         const registry = new ToolRegistry(cfg);
         registry._dedup = new DedupJournal(":memory:");
@@ -656,10 +656,10 @@ describe("reserve_transfer far-side reconciliation (#557)", () => {
         );
 
         expect(reservation.status).toBe("reserved");
-        expect(reservation.reconciled_transaction_id).toBe("stale-1");
-        expect(deleted.some((u) => u.includes("/transactions/stale-1"))).toBe(
-            true,
-        );
+        expect(reservation.far_side_candidate).toBe("stale-1");
+        // No field the route returns proves the row is ours, so the row is
+        // reported to the user, never removed.
+        expect(deleted).toEqual([]);
     });
 
     it("leaves a cleared or linked row alone", async () => {
@@ -698,7 +698,7 @@ describe("reserve_transfer far-side reconciliation (#557)", () => {
         );
 
         expect(reservation.status).toBe("reserved");
-        expect(reservation.reconciled_transaction_id).toBeUndefined();
+        expect(reservation.far_side_candidate).toBeUndefined();
         expect(deleted).toEqual([]);
     });
 });

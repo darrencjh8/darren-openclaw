@@ -1301,13 +1301,12 @@ export class ToolRegistry {
 
   async _handle_reserve_transfer(args) {
     let reservation = this._dedup.reserveTransfer(args);
-    // The far side of the same event may already sit on the destination account
-    // as an ordinary row: an alert that names the deposit and not the transfer
-    // books it as income, and the counterpart Actual creates on insert then
-    // doubles it (issue #557 — OCBC 360 showed +2.00 for a 1.00 deposit).
-    // Replace that row so one event leaves exactly one pair. Only the
-    // unidentified-deposit fallback payee qualifies, and only while uncleared:
-    // deleting a stranger's row would be worse than a double.
+    // The far side may already be booked, because an alert can name the deposit
+    // and not the transfer (issue #557). Report it; never touch it. No field the
+    // route returns can prove a row is ours: every row this pipeline inserts is
+    // uncleared, `Misc` is also the unknown-merchant fallback, and Actual
+    // exposes no created-at, so deleting on this match would risk a real
+    // deposit. The caller warns the user instead.
     if (reservation.status === "reserved") {
         try {
             const date = new Date(args.occurred_at).toISOString().slice(0, 10);
@@ -1322,7 +1321,7 @@ export class ToolRegistry {
             const misc = Array.isArray(payees)
                 ? payees.find((p) => p.name === "Misc" && !p.transfer_acct)
                 : null;
-            const stale = (Array.isArray(rows) ? rows : []).filter(
+            const candidate = (Array.isArray(rows) ? rows : []).find(
                 (tx) =>
                     misc &&
                     tx.amount === Math.abs(args.amount_cents) &&
@@ -1330,19 +1329,13 @@ export class ToolRegistry {
                     tx.cleared === false &&
                     tx.payee === misc.id,
             );
-            if (stale.length === 1) {
-                await this._delete(
-                    `/transactions/${stale[0].id}`,
-                    args.budget_id,
-                );
+            if (candidate)
                 reservation = {
                     ...reservation,
-                    reconciled_transaction_id: stale[0].id,
+                    far_side_candidate: candidate.id,
                 };
-            }
         } catch {
-            // Cannot prove the far side is stale: keep it and accept a possible
-            // double rather than delete a row that may be unrelated.
+            // Cannot read the destination account: book normally.
         }
     }
     if (reservation.status !== "pending") return reservation;
@@ -1875,17 +1868,6 @@ export class ToolRegistry {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
-    });
-    if (!r.ok) throw await actualApiError(r);
-    return r.json();
-  }
-
-  async _delete(path, budgetId) {
-    const query = budgetId
-      ? `?budget_id=${encodeURIComponent(budgetId)}`
-      : "";
-    const r = await fetch(`${this._apiUrl}${path}${query}`, {
-      method: "DELETE",
     });
     if (!r.ok) throw await actualApiError(r);
     return r.json();

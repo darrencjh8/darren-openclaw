@@ -15,6 +15,13 @@ import { dirname } from "path";
  * no bank reference to tell two events apart. Reprocessing a single email is
  * guarded separately, by message identity.
  */
+// Two alerts for one transfer arrive seconds apart, and a genuine repeat is
+// minutes apart, so the window sits between the two. Measured on 2026-09-13:
+// sibling alerts for one event 1 s, 1 s, and 4 s apart; two distinct real
+// transfers 237 s apart. The residual risk is a second email for one event
+// arriving later than this with an amount, which would book twice the way it
+// did before; UOB's status email did arrive 3 min 29 s after its notification,
+// and is refused only because it carries no amount (issue #557).
 const TRANSFER_MATCH_WINDOW_MS = 2 * 60 * 1000;
 
 export class DedupJournal {
@@ -247,9 +254,19 @@ export class DedupJournal {
         return result.changes;
     }
 
-    /** Run full cleanup: processed_uids (60min) + old dedup entries (90d). */
+    /** Run full cleanup: processed_uids (60min) + old dedup entries (90d)
+     *  + booked messages (180d). */
     cleanup() {
         this.cleanupProcessedUids();
         this.cleanupOldEntries();
+        // Message identity must outlive the 60-minute retry cooldown and any
+        // realistic reprocessing, not forever.
+        this._db
+            .prepare("DELETE FROM booked_messages WHERE booked_at < ?")
+            .run(
+                new Date(
+                    Date.now() - 180 * 24 * 60 * 60 * 1000,
+                ).toISOString(),
+            );
     }
 }

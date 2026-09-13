@@ -298,6 +298,24 @@ describe("DedupJournal message identity (#557)", () => {
         journal.cleanupProcessedUids();
         expect(journal.isMessageBooked("859")).toBe(true);
     });
+
+    it("forgets booked messages older than the retention window", () => {
+        journal.markMessageBooked("old");
+        journal.markMessageBooked("fresh");
+        journal._db
+            .prepare("UPDATE booked_messages SET booked_at = ? WHERE uid = ?")
+            .run(
+                new Date(
+                    Date.now() - 200 * 24 * 60 * 60 * 1000,
+                ).toISOString(),
+                "old",
+            );
+
+        journal.cleanup();
+
+        expect(journal.isMessageBooked("old")).toBe(false);
+        expect(journal.isMessageBooked("fresh")).toBe(true);
+    });
 });
 
 describe("DedupJournal cleanupOldEntries", () => {

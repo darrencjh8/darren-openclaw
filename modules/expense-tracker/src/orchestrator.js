@@ -1494,6 +1494,27 @@ export class AgentOrchestrator {
                     if (transferPayee) {
                         output.payee_id = transferPayee.id;
                         output._is_transfer = true;
+                        // Reserve like the deterministic path does, so a second
+                        // real transfer of the same amount is not dropped as a
+                        // duplicate (issue #557). Without this, an account-name
+                        // swap booked outside the journal and leaned on the
+                        // amount+account lookback that cannot tell two real
+                        // transfers apart.
+                        const swapAmount = Number(output.amount_cents);
+                        if (Number.isFinite(swapAmount))
+                            output._transfer = {
+                                budget_id: output.budget_id || "",
+                                source_account_id: output.account_id || "",
+                                destination_account_id: accountMatch.id,
+                                currency:
+                                    output.currency ||
+                                    this._config.primaryCurrency,
+                                amount_cents: Math.abs(swapAmount),
+                                occurred_at:
+                                    output.occurred_at ||
+                                    new Date().toISOString(),
+                                payee_id: transferPayee.id,
+                            };
                     }
                 }
             } catch {}
@@ -1678,11 +1699,12 @@ export class AgentOrchestrator {
             // booked a 0.00 pair (issue #557). Nothing to record, so skip it,
             // mark it read, and say why.
             if (hasAmount && Number(llmOutput.amount_cents) === 0) {
-                if (!silent)
+                if (!silent) {
                     await this._tools.executeTool("mark_email_read", {});
-                await this._tools.executeTool("notify_user", {
-                    message: `Skipped: the alert carried no amount (${llmOutput.raw_description || llmOutput.merchant || "unknown"}).`,
-                });
+                    await this._tools.executeTool("notify_user", {
+                        message: `Skipped: the alert carried no amount (${llmOutput.raw_description || llmOutput.merchant || "unknown"}).`,
+                    });
+                }
                 await this._tools.executeTool("log_decision", {
                     action: "skipped",
                     reasoning: "Alert carried no amount",
@@ -1769,6 +1791,18 @@ export class AgentOrchestrator {
                         id: transferReservation.entry.id,
                         actual_transaction_id: inserted?.id || null,
                     });
+                    // The destination account may already hold this transfer as
+                    // an ordinary row, booked from an alert that named the
+                    // deposit (issue #557). Nothing proves that row is ours, so
+                    // warn instead of touching it: the user can see the account
+                    // and decide which row to remove.
+                    if (transferReservation.far_side_candidate && !silent) {
+                        try {
+                            await this._tools.executeTool("notify_user", {
+                                message: `Transfer ${bookableAmountPrefix(llmOutput.amount_cents, llmOutput.currency)}booked. The destination account already had an uncleared entry of the same amount that day — if it is the same transfer, remove one row in Actual.`,
+                            });
+                        } catch {} // a failed warning must not fail a booked transfer
+                    }
                 }
             } catch (e) {
                 logger.error({ event: "insert_failed", error: e.message });
