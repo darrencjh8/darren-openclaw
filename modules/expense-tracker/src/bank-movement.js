@@ -138,10 +138,11 @@ function namedAccount(value, fallbackBank) {
   };
 }
 
-function baseMovement({ direction, amount, currency, occurredAt, ownAccount, counterparty = null, reference = "", merchant = null, descriptor = "" }) {
+function baseMovement({ direction, amount, currency, occurredAt, ownAccount, counterparty = null, reference = "", merchant = null, descriptor = "", isPayNow = false }) {
   if (!amount || !currency || !occurredAt || !ownAccount?.suffix) return null;
   return {
     kind: "bank_movement",
+    is_paynow: isPayNow,
     direction,
     amount_cents: cents(currency, amount, direction),
     currency: currency.toUpperCase(),
@@ -248,6 +249,9 @@ export function parseBankMovement(text, { senderBank = null, receivedAt } = {}) 
   const destination = namedAccount(to, bankFromText(to));
   const payNow = /PayNow\s+transfer/i.test(body) && !to;
   const merchantMatch = body.match(/made to\s+(.+?)\s+using their\s+Unique Entity Number/i);
+  const payNowRecipient = body.match(
+    /PayNow\s+transfer\s+has\s+been\s+made\s+to\s+(.+?)(?:\s+using their\s+Unique Entity Number|\n|$)/i,
+  )?.[1]?.replace(/[.,;:!?]+$/, "").trim();
   // Decline rather than fabricate a movement when we cannot identify which
   // tracked account (if any) "To:" refers to. This shape (generic From/To
   // labels) is also used by ordinary card-purchase alerts where "To:" is a
@@ -263,10 +267,15 @@ export function parseBankMovement(text, { senderBank = null, receivedAt } = {}) 
     direction: "outgoing", amount, currency,
     occurredAt: isoDateTime(dateText, timeText, receivedAt),
     ownAccount,
-    counterparty: destination?.suffix ? destination : null,
+    counterparty: destination?.suffix
+      ? destination
+      : payNowRecipient && !merchantMatch
+        ? namedAccount(payNowRecipient, bankFromText(payNowRecipient))
+        : null,
     reference,
     merchant: payNow ? merchantMatch?.[1]?.trim() || null : null,
     descriptor,
+    isPayNow: payNow,
   });
 }
 

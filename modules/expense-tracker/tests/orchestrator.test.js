@@ -2528,6 +2528,93 @@ describe("_resolvePhase2 transfer detection", () => {
     // Issue #557: the account-name swap recognised a transfer but booked it
     // outside the reservation journal, so a second real transfer of the same
     // amount was dropped by the amount+account lookback.
+    it("resolves a PayNow self identity before a merchant memory mapping (#561)", async () => {
+        const config = makeConfig();
+        const tools = makeTools({
+            executeTool: vi.fn(async (name) => {
+                if (name === "list_facts")
+                    return {
+                        facts: [
+                            "TestUser is an OCBC 360 account",
+                            "TestUser maps to Spotify payee",
+                            "Spotify maps to Spotify category",
+                        ],
+                    };
+                if (name === "search_memory")
+                    return {
+                        results: [
+                            { text: "TestUser maps to Spotify payee", score: 1 },
+                            { text: "Spotify maps to Spotify category", score: 1 },
+                        ],
+                    };
+                if (name === "fetch_context")
+                    return {
+                        accounts: [
+                            { id: "trust", name: "Trust Bank", closed: false },
+                            { id: "ocbc", name: "OCBC 360", closed: false },
+                        ],
+                        categories: [{ id: "spotify", name: "Spotify" }],
+                        payees: [{ id: "ocbc-transfer", transfer_acct: "ocbc" }],
+                    };
+                return true;
+            }),
+        });
+        const orch = new AgentOrchestrator(config, tools);
+
+        const result = await orch._resolvePhase2({
+            merchant: "TestUser",
+            amount_cents: -474,
+            currency: "SGD",
+            account_id: "trust",
+            budget_id: "test-budget",
+            _is_paynow: true,
+        });
+
+        expect(result.payee_name).toBe("OCBC 360");
+        expect(result.payee_id).toBe("ocbc-transfer");
+        expect(result._is_transfer).toBe(true);
+        expect(result.category_id).toBeNull();
+        expect(tools.executeTool).not.toHaveBeenCalledWith(
+            "search_memory",
+            expect.objectContaining({ query: "TestUser" }),
+        );
+    });
+
+    it("keeps a masked PayNow self identity out of merchant memory (#561)", async () => {
+        const config = makeConfig({ USER_NAME: "Test User" });
+        const tools = makeTools({
+            executeTool: vi.fn(async (name) => {
+                if (name === "list_facts") return { facts: [] };
+                if (name === "search_memory")
+                    return { results: [{ text: "T*** U*** maps to Spotify payee", score: 1 }] };
+                if (name === "fetch_context")
+                    return {
+                        accounts: [{ id: "trust", name: "Trust Bank", closed: false }],
+                        categories: [{ id: "spotify", name: "Spotify" }],
+                        payees: [],
+                    };
+                return true;
+            }),
+        });
+        const orch = new AgentOrchestrator(config, tools);
+
+        const result = await orch._resolvePhase2({
+            merchant: "T*** U***",
+            amount_cents: -474,
+            currency: "SGD",
+            account_id: "trust",
+            budget_id: "test-budget",
+            _is_paynow: true,
+        });
+
+        expect(result.payee_name).toBe("Misc");
+        expect(result.category_id).toBeNull();
+        expect(tools.executeTool).not.toHaveBeenCalledWith(
+            "search_memory",
+            expect.objectContaining({ query: "T*** U***" }),
+        );
+    });
+
     it("reserves a transfer recognised by account name (#557)", async () => {
         const config = makeConfig();
         const tools = makeTools();

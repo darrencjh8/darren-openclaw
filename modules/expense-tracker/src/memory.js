@@ -104,6 +104,33 @@ function mappingEntity(fact) {
   return null;
 }
 
+function isMaskedKey(entity) {
+  return /(?:[\p{L}\p{N}][＊*]{2,}|[＊*]{2,}[\p{L}\p{N}])/u.test(entity);
+}
+
+function selfIdentityEntities(facts) {
+  const identities = new Set();
+  for (const fact of facts) {
+    const suffix = parseSuffixFact(fact);
+    if (suffix) identities.add(suffix.accountName.toLowerCase());
+    const account = String(fact).match(/^(.+?)\s+is\s+(?:a|an)\s+(.+?)\s+account$/i);
+    if (account && /\b(?:bank|card|debit|credit|savings|current|wallet|cash)\b/i.test(account[2])) {
+      identities.add(account[1].trim().toLowerCase());
+    }
+  }
+  for (const fact of facts) {
+    const account = String(fact).match(/^(.+?)\s+is\s+(?:a|an)\s+(.+?)\s+account$/i);
+    if (account && identities.has(account[2].trim().toLowerCase())) {
+      identities.add(account[1].trim().toLowerCase());
+    }
+    const match = String(fact).match(/^(.+?)\s+(?:merchant\s+)?maps\s+to\s+(.+?)\s+payee$/i);
+    if (match && identities.has(match[2].trim().toLowerCase())) {
+      identities.add(match[1].trim().toLowerCase());
+    }
+  }
+  return identities;
+}
+
 /**
  * True when `fact` is the mapping for `merchant`. The test is anchored to the
  * fact's own key, never to arbitrary text: a partial query must not select a
@@ -210,6 +237,10 @@ export class MemoryStore {
     // ── Level 2: structured dedup (O(1) Map lookup) ──
     const parsed = this._parseStructured(fact);
     if (parsed) {
+      const identityReason = this._identityValidationReason(fact, parsed);
+      if (identityReason) {
+        return { added: false, skipped: true, reason: identityReason };
+      }
       const key = `${parsed.entity}|||${parsed.relation}`;
       const existing = this._structuredIndex.get(key);
       if (existing) {
@@ -317,6 +348,10 @@ export class MemoryStore {
     // Guard: empty/whitespace oldText is ambiguous — reject early
     if (!normOld) {
       return { updated: false, found: false };
+    }
+    const identityReason = this._identityValidationReason(normNew);
+    if (identityReason) {
+      return { updated: false, found: false, reason: identityReason };
     }
 
     // ── Tier 1: O(1) structured key lookup ──
@@ -599,6 +634,27 @@ export class MemoryStore {
    * @param {string} fact
    * @returns {{entity: string, relation: string, value: string} | null}
    */
+  _identityValidationReason(fact, parsed = this._parseStructured(fact)) {
+    if (!parsed) return null;
+    if (isMaskedKey(parsed.entity)) return "masked key";
+    const identities = selfIdentityEntities(this._facts);
+    const suffixKey = /^(?:card|account)\s+ending\s+\d{4,6}$/i.test(parsed.entity);
+    if (
+      parsed.relation === "->category" &&
+      (suffixKey || identities.has(parsed.entity))
+    ) {
+      return "self identity";
+    }
+    if (
+      (parsed.relation === "merchant->payee" || parsed.relation === "->payee") &&
+      identities.has(parsed.entity) &&
+      !identities.has(parsed.value)
+    ) {
+      return "self identity";
+    }
+    return null;
+  }
+
   _parseStructured(fact) {
     for (const { re, rel } of STRUCTURED_PATTERNS) {
       const m = fact.match(re);

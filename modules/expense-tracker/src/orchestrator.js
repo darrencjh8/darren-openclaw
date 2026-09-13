@@ -24,6 +24,7 @@ import {
     accountAliases,
     accountTokens,
     canonicalSuffixFact,
+    matchAccountByName,
     parseSuffixFact,
     resolveFactAccount as resolveFactAccountShared,
 } from "./suffix-facts.js";
@@ -282,6 +283,23 @@ export function nameMatchesBank(name, bank) {
     const aliases = BANK_ALIASES[bank.toLowerCase()] || [bank];
     const lower = name.toLowerCase();
     return aliases.some((t) => new RegExp(`\\b${t}\\b`, "i").test(lower));
+}
+
+function matchesMaskedIdentity(value, identity) {
+    const candidate = String(value || "").trim().toLowerCase();
+    const ownName = String(identity || "").trim().toLowerCase();
+    if (!candidate || !ownName) return false;
+    if (candidate === ownName) return true;
+    if (!/[＊*]{2,}/.test(candidate)) return false;
+    const escaped = candidate
+        .split(/([＊*]+)/)
+        .map((part) =>
+            /^[＊*]+$/.test(part)
+                ? ".*"
+                : part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/\s+/g, "\\s+"),
+        )
+        .join("");
+    return new RegExp(`^${escaped}$`, "i").test(ownName);
 }
 
 /** Remove secret-looking facts from a search result list. */
@@ -669,6 +687,7 @@ export class AgentOrchestrator {
                 notify_message: "",
                 _suffix_mappings: suffixMappings,
                 _structured_movement: true,
+                _is_paynow: movement.is_paynow === true,
             };
         }
         return null;
@@ -978,6 +997,7 @@ export class AgentOrchestrator {
                     action,
                     payee_name: "",
                     category_id: "",
+                    _is_paynow: /\bpaynow\b/i.test(emailText),
                 };
                 // _suffix_mappings is set only by the deterministic
                 // movement / bill-payment parsers. Strip any LLM-injected
@@ -1405,6 +1425,33 @@ export class AgentOrchestrator {
             output.notes ||
             ""
         ).trim();
+        let cachedCtx = null;
+        if (output._is_paynow && searchTerm) {
+            try {
+                cachedCtx =
+                    (await this._tools.executeTool("fetch_context", {
+                        budget_id: output.budget_id || "",
+                    })) || {};
+                const accounts = Array.isArray(cachedCtx.accounts)
+                    ? cachedCtx.accounts
+                    : [];
+                const facts =
+                    (await this._tools.executeTool("list_facts", {}))?.facts ||
+                    [];
+                const account = matchAccountByName(
+                    searchTerm,
+                    accounts,
+                    accountAliases(facts, accounts),
+                );
+                if (account.matched) {
+                    output.payee_name = account.name;
+                    output.payee_source = "self_identity";
+                } else if (matchesMaskedIdentity(searchTerm, this._config.userName)) {
+                    output.payee_name = "Misc";
+                    output.payee_source = "self_identity";
+                }
+            } catch {}
+        }
         if (!output.payee_name && searchTerm) {
             let memResults = [];
             try {
@@ -1467,10 +1514,10 @@ export class AgentOrchestrator {
         // payee (the one with transfer_acct set) so Actual Budget creates a
         // transfer instead of a regular expense.
         // Also caches fetch_context so category resolution below reuses it.
-        let cachedCtx = null;
         if (output.payee_name && output.payee_name !== "Misc") {
             try {
                 cachedCtx =
+                    cachedCtx ||
                     (await this._tools.executeTool("fetch_context", {
                         budget_id: output.budget_id || "",
                     })) || {};

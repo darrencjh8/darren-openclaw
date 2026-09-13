@@ -197,6 +197,22 @@ Description : UEN123-REFERENCE
     });
   });
 
+  it("keeps a personal PayNow recipient for self-identity resolution (#561)", () => {
+    const movement = parseBankMovement(`
+The following PayNow transfer has been made to TestUser.
+Date : 01 Sep 2026
+Time : 19:34 PM SGT
+Amount : SGD 4.74
+From your account : Trust Bank (-869001)
+`, { senderBank: "Trust", receivedAt: "2026-09-01T19:35:00+08:00" });
+
+    expect(movement).toMatchObject({
+      is_paynow: true,
+      counterparty: { name: "TestUser" },
+      merchant_display_name: null,
+    });
+  });
+
   it("declines an ordinary card-purchase alert whose 'To:' is a merchant, not an account (issue #398)", () => {
     // Regression test: this DBS "Card Transaction Alert" happens to use
     // generic From:/To:/Amount: labels, but "To: BUS/MRT" is a merchant

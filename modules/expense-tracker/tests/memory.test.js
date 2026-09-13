@@ -1660,18 +1660,17 @@ describe("MemoryStore", () => {
       expect(facts).not.toContain("Food maps to Dining category");
     });
 
-    it("updates is-account to →payee for the same entity", () => {
+    it("refuses to update an own-account identity to a merchant payee (#561)", () => {
       const store = new MemoryStore(emptyMemoryPath);
       store._facts = ["Epsilon Nova is a debit card account"];
       store._rebuildIndices();
-      const result = store.update(
-        "Epsilon Nova is a debit card account",
-        "Epsilon Nova maps to Banking payee",
-      );
-      expect(result.updated).toBe(true);
-      const facts = store.listFacts();
-      expect(facts).toContain("Epsilon Nova maps to Banking payee");
-      expect(facts).not.toContain("Epsilon Nova is a debit card account");
+      expect(
+        store.update(
+          "Epsilon Nova is a debit card account",
+          "Epsilon Nova maps to Banking payee",
+        ),
+      ).toEqual({ updated: false, found: false, reason: "self identity" });
+      expect(store.listFacts()).toContain("Epsilon Nova is a debit card account");
     });
 
     // ── Structured index + dedup set consistency after complex updates ─
@@ -2058,6 +2057,38 @@ describe("merchant mapping lookup", () => {
     expect(
       store._acceptSemanticHit("Example User identifies this as a work expense", 0.59),
     ).toBe(false);
+    unlinkSync(path);
+  });
+});
+
+describe("self-identity fact validation (#561)", () => {
+  it("rejects category and merchant mappings keyed by own identities or masks", async () => {
+    const path = tempFile(".md", "# Long-Term Memory\n\n## Facts\n\n");
+    const store = new MemoryStore(path);
+    await store.add("OCBC 360 is a bank account");
+    await store.add("Test User is an OCBC 360 account");
+    await store.add("Card ending 1234 belongs to OCBC 360");
+
+    await expect(store.add("OCBC 360 maps to Banking category")).resolves.toMatchObject({
+      added: false,
+      reason: "self identity",
+    });
+    await expect(store.add("OCBC 360 maps to Spotify payee")).resolves.toMatchObject({
+      added: false,
+      reason: "self identity",
+    });
+    await expect(store.add("Test User maps to Spotify payee")).resolves.toMatchObject({
+      added: false,
+      reason: "self identity",
+    });
+    await expect(store.add("T*** U*** maps to Spotify payee")).resolves.toMatchObject({
+      added: false,
+      reason: "masked key",
+    });
+    await store.add("Toast Box maps to Food payee");
+    expect(
+      store.update("Toast Box maps to Food payee", "OCBC 360 maps to Spotify payee"),
+    ).toEqual({ updated: false, found: false, reason: "self identity" });
     unlinkSync(path);
   });
 });
