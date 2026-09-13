@@ -409,6 +409,48 @@ describe("ToolRegistry", () => {
         expect(body.budget_id).toBeUndefined();
     });
 
+    it("includes the actual-api error body in the thrown message", async () => {
+        const cfg = new Config(testEnv);
+        const registry = new ToolRegistry(cfg);
+
+        const origFetch = global.fetch;
+        global.fetch = async () => ({
+            ok: false,
+            status: 500,
+            text: async () => '{"error":"No budget file is open"}',
+        });
+        try {
+            await expect(
+                registry._get("/accounts", "test-budget"),
+            ).rejects.toThrow(
+                'actual-api 500 {"error":"No budget file is open"}',
+            );
+        } finally {
+            global.fetch = origFetch;
+        }
+    });
+
+    it("keeps the bare status when the error body cannot be read", async () => {
+        const cfg = new Config(testEnv);
+        const registry = new ToolRegistry(cfg);
+
+        const origFetch = global.fetch;
+        global.fetch = async () => ({
+            ok: false,
+            status: 502,
+            text: async () => {
+                throw new Error("stream closed");
+            },
+        });
+        try {
+            await expect(
+                registry._get("/accounts", "test-budget"),
+            ).rejects.toThrow(/^actual-api 502$/);
+        } finally {
+            global.fetch = origFetch;
+        }
+    });
+
     it("fetch_context returns accounts, categories, and payees in parallel with balances", async () => {
         const { vi } = await import("vitest");
         const cfg = new Config(testEnv);
