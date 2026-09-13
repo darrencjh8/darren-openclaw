@@ -49,6 +49,7 @@ describe("ImapIdleHandler constructor", () => {
         isRecentlyProcessed: () => false,
         isMessageBooked: () => false,
         markMessageBooked: () => {},
+        noteMailboxUidValidity: () => false,
     };
     const handler = new ImapIdleHandler(
       "imap.example.com",
@@ -335,6 +336,7 @@ describe("ImapIdleHandler idleLoop UID pre-check", () => {
       recordProcessed: vi.fn(),
       isMessageBooked: () => false,
       markMessageBooked: vi.fn(),
+      noteMailboxUidValidity: vi.fn().mockReturnValue(false),
     };
     const handler = new ImapIdleHandler("h", 993, "u", "p", dedup);
     const callback = vi.fn();
@@ -355,12 +357,32 @@ describe("ImapIdleHandler idleLoop UID pre-check", () => {
     expect(dedup.recordProcessed).not.toHaveBeenCalled();
   });
 
+  it("tells the journal which mailbox epoch it is reading (#558)", async () => {
+    const dedup = {
+      isRecentlyProcessed: vi.fn().mockReturnValue(false),
+      recordProcessed: vi.fn(),
+      isMessageBooked: () => false,
+      markMessageBooked: vi.fn(),
+      noteMailboxUidValidity: vi.fn().mockReturnValue(false),
+    };
+    const handler = new ImapIdleHandler("h", 993, "u", "p", dedup);
+    handler._client = {
+      mailbox: { uidValidity: 222 },
+      fetch: vi.fn(() => makeIter([])),
+    };
+
+    await handler.fetchUnread();
+
+    expect(dedup.noteMailboxUidValidity).toHaveBeenCalledWith(222);
+  });
+
   it("processes new UIDs and records after success", async () => {
     const dedup = {
       isRecentlyProcessed: vi.fn().mockReturnValue(false),
       recordProcessed: vi.fn(),
       isMessageBooked: () => false,
       markMessageBooked: vi.fn(),
+      noteMailboxUidValidity: vi.fn().mockReturnValue(false),
     };
     const handler = new ImapIdleHandler("h", 993, "u", "p", dedup);
     const callback = vi.fn(async () => {});
@@ -388,6 +410,7 @@ describe("ImapIdleHandler idleLoop UID pre-check", () => {
       recordProcessed: vi.fn(),
       isMessageBooked: () => false,
       markMessageBooked: vi.fn(),
+      noteMailboxUidValidity: vi.fn().mockReturnValue(false),
     };
     const handler = new ImapIdleHandler("h", 993, "u", "p", dedup);
     const callback = vi.fn(async () => {
@@ -416,6 +439,7 @@ describe("ImapIdleHandler idleLoop UID pre-check", () => {
       recordProcessed: vi.fn((uid) => calls.push(`record:${uid}`)),
       isMessageBooked: () => false,
       markMessageBooked: vi.fn(),
+      noteMailboxUidValidity: vi.fn().mockReturnValue(false),
     };
     const handler = new ImapIdleHandler("h", 993, "u", "p", dedup);
     const callback = vi.fn(async (msg) => calls.push(`callback:${msg.msg_id}`));
