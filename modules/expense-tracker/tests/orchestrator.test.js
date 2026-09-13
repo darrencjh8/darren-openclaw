@@ -1150,7 +1150,10 @@ describe("auto-learn contradiction resolution", () => {
         // Positive control. Without it this test also passes when no fact is
         // learned at all, which is the regression it exists to catch.
         expect(learnCalls).toHaveLength(1);
-        expect(learnCalls[0][1]).toEqual({ fact: "DBS Nova is a bank account" });
+        expect(learnCalls[0][1]).toEqual({
+            fact: "DBS Nova is a bank account",
+            budget_id: "budget-sgd",
+        });
         // Filter form, not `not.toHaveBeenCalledWith`: the account-type block
         // cannot call `update_fact` at all, and a specific `old_text` matcher
         // would also pass for any other argument. This is the assertion the
@@ -1193,6 +1196,7 @@ describe("auto-learn contradiction resolution", () => {
         expect(learnCalls).toHaveLength(1);
         expect(learnCalls[0][1]).toEqual({
             fact: "DBS Nova is a credit card account",
+            budget_id: "budget-sgd",
         });
     });
 
@@ -2528,6 +2532,301 @@ describe("_resolvePhase2 transfer detection", () => {
     // Issue #557: the account-name swap recognised a transfer but booked it
     // outside the reservation journal, so a second real transfer of the same
     // amount was dropped by the amount+account lookback.
+    it("resolves a PayNow self identity before a merchant memory mapping (#561)", async () => {
+        const config = makeConfig();
+        const tools = makeTools({
+            executeTool: vi.fn(async (name) => {
+                if (name === "list_facts")
+                    return {
+                        facts: [
+                            "TestUser is an OCBC 360 account",
+                            "TestUser maps to Spotify payee",
+                            "Spotify maps to Spotify category",
+                        ],
+                    };
+                if (name === "search_memory")
+                    return {
+                        results: [
+                            { text: "TestUser maps to Spotify payee", score: 1 },
+                            { text: "Spotify maps to Spotify category", score: 1 },
+                        ],
+                    };
+                if (name === "fetch_context")
+                    return {
+                        accounts: [
+                            { id: "trust", name: "Trust Bank", closed: false },
+                            { id: "ocbc", name: "OCBC 360", closed: false },
+                        ],
+                        categories: [{ id: "spotify", name: "Spotify" }],
+                        payees: [{ id: "ocbc-transfer", transfer_acct: "ocbc" }],
+                    };
+                return true;
+            }),
+        });
+        const orch = new AgentOrchestrator(config, tools);
+
+        const result = await orch._resolvePhase2({
+            merchant: "TestUser",
+            amount_cents: -474,
+            currency: "SGD",
+            account_id: "trust",
+            budget_id: "test-budget",
+            _is_paynow: true,
+        });
+
+        expect(result.payee_name).toBe("OCBC 360");
+        expect(result.payee_id).toBe("ocbc-transfer");
+        expect(result._is_transfer).toBe(true);
+        expect(result.category_id).toBeNull();
+        expect(tools.executeTool).not.toHaveBeenCalledWith(
+            "search_memory",
+            expect.objectContaining({ query: "TestUser" }),
+        );
+    });
+
+    it("keeps a masked PayNow self identity out of merchant memory (#561)", async () => {
+        // The account name is masked in the alert ("T*** B***" for "Trust
+        // Bank"), so identity has to come from the live account list, not from
+        // a stored fact keyed by the masked string.
+        const config = makeConfig({ USER_NAME: "there" });
+        const tools = makeTools({
+            executeTool: vi.fn(async (name) => {
+                if (name === "list_facts") return { facts: [] };
+                if (name === "search_memory")
+                    return { results: [{ text: "T*** B*** maps to Spotify payee", score: 1 }] };
+                if (name === "fetch_context")
+                    return {
+                        accounts: [{ id: "trust", name: "Trust Bank", closed: false }],
+                        categories: [{ id: "spotify", name: "Spotify" }],
+                        payees: [],
+                    };
+                return true;
+            }),
+        });
+        const orch = new AgentOrchestrator(config, tools);
+
+        const result = await orch._resolvePhase2({
+            merchant: "T*** B***",
+            amount_cents: -474,
+            currency: "SGD",
+            account_id: "trust",
+            budget_id: "test-budget",
+            _is_paynow: true,
+        });
+
+        expect(result.payee_name).toBe("Misc");
+        expect(result.category_id).toBeNull();
+        expect(tools.executeTool).not.toHaveBeenCalledWith(
+            "search_memory",
+            expect.objectContaining({ query: "T*** B***" }),
+        );
+    });
+
+    // Issue #561: a PayNow credit that cannot be resolved to an own account is
+    // held, never booked as an uncategorised positive inflow (income). The
+    // deterministic parser already declines it; the LLM path still fell through
+    // to a Misc insert.
+    it("holds an unresolved PayNow credit instead of booking it as income (#561)", async () => {
+        const config = makeConfig({ USER_NAME: "there" });
+        const tools = makeTools({
+            executeTool: vi.fn(async (name) => {
+                if (name === "list_facts") return { facts: [] };
+                if (name === "fetch_context")
+                    return {
+                        accounts: [{ id: "ocbc", name: "OCBC 360", closed: false }],
+                        categories: [],
+                        payees: [],
+                    };
+                if (name === "search_memory")
+                    return {
+                        results: [{ text: "CHONG JIN HENG maps to Spotify payee", score: 1 }],
+                    };
+                return true;
+            }),
+        });
+        const orch = new AgentOrchestrator(config, tools);
+
+        const p1 = fakePhase1Output({
+            merchant: "CHONG JIN HENG",
+            amount_cents: 474,
+            account_id: "ocbc",
+            _is_paynow: true,
+        });
+        const p2 = await orch._resolvePhase2(p1);
+
+        expect(p2.payee_name).toBe("Misc");
+        expect(p2.category_id).toBeNull();
+        expect(p2._is_transfer).toBeUndefined();
+        expect(p2._hold_unresolved_paynow).toBe(true);
+
+        const result = await orch._executePhase3Core(p2, { silent: false });
+
+        expect(result.action).toBe("notified");
+        expect(tools.executeTool).not.toHaveBeenCalledWith(
+            "insert_transaction",
+            expect.anything(),
+        );
+    });
+
+    it("holds a self-identity PayNow credit with no transfer payee (#561)", async () => {
+        const config = makeConfig({ USER_NAME: "there" });
+        const tools = makeTools({
+            executeTool: vi.fn(async (name) => {
+                if (name === "list_facts") return { facts: [] };
+                if (name === "fetch_context")
+                    return {
+                        accounts: [
+                            { id: "trust", name: "Trust Bank", closed: false },
+                            { id: "ocbc", name: "OCBC 360", closed: false },
+                        ],
+                        categories: [{ id: "banking", name: "Banking" }],
+                        // No payee carries transfer_acct, so no transfer can be
+                        // reserved for the sending account.
+                        payees: [],
+                    };
+                if (name === "search_memory")
+                    return {
+                        results: [{ text: "Trust Bank maps to Banking category", score: 1 }],
+                    };
+                return true;
+            }),
+        });
+        const orch = new AgentOrchestrator(config, tools);
+
+        const p1 = fakePhase1Output({
+            merchant: "Trust Bank",
+            amount_cents: 474,
+            account_id: "ocbc",
+            _is_paynow: true,
+        });
+        const p2 = await orch._resolvePhase2(p1);
+
+        expect(p2.payee_name).toBe("Trust Bank");
+        expect(p2.payee_source).toBe("self_identity");
+        expect(p2.category_id).toBeNull();
+        // No transfer payee exists, so the credit cannot be reserved and must be
+        // held rather than booked as an uncategorised inflow.
+        expect(p2._hold_unresolved_paynow).toBe(true);
+
+        const result = await orch._executePhase3Core(p2, { silent: false });
+
+        expect(result.action).toBe("notified");
+        expect(tools.executeTool).not.toHaveBeenCalledWith(
+            "insert_transaction",
+            expect.anything(),
+        );
+    });
+
+    // Review round 2 on #561: pre-seeding Misc for every PayNow killed the
+    // learned merchant mapping for ordinary personal-PayNow debits.
+    it("keeps the learned merchant payee for a PayNow debit (#561)", async () => {
+        const config = makeConfig();
+        const tools = makeTools({
+            executeTool: vi.fn(async (name, args) => {
+                if (name === "list_facts") return { facts: [] };
+                if (name === "fetch_context")
+                    return {
+                        accounts: [{ id: "trust", name: "Trust Bank", closed: false }],
+                        categories: [{ id: "food", name: "Food" }],
+                        payees: [],
+                    };
+                if (name === "search_memory" && args?.query === "Hawker Chan")
+                    return {
+                        results: [{ text: "Hawker Chan maps to Hawker Chan payee", score: 1 }],
+                    };
+                return { results: [] };
+            }),
+        });
+        const orch = new AgentOrchestrator(config, tools);
+
+        const p2 = await orch._resolvePhase2({
+            merchant: "Hawker Chan",
+            amount_cents: -474,
+            currency: "SGD",
+            account_id: "trust",
+            budget_id: "test-budget",
+            action: "insert",
+            _is_paynow: true,
+        });
+
+        expect(p2.payee_name).toBe("Hawker Chan");
+        expect(p2.payee_source).toBe("memory");
+        expect(p2._hold_unresolved_paynow).toBeUndefined();
+    });
+
+    it("reserves an incoming self-transfer the right way round (#561)", async () => {
+        const config = makeConfig();
+        const tools = makeTools({
+            executeTool: vi.fn(async (name) => {
+                if (name === "list_facts") return { facts: [] };
+                if (name === "fetch_context")
+                    return {
+                        accounts: [
+                            { id: "trust", name: "Trust Bank", closed: false },
+                            { id: "ocbc", name: "OCBC 360", closed: false },
+                        ],
+                        categories: [],
+                        payees: [{ id: "transfer-trust", transfer_acct: "trust" }],
+                    };
+                return { results: [] };
+            }),
+        });
+        const orch = new AgentOrchestrator(config, tools);
+
+        const p2 = await orch._resolvePhase2({
+            merchant: "Trust Bank",
+            amount_cents: 474,
+            currency: "SGD",
+            account_id: "ocbc",
+            account_name: "OCBC 360",
+            budget_id: "test-budget",
+            action: "insert",
+            _is_paynow: true,
+        });
+
+        expect(p2._is_transfer).toBe(true);
+        expect(p2.category_id).toBeNull();
+        expect(p2._hold_unresolved_paynow).toBeUndefined();
+        // Sender is the source, the credited account is the destination.
+        expect(p2._transfer.source_account_id).toBe("trust");
+        expect(p2._transfer.destination_account_id).toBe("ocbc");
+    });
+
+    it("reserves an outgoing transfer the right way round (#561)", async () => {
+        const config = makeConfig();
+        const tools = makeTools({
+            executeTool: vi.fn(async (name) => {
+                if (name === "fetch_context")
+                    return {
+                        accounts: [
+                            { id: "ocbc", name: "OCBC 360", closed: false },
+                            { id: "trust", name: "Trust Bank", closed: false },
+                        ],
+                        categories: [],
+                        payees: [{ id: "transfer-trust", transfer_acct: "trust" }],
+                    };
+                return { results: [] };
+            }),
+        });
+        const orch = new AgentOrchestrator(config, tools);
+
+        // The alert named the destination account, so the account-name swap
+        // supplies the payee. The direction is what this test pins.
+        const p2 = await orch._resolvePhase2({
+            merchant: "Trust Bank",
+            payee_name: "Trust Bank",
+            amount_cents: -474,
+            currency: "SGD",
+            account_id: "ocbc",
+            budget_id: "test-budget",
+            action: "insert",
+        });
+
+        expect(p2._is_transfer).toBe(true);
+        expect(p2._transfer.source_account_id).toBe("ocbc");
+        expect(p2._transfer.destination_account_id).toBe("trust");
+    });
+
     it("reserves a transfer recognised by account name (#557)", async () => {
         const config = makeConfig();
         const tools = makeTools();
@@ -2553,13 +2852,14 @@ describe("_resolvePhase2 transfer detection", () => {
         const result = await orch._resolvePhase2({
             account_id: "acct-ocbc",
             payee_name: "Trust Bank",
-            amount_cents: 100,
+            amount_cents: -100,
             currency: "SGD",
             date: "2026-09-13",
         });
 
         expect(result._is_transfer).toBe(true);
         expect(result._transfer).toBeDefined();
+        // A debit: the booked account pays, so it is the source.
         expect(result._transfer.source_account_id).toBe("acct-ocbc");
         expect(result._transfer.destination_account_id).toBe("acct-trust");
         expect(result._transfer.amount_cents).toBe(100);

@@ -736,6 +736,11 @@ describe("Auto-learning", () => {
       choices: [{ message: { content: '{"payee":"Coffee"}' } }],
     });
 
+    // The write goes through write-time identity validation, so the live
+    // account list is fetched first (#561).
+    const accounts = [{ id: "ocbc", name: "OCBC 360", closed: false }];
+    registry._handle_fetch_accounts = async () => accounts;
+
     await registry._handle_resolve_merchant({
       merchant: "UnchartedBiz",
       budget_id: "test-budget",
@@ -743,6 +748,7 @@ describe("Auto-learning", () => {
 
     expect(memory.add).toHaveBeenCalledWith(
       "UnchartedBiz maps to Coffee payee",
+      accounts,
     );
 
     vi.unstubAllGlobals();
@@ -1534,6 +1540,83 @@ describe("Multi-word payee regex", () => {
     });
 
     expect(result).toEqual({ payee: "Fun Money", source: "memory" });
+  });
+});
+
+describe("web-path memory write is validated (#561)", () => {
+  /**
+   * Registry whose web branch returns `payee`, with live accounts supplied (or
+   * an error object when the account list cannot be read).
+   */
+  function webRegistry(memory, accounts) {
+    const registry = new ToolRegistry(mockConfig(), memory);
+    registry._handle_search_web = vi.fn(async () => ({
+      results: [
+        { title: "Coffee", url: "https://coffee.test", description: "cafe" },
+      ],
+    }));
+    registry._classify_merchant = vi.fn(async () => "Coffee");
+    registry._handle_fetch_accounts = vi.fn(async () => accounts);
+    return registry;
+  }
+
+  it("passes live accounts into the web-path memory write", async () => {
+    const memory = mockMemoryStore();
+    const accounts = [{ id: "ocbc", name: "OCBC 360", closed: false }];
+    const registry = webRegistry(memory, accounts);
+
+    const result = await registry._handle_resolve_merchant({
+      merchant: "Kopi Place",
+      budget_id: "test-budget",
+    });
+
+    expect(result).toEqual({ payee: "Coffee", source: "web" });
+    expect(memory.add).toHaveBeenCalledWith(
+      "Kopi Place maps to Coffee payee",
+      accounts,
+    );
+  });
+
+  it("does not write a web payee when the account list cannot be read", async () => {
+    const memory = mockMemoryStore();
+    const registry = webRegistry(memory, { error: "upstream down" });
+
+    const result = await registry._handle_resolve_merchant({
+      merchant: "Kopi Place",
+      budget_id: "test-budget",
+    });
+
+    // The classification still stands; only the unvalidatable write is dropped.
+    expect(result).toEqual({ payee: "Coffee", source: "web" });
+    expect(memory.add).not.toHaveBeenCalled();
+  });
+
+  it("does not store a web payee that is one of the user's own accounts", async () => {
+    const { MemoryStore } = await import("../src/memory.js");
+    const { mkdtempSync } = await import("node:fs");
+    const { tmpdir } = await import("node:os");
+    const { join } = await import("node:path");
+    const store = new MemoryStore(join(mkdtempSync(join(tmpdir(), "mem-")), "MEMORY.md"));
+    const registry = new ToolRegistry(mockConfig(), store);
+    registry._handle_search_web = vi.fn(async () => ({
+      results: [
+        { title: "Trust Bank", url: "https://trust.test", description: "bank" },
+      ],
+    }));
+    registry._classify_merchant = vi.fn(async () => "Trust Bank");
+    registry._handle_fetch_accounts = vi.fn(async () => [
+      { id: "trust", name: "Trust Bank", closed: false },
+    ]);
+
+    const result = await registry._handle_resolve_merchant({
+      merchant: "Trust Bank",
+      budget_id: "test-budget",
+    });
+
+    expect(result).toEqual({ payee: "Trust Bank", source: "web" });
+    expect(
+      store.listFacts().some((f) => /maps to Trust Bank payee/i.test(f)),
+    ).toBe(false);
   });
 });
 

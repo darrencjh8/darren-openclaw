@@ -297,6 +297,7 @@ const TOOLS = [
           type: "string",
           description: "Complete natural-language sentence",
         },
+        budget_id: { type: "string", description: "Budget containing accounts" },
       },
       required: ["fact"],
     },
@@ -314,6 +315,7 @@ const TOOLS = [
       properties: {
         old_text: { type: "string" },
         new_text: { type: "string" },
+        budget_id: { type: "string", description: "Budget containing accounts" },
       },
       required: ["old_text", "new_text"],
     },
@@ -1001,10 +1003,32 @@ export class ToolRegistry {
     return { results: await this._memory.search(query) };
   }
 
-  async _handle_learn_fact({ fact }) {
+  /**
+   * Live accounts for write-time identity validation. Refuses instead of
+   * returning an empty list when the accounts could not be read, so a failed
+   * fetch cannot silently disable the check that keeps own-account facts out of
+   * memory. Review round 2 on #561.
+   */
+  async _identityAccounts(budget_id) {
+    const accounts = await this._handle_fetch_accounts({
+      budget_id: budget_id || this._config.primaryBudgetFile,
+    });
+    if (!Array.isArray(accounts)) {
+      throw new Error("account list unavailable for fact validation");
+    }
+    return accounts;
+  }
+
+  async _handle_learn_fact({ fact, budget_id }) {
     if (!this._memory)
       return { added: false, skipped: false, reason: "no memory store" };
-    return await this._memory.add(fact);
+    let accounts;
+    try {
+      accounts = await this._identityAccounts(budget_id);
+    } catch (error) {
+      return { added: false, skipped: true, reason: error.message };
+    }
+    return await this._memory.add(fact, accounts);
   }
 
   async _handle_list_facts() {
@@ -1033,9 +1057,15 @@ export class ToolRegistry {
     return this._memory.cleanup();
   }
 
-  async _handle_update_fact({ old_text, new_text }) {
+  async _handle_update_fact({ old_text, new_text, budget_id }) {
     if (!this._memory) return { updated: false, found: false };
-    const result = this._memory.update(old_text, new_text);
+    let accounts;
+    try {
+      accounts = await this._identityAccounts(budget_id);
+    } catch (error) {
+      return { updated: false, found: false, reason: error.message };
+    }
+    const result = this._memory.update(old_text, new_text, accounts);
     if (result.updated) this._cooldown.clear();
     return result;
   }
@@ -1765,7 +1795,15 @@ export class ToolRegistry {
           ),
         ]);
         if (result) {
-          await this._memory.add(merchant + " maps to " + result + " payee");
+          // Route through the validated write, so a web-classified payee that
+          // is one of the user's own account names can never be stored as a
+          // merchant fact and re-poison memory (issue #561). The write failing
+          // is not fatal: the classification already succeeded. Review rounds
+          // 2 and 3 on #561.
+          await this._handle_learn_fact({
+            fact: merchant + " maps to " + result + " payee",
+            budget_id: budgetId,
+          });
           return { payee: result, source: "web" };
         }
       } catch {

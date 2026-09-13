@@ -33,6 +33,7 @@ const MEMORY_TEMPLATE = `# Long-Term Memory
 import {
   CANONICAL_SUFFIX_RE,
   STRUCTURED_PATTERNS,
+  accountAliases,
   canonicalSuffixFact,
   matchAccountByName,
   parseSuffixFact,
@@ -42,6 +43,7 @@ import {
 export {
   CANONICAL_SUFFIX_RE,
   STRUCTURED_PATTERNS,
+  accountAliases,
   canonicalSuffixFact,
   matchAccountByName,
   parseSuffixFact,
@@ -102,6 +104,10 @@ function mappingEntity(fact) {
   const suffix = text.match(CANONICAL_SUFFIX_RE);
   if (suffix) return normalize(suffix[2]);
   return null;
+}
+
+function isMaskedKey(entity) {
+  return /[＊*]{2,}/u.test(entity);
 }
 
 /**
@@ -197,7 +203,7 @@ export class MemoryStore {
    *  2. Structured key match (O(1)) — contradiction → skip + warn
    *  3. Semantic cosine similarity (O(N), free-form only)
    */
-  async add(fact) {
+  async add(fact, accounts = []) {
     fact = fact.trim();
     if (!fact) return { added: false, skipped: false, reason: "empty fact" };
 
@@ -210,6 +216,10 @@ export class MemoryStore {
     // ── Level 2: structured dedup (O(1) Map lookup) ──
     const parsed = this._parseStructured(fact);
     if (parsed) {
+      const identityReason = this._identityValidationReason(fact, parsed, accounts);
+      if (identityReason) {
+        return { added: false, skipped: true, reason: identityReason };
+      }
       const key = `${parsed.entity}|||${parsed.relation}`;
       const existing = this._structuredIndex.get(key);
       if (existing) {
@@ -310,13 +320,17 @@ export class MemoryStore {
    * Returns { updated, found, old } — old is the matched fact text
    * so callers can verify the correct fact was updated.
    */
-  update(oldText, newText) {
+  update(oldText, newText, accounts = []) {
     const normNew = newText.trim();
     const normOld = (oldText || "").trim();
 
     // Guard: empty/whitespace oldText is ambiguous — reject early
     if (!normOld) {
       return { updated: false, found: false };
+    }
+    const identityReason = this._identityValidationReason(normNew, undefined, accounts);
+    if (identityReason) {
+      return { updated: false, found: false, reason: identityReason };
     }
 
     // ── Tier 1: O(1) structured key lookup ──
@@ -599,6 +613,28 @@ export class MemoryStore {
    * @param {string} fact
    * @returns {{entity: string, relation: string, value: string} | null}
    */
+  _identityValidationReason(fact, parsed = this._parseStructured(fact), accounts = []) {
+    if (!parsed) return null;
+    if (isMaskedKey(parsed.entity)) return "masked key";
+    const suffixKey = /^(?:card|account)\s+ending\s+\d{4,6}$/i.test(parsed.entity);
+    // The same matcher the resolver uses, so a key written as a stored account
+    // alias ("Nova Card" for "DBS Nova Card") is refused too. Review round 2.
+    const accountKey = matchAccountByName(
+      parsed.entity,
+      accounts,
+      accountAliases(this._facts, accounts),
+    ).matched;
+    if (
+      (parsed.relation === "->category" ||
+        parsed.relation === "merchant->payee" ||
+        parsed.relation === "->payee") &&
+      (suffixKey || accountKey)
+    ) {
+      return "self identity";
+    }
+    return null;
+  }
+
   _parseStructured(fact) {
     for (const { re, rel } of STRUCTURED_PATTERNS) {
       const m = fact.match(re);

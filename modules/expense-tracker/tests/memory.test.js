@@ -1660,18 +1660,18 @@ describe("MemoryStore", () => {
       expect(facts).not.toContain("Food maps to Dining category");
     });
 
-    it("updates is-account to →payee for the same entity", () => {
+    it("refuses to update an own-account identity to a merchant payee (#561)", () => {
       const store = new MemoryStore(emptyMemoryPath);
       store._facts = ["Epsilon Nova is a debit card account"];
       store._rebuildIndices();
-      const result = store.update(
-        "Epsilon Nova is a debit card account",
-        "Epsilon Nova maps to Banking payee",
-      );
-      expect(result.updated).toBe(true);
-      const facts = store.listFacts();
-      expect(facts).toContain("Epsilon Nova maps to Banking payee");
-      expect(facts).not.toContain("Epsilon Nova is a debit card account");
+      expect(
+        store.update(
+          "Epsilon Nova is a debit card account",
+          "Epsilon Nova maps to Banking payee",
+          [{ id: "epsilon", name: "Epsilon Nova", closed: false }],
+        ),
+      ).toEqual({ updated: false, found: false, reason: "self identity" });
+      expect(store.listFacts()).toContain("Epsilon Nova is a debit card account");
     });
 
     // ── Structured index + dedup set consistency after complex updates ─
@@ -2058,6 +2058,62 @@ describe("merchant mapping lookup", () => {
     expect(
       store._acceptSemanticHit("Example User identifies this as a work expense", 0.59),
     ).toBe(false);
+    unlinkSync(path);
+  });
+});
+
+describe("self-identity fact validation (#561)", () => {
+  it("rejects category and merchant mappings keyed by own identities or masks", async () => {
+    const path = tempFile(".md", "# Long-Term Memory\n\n## Facts\n\n");
+    const store = new MemoryStore(path);
+    const accounts = [{ id: "ocbc", name: "OCBC 360", closed: false }];
+
+    await expect(store.add("OCBC 360 maps to Banking category", accounts)).resolves.toMatchObject({
+      added: false,
+      reason: "self identity",
+    });
+    await expect(store.add("OCBC 360 maps to Spotify payee", accounts)).resolves.toMatchObject({
+      added: false,
+      reason: "self identity",
+    });
+    await expect(store.add("T*** U*** maps to Spotify payee", accounts)).resolves.toMatchObject({
+      added: false,
+      reason: "masked key",
+    });
+    await store.add("Toast Box maps to Food payee");
+    expect(
+      store.update("Toast Box maps to Food payee", "OCBC 360 maps to Spotify payee", accounts),
+    ).toEqual({ updated: false, found: false, reason: "self identity" });
+    unlinkSync(path);
+  });
+
+  it("uses live accounts even before identity facts exist (#561)", async () => {
+    const path = tempFile(".md", "# Long-Term Memory\n\n## Facts\n\n");
+    const store = new MemoryStore(path);
+    const accounts = [{ id: "ocbc", name: "OCBC  360", closed: false }];
+
+    await expect(store.add("OCBC 360. maps to Banking category", accounts)).resolves.toMatchObject({
+      added: false,
+      reason: "self identity",
+    });
+    await store.add("Toast Box maps to Food payee");
+    expect(
+      store.update("Toast Box maps to Food payee", "OCBC 360 maps to Spotify payee", accounts),
+    ).toEqual({ updated: false, found: false, reason: "self identity" });
+    unlinkSync(path);
+  });
+
+  it("refuses a key written as a stored account alias (#561)", async () => {
+    const path = tempFile(".md", "# Long-Term Memory\n\n## Facts\n\n");
+    const store = new MemoryStore(path);
+    const accounts = [{ id: "nova", name: "DBS Nova Card", closed: false }];
+    // The alias only exists once the type fact is stored, so the refusal has to
+    // read the same alias map the resolver uses.
+    await store.add("Nova Card is a DBS Nova Card account");
+
+    await expect(
+      store.add("Nova Card maps to Banking category", accounts),
+    ).resolves.toMatchObject({ added: false, reason: "self identity" });
     unlinkSync(path);
   });
 });

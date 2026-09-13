@@ -1,4 +1,9 @@
-import { parseSuffixFact, resolveFactAccount } from "./suffix-facts.js";
+import {
+  accountAliases,
+  matchAccountByName,
+  parseSuffixFact,
+  resolveFactAccount,
+} from "./suffix-facts.js";
 
 const BANK_ALIASES = [
   ["OCBC", /\b(?:ocbc|oversea\s*chinese\s*banking)\b/i],
@@ -138,10 +143,12 @@ function namedAccount(value, fallbackBank) {
   };
 }
 
-function baseMovement({ direction, amount, currency, occurredAt, ownAccount, counterparty = null, reference = "", merchant = null, descriptor = "" }) {
+function baseMovement({ direction, amount, currency, occurredAt, ownAccount, counterparty = null, reference = "", merchant = null, descriptor = "", isPayNow = false, isPayNowMerchant = false }) {
   if (!amount || !currency || !occurredAt || !ownAccount?.suffix) return null;
   return {
     kind: "bank_movement",
+    is_paynow: isPayNow,
+    is_paynow_merchant: isPayNowMerchant,
     direction,
     amount_cents: cents(currency, amount, direction),
     currency: currency.toUpperCase(),
@@ -230,10 +237,15 @@ export function parseBankMovement(text, { senderBank = null, receivedAt } = {}) 
 
   const deposited = field(body, ["Account that money was deposited in"]);
   if (deposited) {
+    const payNowSender = body.match(/PayNow\s+transfer\s+from\s+(.+?)(?:\n|$)/i)?.[1]
+      ?.replace(/[.,;:!?]+$/, "").trim();
     return baseMovement({
       direction: "incoming", amount, currency,
       occurredAt: isoDateTime("", field(body, ["Time of deposit"]), receivedAt),
-      ownAccount: { bank: senderBank, suffix: suffix(deposited) }, reference,
+      ownAccount: { bank: senderBank, suffix: suffix(deposited) },
+      counterparty: payNowSender ? namedAccount(payNowSender, bankFromText(payNowSender)) : null,
+      reference,
+      isPayNow: /\bPayNow\b/i.test(body),
     });
   }
 
@@ -248,6 +260,9 @@ export function parseBankMovement(text, { senderBank = null, receivedAt } = {}) 
   const destination = namedAccount(to, bankFromText(to));
   const payNow = /PayNow\s+transfer/i.test(body) && !to;
   const merchantMatch = body.match(/made to\s+(.+?)\s+using their\s+Unique Entity Number/i);
+  const payNowRecipient = body.match(
+    /PayNow\s+transfer\s+has\s+been\s+made\s+to\s+(.+?)(?:\s+using their\s+Unique Entity Number|\n|$)/i,
+  )?.[1]?.replace(/[.,;:!?]+$/, "").trim();
   // Decline rather than fabricate a movement when we cannot identify which
   // tracked account (if any) "To:" refers to. This shape (generic From/To
   // labels) is also used by ordinary card-purchase alerts where "To:" is a
@@ -263,10 +278,16 @@ export function parseBankMovement(text, { senderBank = null, receivedAt } = {}) 
     direction: "outgoing", amount, currency,
     occurredAt: isoDateTime(dateText, timeText, receivedAt),
     ownAccount,
-    counterparty: destination?.suffix ? destination : null,
+    counterparty: destination?.suffix
+      ? destination
+      : payNowRecipient && !merchantMatch
+        ? namedAccount(payNowRecipient, bankFromText(payNowRecipient))
+        : null,
     reference,
     merchant: payNow ? merchantMatch?.[1]?.trim() || null : null,
     descriptor,
+    isPayNow: payNow,
+    isPayNowMerchant: Boolean(merchantMatch),
   });
 }
 
@@ -285,7 +306,11 @@ function resolveAccount(evidence, accounts) {
 }
 
 export function identityMappingsFromFacts(facts, accounts) {
-  const mappings = { suffix: new Map(), recipient: new Map() };
+  const mappings = {
+    suffix: new Map(),
+    recipient: new Map(),
+    aliases: accountAliases(facts, accounts),
+  };
   for (const fact of facts || []) {
     const text = typeof fact === "string" ? fact : fact?.text || "";
     const parsed = parseSuffixFact(text);
@@ -378,21 +403,35 @@ export function resolveMovementAccounts(movement, accounts, payees, mappings = {
         ? mappings.recipient.get(movement.recipient_bank) || null
         : null)
   );
+  const namedOther = movement.counterparty?.name
+    ? matchAccountByName(movement.counterparty.name, accounts, mappings.aliases)
+    : null;
   const other = otherConflict ? null : (
     resolveMappedAccount(movement.counterparty, mappings)
       || resolveAccount(movement.counterparty, accounts)
+      || (namedOther?.matched
+        ? accounts.find((account) => account.id === namedOther.id) || null
+        : null)
   );
   const destination = movement.direction === "outgoing" ? other : own;
   // For a one-sided incoming movement (deposit into own account, no counterparty),
   // the source is the own account that received the funds.
   const source = movement.direction === "outgoing" ? own : (other || own);
+  const sourcePayee = source
+    ? payees.find((payee) => payee.transfer_acct === source.id) || null
+    : null;
   const destinationPayee = destination
     ? payees.find((payee) => payee.transfer_acct === destination.id) || null
     : null;
+  // Incoming alerts are booked on the credited account, so prefer the sending
+  // account's transfer payee; legacy alerts can still reserve with destination.
+  const transferPayee = movement.direction === "incoming"
+    ? sourcePayee || destinationPayee
+    : destinationPayee;
   return {
     source_account: source,
     destination_account: destination,
-    destination_payee: destinationPayee,
-    internal: !!(source && destination && source.id !== destination.id && destinationPayee),
+    destination_payee: transferPayee,
+    internal: !!(source && destination && source.id !== destination.id && transferPayee),
   };
 }

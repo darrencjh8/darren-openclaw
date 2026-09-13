@@ -24,6 +24,7 @@ import {
     accountAliases,
     accountTokens,
     canonicalSuffixFact,
+    matchAccountByName,
     parseSuffixFact,
     resolveFactAccount as resolveFactAccountShared,
 } from "./suffix-facts.js";
@@ -282,6 +283,36 @@ export function nameMatchesBank(name, bank) {
     const aliases = BANK_ALIASES[bank.toLowerCase()] || [bank];
     const lower = name.toLowerCase();
     return aliases.some((t) => new RegExp(`\\b${t}\\b`, "i").test(lower));
+}
+
+/**
+ * True when `value` is a mask of one of the user's own account names: it stays
+ * literal outside the masked run, and the run matches one or more letters.
+ * `T*** U***` masks `Trust Bank`; `Chong *** Heng` masks `Chong Jin Heng`.
+ * Only account names are considered, so a masked merchant cannot be mistaken
+ * for a self identity. Issue #561.
+ */
+function masksOwnAccount(value, accounts, aliases) {
+    const candidate = String(value || "").trim();
+    if (!/[＊*]{2,}/.test(candidate)) return false;
+    const names = [
+        ...(accounts || []).map((a) => a?.name),
+        ...(aliases ? aliases.values() : []),
+    ].filter(Boolean);
+    for (const name of names) {
+        const target = String(name).trim();
+        if (!target) continue;
+        const pattern = candidate
+            .split(/([＊*]+)/)
+            .map((part) =>
+                /^[＊*]+$/.test(part)
+                    ? "[\\p{L}\\p{N}]+"
+                    : part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/\s+/g, "\\s+"),
+            )
+            .join("");
+        if (new RegExp(`^${pattern}$`, "iu").test(target)) return true;
+    }
+    return false;
 }
 
 /** Remove secret-looking facts from a search result list. */
@@ -580,6 +611,7 @@ export class AgentOrchestrator {
         const queries = new Set([
             movement.own_account?.suffix,
             movement.counterparty?.suffix,
+            movement.counterparty?.name,
             movement.recipient_bank ? `${movement.recipient_bank} alert recipient` : "",
         ].filter(Boolean));
         for (const query of queries) {
@@ -597,25 +629,31 @@ export class AgentOrchestrator {
         if (!source || !date) return null;
 
         if (resolved.internal) {
+            const incoming = movement.direction === "incoming";
+            const bookedAccount = incoming ? destination : source;
+            const otherAccount = incoming ? source : destination;
             return {
-                merchant: movement.counterparty?.name || destination.name,
-                amount_cents: -Math.abs(movement.amount_cents),
+                merchant: movement.counterparty?.name || otherAccount.name,
+                amount_cents: incoming
+                    ? Math.abs(movement.amount_cents)
+                    : -Math.abs(movement.amount_cents),
                 date,
                 currency: movement.currency,
-                account_id: source.id,
-                account_name: source.name,
+                account_id: bookedAccount.id,
+                account_name: bookedAccount.name,
                 budget_id: budgetId,
                 action: "insert",
-                payee_name: destination.name,
+                payee_name: otherAccount.name,
                 payee_id: resolved.destination_payee.id,
                 category_id: null,
-                raw_description: `Transfer to ${movement.counterparty?.name || destination.name}`,
+                raw_description: `Transfer ${incoming ? "from" : "to"} ${movement.counterparty?.name || otherAccount.name}`,
                 raw_merchant_descriptor: "",
                 notes: movement.reference_number ? `Statement: ${movement.reference_number}` : "",
                 reasoning: "Deterministic structured bank transfer",
                 notify_message: "",
                 _suffix_mappings: suffixMappings,
                 _is_transfer: true,
+                _is_paynow: movement.is_paynow === true,
                 _transfer: {
                     budget_id: budgetId,
                     source_account_id: source.id,
@@ -669,6 +707,8 @@ export class AgentOrchestrator {
                 notify_message: "",
                 _suffix_mappings: suffixMappings,
                 _structured_movement: true,
+                _is_paynow: movement.is_paynow === true,
+                _paynow_merchant: movement.is_paynow_merchant === true,
             };
         }
         return null;
@@ -978,6 +1018,8 @@ export class AgentOrchestrator {
                     action,
                     payee_name: "",
                     category_id: "",
+                    _is_paynow: /\bpaynow\b/i.test(emailText),
+                    _paynow_merchant: /\bUnique Entity Number\b/i.test(emailText),
                 };
                 // _suffix_mappings is set only by the deterministic
                 // movement / bill-payment parsers. Strip any LLM-injected
@@ -1405,7 +1447,83 @@ export class AgentOrchestrator {
             output.notes ||
             ""
         ).trim();
-        if (!output.payee_name && searchTerm) {
+        let cachedCtx = null;
+        // Set when a live account matched, so the payee must survive to the
+        // transfer lookup below instead of being replaced by a merchant.
+        let paynowAccountMatched = false;
+        // Set when the PayNow identity check has already decided the payee, so
+        // the merchant tiers below must not override it.
+        let paynowSettled = false;
+        if (output._is_paynow && searchTerm) {
+            // A credit is income unless it is a transfer, so it must never be
+            // booked as a merchant or as an uncategorised positive inflow. A
+            // debit is an ordinary payment and still has to reach its learned
+            // merchant payee and the transfer lookup below. Review round 2 #561.
+            const credit = Number(output.amount_cents) > 0;
+            // Set when the counterparty is a mask of one of the user's own
+            // accounts; it must never be looked up as a merchant. Set when the
+            // counterparty is not a known merchant, so a credit from it is held
+            // rather than booked. A debit is only saved by an exact learned key.
+            let selfMasked = false;
+            let unresolved = false;
+            try {
+                cachedCtx =
+                    (await this._tools.executeTool("fetch_context", {
+                        budget_id: output.budget_id || "",
+                    })) || {};
+                const accounts = Array.isArray(cachedCtx.accounts)
+                    ? cachedCtx.accounts
+                    : [];
+                const facts =
+                    (await this._tools.executeTool("list_facts", {}))?.facts ||
+                    [];
+                const aliases = accountAliases(facts, accounts);
+                // The mask test runs first: the account matcher compares token
+                // sets, so a mask like "T*** B***" can reach a live account
+                // through one surviving token and be mistaken for a name.
+                if (masksOwnAccount(searchTerm, accounts, aliases)) {
+                    selfMasked = true;
+                    unresolved = true;
+                } else {
+                    const account = matchAccountByName(
+                        searchTerm,
+                        accounts,
+                        aliases,
+                    );
+                    if (account.matched) {
+                        output.payee_name = account.name;
+                        output.payee_source = "self_identity";
+                        paynowAccountMatched = true;
+                    } else if (!output._paynow_merchant) {
+                        unresolved = true;
+                    }
+                }
+            } catch (error) {
+                logger.warn({ event: "paynow_identity_failed", merchant: searchTerm, budget_id: output.budget_id || "", error: error.message });
+                unresolved = true;
+            }
+            // A recognised own account is only a transfer once the transfer
+            // lookup below finds its payee; until then a credit from it is still
+            // income and is held the same way an unresolved one is.
+            if (credit && (unresolved || paynowAccountMatched)) {
+                output._hold_unresolved_paynow = true;
+            }
+            if (selfMasked || (unresolved && credit)) {
+                // A masked self identity is a person, not a merchant key, and a
+                // held credit must not be booked: both are Misc with no category.
+                // An unresolved debit still gets its merchant tiers below.
+                output.payee_name = "Misc";
+                output.payee_source = "paynow_unresolved";
+                paynowSettled = true;
+            } else if (paynowAccountMatched) {
+                // Keep the account payee for the transfer lookup below.
+                paynowSettled = true;
+            }
+        }
+        // A PayNow counterparty the identity check settled keeps that payee; the
+        // transfer lookup below is what turns an account match into a transfer.
+        // Everything else takes the merchant tiers. Review round 2 on #561.
+        if (!output.payee_name && searchTerm && !paynowSettled) {
             let memResults = [];
             try {
                 const memResult = await this._tools.executeTool(
@@ -1467,10 +1585,10 @@ export class AgentOrchestrator {
         // payee (the one with transfer_acct set) so Actual Budget creates a
         // transfer instead of a regular expense.
         // Also caches fetch_context so category resolution below reuses it.
-        let cachedCtx = null;
         if (output.payee_name && output.payee_name !== "Misc") {
             try {
                 cachedCtx =
+                    cachedCtx ||
                     (await this._tools.executeTool("fetch_context", {
                         budget_id: output.budget_id || "",
                     })) || {};
@@ -1494,6 +1612,19 @@ export class AgentOrchestrator {
                     if (transferPayee) {
                         output.payee_id = transferPayee.id;
                         output._is_transfer = true;
+                        // The reserved transfer always runs source -> destination,
+                        // and the booked account is the one this row sits on: it
+                        // is the destination when the row is a credit and the
+                        // source when it is a debit. The deterministic parser
+                        // reads an incoming credit exactly this way, so both
+                        // routes agree. Review round 2 on #561.
+                        const credited = Number(output.amount_cents) > 0;
+                        const bookAccountId = output.account_id || "";
+                        const otherAccountId = accountMatch.id;
+                        // The hold is for a credit that resolved to no other
+                        // account; a reserved transfer is exactly what it was
+                        // waiting for.
+                        delete output._hold_unresolved_paynow;
                         // Reserve like the deterministic path does, so a second
                         // real transfer of the same amount is not dropped as a
                         // duplicate (issue #557). Without this, an account-name
@@ -1504,8 +1635,12 @@ export class AgentOrchestrator {
                         if (Number.isFinite(swapAmount))
                             output._transfer = {
                                 budget_id: output.budget_id || "",
-                                source_account_id: output.account_id || "",
-                                destination_account_id: accountMatch.id,
+                                source_account_id: credited
+                                    ? otherAccountId
+                                    : bookAccountId,
+                                destination_account_id: credited
+                                    ? bookAccountId
+                                    : otherAccountId,
                                 currency:
                                     output.currency ||
                                     this._config.primaryCurrency,
@@ -1515,6 +1650,12 @@ export class AgentOrchestrator {
                                     new Date().toISOString(),
                                 payee_id: transferPayee.id,
                             };
+                    } else if (output._hold_unresolved_paynow) {
+                        // A credit that resolved to an account but has no
+                        // transfer payee cannot be reserved, so it stays held
+                        // rather than booking an uncategorised inflow.
+                        output._is_transfer = undefined;
+                        output.payee_id = undefined;
                     }
                 }
             } catch {}
@@ -1524,7 +1665,7 @@ export class AgentOrchestrator {
         // Never categorize own-account transfers: payee→category memory facts
         // describe card spend ("Epsilon Nova Card maps to Food category"), not a
         // credit-card repayment between the user's own accounts.
-        if (!output._is_transfer && !output.category_id) {
+        if (!output._is_transfer && !output.category_id && output.payee_source !== "self_identity") {
             let liveCategories = [];
             try {
                 if (cachedCtx) {
@@ -1613,13 +1754,16 @@ export class AgentOrchestrator {
                         if (valid) {
                             output.category_id = categoryId;
                             output.category_name = valid.name;
-                            // Auto-learn for next time (learn_fact → update_fact on contradiction)
+                            // Auto-learn for next time (learn_fact → update_fact on contradiction).
+                            // The budget id is what lets write-time validation
+                            // check the key against the right account list.
                             try {
                                 const fact = `${output.payee_name} maps to ${valid.name} category`;
                                 const learned = await this._tools.executeTool(
                                     "learn_fact",
                                     {
                                         fact,
+                                        budget_id: output.budget_id || "",
                                     },
                                 );
                                 if (
@@ -1631,6 +1775,7 @@ export class AgentOrchestrator {
                                         {
                                             old_text: learned.existing,
                                             new_text: fact,
+                                            budget_id: output.budget_id || "",
                                         },
                                     );
                                 }
@@ -1679,6 +1824,24 @@ export class AgentOrchestrator {
         }
 
         if (action === "insert") {
+            // Issue #561: a PayNow credit whose sender resolves to no own
+            // account must never be booked as an uncategorised positive inflow
+            // (income). A self-transfer is not income, and the sender account
+            // has to be known to reserve the right way round, so hold it and
+            // let the user resolve it.
+            if (llmOutput._hold_unresolved_paynow) {
+                if (!silent) {
+                    await this._tools.executeTool("notify_user", {
+                        message: `Held: a PayNow credit of ${bookableAmountPrefix(llmOutput.amount_cents, llmOutput.currency)}from "${llmOutput.merchant || "unknown"}" could not be matched to one of your accounts, so it was not booked as income. Transfer it in Actual or tell me which account sent it.`,
+                    });
+                }
+                await this._tools.executeTool("log_decision", {
+                    action: "held_unresolved_paynow",
+                    reasoning: llmOutput.reasoning || "",
+                    timestamp: new Date().toISOString(),
+                });
+                return { action: "notified", details: "Held an unresolved PayNow credit" };
+            }
             const payeeName = llmOutput.payee_name || "Misc";
             const accountId = llmOutput.account_id || "";
             const categoryId =
@@ -1896,6 +2059,7 @@ export class AgentOrchestrator {
                                 "learn_fact",
                                 {
                                     fact,
+                                    budget_id: llmOutput.budget_id || "",
                                 },
                             );
                             if (learned?.reason === "contradiction") {
@@ -1919,7 +2083,9 @@ export class AgentOrchestrator {
                 ? llmOutput._suffix_mappings
                 : [];
             for (const mapping of suffixMappings) {
-                learnPromises.push(this._learnSuffixFact(mapping));
+                learnPromises.push(
+                    this._learnSuffixFact(mapping, llmOutput.budget_id || ""),
+                );
             }
             Promise.allSettled(learnPromises).catch(() => {});
 
@@ -1956,13 +2122,16 @@ export class AgentOrchestrator {
      * Persist a verified suffix→account mapping. Guarded to 4–6 digit
      * suffixes; fire-and-forget with contradiction resolution.
      */
-    async _learnSuffixFact({ suffix, accountName }) {
+    async _learnSuffixFact({ suffix, accountName }, budget_id = "") {
         if (!suffix || !accountName) return;
         const normalized = String(suffix).trim();
         if (!/^\d{4,6}$/.test(normalized)) return;
         const fact = this._suffixFactText({ suffix: normalized, accountName });
         try {
-            const learned = await this._tools.executeTool("learn_fact", { fact });
+            const learned = await this._tools.executeTool("learn_fact", {
+                fact,
+                budget_id,
+            });
             if (learned?.reason === "contradiction" && learned?.existing) {
                 // Parse the STORED fact with the shared tolerant parser, so an
                 // existing fact written as "Card/account …" or with a trailing
@@ -1982,6 +2151,7 @@ export class AgentOrchestrator {
                     await this._tools.executeTool("update_fact", {
                         old_text: learned.existing,
                         new_text: fact,
+                        budget_id,
                     });
                 } else {
                     logger.warn({
