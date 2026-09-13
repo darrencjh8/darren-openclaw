@@ -239,6 +239,23 @@ function ambiguousPayeeError(message) {
 }
 
 /**
+ * Build the error for a failed actual-api response, including the response
+ * body when it can be read. A bare status hid the cause of the 2026-09-13
+ * incident, where every budget-scoped route answered 500 with
+ * `{"error":"No budget file is open"}` and the logs showed only
+ * `actual-api 500` (issue #549).
+ */
+async function actualApiError(response) {
+  let body = "";
+  try {
+    body = String(await response.text()).trim();
+  } catch {
+    // An unreadable body leaves the bare status.
+  }
+  return new Error(`actual-api ${response.status}${body ? ` ${body}` : ""}`);
+}
+
+/**
  * Normalise a quoted integer amount to a number (#508), leaving all else as-is
  * so the route rejects it rather than it being reinterpreted here.
  */
@@ -1790,7 +1807,7 @@ export class ToolRegistry {
     const qs = params.toString();
     const url = `${this._apiUrl}${path}${qs ? "?" + qs : ""}`;
     const r = await fetch(url);
-    if (!r.ok) throw new Error(`actual-api ${r.status}`);
+    if (!r.ok) throw await actualApiError(r);
     return r.json();
   }
 
@@ -1802,7 +1819,7 @@ export class ToolRegistry {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     });
-    if (!r.ok) throw new Error(`actual-api ${r.status}`);
+    if (!r.ok) throw await actualApiError(r);
     return r.json();
   }
 
@@ -1914,7 +1931,7 @@ export class ToolRegistry {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     });
-    if (!r.ok) throw new Error(`actual-api ${r.status}`);
+    if (!r.ok) throw await actualApiError(r);
     return r.json();
   }
 
