@@ -1301,6 +1301,43 @@ export class ToolRegistry {
 
   async _handle_reserve_transfer(args) {
     let reservation = this._dedup.reserveTransfer(args);
+    // The far side may already be booked, because an alert can name the deposit
+    // and not the transfer (issue #557). Report it; never touch it. No field the
+    // route returns can prove a row is ours: every row this pipeline inserts is
+    // uncleared, `Misc` is also the unknown-merchant fallback, and Actual
+    // exposes no created-at, so deleting on this match would risk a real
+    // deposit. The caller warns the user instead.
+    if (reservation.status === "reserved") {
+        try {
+            const date = new Date(args.occurred_at).toISOString().slice(0, 10);
+            const [rows, payees] = await Promise.all([
+                this._get("/transactions", args.budget_id, {
+                    since_date: date,
+                    until_date: date,
+                    account_id: args.destination_account_id,
+                }),
+                this._get("/payees", args.budget_id),
+            ]);
+            const misc = Array.isArray(payees)
+                ? payees.find((p) => p.name === "Misc" && !p.transfer_acct)
+                : null;
+            const candidate = (Array.isArray(rows) ? rows : []).find(
+                (tx) =>
+                    misc &&
+                    tx.amount === Math.abs(args.amount_cents) &&
+                    !tx.transfer_id &&
+                    tx.cleared === false &&
+                    tx.payee === misc.id,
+            );
+            if (candidate)
+                reservation = {
+                    ...reservation,
+                    far_side_candidate: candidate.id,
+                };
+        } catch {
+            // Cannot read the destination account: book normally.
+        }
+    }
     if (reservation.status !== "pending") return reservation;
 
     // A timeout may occur after Actual committed. Reconcile the exact source

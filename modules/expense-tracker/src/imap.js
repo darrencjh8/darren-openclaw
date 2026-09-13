@@ -138,7 +138,8 @@ export class ImapIdleHandler {
                 for (const msg of unread) {
                     if (
                         this._dedup &&
-                        this._dedup.isRecentlyProcessed(msg.msg_id)
+                        (this._dedup.isRecentlyProcessed(msg.msg_id) ||
+                            this._dedup.isMessageBooked(msg.msg_id))
                     ) {
                         logger.info({
                             event: "imap_recently_skipped",
@@ -153,9 +154,21 @@ export class ImapIdleHandler {
                             subject: msg.subject,
                             from: msg.from,
                         });
-                        await callback(msg);
-                        if (this._dedup)
+                        const result = await callback(msg);
+                        if (this._dedup) {
                             this._dedup.recordProcessed(msg.msg_id);
+                            // A message that reached a verdict must book nothing
+                            // on a later pass, even after the retry cooldown
+                            // expires (issue #557). An uncertain outcome stays
+                            // retryable, which is what the cooldown is for.
+                            if (
+                                result &&
+                                ["inserted", "duplicate", "skipped"].includes(
+                                    result.action,
+                                )
+                            )
+                                this._dedup.markMessageBooked(msg.msg_id);
+                        }
                     } catch (e) {
                         logger.error({
                             event: "imap_callback_error",

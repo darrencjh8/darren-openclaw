@@ -227,7 +227,7 @@ describe("DedupJournal transfer journal", () => {
         occurred_at: "2026-09-01T01:06:00+08:00",
     };
 
-    it("reserves then recognizes an inserted counterpart within ten minutes", () => {
+    it("reserves then recognizes an inserted counterpart within the match window", () => {
         const reserved = journal.reserveTransfer(transfer);
         expect(reserved.status).toBe("reserved");
         journal.markTransferInserted(reserved.entry.id, "actual-transfer-1");
@@ -251,6 +251,70 @@ describe("DedupJournal transfer journal", () => {
             occurred_at: "2026-09-01T01:07:00+08:00",
         });
         expect(reverse.status).toBe("reserved");
+    });
+
+    // Issue #556: a real second transfer of the same amount minutes later is not
+    // the same event. Live case: OCBC 360 -> Trust Bank S$1.00 at 08:49Z and again
+    // at 08:53Z on 2026-09-13; the second booking must not collapse into the first.
+    it("does not merge a real repeat transfer minutes later (#556)", () => {
+        const reserved = journal.reserveTransfer(transfer);
+        journal.markTransferInserted(reserved.entry.id, "actual-transfer-1");
+
+        const repeat = journal.reserveTransfer({
+            ...transfer,
+            occurred_at: "2026-09-01T01:10:00+08:00",
+        });
+        expect(repeat.status).toBe("reserved");
+        expect(repeat.entry.id).not.toBe(reserved.entry.id);
+    });
+});
+
+describe("DedupJournal message identity (#557)", () => {
+    let dbPath;
+    let journal;
+
+    beforeEach(() => {
+        dbPath = join(
+            tmpdir(),
+            `dedup-booked-${Date.now()}-${Math.random().toString(36).slice(2)}.db`,
+        );
+        journal = new DedupJournal(dbPath);
+    });
+
+    afterEach(() => {
+        journal.close();
+        try {
+            unlinkSync(dbPath);
+        } catch {}
+    });
+
+    it("remembers a booked message after the retry cooldown is cleaned up", () => {
+        expect(journal.isMessageBooked("859")).toBe(false);
+        journal.markMessageBooked("859");
+        expect(journal.isMessageBooked("859")).toBe(true);
+
+        // The 60-minute cooldown forgets attempts so failures can retry; it must
+        // never forget that an email already produced a booking.
+        journal.cleanupProcessedUids();
+        expect(journal.isMessageBooked("859")).toBe(true);
+    });
+
+    it("forgets booked messages older than the retention window", () => {
+        journal.markMessageBooked("old");
+        journal.markMessageBooked("fresh");
+        journal._db
+            .prepare("UPDATE booked_messages SET booked_at = ? WHERE uid = ?")
+            .run(
+                new Date(
+                    Date.now() - 200 * 24 * 60 * 60 * 1000,
+                ).toISOString(),
+                "old",
+            );
+
+        journal.cleanup();
+
+        expect(journal.isMessageBooked("old")).toBe(false);
+        expect(journal.isMessageBooked("fresh")).toBe(true);
     });
 });
 

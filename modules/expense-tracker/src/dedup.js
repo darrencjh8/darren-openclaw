@@ -8,6 +8,22 @@ import { createHash } from "crypto";
 import { mkdirSync } from "fs";
 import { dirname } from "path";
 
+/**
+ * Two alerts for one transfer arrive seconds apart, so a reservation is matched
+ * against a narrow window. It must stay narrow: a genuine second transfer of the
+ * same amount is ordinary (issue #556, four minutes apart), and the journal has
+ * no bank reference to tell two events apart. Reprocessing a single email is
+ * guarded separately, by message identity.
+ */
+// Two alerts for one transfer arrive seconds apart, and a genuine repeat is
+// minutes apart, so the window sits between the two. Measured on 2026-09-13:
+// sibling alerts for one event 1 s, 1 s, and 4 s apart; two distinct real
+// transfers 237 s apart. The residual risk is a second email for one event
+// arriving later than this with an amount, which would book twice the way it
+// did before; UOB's status email did arrive 3 min 29 s after its notification,
+// and is refused only because it carries no amount (issue #557).
+const TRANSFER_MATCH_WINDOW_MS = 2 * 60 * 1000;
+
 export class DedupJournal {
     /** @param {string} dbPath - Path to dedup.db */
     constructor(dbPath = "data/dedup.db") {
@@ -36,6 +52,15 @@ export class DedupJournal {
       CREATE TABLE IF NOT EXISTS processed_uids (
         uid TEXT PRIMARY KEY,
         processed_at TEXT NOT NULL
+      )
+    `);
+        // Message identity that outlives the retry cooldown: once an email has
+        // produced a booking, reprocessing it must book nothing (issue #557).
+        // processed_uids keeps its short life so genuine failures still retry.
+        this._db.exec(`
+      CREATE TABLE IF NOT EXISTS booked_messages (
+        uid TEXT PRIMARY KEY,
+        booked_at TEXT NOT NULL
       )
     `);
         this._db.exec(`
@@ -111,8 +136,12 @@ export class DedupJournal {
         occurred_at,
     }) {
         const occurredAt = new Date(occurred_at).toISOString();
-        const start = new Date(new Date(occurredAt).getTime() - 10 * 60 * 1000).toISOString();
-        const end = new Date(new Date(occurredAt).getTime() + 10 * 60 * 1000).toISOString();
+        const start = new Date(
+            new Date(occurredAt).getTime() - TRANSFER_MATCH_WINDOW_MS,
+        ).toISOString();
+        const end = new Date(
+            new Date(occurredAt).getTime() + TRANSFER_MATCH_WINDOW_MS,
+        ).toISOString();
         const reserve = this._db.transaction(() => {
             const rows = this._db.prepare(`
               SELECT * FROM transfer_journal
@@ -190,6 +219,21 @@ export class DedupJournal {
         this._stmtInsertUid.run(uid, new Date().toISOString());
     }
 
+    /** True once this message has produced a booking; this never expires. */
+    isMessageBooked(uid) {
+        return !!this._db
+            .prepare("SELECT 1 FROM booked_messages WHERE uid = ?")
+            .get(uid);
+    }
+
+    markMessageBooked(uid) {
+        this._db
+            .prepare(
+                "INSERT OR REPLACE INTO booked_messages (uid, booked_at) VALUES (?, ?)",
+            )
+            .run(uid, new Date().toISOString());
+    }
+
     /** Delete processed_uids entries older than 60 minutes */
     cleanupProcessedUids() {
         const cutoff = new Date(Date.now() - 60 * 60 * 1000).toISOString();
@@ -210,9 +254,19 @@ export class DedupJournal {
         return result.changes;
     }
 
-    /** Run full cleanup: processed_uids (60min) + old dedup entries (90d). */
+    /** Run full cleanup: processed_uids (60min) + old dedup entries (90d)
+     *  + booked messages (180d). */
     cleanup() {
         this.cleanupProcessedUids();
         this.cleanupOldEntries();
+        // Message identity must outlive the 60-minute retry cooldown and any
+        // realistic reprocessing, not forever.
+        this._db
+            .prepare("DELETE FROM booked_messages WHERE booked_at < ?")
+            .run(
+                new Date(
+                    Date.now() - 180 * 24 * 60 * 60 * 1000,
+                ).toISOString(),
+            );
     }
 }

@@ -45,7 +45,11 @@ describe("ImapIdleHandler constructor", () => {
   });
 
   it("accepts mailbox with dedupJournal", () => {
-    const dedup = { isRecentlyProcessed: () => false };
+    const dedup = {
+        isRecentlyProcessed: () => false,
+        isMessageBooked: () => false,
+        markMessageBooked: () => {},
+    };
     const handler = new ImapIdleHandler(
       "imap.example.com",
       993,
@@ -329,6 +333,8 @@ describe("ImapIdleHandler idleLoop UID pre-check", () => {
     const dedup = {
       isRecentlyProcessed: vi.fn().mockReturnValue(true),
       recordProcessed: vi.fn(),
+      isMessageBooked: () => false,
+      markMessageBooked: vi.fn(),
     };
     const handler = new ImapIdleHandler("h", 993, "u", "p", dedup);
     const callback = vi.fn();
@@ -353,6 +359,8 @@ describe("ImapIdleHandler idleLoop UID pre-check", () => {
     const dedup = {
       isRecentlyProcessed: vi.fn().mockReturnValue(false),
       recordProcessed: vi.fn(),
+      isMessageBooked: () => false,
+      markMessageBooked: vi.fn(),
     };
     const handler = new ImapIdleHandler("h", 993, "u", "p", dedup);
     const callback = vi.fn(async () => {});
@@ -378,6 +386,8 @@ describe("ImapIdleHandler idleLoop UID pre-check", () => {
     const dedup = {
       isRecentlyProcessed: vi.fn().mockReturnValue(false),
       recordProcessed: vi.fn(),
+      isMessageBooked: () => false,
+      markMessageBooked: vi.fn(),
     };
     const handler = new ImapIdleHandler("h", 993, "u", "p", dedup);
     const callback = vi.fn(async () => {
@@ -404,6 +414,8 @@ describe("ImapIdleHandler idleLoop UID pre-check", () => {
     const dedup = {
       isRecentlyProcessed: vi.fn((uid) => uid === "101"),
       recordProcessed: vi.fn((uid) => calls.push(`record:${uid}`)),
+      isMessageBooked: () => false,
+      markMessageBooked: vi.fn(),
     };
     const handler = new ImapIdleHandler("h", 993, "u", "p", dedup);
     const callback = vi.fn(async (msg) => calls.push(`callback:${msg.msg_id}`));
