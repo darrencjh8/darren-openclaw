@@ -62,7 +62,11 @@ fi
 cp /opt/data/SOUL.md "$CLONE_DIR/" 2>/dev/null || true
 if [ -n "$EXPENSE_DIR" ]; then
     mkdir -p "$CLONE_DIR/expense-tracker"
-    cp "$EXPENSE_DIR/MEMORY.md" "$CLONE_DIR/expense-tracker/" 2>/dev/null || true
+    if [ -f "$EXPENSE_DIR/MEMORY.md" ]; then
+        cp "$EXPENSE_DIR/MEMORY.md" "$CLONE_DIR/expense-tracker/"
+    else
+        echo "WARN: expense memory missing: $EXPENSE_DIR/MEMORY.md" >&2
+    fi
     cp "$EXPENSE_DIR/mappings.json" "$CLONE_DIR/expense-tracker/" 2>/dev/null || true
 fi
 
