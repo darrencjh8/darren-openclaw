@@ -364,7 +364,6 @@ describe("ImapIdleHandler idleLoop UID pre-check", () => {
       isMessageBooked: () => false,
       markMessageBooked: vi.fn(),
       noteMailboxUidValidity: vi.fn().mockReturnValue(false),
-      noteMailboxUidValidity: vi.fn().mockReturnValue(false),
     };
     const handler = new ImapIdleHandler("h", 993, "u", "p", dedup);
     handler._client = {

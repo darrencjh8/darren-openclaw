@@ -339,6 +339,26 @@ describe("DedupJournal message identity (#557)", () => {
         expect(journal.noteMailboxUidValidity(null)).toBe(false);
         expect(journal.isMessageBooked("859")).toBe(true);
     });
+
+    it("drops unproven uid state the first time an epoch is seen (#558)", () => {
+        // Written before this fix existed, so the epoch they belong to is
+        // unknown: a uid collision would skip a genuinely new email.
+        journal.markMessageBooked("859");
+        journal.recordProcessed("859");
+
+        expect(journal.noteMailboxUidValidity(222)).toBe(true);
+        expect(journal.isMessageBooked("859")).toBe(false);
+        expect(journal.isRecentlyProcessed("859")).toBe(false);
+
+        expect(journal.noteMailboxUidValidity(222)).toBe(false);
+    });
+
+    it("records a first epoch without clearing an empty journal", () => {
+        expect(journal.noteMailboxUidValidity(222)).toBe(false);
+        journal.markMessageBooked("859");
+        expect(journal.noteMailboxUidValidity(222)).toBe(false);
+        expect(journal.isMessageBooked("859")).toBe(true);
+    });
 });
 
 describe("DedupJournal cleanupOldEntries", () => {

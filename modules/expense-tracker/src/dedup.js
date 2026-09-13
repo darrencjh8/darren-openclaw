@@ -227,8 +227,9 @@ export class DedupJournal {
         this._stmtInsertUid.run(uid, new Date().toISOString());
     }
 
-    /** True once this message has produced a booking; retained until
-     *  cleanup() passes 180 days. Part of the interface imap.js requires. */
+    /** True once this message has produced a booking; deleted by cleanup()
+     *  once older than 180 days, and dropped when the mailbox epoch changes
+     *  (#558). Part of the interface imap.js requires. */
     isMessageBooked(uid) {
         return !!this._db
             .prepare("SELECT 1 FROM booked_messages WHERE uid = ?")
@@ -253,19 +254,33 @@ export class DedupJournal {
      */
     noteMailboxUidValidity(uidValidity) {
         if (uidValidity === undefined || uidValidity === null) return false;
+        const key = String(uidValidity);
         const row = this._db
             .prepare("SELECT value FROM mailbox_state WHERE key = ?")
             .get("uidvalidity");
-        if (row && row.value === String(uidValidity)) return false;
-        this._db
-            .prepare(
-                "INSERT OR REPLACE INTO mailbox_state (key, value) VALUES (?, ?)",
-            )
-            .run("uidvalidity", String(uidValidity));
-        if (!row) return false; // first sight: nothing stale to drop
-        this._db.prepare("DELETE FROM booked_messages").run();
-        this._db.prepare("DELETE FROM processed_uids").run();
-        return true;
+        if (row && row.value === key) return false;
+        // On first sight there is no recorded epoch, so a stored uid is
+        // unproven: it may have been written under a different one. Dropping it
+        // can re-book an email that is still unread, but keeping it can skip a
+        // genuinely new one in silence, which is the worse failure (issue #558).
+        const stored =
+            this._db.prepare("SELECT 1 FROM booked_messages LIMIT 1").get() ||
+            this._db.prepare("SELECT 1 FROM processed_uids LIMIT 1").get();
+        // One transaction: a crash between the epoch write and the deletes would
+        // otherwise leave the epoch recorded and the stale uids live forever.
+        return this._db.transaction(() => {
+            this._db
+                .prepare(
+                    "INSERT OR REPLACE INTO mailbox_state (key, value) VALUES (?, ?)",
+                )
+                .run("uidvalidity", key);
+            if (row || stored) {
+                this._db.prepare("DELETE FROM booked_messages").run();
+                this._db.prepare("DELETE FROM processed_uids").run();
+                return true;
+            }
+            return false;
+        })();
     }
 
     /** Delete processed_uids entries older than 60 minutes */
