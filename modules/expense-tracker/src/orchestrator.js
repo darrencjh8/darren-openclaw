@@ -634,6 +634,7 @@ export class AgentOrchestrator {
                 notify_message: "",
                 _suffix_mappings: suffixMappings,
                 _is_transfer: true,
+                _is_paynow: movement.is_paynow === true,
                 _transfer: {
                     budget_id: budgetId,
                     source_account_id: source.id,
@@ -688,6 +689,7 @@ export class AgentOrchestrator {
                 _suffix_mappings: suffixMappings,
                 _structured_movement: true,
                 _is_paynow: movement.is_paynow === true,
+                _paynow_merchant: movement.is_paynow_merchant === true,
             };
         }
         return null;
@@ -998,6 +1000,7 @@ export class AgentOrchestrator {
                     payee_name: "",
                     category_id: "",
                     _is_paynow: /\bpaynow\b/i.test(emailText),
+                    _paynow_merchant: /\bUnique Entity Number\b/i.test(emailText),
                 };
                 // _suffix_mappings is set only by the deterministic
                 // movement / bill-payment parsers. Strip any LLM-injected
@@ -1446,11 +1449,15 @@ export class AgentOrchestrator {
                 if (account.matched) {
                     output.payee_name = account.name;
                     output.payee_source = "self_identity";
-                } else if (matchesMaskedIdentity(searchTerm, this._config.userName)) {
+                } else if (!output._paynow_merchant) {
                     output.payee_name = "Misc";
-                    output.payee_source = "self_identity";
+                    output.payee_source = "paynow_unresolved";
                 }
-            } catch {}
+            } catch (error) {
+                logger.warn({ event: "paynow_identity_failed", merchant: searchTerm, budget_id: output.budget_id || "", error: error.message });
+                output.payee_name = "Misc";
+                output.payee_source = "paynow_unresolved";
+            }
         }
         if (!output.payee_name && searchTerm) {
             let memResults = [];
@@ -1571,7 +1578,7 @@ export class AgentOrchestrator {
         // Never categorize own-account transfers: payee→category memory facts
         // describe card spend ("Epsilon Nova Card maps to Food category"), not a
         // credit-card repayment between the user's own accounts.
-        if (!output._is_transfer && !output.category_id) {
+        if (!output._is_transfer && !output.category_id && output.payee_source !== "self_identity") {
             let liveCategories = [];
             try {
                 if (cachedCtx) {

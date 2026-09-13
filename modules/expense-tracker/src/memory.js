@@ -105,7 +105,7 @@ function mappingEntity(fact) {
 }
 
 function isMaskedKey(entity) {
-  return /(?:[\p{L}\p{N}][＊*]{2,}|[＊*]{2,}[\p{L}\p{N}])/u.test(entity);
+  return /[＊*]{2,}/u.test(entity);
 }
 
 function selfIdentityEntities(facts) {

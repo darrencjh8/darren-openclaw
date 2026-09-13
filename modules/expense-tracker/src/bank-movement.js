@@ -138,11 +138,12 @@ function namedAccount(value, fallbackBank) {
   };
 }
 
-function baseMovement({ direction, amount, currency, occurredAt, ownAccount, counterparty = null, reference = "", merchant = null, descriptor = "", isPayNow = false }) {
+function baseMovement({ direction, amount, currency, occurredAt, ownAccount, counterparty = null, reference = "", merchant = null, descriptor = "", isPayNow = false, isPayNowMerchant = false }) {
   if (!amount || !currency || !occurredAt || !ownAccount?.suffix) return null;
   return {
     kind: "bank_movement",
     is_paynow: isPayNow,
+    is_paynow_merchant: isPayNowMerchant,
     direction,
     amount_cents: cents(currency, amount, direction),
     currency: currency.toUpperCase(),
@@ -231,10 +232,15 @@ export function parseBankMovement(text, { senderBank = null, receivedAt } = {}) 
 
   const deposited = field(body, ["Account that money was deposited in"]);
   if (deposited) {
+    const payNowSender = body.match(/PayNow\s+transfer\s+from\s+(.+?)(?:\n|$)/i)?.[1]
+      ?.replace(/[.,;:!?]+$/, "").trim();
     return baseMovement({
       direction: "incoming", amount, currency,
       occurredAt: isoDateTime("", field(body, ["Time of deposit"]), receivedAt),
-      ownAccount: { bank: senderBank, suffix: suffix(deposited) }, reference,
+      ownAccount: { bank: senderBank, suffix: suffix(deposited) },
+      counterparty: payNowSender ? namedAccount(payNowSender, bankFromText(payNowSender)) : null,
+      reference,
+      isPayNow: /\bPayNow\b/i.test(body),
     });
   }
 
@@ -276,6 +282,7 @@ export function parseBankMovement(text, { senderBank = null, receivedAt } = {}) 
     merchant: payNow ? merchantMatch?.[1]?.trim() || null : null,
     descriptor,
     isPayNow: payNow,
+    isPayNowMerchant: Boolean(merchantMatch),
   });
 }
 
