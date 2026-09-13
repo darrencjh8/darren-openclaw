@@ -145,14 +145,60 @@ async function getBudgets() {
 }
 
 /**
- * Switch the active budget when `target` differs. The caller MUST hold the
- * lock: `activeSyncId` is what every write resolves against, so changing it
- * outside the lock is the race in issue #506.
+ * Whether the library currently has a budget open. `getAccounts` is an
+ * in-memory read of the loaded spreadsheet, so the probe is cheap, and it is
+ * the only public way to ask: the library throws "No budget file is open"
+ * instead of exposing its loaded-budget flag.
+ */
+async function budgetIsOpen() {
+    try {
+        await actual.getAccounts();
+        return true;
+    } catch {
+        return false;
+    }
+}
+
+/**
+ * Load `activeSyncId` again after the library lost its open budget. The library
+ * closes the budget that is open before it fetches the next one, so a
+ * `downloadBudget` that fails on the sync server — on its own or as part of a
+ * switch — leaves the process budgetless while `activeSyncId` still names the
+ * budget that used to be open. Nothing else brings it back: `init()` never runs
+ * again, and every later request names that same sync id. Issue #549.
+ */
+async function reopenActiveBudget() {
+    if (!activeSyncId) return;
+    await retryWithBackoff(() =>
+        actual.downloadBudget(activeSyncId, { password: PASSWORD }),
+    );
+    budgetCache[activeSyncId] = true;
+    console.log(`Reopened the budget the library had closed (${activeSyncId})`);
+}
+
+/**
+ * Switch the active budget when `target` differs, and reopen it when the
+ * library has none open. The caller MUST hold the lock: `activeSyncId` is what
+ * every write resolves against, so changing it outside the lock is the race in
+ * issue #506.
  */
 async function applyBudgetSwitch(target) {
-    if (!target) return;
+    if (!target) {
+        // A request that names no budget falls back to whichever budget is
+        // active, so that one has to be open too.
+        if (await budgetIsOpen()) return;
+        await reopenActiveBudget();
+        return;
+    }
     const syncId = syncIdOf(target);
-    if (syncId === activeSyncId) return;
+    if (syncId === activeSyncId) {
+        // The same budget is already active, so the only thing left to do is put
+        // it back when the library closed it. That is not a switch, so it skips
+        // the switch cooldown and its re-check.
+        if (await budgetIsOpen()) return;
+        await reopenActiveBudget();
+        return;
+    }
 
     // Enforce minimum delay between budget switches for preemptible server stability
     const now = Date.now();
@@ -164,7 +210,7 @@ async function applyBudgetSwitch(target) {
     }
 
     // Re-check in case another request already switched
-    if (syncId === activeSyncId) return;
+    if (syncId === activeSyncId && (await budgetIsOpen())) return;
 
     // Always download when switching — @actual-app/api needs it to change active budget
     await retryWithBackoff(() =>
