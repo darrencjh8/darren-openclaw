@@ -101,7 +101,7 @@ async function ocrExtract(pdfBytes) {
   }
   try {
     const { fromBuffer } = await import("pdf2pic");
-    const Tesseract = await import("tesseract.js");
+    const { default: Tesseract } = await import("tesseract.js");
     const options = {
       density: 300,
       saveFilename: "page",

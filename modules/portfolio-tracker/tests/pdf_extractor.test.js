@@ -19,9 +19,11 @@ describe("pdf_extractor", () => {
           };
         });
         vi.doMock("tesseract.js", () => ({
-          recognize: vi
-            .fn()
-            .mockResolvedValue({ data: { text: "Trade confirmation: BUY 100 AAPL" } }),
+          default: {
+            recognize: vi
+              .fn()
+              .mockResolvedValue({ data: { text: "Trade confirmation: BUY 100 AAPL" } }),
+          },
         }));
         const mod = await import("../src/pdf_extractor.js");
         extractPdfText = mod.extractPdfText;
@@ -55,12 +57,14 @@ describe("pdf_extractor", () => {
         vi.doMock("tesseract.js", () => {
           let callCount = 0;
           return {
-            recognize: vi.fn().mockImplementation(() => {
-              callCount++;
-              return Promise.resolve({
-                data: { text: `Page ${callCount} text` },
-              });
-            }),
+            default: {
+              recognize: vi.fn().mockImplementation(() => {
+                callCount++;
+                return Promise.resolve({
+                  data: { text: `Page ${callCount} text` },
+                });
+              }),
+            },
           };
         });
         const mod = await import("../src/pdf_extractor.js");
@@ -87,9 +91,11 @@ describe("pdf_extractor", () => {
           return { fromBuffer: vi.fn().mockReturnValue(mockConvert) };
         });
         vi.doMock("tesseract.js", () => ({
-          recognize: vi
-            .fn()
-            .mockResolvedValue({ data: { text: "   " } }),
+          default: {
+            recognize: vi
+              .fn()
+              .mockResolvedValue({ data: { text: "   " } }),
+          },
         }));
         const mod = await import("../src/pdf_extractor.js");
         extractPdfText = mod.extractPdfText;
@@ -132,9 +138,11 @@ describe("pdf_extractor", () => {
           return { fromBuffer: vi.fn().mockReturnValue(mockConvert) };
         });
         vi.doMock("tesseract.js", () => ({
-          recognize: vi
-            .fn()
-            .mockRejectedValue(new Error("OCR engine crashed")),
+          default: {
+            recognize: vi
+              .fn()
+              .mockRejectedValue(new Error("OCR engine crashed")),
+          },
         }));
         const mod = await import("../src/pdf_extractor.js");
         extractPdfText = mod.extractPdfText;
@@ -158,7 +166,9 @@ describe("pdf_extractor", () => {
           return { fromBuffer: vi.fn().mockReturnValue(mockConvert) };
         });
         vi.doMock("tesseract.js", () => ({
-          recognize: vi.fn(),
+          default: {
+            recognize: vi.fn(),
+          },
         }));
         const mod = await import("../src/pdf_extractor.js");
         extractPdfText = mod.extractPdfText;
@@ -188,9 +198,11 @@ describe("pdf_extractor", () => {
           return { fromBuffer: vi.fn().mockReturnValue(mockConvert) };
         });
         vi.doMock("tesseract.js", () => ({
-          recognize: vi
-            .fn()
-            .mockResolvedValue({ data: { text: "File-based OCR result" } }),
+          default: {
+            recognize: vi
+              .fn()
+              .mockResolvedValue({ data: { text: "File-based OCR result" } }),
+          },
         }));
         const mod = await import("../src/pdf_extractor.js");
         extractPdfTextFromFile = mod.extractPdfTextFromFile;
