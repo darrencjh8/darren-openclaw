@@ -285,6 +285,19 @@ export function nameMatchesBank(name, bank) {
     return aliases.some((t) => new RegExp(`\\b${t}\\b`, "i").test(lower));
 }
 
+function isTransferDestination(account) {
+    return account && !account.closed && !["credit", "investment"].includes(account.type);
+}
+
+function transferDestinationIsAmbiguous(name, destination, accounts) {
+    const direct = matchAccountByName(name, accounts);
+    if (direct.matched && direct.id === destination.id) return false;
+    const bank = bankFromText(name);
+    return bank && accounts.filter((account) =>
+        !account.closed && bankFromText(account.name) === bank,
+    ).length > 1;
+}
+
 /**
  * True when `value` is a mask of one of the user's own account names: it stays
  * literal outside the masked run, and the run matches one or more letters.
@@ -1596,13 +1609,20 @@ export class AgentOrchestrator {
                     ? cachedCtx.accounts
                     : [];
                 const accountMatch = liveAccounts.find(
-                    (a) =>
-                        a.name &&
-                        a.name.toLowerCase() ===
-                            output.payee_name.toLowerCase() &&
-                        !a.closed,
+                    (a) => a.name && a.name.toLowerCase() === output.payee_name.toLowerCase(),
                 );
-                if (accountMatch) {
+                if (accountMatch && (
+                    !isTransferDestination(accountMatch) ||
+                    accountMatch.id === output.account_id ||
+                    transferDestinationIsAmbiguous(searchTerm, accountMatch, liveAccounts)
+                )) {
+                    // A closed/card/investment account, self target, or bank-only
+                    // name with several own accounts cannot identify a transfer leg.
+                    output.payee_name = "Misc";
+                    output.payee_source = "transfer_destination_refused";
+                    output.category_id = null;
+                    output._hold_unresolved_transfer = true;
+                } else if (accountMatch) {
                     const payees = Array.isArray(cachedCtx.payees)
                         ? cachedCtx.payees
                         : [];
@@ -1841,6 +1861,19 @@ export class AgentOrchestrator {
                     timestamp: new Date().toISOString(),
                 });
                 return { action: "notified", details: "Held an unresolved PayNow credit" };
+            }
+            if (llmOutput._hold_unresolved_transfer) {
+                if (!silent) {
+                    await this._tools.executeTool("notify_user", {
+                        message: `Held: transfer destination for ${bookableAmountPrefix(llmOutput.amount_cents, llmOutput.currency)}"${llmOutput.merchant || "unknown"}" was not safe to resolve, so it was not booked.`,
+                    });
+                }
+                await this._tools.executeTool("log_decision", {
+                    action: "held_unresolved_transfer",
+                    reasoning: llmOutput.reasoning || "",
+                    timestamp: new Date().toISOString(),
+                });
+                return { action: "notified", details: "Held an unresolved transfer" };
             }
             const payeeName = llmOutput.payee_name || "Misc";
             const accountId = llmOutput.account_id || "";

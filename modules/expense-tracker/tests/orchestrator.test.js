@@ -2865,4 +2865,55 @@ describe("_resolvePhase2 transfer detection", () => {
         expect(result._transfer.amount_cents).toBe(100);
         expect(result._transfer.payee_id).toBe("p-trust-transfer");
     });
+
+    it("refuses ambiguous, closed, credit-card, and self transfer destinations (#563)", async () => {
+        const config = makeConfig();
+        const tools = makeTools({
+            executeTool: vi.fn(async (name, args) => {
+                if (name === "fetch_context")
+                    return {
+                        accounts: [
+                            { id: "ocbc", name: "OCBC 360", closed: false, type: "checking" },
+                            { id: "bonus", name: "SC Bonus Saver", closed: false, type: "checking" },
+                            { id: "journeys", name: "SC Journeys Card", closed: false, type: "credit" },
+                            { id: "smart", name: "SC Smart Card", closed: true, type: "credit" },
+                        ],
+                        categories: [],
+                        payees: [
+                            { id: "bonus-transfer", transfer_acct: "bonus" },
+                            { id: "journeys-transfer", transfer_acct: "journeys" },
+                            { id: "smart-transfer", transfer_acct: "smart" },
+                        ],
+                    };
+                if (name === "search_memory" && args?.query === "Standard Chartered Bank Singapore")
+                    return { results: [{ text: "Standard Chartered Bank Singapore maps to SC Bonus Saver payee", score: 1 }] };
+                return { results: [] };
+            }),
+        });
+        const orch = new AgentOrchestrator(config, tools);
+
+        const ambiguous = await orch._resolvePhase2({
+            merchant: "Standard Chartered Bank Singapore", amount_cents: -250000,
+            currency: "SGD", account_id: "ocbc", budget_id: "test-budget", action: "insert",
+        });
+        expect(ambiguous).toMatchObject({ payee_name: "Misc", category_id: null });
+        expect(ambiguous._is_transfer).toBeUndefined();
+        await orch._executePhase3Core(ambiguous, { silent: false });
+        expect(tools.executeTool).not.toHaveBeenCalledWith(
+            "insert_transaction",
+            expect.anything(),
+        );
+
+        for (const [account_id, payee_name] of [
+            ["bonus", "SC Bonus Saver"],
+            ["ocbc", "SC Journeys Card"],
+            ["ocbc", "SC Smart Card"],
+        ]) {
+            const result = await orch._resolvePhase2({
+                merchant: payee_name, payee_name, amount_cents: -250000,
+                currency: "SGD", account_id, budget_id: "test-budget", action: "insert",
+            });
+            expect(result._is_transfer).toBeUndefined();
+        }
+    });
 });
