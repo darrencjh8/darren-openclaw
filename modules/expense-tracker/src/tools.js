@@ -197,6 +197,12 @@ export class StatementJournal {
 // ── Tool Definitions ────────────────────────────────────────────
 
 /**
+ * Tag for the duplicate-name refusal. Callers key off this rather than the
+ * message text, so the wording stays free to change. Issue #551.
+ */
+const AMBIGUOUS_PAYEE = "AMBIGUOUS_PAYEE";
+
+/**
  * Resolve one payee from a live payee list by exact name.
  *
  * Duplicate names are never resolved by list order, so this is the one policy
@@ -226,6 +232,10 @@ export function resolvePayeeMatch(payees, name) {
       .join(", ");
     return {
       error: `Payee "${name}" is ambiguous; pass payee_id (candidates: ${candidates}).`,
+      // Tagged so a caller that only relays the text (the insert path returns
+      // it, the orchestrator rethrows it) can still tell a refusal from an
+      // upstream failure and tell the human what to do about it. Issue #551.
+      code: AMBIGUOUS_PAYEE,
     };
   }
   return transferMatches[0] || matches[0];
@@ -234,7 +244,7 @@ export function resolvePayeeMatch(payees, name) {
 /** Tag an ambiguity refusal so callers can tell it from a fetch failure. */
 function ambiguousPayeeError(message) {
   const error = new Error(message);
-  error.code = "AMBIGUOUS_PAYEE";
+  error.code = AMBIGUOUS_PAYEE;
   return error;
 }
 
@@ -1217,8 +1227,11 @@ export class ToolRegistry {
           budget_id,
         );
       } catch (e) {
-        // An ambiguous name is refused with the candidate payee IDs.
-        return { error: e.message };
+        // An ambiguous name is refused with the candidate payee IDs. Only that
+        // refusal is tagged; a transport code stays out of the tool result.
+        return e.code === AMBIGUOUS_PAYEE
+          ? { error: e.message, code: e.code }
+          : { error: e.message };
       }
       payee_name = validated.name;
       payeeId = validated.payeeId;
@@ -1229,7 +1242,7 @@ export class ToolRegistry {
           const payees = await this._get("/payees", budget_id);
           if (Array.isArray(payees)) {
             const match = resolvePayeeMatch(payees, payee_name);
-            if (match?.error) return { error: match.error };
+            if (match?.error) return { error: match.error, code: match.code };
             if (match) {
               payeeId = match.id;
               payee_name = match.name;

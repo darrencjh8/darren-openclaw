@@ -1735,7 +1735,13 @@ export class AgentOrchestrator {
                 // A tool-level failure is returned, not thrown. Treat it as a
                 // failed insert so the reservation is not completed and the
                 // user is told. Issue #483 review.
-                if (inserted && inserted.error) throw new Error(inserted.error);
+                if (inserted && inserted.error) {
+                    // Keep the tool's tag: the notification tells an ambiguous
+                    // payee refusal apart from an upstream failure. Issue #551.
+                    const refused = new Error(inserted.error);
+                    if (inserted.code) refused.code = inserted.code;
+                    throw refused;
+                }
                 if (transferReservation?.status === "reserved") {
                     await this._tools.executeTool("complete_transfer", {
                         id: transferReservation.entry.id,
@@ -1752,9 +1758,15 @@ export class AgentOrchestrator {
                         llmOutput.amount_cents,
                         llmOutput.currency,
                     );
+                    // "pass payee_id" is an instruction for the model; a human
+                    // reading the notification can only merge the duplicates.
+                    const ambiguousHint =
+                        e.code === "AMBIGUOUS_PAYEE"
+                            ? " Two payees share that name — merge them in Actual; this email retries."
+                            : "";
                     try {
                         await this._tools.executeTool("notify_user", {
-                            message: `Failed to insert ${amountText}at ${llmOutput.merchant || payeeName}: ${String(e.message).slice(0, 200)}`,
+                            message: `Failed to insert ${amountText}at ${llmOutput.merchant || payeeName}: ${String(e.message).slice(0, 200)}${ambiguousHint}`,
                         });
                     } catch {} // prevent notify_user failure from triggering top-level catch
                 }

@@ -311,6 +311,9 @@ describe("ToolRegistry — budget_id validation", () => {
 
             expect(result).toEqual({
                 error: 'Payee "Deposit" is ambiguous; pass payee_id (candidates: payee-a, payee-b).',
+                // The tag survives the tool boundary so the caller can tell a
+                // refusal from an upstream failure. Issue #551.
+                code: "AMBIGUOUS_PAYEE",
             });
             // No POST was attempted.
             expect(mockFetch).toHaveBeenCalledTimes(1);
