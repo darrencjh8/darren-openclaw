@@ -273,6 +273,9 @@ describe("ToolRegistry — budget_id validation", () => {
         test("a bare imported_description matching a transfer and a plain payee picks the transfer (#483)", async () => {
             mockFetch
                 .mockResolvedValueOnce({ ok: true, json: () => duplicateNamePayees })
+                .mockResolvedValueOnce({ ok: true, json: () => [
+                    { id: "acct-deposit", name: "Deposit Account", closed: false },
+                ] })
                 .mockResolvedValueOnce({ ok: true, json: () => ({ id: "txn-1" }) });
 
             await registry.executeTool("insert_transaction", {
@@ -283,9 +286,9 @@ describe("ToolRegistry — budget_id validation", () => {
                 imported_description: "Deposit",
             });
 
-            // One payee fetch: the same list supplies the name and the ID.
-            expect(mockFetch).toHaveBeenCalledTimes(2);
-            const postBody = JSON.parse(mockFetch.mock.calls[1][1].body);
+            // The matched transfer payee's target is validated before posting.
+            expect(mockFetch).toHaveBeenCalledTimes(3);
+            const postBody = JSON.parse(mockFetch.mock.calls[2][1].body);
             // The transfer payee is the only match that creates a transfer, so
             // it wins over the plain payee listed first.
             expect(postBody.payee).toBe("payee-transfer");
@@ -558,7 +561,7 @@ describe("ToolRegistry — budget_id validation", () => {
 
             await expect(
                 registry._validate_payee("deposit", "My Budget"),
-            ).resolves.toEqual({ name: "Deposit", payeeId: "payee-transfer" });
+            ).resolves.toMatchObject({ name: "Deposit", payeeId: "payee-transfer" });
         });
     });
 
