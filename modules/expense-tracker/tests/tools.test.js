@@ -409,47 +409,55 @@ describe("ToolRegistry", () => {
         expect(body.budget_id).toBeUndefined();
     });
 
-    it("includes the actual-api error body in the thrown message", async () => {
-        const cfg = new Config(testEnv);
-        const registry = new ToolRegistry(cfg);
+    // Every HTTP helper shares the same error builder, so each one is covered.
+    for (const [helper, call] of [
+        ["_get", (registry) => registry._get("/accounts", "test-budget")],
+        ["_post", (registry) => registry._post("/accounts", {}, "test-budget")],
+        [
+            "_patch",
+            (registry) => registry._patch("/accounts", {}, "test-budget"),
+        ],
+    ]) {
+        it(`${helper} includes the actual-api error body in the thrown message`, async () => {
+            const cfg = new Config(testEnv);
+            const registry = new ToolRegistry(cfg);
 
-        const origFetch = global.fetch;
-        global.fetch = async () => ({
-            ok: false,
-            status: 500,
-            text: async () => '{"error":"No budget file is open"}',
+            const origFetch = global.fetch;
+            global.fetch = async () => ({
+                ok: false,
+                status: 500,
+                text: async () => '{"error":"No budget file is open"}',
+            });
+            try {
+                await expect(call(registry)).rejects.toThrow(
+                    'actual-api 500 {"error":"No budget file is open"}',
+                );
+            } finally {
+                global.fetch = origFetch;
+            }
         });
-        try {
-            await expect(
-                registry._get("/accounts", "test-budget"),
-            ).rejects.toThrow(
-                'actual-api 500 {"error":"No budget file is open"}',
-            );
-        } finally {
-            global.fetch = origFetch;
-        }
-    });
 
-    it("keeps the bare status when the error body cannot be read", async () => {
-        const cfg = new Config(testEnv);
-        const registry = new ToolRegistry(cfg);
+        it(`${helper} keeps the bare status when the error body cannot be read`, async () => {
+            const cfg = new Config(testEnv);
+            const registry = new ToolRegistry(cfg);
 
-        const origFetch = global.fetch;
-        global.fetch = async () => ({
-            ok: false,
-            status: 502,
-            text: async () => {
-                throw new Error("stream closed");
-            },
+            const origFetch = global.fetch;
+            global.fetch = async () => ({
+                ok: false,
+                status: 502,
+                text: async () => {
+                    throw new Error("stream closed");
+                },
+            });
+            try {
+                await expect(call(registry)).rejects.toThrow(
+                    /^actual-api 502$/,
+                );
+            } finally {
+                global.fetch = origFetch;
+            }
         });
-        try {
-            await expect(
-                registry._get("/accounts", "test-budget"),
-            ).rejects.toThrow(/^actual-api 502$/);
-        } finally {
-            global.fetch = origFetch;
-        }
-    });
+    }
 
     it("fetch_context returns accounts, categories, and payees in parallel with balances", async () => {
         const { vi } = await import("vitest");

@@ -149,13 +149,18 @@ async function getBudgets() {
  * in-memory read of the loaded spreadsheet, so the probe is cheap, and it is
  * the only public way to ask: the library throws "No budget file is open"
  * instead of exposing its loaded-budget flag.
+ *
+ * Only that message means the budget is closed. Any other failure is rethrown
+ * so it reaches the route's 500 instead of being read as "closed", which would
+ * start a download that holds the global lock through its retry backoff.
  */
 async function budgetIsOpen() {
     try {
         await actual.getAccounts();
         return true;
-    } catch {
-        return false;
+    } catch (e) {
+        if (/No budget file is open/.test(e?.message || "")) return false;
+        throw e;
     }
 }
 

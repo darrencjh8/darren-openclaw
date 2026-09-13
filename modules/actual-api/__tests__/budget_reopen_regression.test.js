@@ -139,6 +139,26 @@ describe("a request re-opens the budget the library closed (issue #549)", () => 
         await accounts(mockReq({ query: { budget_id: "sgd-sync" } }), res);
 
         expect(actual.downloadBudget).not.toHaveBeenCalled();
+        // The probe plus the route's own read: dropping the probe to save the
+        // call would leave this at one and reopen unconditionally instead.
+        expect(actual.getAccounts).toHaveBeenCalledTimes(2);
         expect(res.json).toHaveBeenCalledWith(SGD_ACCOUNTS);
+    });
+
+    test("GET /accounts rethrows a probe failure that is not the no-budget state", async () => {
+        actual.getAccounts.mockRejectedValueOnce(
+            new Error("spreadsheet is corrupt"),
+        );
+
+        const accounts = findHandler("get", "/accounts");
+        const res = mockRes();
+
+        await accounts(mockReq({ query: { budget_id: "sgd-sync" } }), res);
+
+        expect(actual.downloadBudget).not.toHaveBeenCalled();
+        expect(res.status).toHaveBeenCalledWith(500);
+        expect(res.json).toHaveBeenCalledWith({
+            error: "spreadsheet is corrupt",
+        });
     });
 });
