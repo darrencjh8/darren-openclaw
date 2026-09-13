@@ -1760,9 +1760,12 @@ export class AgentOrchestrator {
                     );
                     // "pass payee_id" is an instruction for the model; a human
                     // reading the notification can only merge the duplicates.
+                    // The refusal fires for two or more matches, not just two.
+                    // The tag is a literal because tools.js already imports this
+                    // module, so sharing the constant would close a cycle.
                     const ambiguousHint =
                         e.code === "AMBIGUOUS_PAYEE"
-                            ? " Two payees share that name — merge them in Actual; this email retries."
+                            ? " More than one payee has that name — merge them in Actual; this email retries."
                             : "";
                     try {
                         await this._tools.executeTool("notify_user", {
