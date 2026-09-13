@@ -1795,7 +1795,15 @@ export class ToolRegistry {
           ),
         ]);
         if (result) {
-          await this._memory.add(merchant + " maps to " + result + " payee");
+          // Route through the validated write, so a web-classified payee that
+          // is one of the user's own account names can never be stored as a
+          // merchant fact and re-poison memory (issue #561). The write failing
+          // is not fatal: the classification already succeeded. Review rounds
+          // 2 and 3 on #561.
+          await this._handle_learn_fact({
+            fact: merchant + " maps to " + result + " payee",
+            budget_id: budgetId,
+          });
           return { payee: result, source: "web" };
         }
       } catch {

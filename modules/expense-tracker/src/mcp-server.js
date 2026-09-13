@@ -77,8 +77,15 @@ export const toolShapes = {
   },
   list_facts: {},
   search_facts: { query: z.string() },
-  learn_fact: { fact: z.string() },
-  update_fact: { old_text: z.string(), new_text: z.string() },
+  // budget_id is optional so existing callers keep working, but supplying it
+  // makes the write-time identity check validate against that budget's live
+  // accounts instead of the primary budget's (issue #561).
+  learn_fact: { fact: z.string(), budget_id: z.string().min(1).optional() },
+  update_fact: {
+    old_text: z.string(),
+    new_text: z.string(),
+    budget_id: z.string().min(1).optional(),
+  },
   delete_fact: { match_text: z.string() },
   compact_facts: {},
   cleanup_facts: {},
