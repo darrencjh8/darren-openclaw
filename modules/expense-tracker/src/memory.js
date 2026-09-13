@@ -33,6 +33,7 @@ const MEMORY_TEMPLATE = `# Long-Term Memory
 import {
   CANONICAL_SUFFIX_RE,
   STRUCTURED_PATTERNS,
+  accountAliases,
   canonicalSuffixFact,
   matchAccountByName,
   parseSuffixFact,
@@ -42,6 +43,7 @@ import {
 export {
   CANONICAL_SUFFIX_RE,
   STRUCTURED_PATTERNS,
+  accountAliases,
   canonicalSuffixFact,
   matchAccountByName,
   parseSuffixFact,
@@ -615,7 +617,13 @@ export class MemoryStore {
     if (!parsed) return null;
     if (isMaskedKey(parsed.entity)) return "masked key";
     const suffixKey = /^(?:card|account)\s+ending\s+\d{4,6}$/i.test(parsed.entity);
-    const accountKey = matchAccountByName(parsed.entity, accounts).matched;
+    // The same matcher the resolver uses, so a key written as a stored account
+    // alias ("Nova Card" for "DBS Nova Card") is refused too. Review round 2.
+    const accountKey = matchAccountByName(
+      parsed.entity,
+      accounts,
+      accountAliases(this._facts, accounts),
+    ).matched;
     if (
       (parsed.relation === "->category" ||
         parsed.relation === "merchant->payee" ||

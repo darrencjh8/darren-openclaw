@@ -2102,4 +2102,18 @@ describe("self-identity fact validation (#561)", () => {
     ).toEqual({ updated: false, found: false, reason: "self identity" });
     unlinkSync(path);
   });
+
+  it("refuses a key written as a stored account alias (#561)", async () => {
+    const path = tempFile(".md", "# Long-Term Memory\n\n## Facts\n\n");
+    const store = new MemoryStore(path);
+    const accounts = [{ id: "nova", name: "DBS Nova Card", closed: false }];
+    // The alias only exists once the type fact is stored, so the refusal has to
+    // read the same alias map the resolver uses.
+    await store.add("Nova Card is a DBS Nova Card account");
+
+    await expect(
+      store.add("Nova Card maps to Banking category", accounts),
+    ).resolves.toMatchObject({ added: false, reason: "self identity" });
+    unlinkSync(path);
+  });
 });

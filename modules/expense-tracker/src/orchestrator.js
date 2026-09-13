@@ -285,21 +285,34 @@ export function nameMatchesBank(name, bank) {
     return aliases.some((t) => new RegExp(`\\b${t}\\b`, "i").test(lower));
 }
 
-function matchesMaskedIdentity(value, identity) {
-    const candidate = String(value || "").trim().toLowerCase();
-    const ownName = String(identity || "").trim().toLowerCase();
-    if (!candidate || !ownName) return false;
-    if (candidate === ownName) return true;
+/**
+ * True when `value` is a mask of one of the user's own account names: it stays
+ * literal outside the masked run, and the run matches one or more letters.
+ * `T*** U***` masks `Trust Bank`; `Chong *** Heng` masks `Chong Jin Heng`.
+ * Only account names are considered, so a masked merchant cannot be mistaken
+ * for a self identity. Issue #561.
+ */
+function masksOwnAccount(value, accounts, aliases) {
+    const candidate = String(value || "").trim();
     if (!/[＊*]{2,}/.test(candidate)) return false;
-    const escaped = candidate
-        .split(/([＊*]+)/)
-        .map((part) =>
-            /^[＊*]+$/.test(part)
-                ? ".*"
-                : part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/\s+/g, "\\s+"),
-        )
-        .join("");
-    return new RegExp(`^${escaped}$`, "i").test(ownName);
+    const names = [
+        ...(accounts || []).map((a) => a?.name),
+        ...(aliases ? aliases.values() : []),
+    ].filter(Boolean);
+    for (const name of names) {
+        const target = String(name).trim();
+        if (!target) continue;
+        const pattern = candidate
+            .split(/([＊*]+)/)
+            .map((part) =>
+                /^[＊*]+$/.test(part)
+                    ? "[\\p{L}\\p{N}]+"
+                    : part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/\s+/g, "\\s+"),
+            )
+            .join("");
+        if (new RegExp(`^${pattern}$`, "iu").test(target)) return true;
+    }
+    return false;
 }
 
 /** Remove secret-looking facts from a search result list. */
@@ -1435,7 +1448,24 @@ export class AgentOrchestrator {
             ""
         ).trim();
         let cachedCtx = null;
+        // Set when a live account matched, so the payee must survive to the
+        // transfer lookup below instead of being replaced by a merchant.
+        let paynowAccountMatched = false;
+        // Set when the PayNow identity check has already decided the payee, so
+        // the merchant tiers below must not override it.
+        let paynowSettled = false;
         if (output._is_paynow && searchTerm) {
+            // A credit is income unless it is a transfer, so it must never be
+            // booked as a merchant or as an uncategorised positive inflow. A
+            // debit is an ordinary payment and still has to reach its learned
+            // merchant payee and the transfer lookup below. Review round 2 #561.
+            const credit = Number(output.amount_cents) > 0;
+            // Set when the counterparty is a mask of one of the user's own
+            // accounts; it must never be looked up as a merchant. Set when the
+            // counterparty is not a known merchant, so a credit from it is held
+            // rather than booked. A debit is only saved by an exact learned key.
+            let selfMasked = false;
+            let unresolved = false;
             try {
                 cachedCtx =
                     (await this._tools.executeTool("fetch_context", {
@@ -1447,34 +1477,53 @@ export class AgentOrchestrator {
                 const facts =
                     (await this._tools.executeTool("list_facts", {}))?.facts ||
                     [];
-                const account = matchAccountByName(
-                    searchTerm,
-                    accounts,
-                    accountAliases(facts, accounts),
-                );
-                if (account.matched) {
-                    output.payee_name = account.name;
-                    output.payee_source = "self_identity";
-                } else if (!output._paynow_merchant) {
-                    output.payee_name = "Misc";
-                    output.payee_source = "paynow_unresolved";
-                }
-                // A PayNow credit that resolves to no known merchant must be
-                // held, not booked as income. Only a credit is affected: a debit
-                // is an ordinary payment and still books normally.
-                if (!output._paynow_merchant && Number(output.amount_cents) > 0) {
-                    output._hold_unresolved_paynow = true;
+                const aliases = accountAliases(facts, accounts);
+                // The mask test runs first: the account matcher compares token
+                // sets, so a mask like "T*** B***" can reach a live account
+                // through one surviving token and be mistaken for a name.
+                if (masksOwnAccount(searchTerm, accounts, aliases)) {
+                    selfMasked = true;
+                    unresolved = true;
+                } else {
+                    const account = matchAccountByName(
+                        searchTerm,
+                        accounts,
+                        aliases,
+                    );
+                    if (account.matched) {
+                        output.payee_name = account.name;
+                        output.payee_source = "self_identity";
+                        paynowAccountMatched = true;
+                    } else if (!output._paynow_merchant) {
+                        unresolved = true;
+                    }
                 }
             } catch (error) {
                 logger.warn({ event: "paynow_identity_failed", merchant: searchTerm, budget_id: output.budget_id || "", error: error.message });
+                unresolved = true;
+            }
+            // A recognised own account is only a transfer once the transfer
+            // lookup below finds its payee; until then a credit from it is still
+            // income and is held the same way an unresolved one is.
+            if (credit && (unresolved || paynowAccountMatched)) {
+                output._hold_unresolved_paynow = true;
+            }
+            if (selfMasked || (unresolved && credit)) {
+                // A masked self identity is a person, not a merchant key, and a
+                // held credit must not be booked: both are Misc with no category.
+                // An unresolved debit still gets its merchant tiers below.
                 output.payee_name = "Misc";
                 output.payee_source = "paynow_unresolved";
-                if (Number(output.amount_cents) > 0) {
-                    output._hold_unresolved_paynow = true;
-                }
+                paynowSettled = true;
+            } else if (paynowAccountMatched) {
+                // Keep the account payee for the transfer lookup below.
+                paynowSettled = true;
             }
         }
-        if (!output.payee_name && searchTerm) {
+        // A PayNow counterparty the identity check settled keeps that payee; the
+        // transfer lookup below is what turns an account match into a transfer.
+        // Everything else takes the merchant tiers. Review round 2 on #561.
+        if (!output.payee_name && searchTerm && !paynowSettled) {
             let memResults = [];
             try {
                 const memResult = await this._tools.executeTool(
@@ -1502,9 +1551,6 @@ export class AgentOrchestrator {
             if (payeeMatch) {
                 output.payee_name = payeeMatch;
                 output.payee_source = "memory";
-                // A learned merchant mapping settles the unresolved PayNow: it is
-                // a real payee, not a self-transfer left dangling.
-                delete output._hold_unresolved_paynow;
             } else {
                 try {
                     const resolved = await this._tools.executeTool(
@@ -1517,12 +1563,6 @@ export class AgentOrchestrator {
                     if (resolved?.payee) {
                         output.payee_name = resolved.payee;
                         output.payee_source = resolved.source || "fallback";
-                        // Any real payee settles the unresolved PayNow: there is
-                        // nothing left to hold. A "Misc" fallback is not real, so
-                        // the hold stays and the credit is notified instead.
-                        if (resolved.payee.toLowerCase() !== "misc") {
-                            delete output._hold_unresolved_paynow;
-                        }
                     }
                 } catch (e) {
                     // resolve_merchant failed — leave payee blank, fall through to Misc
@@ -1572,6 +1612,19 @@ export class AgentOrchestrator {
                     if (transferPayee) {
                         output.payee_id = transferPayee.id;
                         output._is_transfer = true;
+                        // The reserved transfer always runs source -> destination,
+                        // and the booked account is the one this row sits on: it
+                        // is the destination when the row is a credit and the
+                        // source when it is a debit. The deterministic parser
+                        // reads an incoming credit exactly this way, so both
+                        // routes agree. Review round 2 on #561.
+                        const credited = Number(output.amount_cents) > 0;
+                        const bookAccountId = output.account_id || "";
+                        const otherAccountId = accountMatch.id;
+                        // The hold is for a credit that resolved to no other
+                        // account; a reserved transfer is exactly what it was
+                        // waiting for.
+                        delete output._hold_unresolved_paynow;
                         // Reserve like the deterministic path does, so a second
                         // real transfer of the same amount is not dropped as a
                         // duplicate (issue #557). Without this, an account-name
@@ -1582,8 +1635,12 @@ export class AgentOrchestrator {
                         if (Number.isFinite(swapAmount))
                             output._transfer = {
                                 budget_id: output.budget_id || "",
-                                source_account_id: output.account_id || "",
-                                destination_account_id: accountMatch.id,
+                                source_account_id: credited
+                                    ? otherAccountId
+                                    : bookAccountId,
+                                destination_account_id: credited
+                                    ? bookAccountId
+                                    : otherAccountId,
                                 currency:
                                     output.currency ||
                                     this._config.primaryCurrency,
@@ -1593,6 +1650,12 @@ export class AgentOrchestrator {
                                     new Date().toISOString(),
                                 payee_id: transferPayee.id,
                             };
+                    } else if (output._hold_unresolved_paynow) {
+                        // A credit that resolved to an account but has no
+                        // transfer payee cannot be reserved, so it stays held
+                        // rather than booking an uncategorised inflow.
+                        output._is_transfer = undefined;
+                        output.payee_id = undefined;
                     }
                 }
             } catch {}
@@ -1691,13 +1754,16 @@ export class AgentOrchestrator {
                         if (valid) {
                             output.category_id = categoryId;
                             output.category_name = valid.name;
-                            // Auto-learn for next time (learn_fact → update_fact on contradiction)
+                            // Auto-learn for next time (learn_fact → update_fact on contradiction).
+                            // The budget id is what lets write-time validation
+                            // check the key against the right account list.
                             try {
                                 const fact = `${output.payee_name} maps to ${valid.name} category`;
                                 const learned = await this._tools.executeTool(
                                     "learn_fact",
                                     {
                                         fact,
+                                        budget_id: output.budget_id || "",
                                     },
                                 );
                                 if (
@@ -1709,6 +1775,7 @@ export class AgentOrchestrator {
                                         {
                                             old_text: learned.existing,
                                             new_text: fact,
+                                            budget_id: output.budget_id || "",
                                         },
                                     );
                                 }
@@ -1992,6 +2059,7 @@ export class AgentOrchestrator {
                                 "learn_fact",
                                 {
                                     fact,
+                                    budget_id: llmOutput.budget_id || "",
                                 },
                             );
                             if (learned?.reason === "contradiction") {
@@ -2015,7 +2083,9 @@ export class AgentOrchestrator {
                 ? llmOutput._suffix_mappings
                 : [];
             for (const mapping of suffixMappings) {
-                learnPromises.push(this._learnSuffixFact(mapping));
+                learnPromises.push(
+                    this._learnSuffixFact(mapping, llmOutput.budget_id || ""),
+                );
             }
             Promise.allSettled(learnPromises).catch(() => {});
 
@@ -2052,13 +2122,16 @@ export class AgentOrchestrator {
      * Persist a verified suffix→account mapping. Guarded to 4–6 digit
      * suffixes; fire-and-forget with contradiction resolution.
      */
-    async _learnSuffixFact({ suffix, accountName }) {
+    async _learnSuffixFact({ suffix, accountName }, budget_id = "") {
         if (!suffix || !accountName) return;
         const normalized = String(suffix).trim();
         if (!/^\d{4,6}$/.test(normalized)) return;
         const fact = this._suffixFactText({ suffix: normalized, accountName });
         try {
-            const learned = await this._tools.executeTool("learn_fact", { fact });
+            const learned = await this._tools.executeTool("learn_fact", {
+                fact,
+                budget_id,
+            });
             if (learned?.reason === "contradiction" && learned?.existing) {
                 // Parse the STORED fact with the shared tolerant parser, so an
                 // existing fact written as "Card/account …" or with a trailing
@@ -2078,6 +2151,7 @@ export class AgentOrchestrator {
                     await this._tools.executeTool("update_fact", {
                         old_text: learned.existing,
                         new_text: fact,
+                        budget_id,
                     });
                 } else {
                     logger.warn({

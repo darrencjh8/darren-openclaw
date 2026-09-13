@@ -413,6 +413,27 @@ describe("ToolRegistry", () => {
         ]);
     });
 
+    it("refuses a fact write when the account list cannot be read (#561)", async () => {
+        const cfg = new Config(testEnv);
+        const calls = [];
+        const registry = new ToolRegistry(cfg, {
+            add: async (...args) => { calls.push(["add", args]); return { added: true }; },
+            update: (...args) => { calls.push(["update", args]); return { updated: true }; },
+        });
+        registry._handle_fetch_accounts = async () => ({ error: "upstream down" });
+
+        await expect(
+            registry.executeTool("learn_fact", { fact: "OCBC 360 maps to Food category" }),
+        ).resolves.toMatchObject({ added: false, skipped: true });
+        await expect(
+            registry.executeTool("update_fact", {
+                old_text: "Old maps to Food payee",
+                new_text: "OCBC 360 maps to Spotify payee",
+            }),
+        ).resolves.toMatchObject({ updated: false, found: false });
+        expect(calls).toEqual([]);
+    });
+
     it("_post does not mutate the caller's body object", async () => {
         const cfg = new Config(testEnv);
         const registry = new ToolRegistry(cfg);

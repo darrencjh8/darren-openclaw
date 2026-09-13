@@ -1003,13 +1003,32 @@ export class ToolRegistry {
     return { results: await this._memory.search(query) };
   }
 
-  async _handle_learn_fact({ fact, budget_id }) {
-    if (!this._memory)
-      return { added: false, skipped: false, reason: "no memory store" };
+  /**
+   * Live accounts for write-time identity validation. Refuses instead of
+   * returning an empty list when the accounts could not be read, so a failed
+   * fetch cannot silently disable the check that keeps own-account facts out of
+   * memory. Review round 2 on #561.
+   */
+  async _identityAccounts(budget_id) {
     const accounts = await this._handle_fetch_accounts({
       budget_id: budget_id || this._config.primaryBudgetFile,
     });
-    return await this._memory.add(fact, Array.isArray(accounts) ? accounts : []);
+    if (!Array.isArray(accounts)) {
+      throw new Error("account list unavailable for fact validation");
+    }
+    return accounts;
+  }
+
+  async _handle_learn_fact({ fact, budget_id }) {
+    if (!this._memory)
+      return { added: false, skipped: false, reason: "no memory store" };
+    let accounts;
+    try {
+      accounts = await this._identityAccounts(budget_id);
+    } catch (error) {
+      return { added: false, skipped: true, reason: error.message };
+    }
+    return await this._memory.add(fact, accounts);
   }
 
   async _handle_list_facts() {
@@ -1040,14 +1059,13 @@ export class ToolRegistry {
 
   async _handle_update_fact({ old_text, new_text, budget_id }) {
     if (!this._memory) return { updated: false, found: false };
-    const accounts = await this._handle_fetch_accounts({
-      budget_id: budget_id || this._config.primaryBudgetFile,
-    });
-    const result = this._memory.update(
-      old_text,
-      new_text,
-      Array.isArray(accounts) ? accounts : [],
-    );
+    let accounts;
+    try {
+      accounts = await this._identityAccounts(budget_id);
+    } catch (error) {
+      return { updated: false, found: false, reason: error.message };
+    }
+    const result = this._memory.update(old_text, new_text, accounts);
     if (result.updated) this._cooldown.clear();
     return result;
   }

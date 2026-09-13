@@ -1098,6 +1098,7 @@ describe("suffix auto-learn", () => {
     expect(tools.executeTool).toHaveBeenCalledWith("update_fact", {
       old_text: "Card ending 3255 belongs to DBS Vista Card",
       new_text: "Card ending 3255 belongs to DBS Nova Card",
+      budget_id: "",
     });
   });
 
