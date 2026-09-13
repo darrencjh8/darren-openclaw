@@ -512,14 +512,20 @@ PATH="$shim_dir:$PATH" \
     HERMES_SKILL_LOCK_MODE=mkdir \
     HERMES_SKILL_LOCK_WAIT_SECONDS=20 \
     sh -x "$SYNC" "$SOURCE" >/dev/null 2>"$ROOT/trace" || dbg_rc=$?
-dbg_looks=$(awk '/^\+ missing_pid=[0-9]+$/ {v=$0; sub(/.*=/, "", v); if (v < 3) c++} END {print c+0}' \
+dbg_trace=$(awk '/^\+ missing_pid=[0-9]+$/ {v=$0; sub(/.*=/, "", v); if (v == 0) z++; if (v + 0 > m) m = v + 0} END {print z + 0, m + 0}' \
     "$ROOT/trace" 2>/dev/null)
+dbg_resets=${dbg_trace% *}
+dbg_peak=${dbg_trace#* }
 rm -rf "$PRIMARY/.codex-router-skills.lock.d"
-if [[ "$dbg_rc" -eq 0 && "$dbg_looks" -ge 5 && -f "$PRIMARY/skills/dev-loop/SKILL.md" ]]; then
-    ok "re-armed the ownerless-lock debounce for a later lock (${dbg_looks} debounced looks)"
+# The counter must re-arm once per lock and its peak must be the debounce limit,
+# so a latched counter (no reset after the first reclaim) and any change to the
+# limit both fail here. One initial `0` plus one reset per lock is three zero
+# entries, and a re-armed counter with a limit of three peaks at three (#545).
+if [[ "$dbg_rc" -eq 0 && "$dbg_resets" -eq 3 && "$dbg_peak" -eq 3 && -f "$PRIMARY/skills/dev-loop/SKILL.md" ]]; then
+    ok "re-armed the ownerless-lock debounce for a later lock (${dbg_resets} resets, peak ${dbg_peak})"
 else
     nope "re-armed the ownerless-lock debounce for a later lock" \
-        "rc=$dbg_rc debounced_looks=${dbg_looks:-0}"
+        "rc=$dbg_rc resets=${dbg_resets:-0} peak=${dbg_peak:-0}"
 fi
 
 # Not covered here, and not coverable on the CI runner: a preempted fallback
