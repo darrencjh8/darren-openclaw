@@ -102,6 +102,78 @@ grep -q "card 4605" "$topic_clone/topics/accounts.md" 2>/dev/null \
     || nope "MEMORY.md copy" "regression: core store not copied"
 
 echo ""
+echo "=== expense-tracker memory copy ==="
+
+expense_src="$TMPDIR/expense-memories"
+expense_clone="$TMPDIR/expense-backup"
+mkdir -p "$expense_src" "$expense_clone" "$TMPDIR/expense-stubbin"
+printf 'expense memory: password stays verbatim\n' > "$expense_src/MEMORY.md"
+printf 'not memory\n' > "$expense_src/dedup.db"
+
+# Stub all git calls made by the backup script; clone creates local repository shape.
+cat > "$TMPDIR/expense-stubbin/git" <<'STUB'
+#!/bin/sh
+if [ "$1" = clone ]; then
+    mkdir -p "$3/.git"
+    exit 0
+fi
+if [ "$1" = diff ]; then
+    exit 1
+fi
+exit 0
+STUB
+cat > "$TMPDIR/expense-stubbin/gh" <<'STUB'
+#!/bin/sh
+if [ "$1" = auth ] && [ "$2" = token ]; then
+    printf 'ghp_test_token\n'
+fi
+STUB
+chmod +x "$TMPDIR/expense-stubbin/git" "$TMPDIR/expense-stubbin/gh"
+
+MEMORY_REPO_URL="https://example.com/owner/repo" \
+MEMORY_SRC_DIR="$topic_src" \
+MEMORY_CLONE_DIR="$expense_clone" \
+EXPENSE_TRACKER_DATA="$expense_src" \
+PATH="$TMPDIR/expense-stubbin:$PATH" \
+    bash "$backup_script" >/dev/null 2>&1
+
+cmp -s "$expense_src/MEMORY.md" "$expense_clone/expense-tracker/MEMORY.md" \
+    && ok "expense-tracker MEMORY.md copied verbatim" \
+    || nope "expense-tracker memory copy" "MEMORY.md missing or changed"
+[ ! -e "$expense_clone/expense-tracker/dedup.db" ] \
+    && ok "expense-tracker dedup.db excluded" \
+    || nope "expense-tracker exclusions" "dedup.db copied"
+
+missing_clone="$TMPDIR/expense-backup-missing"
+mkdir -p "$missing_clone"
+if env -u EXPENSE_TRACKER_DATA \
+    MEMORY_REPO_URL="https://example.com/owner/repo" \
+    MEMORY_SRC_DIR="$topic_src" \
+    MEMORY_CLONE_DIR="$missing_clone" \
+    PATH="$TMPDIR/expense-stubbin:$PATH" \
+    bash "$backup_script" >/dev/null 2>&1 \
+    && [ ! -e "$missing_clone/expense-tracker/MEMORY.md" ]; then
+    ok "unset expense directory creates no partial memory"
+else
+    nope "unset expense directory" "backup failed or created expense-tracker/MEMORY.md"
+fi
+
+empty_expense="$TMPDIR/empty-expense"
+empty_clone="$TMPDIR/expense-backup-empty"
+mkdir -p "$empty_expense" "$empty_clone"
+if MEMORY_REPO_URL="https://example.com/owner/repo" \
+    MEMORY_SRC_DIR="$topic_src" \
+    MEMORY_CLONE_DIR="$empty_clone" \
+    EXPENSE_TRACKER_DATA="$empty_expense" \
+    PATH="$TMPDIR/expense-stubbin:$PATH" \
+    bash "$backup_script" >/dev/null 2>&1 \
+    && [ ! -e "$empty_clone/expense-tracker/MEMORY.md" ]; then
+    ok "missing expense MEMORY.md creates no partial memory"
+else
+    nope "missing expense MEMORY.md" "backup failed or created partial MEMORY.md"
+fi
+
+echo ""
 echo "========================================="
 echo -e " Results: ${GREEN}$pass passed${NC}, ${RED}$fail failed${NC}"
 echo "========================================="
