@@ -35,6 +35,8 @@ services:
             - IMAP_HOST=${IMAP_HOST}
             - IMAP_USERNAME=${IMAP_USERNAME}
             - IMAP_PASSWORD=${IMAP_PASSWORD}
+            # No IPv6 route in the container; see issue #553.
+            - NODE_OPTIONS=--no-network-family-autoselection
         restart: unless-stopped
         healthcheck:
             test:
@@ -59,6 +61,8 @@ services:
             - ACTUAL_BUDGET_PASSWORD=${ACTUAL_BUDGET_PASSWORD}
             - ACTUAL_PRIMARY_BUDGET_FILE=${ACTUAL_PRIMARY_BUDGET_FILE}
             - BUDGET_SWITCH_DELAY_MS=5000
+            # No IPv6 route in the container; see issue #553.
+            - NODE_OPTIONS=--no-network-family-autoselection
         restart: unless-stopped
         logging: *default-logging
 
@@ -90,6 +94,8 @@ services:
             - TAXONOMY_NAMES=${TAXONOMY_NAMES:-Sector,Geography,Asset Class}
             - PP_XML_PATH=/data/onedrive/Portfolio/Portfolio.portfolio
             - PP_OFFSET_MAP=${PP_OFFSET_MAP:-}
+            # No IPv6 route in the container; see issue #553.
+            - NODE_OPTIONS=--no-network-family-autoselection
         mem_limit: 512m
         restart: unless-stopped
         healthcheck:
