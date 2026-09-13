@@ -1,6 +1,5 @@
 #!/bin/bash
-# Unit tests for memory-backup.sh helpers.
-# No real git operations — tests URL construction and token handling.
+# Tests URL construction plus memory-backup.sh end-to-end with stubbed git and gh.
 set -euo pipefail
 
 RED='\033[0;31m' GREEN='\033[0;32m' NC='\033[0m'
@@ -109,6 +108,9 @@ expense_clone="$TMPDIR/expense-backup"
 mkdir -p "$expense_src" "$expense_clone" "$TMPDIR/expense-stubbin"
 printf 'expense memory: password stays verbatim\n' > "$expense_src/MEMORY.md"
 printf 'not memory\n' > "$expense_src/dedup.db"
+printf 'not memory\n' > "$expense_src/metadata.json"
+printf 'not memory\n' > "$expense_src/statement.db"
+printf 'not memory\n' > "$expense_src/.env"
 
 # Stub all git calls made by the backup script; clone creates local repository shape.
 cat > "$TMPDIR/expense-stubbin/git" <<'STUB'
@@ -140,9 +142,14 @@ PATH="$TMPDIR/expense-stubbin:$PATH" \
 cmp -s "$expense_src/MEMORY.md" "$expense_clone/expense-tracker/MEMORY.md" \
     && ok "expense-tracker MEMORY.md copied verbatim" \
     || nope "expense-tracker memory copy" "MEMORY.md missing or changed"
-[ ! -e "$expense_clone/expense-tracker/dedup.db" ] \
-    && ok "expense-tracker dedup.db excluded" \
-    || nope "expense-tracker exclusions" "dedup.db copied"
+[ -f "$expense_clone/expense-tracker/MEMORY.md" ] \
+    && ok "expense-tracker copy exists before exclusion checks" \
+    || nope "expense-tracker copy" "MEMORY.md missing"
+for excluded in dedup.db metadata.json statement.db .env; do
+    [ ! -e "$expense_clone/expense-tracker/$excluded" ] \
+        && ok "expense-tracker $excluded excluded" \
+        || nope "expense-tracker exclusions" "$excluded copied"
+done
 
 missing_clone="$TMPDIR/expense-backup-missing"
 mkdir -p "$missing_clone"
@@ -160,17 +167,22 @@ fi
 
 empty_expense="$TMPDIR/empty-expense"
 empty_clone="$TMPDIR/expense-backup-empty"
-mkdir -p "$empty_expense" "$empty_clone"
+stale_memory="$TMPDIR/stale-expense-memory"
+empty_log="$TMPDIR/empty-expense.log"
+mkdir -p "$empty_expense" "$empty_clone/expense-tracker"
+printf 'stale expense memory\n' > "$stale_memory"
+cp "$stale_memory" "$empty_clone/expense-tracker/MEMORY.md"
 if MEMORY_REPO_URL="https://example.com/owner/repo" \
     MEMORY_SRC_DIR="$topic_src" \
     MEMORY_CLONE_DIR="$empty_clone" \
     EXPENSE_TRACKER_DATA="$empty_expense" \
     PATH="$TMPDIR/expense-stubbin:$PATH" \
-    bash "$backup_script" >/dev/null 2>&1 \
-    && [ ! -e "$empty_clone/expense-tracker/MEMORY.md" ]; then
-    ok "missing expense MEMORY.md creates no partial memory"
+    bash "$backup_script" >"$empty_log" 2>&1 \
+    && grep -Fq "WARN: expense memory missing:" "$empty_log" \
+    && cmp -s "$stale_memory" "$empty_clone/expense-tracker/MEMORY.md"; then
+    ok "missing expense MEMORY.md warns without changing stale memory"
 else
-    nope "missing expense MEMORY.md" "backup failed or created partial MEMORY.md"
+    nope "missing expense MEMORY.md" "backup lacked warning or changed stale memory"
 fi
 
 echo ""
