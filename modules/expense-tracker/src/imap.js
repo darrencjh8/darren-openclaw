@@ -72,6 +72,14 @@ export class ImapIdleHandler {
 
     async fetchUnread() {
         if (!this._client) return [];
+        // A UID identifies a message only inside one UIDVALIDITY epoch. When the
+        // server changes it, every uid the journal remembers may now belong to a
+        // different message, so the journal drops that state before this batch
+        // is checked (issue #558).
+        if (this._dedup)
+            this._dedup.noteMailboxUidValidity(
+                this._client.mailbox?.uidValidity,
+            );
         const messages = [];
         const seen = new Set();
         for await (const msg of this._client.fetch(

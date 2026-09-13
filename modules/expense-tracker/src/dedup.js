@@ -57,6 +57,14 @@ export class DedupJournal {
         // Message identity that outlives the retry cooldown: once an email has
         // produced a booking, reprocessing it must book nothing (issue #557).
         // processed_uids keeps its short life so genuine failures still retry.
+        // Last UIDVALIDITY read from the mailbox: it decides when the uid-keyed
+        // tables above stop meaning anything (issue #558).
+        this._db.exec(`
+      CREATE TABLE IF NOT EXISTS mailbox_state (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+      )
+    `);
         this._db.exec(`
       CREATE TABLE IF NOT EXISTS booked_messages (
         uid TEXT PRIMARY KEY,
@@ -219,7 +227,8 @@ export class DedupJournal {
         this._stmtInsertUid.run(uid, new Date().toISOString());
     }
 
-    /** True once this message has produced a booking; this never expires. */
+    /** True once this message has produced a booking; retained until
+     *  cleanup() passes 180 days. Part of the interface imap.js requires. */
     isMessageBooked(uid) {
         return !!this._db
             .prepare("SELECT 1 FROM booked_messages WHERE uid = ?")
@@ -232,6 +241,31 @@ export class DedupJournal {
                 "INSERT OR REPLACE INTO booked_messages (uid, booked_at) VALUES (?, ?)",
             )
             .run(uid, new Date().toISOString());
+    }
+
+    /**
+     * Record the mailbox's UIDVALIDITY and drop the UID-keyed state when it
+     * changes. A UID identifies a message only inside one epoch, so after a
+     * change every stored uid can point at a different message and keeping them
+     * would silently skip genuinely new mail (issue #558). The dedup table is
+     * untouched: it is keyed on the message content, not on a uid.
+     * Returns true when state was cleared.
+     */
+    noteMailboxUidValidity(uidValidity) {
+        if (uidValidity === undefined || uidValidity === null) return false;
+        const row = this._db
+            .prepare("SELECT value FROM mailbox_state WHERE key = ?")
+            .get("uidvalidity");
+        if (row && row.value === String(uidValidity)) return false;
+        this._db
+            .prepare(
+                "INSERT OR REPLACE INTO mailbox_state (key, value) VALUES (?, ?)",
+            )
+            .run("uidvalidity", String(uidValidity));
+        if (!row) return false; // first sight: nothing stale to drop
+        this._db.prepare("DELETE FROM booked_messages").run();
+        this._db.prepare("DELETE FROM processed_uids").run();
+        return true;
     }
 
     /** Delete processed_uids entries older than 60 minutes */

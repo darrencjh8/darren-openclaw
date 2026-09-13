@@ -316,6 +316,29 @@ describe("DedupJournal message identity (#557)", () => {
         expect(journal.isMessageBooked("old")).toBe(false);
         expect(journal.isMessageBooked("fresh")).toBe(true);
     });
+
+    it("drops uid-keyed state when the mailbox epoch changes (#558)", () => {
+        expect(journal.noteMailboxUidValidity(111)).toBe(false); // first sight
+        journal.markMessageBooked("859");
+        journal.recordProcessed("859");
+
+        expect(journal.noteMailboxUidValidity(111)).toBe(false); // same epoch
+        expect(journal.isMessageBooked("859")).toBe(true);
+
+        // A change reassigns UIDs, so 859 may now be a different message.
+        expect(journal.noteMailboxUidValidity(222)).toBe(true);
+        expect(journal.isMessageBooked("859")).toBe(false);
+        expect(journal.isRecentlyProcessed("859")).toBe(false);
+
+        expect(journal.noteMailboxUidValidity(222)).toBe(false); // recorded
+    });
+
+    it("ignores a missing mailbox epoch", () => {
+        journal.markMessageBooked("859");
+        expect(journal.noteMailboxUidValidity(undefined)).toBe(false);
+        expect(journal.noteMailboxUidValidity(null)).toBe(false);
+        expect(journal.isMessageBooked("859")).toBe(true);
+    });
 });
 
 describe("DedupJournal cleanupOldEntries", () => {
