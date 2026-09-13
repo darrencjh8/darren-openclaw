@@ -47,6 +47,15 @@ export class DedupJournal {
         processed_at TEXT NOT NULL
       )
     `);
+        // Message identity that outlives the retry cooldown: once an email has
+        // produced a booking, reprocessing it must book nothing (issue #557).
+        // processed_uids keeps its short life so genuine failures still retry.
+        this._db.exec(`
+      CREATE TABLE IF NOT EXISTS booked_messages (
+        uid TEXT PRIMARY KEY,
+        booked_at TEXT NOT NULL
+      )
+    `);
         this._db.exec(`
       CREATE TABLE IF NOT EXISTS transfer_journal (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -201,6 +210,21 @@ export class DedupJournal {
 
     recordProcessed(uid) {
         this._stmtInsertUid.run(uid, new Date().toISOString());
+    }
+
+    /** True once this message has produced a booking; this never expires. */
+    isMessageBooked(uid) {
+        return !!this._db
+            .prepare("SELECT 1 FROM booked_messages WHERE uid = ?")
+            .get(uid);
+    }
+
+    markMessageBooked(uid) {
+        this._db
+            .prepare(
+                "INSERT OR REPLACE INTO booked_messages (uid, booked_at) VALUES (?, ?)",
+            )
+            .run(uid, new Date().toISOString());
     }
 
     /** Delete processed_uids entries older than 60 minutes */

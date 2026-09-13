@@ -269,6 +269,37 @@ describe("DedupJournal transfer journal", () => {
     });
 });
 
+describe("DedupJournal message identity (#557)", () => {
+    let dbPath;
+    let journal;
+
+    beforeEach(() => {
+        dbPath = join(
+            tmpdir(),
+            `dedup-booked-${Date.now()}-${Math.random().toString(36).slice(2)}.db`,
+        );
+        journal = new DedupJournal(dbPath);
+    });
+
+    afterEach(() => {
+        journal.close();
+        try {
+            unlinkSync(dbPath);
+        } catch {}
+    });
+
+    it("remembers a booked message after the retry cooldown is cleaned up", () => {
+        expect(journal.isMessageBooked("859")).toBe(false);
+        journal.markMessageBooked("859");
+        expect(journal.isMessageBooked("859")).toBe(true);
+
+        // The 60-minute cooldown forgets attempts so failures can retry; it must
+        // never forget that an email already produced a booking.
+        journal.cleanupProcessedUids();
+        expect(journal.isMessageBooked("859")).toBe(true);
+    });
+});
+
 describe("DedupJournal cleanupOldEntries", () => {
     let dbPath;
     let journal;

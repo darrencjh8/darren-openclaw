@@ -1673,6 +1673,23 @@ export class AgentOrchestrator {
             // tolerate a quoted integer amount, and those must still dedup.
             const hasAmount =
                 llmOutput.amount_cents != null && llmOutput.amount_cents !== "";
+            // An alert can carry no figure at all: UOB sends a second "FAST Funds
+            // Transfer Status" email naming the transfer but no amount, and it
+            // booked a 0.00 pair (issue #557). Nothing to record, so skip it,
+            // mark it read, and say why.
+            if (hasAmount && Number(llmOutput.amount_cents) === 0) {
+                if (!silent)
+                    await this._tools.executeTool("mark_email_read", {});
+                await this._tools.executeTool("notify_user", {
+                    message: `Skipped: the alert carried no amount (${llmOutput.raw_description || llmOutput.merchant || "unknown"}).`,
+                });
+                await this._tools.executeTool("log_decision", {
+                    action: "skipped",
+                    reasoning: "Alert carried no amount",
+                    timestamp: new Date().toISOString(),
+                });
+                return { action: "skipped" };
+            }
             // A structured transfer dedups on its reservation below, never on
             // money: an amount+account lookback cannot tell two real transfers of
             // the same amount apart, so it silently dropped the second one

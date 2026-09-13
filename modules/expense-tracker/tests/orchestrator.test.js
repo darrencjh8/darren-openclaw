@@ -2478,4 +2478,33 @@ describe("_resolvePhase2 transfer detection", () => {
             expect.anything(),
         );
     });
+
+    // Issue #557: UOB sends a second "FAST Funds Transfer Status" email naming
+    // the transfer but carrying no amount. It booked a 0.00 pair and notified
+    // "S$0.00 ... logged"; an alert with no figure must book nothing.
+    it("books nothing when the alert carries no amount (#557)", async () => {
+        const config = makeConfig();
+        const tools = makeTools();
+        const orch = new AgentOrchestrator(config, tools);
+
+        const p1 = fakePhase1Output({ amount_cents: 0 });
+        const p2 = fakePhase2Output(p1, { amount_cents: 0 });
+        orch._runPhase1 = vi.fn().mockResolvedValue(p1);
+        orch._resolvePhase2 = vi.fn().mockResolvedValue(p2);
+
+        const result = await orch.processEmail(
+            "test-zero-amount",
+            "raw email",
+        );
+
+        expect(result.action).toBe("skipped");
+        expect(tools.executeTool).not.toHaveBeenCalledWith(
+            "insert_transaction",
+            expect.anything(),
+        );
+        const notify = tools.executeTool.mock.calls.find(
+            (c) => c[0] === "notify_user",
+        );
+        expect(notify[1].message).toContain("no amount");
+    });
 });

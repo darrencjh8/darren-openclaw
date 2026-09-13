@@ -4,6 +4,7 @@
 import { describe, it, expect } from "vitest";
 import { Config } from "../src/config.js";
 import { ToolRegistry, NotificationCooldown } from "../src/tools.js";
+import { DedupJournal } from "../src/dedup.js";
 
 const testEnv = {
     DEEPSEEK_API_KEY: "sk-test",
@@ -602,5 +603,102 @@ describe("NotificationCooldown", () => {
         const c = new NotificationCooldown();
         c.record("msg-1");
         expect(c.shouldSuppress("msg-2")).toBe(false);
+    });
+});
+
+describe("reserve_transfer far-side reconciliation (#557)", () => {
+    // Live case: the OCBC "Deposit in your account" alert booked OCBC 360 +1.00
+    // as an unidentified deposit before the UOB transfer alert arrived, and the
+    // counterpart Actual creates on transfer insert then doubled it.
+    const args = {
+        budget_id: "Darren SGD",
+        source_account_id: "uob-one",
+        destination_account_id: "ocbc-360",
+        currency: "SGD",
+        amount_cents: 100,
+        occurred_at: "2026-09-13T08:53:57.000Z",
+        payee_id: "p-uob-transfer",
+    };
+
+    it("replaces a stale unidentified deposit on the destination account", async () => {
+        const cfg = new Config(testEnv);
+        const registry = new ToolRegistry(cfg);
+        registry._dedup = new DedupJournal(":memory:");
+        const deleted = [];
+        global.fetch = async (url, options = {}) => {
+            if (options.method === "DELETE") {
+                deleted.push(String(url));
+                return { ok: true, json: async () => ({ status: "deleted" }) };
+            }
+            if (String(url).includes("/payees")) {
+                return {
+                    ok: true,
+                    json: async () => [{ id: "p-misc", name: "Misc" }],
+                };
+            }
+            return {
+                ok: true,
+                json: async () => [
+                    {
+                        id: "stale-1",
+                        amount: 100,
+                        payee: "p-misc",
+                        cleared: false,
+                        transfer_id: null,
+                    },
+                ],
+            };
+        };
+
+        const reservation = await registry.executeTool(
+            "reserve_transfer",
+            args,
+        );
+
+        expect(reservation.status).toBe("reserved");
+        expect(reservation.reconciled_transaction_id).toBe("stale-1");
+        expect(deleted.some((u) => u.includes("/transactions/stale-1"))).toBe(
+            true,
+        );
+    });
+
+    it("leaves a cleared or linked row alone", async () => {
+        const cfg = new Config(testEnv);
+        const registry = new ToolRegistry(cfg);
+        registry._dedup = new DedupJournal(":memory:");
+        const deleted = [];
+        global.fetch = async (url, options = {}) => {
+            if (options.method === "DELETE") {
+                deleted.push(String(url));
+                return { ok: true, json: async () => ({ status: "deleted" }) };
+            }
+            if (String(url).includes("/payees")) {
+                return {
+                    ok: true,
+                    json: async () => [{ id: "p-misc", name: "Misc" }],
+                };
+            }
+            return {
+                ok: true,
+                json: async () => [
+                    {
+                        id: "real-1",
+                        amount: 100,
+                        payee: "p-misc",
+                        cleared: true,
+                        transfer_id: null,
+                    },
+                ],
+            };
+        };
+
+        const reservation = await registry.executeTool(
+            "reserve_transfer",
+            args,
+        );
+
+        expect(reservation.status).toBe("reserved");
+        expect(reservation.reconciled_transaction_id).toBeUndefined();
+        expect(deleted).toEqual([]);
     });
 });
