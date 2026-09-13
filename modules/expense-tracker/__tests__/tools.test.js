@@ -286,8 +286,12 @@ describe("ToolRegistry — budget_id validation", () => {
                 imported_description: "Deposit",
             });
 
-            // The matched transfer payee's target is validated before posting.
+            // #563: the matched transfer payee's target must be checked to be
+            // open and not the booking account, so the write boundary reads
+            // /accounts between the payee lookup and the POST. The old count of
+            // 2 asserted that no such check happened.
             expect(mockFetch).toHaveBeenCalledTimes(3);
+            expect(mockFetch.mock.calls[1][0]).toContain("/accounts");
             const postBody = JSON.parse(mockFetch.mock.calls[2][1].body);
             // The transfer payee is the only match that creates a transfer, so
             // it wins over the plain payee listed first.
@@ -559,9 +563,20 @@ describe("ToolRegistry — budget_id validation", () => {
                 json: () => duplicateNamePayees,
             });
 
+            // #563: _validate_payee also hands back the matched payee object, so
+            // insert_transaction can validate that exact payee's transfer target
+            // without re-resolving the name against a second payee list.
             await expect(
                 registry._validate_payee("deposit", "My Budget"),
-            ).resolves.toMatchObject({ name: "Deposit", payeeId: "payee-transfer" });
+            ).resolves.toEqual({
+                name: "Deposit",
+                payeeId: "payee-transfer",
+                payee: {
+                    id: "payee-transfer",
+                    name: "Deposit",
+                    transfer_acct: "acct-deposit",
+                },
+            });
         });
     });
 
