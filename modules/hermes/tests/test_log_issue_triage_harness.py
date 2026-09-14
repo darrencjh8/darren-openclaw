@@ -24,10 +24,12 @@ class LogIssueTriageHarnessTest(unittest.TestCase):
         for filename in ("expense-tracker.json", "hermes.json", "portfolio-tracker.json"):
             self.assertIn(filename, WORKER)
 
-    def test_snapshot_fails_when_docker_logs_fail(self):
+    def test_snapshot_streams_without_stale_cursor_or_artifacts(self):
+        self.assertIn("set -euo pipefail", SNAPSHOT)
         self.assertIn("timeout 30 docker logs --tail 500", SNAPSHOT)
-        self.assertIn('>"$tmp"', SNAPSHOT)
-        self.assertNotIn("docker logs --tail 500 \"$component\" |", SNAPSHOT)
+        self.assertIn("--source -", SNAPSHOT)
+        self.assertIn('rm -f "$snapshot"', SNAPSHOT)
+        self.assertNotIn("mktemp", SNAPSHOT)
 
     def test_agent_denies_side_effects_and_requires_final_marker(self):
         for permission in ("edit: deny", "bash: deny", "task: deny", "webfetch: deny", "read: deny"):
