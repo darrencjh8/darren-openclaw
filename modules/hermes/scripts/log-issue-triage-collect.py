@@ -11,8 +11,9 @@ ALLOWED_COMPONENTS = {"expense-tracker", "hermes", "portfolio-tracker"}
 SECRET_PATTERNS = (
     re.compile(r"(?i)\bauthorization\s*:\s*bearer\s+\S+"),
     re.compile(r"(?i)\bbearer\s+\S+"),
-    re.compile(r"(?i)\b(?:password|passwd|pin|otp|secret|token|api[_-]?key|authorization)\b\s*[:=]\s*(?:\"[^\"]*\"|'[^']*'|[^\s,;}]+)"),
+    re.compile(r"(?i)(?:password|passwd|pin|otp|secret|token|api[_-]?key|authorization)\s*[:=]\s*(?:\"[^\"]*\"|'[^']*'|[^\s,;}]+)"),
     re.compile(r"(?i)\"(?:password|passwd|pin|otp|secret|token|api[_-]?key|authorization)\"\s*:\s*(?:\"[^\"]*\"|'[^']*'|[^\s,;}]+)"),
+    re.compile(r"\b(?:gh[pousr]_[A-Za-z0-9_]+|sk-[A-Za-z0-9_-]+|AKIA[A-Z0-9]{16})\b"),
     re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b"),
     re.compile(r"\b(?:\d[ -]?){13,19}\b"),
 )

@@ -388,10 +388,11 @@ mkdir -p /opt/data/log-issue-triage/snapshots /opt/data/log-issue-triage/worker-
 chown -R hermes:hermes /opt/data/log-issue-triage 2>/dev/null || true
 # OpenCode sees only bounded redacted artifacts and cannot mutate state; Hermes
 # alone verifies and performs any GitHub write.
-python3 <<'PYEOF' || true
+python3 <<'PYEOF'
 import datetime
 import json
 import os
+import tempfile
 import uuid
 
 jobs_path = "/opt/data/cron/jobs.json"
@@ -399,9 +400,13 @@ os.makedirs(os.path.dirname(jobs_path), exist_ok=True)
 try:
     with open(jobs_path, encoding="utf-8") as handle:
         data = json.load(handle)
-    jobs = data.get("jobs", []) if isinstance(data, dict) else data
-except (FileNotFoundError, json.JSONDecodeError):
-    jobs = []
+except FileNotFoundError:
+    data = {"jobs": []}
+except json.JSONDecodeError as error:
+    raise SystemExit(f"refusing to replace corrupt cron jobs file: {error}")
+if not isinstance(data, dict) or not isinstance(data.get("jobs", []), list):
+    raise SystemExit("refusing to replace malformed cron jobs file")
+jobs = data["jobs"]
 
 LOG_ISSUE_TRIAGE_PROMPT = """Review bounded log evidence for potential software defects.
 
@@ -454,8 +459,13 @@ else:
         existing[key] = MANAGED[key]
     print("cron: log-issue-triage migrated" if changed else "cron: log-issue-triage unchanged")
 
-with open(jobs_path, "w", encoding="utf-8") as handle:
+directory = os.path.dirname(jobs_path)
+with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=directory, delete=False) as handle:
     json.dump({"jobs": jobs, "updated_at": datetime.datetime.now(datetime.timezone.utc).isoformat()}, handle, indent=2)
+    handle.flush()
+    os.fsync(handle.fileno())
+    temp_path = handle.name
+os.replace(temp_path, jobs_path)
 PYEOF
 
 # Seed memory-triage cron job (idempotent — drains the memory write-approval queue).

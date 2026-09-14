@@ -10,22 +10,22 @@ fi
 component=$1
 case "$component" in
     expense-tracker|hermes|portfolio-tracker) ;;
-    *) echo "unsupported component: $component" >&2; exit 64 ;;
+    *) echo "unknown triage component" >&2; exit 64 ;;
 esac
 
 snapshot_dir=/opt/data/log-issue-triage/snapshots
-mkdir -p "$snapshot_dir"
-tmp="$snapshot_dir/$component.json.tmp"
-output="$snapshot_dir/$component.json"
+state_dir=/opt/data/log-issue-triage/state
+mkdir -p "$snapshot_dir" "$state_dir"
+tmp=$(mktemp "$snapshot_dir/.${component}.raw.XXXXXX")
+trap 'rm -f "$tmp"' EXIT HUP INT TERM
 
-# Docker is the sole raw-log reader. The collector receives stdin, redacts before
-# writing, and caps the artifact that the external worker may inspect.
-docker logs --since 25h --tail 1500 "$component" 2>&1 | \
-    python3 /opt/data/scripts/log-issue-triage-collect.py \
-        --component "$component" \
-        --source - \
-        --state-dir /opt/data/log-issue-triage/cursors \
-        --max-lines 300 \
-        --max-bytes 32768 >"$tmp"
-mv "$tmp" "$output"
-printf '%s\n' "$output"
+# Capture failure separately; a broken Docker read must not masquerade as no logs.
+timeout 30 docker logs --tail 500 "$component" >"$tmp"
+python3 /opt/data/scripts/log-issue-triage-collect.py \
+    --component "$component" \
+    --source "$tmp" \
+    --state-dir "$state_dir" \
+    --max-lines 200 \
+    --max-bytes 65536 \
+    >"$snapshot_dir/$component.json"
+printf '%s\n' "$snapshot_dir/$component.json"

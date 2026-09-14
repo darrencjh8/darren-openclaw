@@ -8,10 +8,11 @@ if [ "$#" -ne 1 ]; then
 fi
 
 snapshot=$1
-case "$snapshot" in
-    /opt/data/log-issue-triage/snapshots/*.json) ;;
-    *) echo "snapshot must be under /opt/data/log-issue-triage/snapshots" >&2; exit 64 ;;
+case "$(basename "$snapshot")" in
+    expense-tracker.json|hermes.json|portfolio-tracker.json) ;;
+    *) echo "refusing unknown triage snapshot" >&2; exit 64 ;;
 esac
+snapshot=/opt/data/log-issue-triage/snapshots/"$(basename "$snapshot")"
 [ -f "$snapshot" ] || { echo "snapshot does not exist" >&2; exit 66; }
 
 output_dir=/opt/data/log-issue-triage/worker-output
