@@ -98,9 +98,9 @@ grep -Fq -- 'auto-thinking' "$CODE_REVIEWER_PROFILE/config.yaml" \
     || nope "code-reviewer profile defaults to a served router model"
 
 echo "=== repo rules keep the gate invariants ==="
-grep -Fq -- 'three continuous approvals on the same unchanged HEAD' "$REPO_RULES" \
-    && ok "repo rules require three approvals" \
-    || nope "repo rules require three approvals"
+grep -Fq -- 'two continuous approvals on the same unchanged HEAD' "$REPO_RULES" \
+    && ok "repo rules require two approvals" \
+    || nope "repo rules require two approvals"
 grep -Fq -- 'invoke spec-auditor before code review' "$REPO_RULES" \
     && ok "repo rules invoke spec-auditor when a spec exists" \
     || nope "repo rules invoke spec-auditor when a spec exists"
