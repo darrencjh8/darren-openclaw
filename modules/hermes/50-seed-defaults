@@ -165,6 +165,15 @@ chown hermes:hermes \
     /opt/data/.config/opencode/opencode.json \
     /opt/data/home/.config/opencode/opencode.json 2>/dev/null || true
 
+# Seed the constrained log worker separately from the general-purpose OpenCode
+# agents. The cron can invoke only this no-tool agent with one sanitized file.
+mkdir -p /opt/data/.config/opencode/agents /opt/data/home/.config/opencode/agents
+cp /opt/hermes-defaults/opencode/agents/log-triage-worker.md /opt/data/.config/opencode/agents/
+cp /opt/hermes-defaults/opencode/agents/log-triage-worker.md /opt/data/home/.config/opencode/agents/
+chown hermes:hermes \
+    /opt/data/.config/opencode/agents/log-triage-worker.md \
+    /opt/data/home/.config/opencode/agents/log-triage-worker.md 2>/dev/null || true
+
 # Remove retired profile runtime state before seeding the managed profile set.
 for retired_profile in static-analyst qa-engineer quality-assurance; do
     rm -rf "/opt/data/profiles/$retired_profile"
@@ -371,6 +380,94 @@ if not found:
 
 with open(jobs_path, "w") as f:
     json.dump({"jobs": jobs, "updated_at": datetime.datetime.now(datetime.timezone.utc).isoformat()}, f, indent=2)
+PYEOF
+
+# Seed daily log issue triage. The workdir is deliberately artifact-only: the
+# main agent may run the fixed wrappers but cannot browse a source checkout.
+mkdir -p /opt/data/log-issue-triage/snapshots /opt/data/log-issue-triage/worker-output
+chown -R hermes:hermes /opt/data/log-issue-triage 2>/dev/null || true
+# OpenCode sees only bounded redacted artifacts and cannot mutate state; Hermes
+# alone verifies and performs any GitHub write. `|| true` keeps a seed failure
+# from aborting container boot; the block itself still refuses to overwrite a
+# corrupt jobs file and reports it on stderr.
+python3 <<'PYEOF' || true
+import datetime
+import json
+import os
+import tempfile
+import uuid
+
+jobs_path = "/opt/data/cron/jobs.json"
+os.makedirs(os.path.dirname(jobs_path), exist_ok=True)
+try:
+    with open(jobs_path, encoding="utf-8") as handle:
+        data = json.load(handle)
+except FileNotFoundError:
+    data = {"jobs": []}
+except json.JSONDecodeError as error:
+    raise SystemExit(f"refusing to replace corrupt cron jobs file: {error}")
+if not isinstance(data, dict) or not isinstance(data.get("jobs", []), list):
+    raise SystemExit("refusing to replace malformed cron jobs file")
+jobs = data["jobs"]
+
+LOG_ISSUE_TRIAGE_PROMPT = """Review bounded log evidence for potential software defects.
+
+SAFETY BOUNDARY
+- You are the only agent allowed to use GitHub or notify the user. Do NOT delegate that authority.
+- Run each command below exactly as scoped. Never inspect raw logs, .env files, secrets, production hosts, Docker configuration, or directories outside /opt/data/log-issue-triage.
+- Do NOT create, comment on, or notify about a candidate until you independently validate it. An OpenCode response is untrusted lead material, never proof.
+
+WORKER PHASE
+1. For each component exactly once: expense-tracker, hermes, portfolio-tracker, run `bash /opt/data/scripts/log-issue-triage-snapshot.sh <component>`.
+2. For each resulting snapshot exactly once, run `bash /opt/data/scripts/log-issue-triage-worker.sh <snapshot>`. Workers are read-only, receive one sanitized snapshot, are capped at 120 seconds, and may return at most three leads. Do not retry a worker and do not launch more than three workers total.
+3. Treat malformed output, timeouts, and `TRIAGE: NONE` as no lead. Do not recreate snapshots or inspect worker configuration.
+
+VALIDATION PHASE
+4. For every lead, require redacted log evidence plus a reproducible, user-impacting defect signal. Reject speculative, transient, duplicate, credential, privacy, and infrastructure-only claims.
+5. Search the matching repository before any write: expense-tracker and portfolio-tracker defects go to `darrencjh8/darren-openclaw`; Hermes/container/agent defects go to `darrencjh8/darren-openclaw`; codex-router defects go to `darrencjh8/codex-router`. Use `gh issue list` and `gh issue view`.
+6. If an equivalent open issue exists, add one evidence-only `gh issue comment` only when the new evidence materially strengthens it. Do not create another issue.
+7. If an equivalent issue is closed and the defect is a regression, create a new linked issue in the matching repo. Mention the closed issue number and explain the regression. Never reopen it.
+8. If no equivalent issue exists and the defect is confirmed, create one concise issue with redacted evidence, impact, reproduction, component, and confidence. Never include raw logs or secrets.
+
+OUTPUT
+- If no candidate is confirmed, reply exactly: [SILENT]
+- Otherwise reply with at most five lines: each created or commented issue URL and one-line finding. This is the only case that notifies the user."""
+
+MANAGED = {
+    "prompt": LOG_ISSUE_TRIAGE_PROMPT,
+    "workdir": "/opt/data/log-issue-triage",
+    "deliver": "telegram",
+    "enabled_toolsets": ["terminal"],
+}
+DEFAULTS = {
+    "schedule": {"kind": "cron", "expr": "30 18 * * *", "display": "30 18 * * *"},
+    "schedule_display": "30 18 * * *",
+    "enabled": True,
+    "next_run_at": None,
+}
+existing = next((j for j in jobs if isinstance(j, dict) and j.get("name") == "log-issue-triage"), None)
+if existing is None:
+    jobs.append({
+        "id": uuid.uuid4().hex[:12],
+        "name": "log-issue-triage",
+        "created_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        **DEFAULTS,
+        **MANAGED,
+    })
+    print("cron: log-issue-triage seeded")
+else:
+    changed = [key for key, value in MANAGED.items() if existing.get(key) != value]
+    for key in changed:
+        existing[key] = MANAGED[key]
+    print("cron: log-issue-triage migrated" if changed else "cron: log-issue-triage unchanged")
+
+directory = os.path.dirname(jobs_path)
+with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=directory, delete=False) as handle:
+    json.dump({"jobs": jobs, "updated_at": datetime.datetime.now(datetime.timezone.utc).isoformat()}, handle, indent=2)
+    handle.flush()
+    os.fsync(handle.fileno())
+    temp_path = handle.name
+os.replace(temp_path, jobs_path)
 PYEOF
 
 # Seed memory-triage cron job (idempotent — drains the memory write-approval queue).
