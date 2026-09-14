@@ -1177,8 +1177,8 @@ export class ToolRegistry {
    * name throws: silently booking whichever payee came first is the defect #483
    * tracks, and "Misc" would hide the collision. Issue #483.
    *
-   * @returns {Promise<{name: string, payeeId: string|null}>} the canonical name
-   *   and, when the live list matched it, the matching payee's ID
+   * @returns {Promise<{name: string, payeeId: string|null, payee?: object}>} the canonical name
+   *   and, when the live list matched it, the matching payee's ID and object
    */
   async _validate_payee(payee_name, budget_id = "") {
     if (!payee_name) return { name: "Misc", payeeId: null };
@@ -1191,7 +1191,7 @@ export class ToolRegistry {
     if (Array.isArray(payees)) {
       const match = resolvePayeeMatch(payees, payee_name);
       if (match?.error) throw ambiguousPayeeError(match.error);
-      if (match) return { name: match.name, payeeId: match.id || null };
+      if (match) return { name: match.name, payeeId: match.id || null, payee: match };
     }
     // Fall back to semantic memory search if available
     if (this._memory) {
@@ -1228,6 +1228,15 @@ export class ToolRegistry {
     const explicitId = args.payee_id || null;
     let payeeId = explicitId;
     let payee_name = null;
+    const validateTransferTarget = async (payee) => {
+      if (!payee?.transfer_acct) return null;
+      const accounts = await this._get("/accounts", budget_id);
+      if (!Array.isArray(accounts)) return "Could not validate transfer destination.";
+      if (payee.transfer_acct === args.account_id) return "Transfer destination cannot be its source account.";
+      if (!accounts.some((account) => account.id === payee.transfer_acct && !account.closed))
+        return "Transfer destination is closed or unavailable.";
+      return null;
+    };
     if (explicitId) {
       // An explicit ID comes from the caller or from Phase 2 transfer detection,
       // so it is validated here and never second-guessed by a name lookup.
@@ -1245,6 +1254,8 @@ export class ToolRegistry {
       const explicit = payees.find((p) => p.id === explicitId);
       if (!explicit)
         return { error: `Payee ID "${explicitId}" not found in payee list.` };
+      const transferError = await validateTransferTarget(explicit);
+      if (transferError) return { error: transferError };
       // The journal keys duplicates by payee name, so an explicit ID must still
       // record a non-empty name; fall back to the imported description when the
       // payee itself has no name.
@@ -1265,20 +1276,29 @@ export class ToolRegistry {
       }
       payee_name = validated.name;
       payeeId = validated.payeeId;
-      if (!payeeId && payee_name && payee_name !== "Misc") {
+      if (payeeId) {
+        // _validate_payee returns an ID for a bare matching name, so it needs
+        // the same transfer-target check as a caller-supplied ID.
+        const transferError = await validateTransferTarget(validated.payee);
+        if (transferError) return { error: transferError };
+      } else if (payee_name && payee_name !== "Misc") {
         // Only a memory-resolved name needs a second lookup: the live list did
         // not supply an ID above.
         try {
           const payees = await this._get("/payees", budget_id);
-          if (Array.isArray(payees)) {
-            const match = resolvePayeeMatch(payees, payee_name);
-            if (match?.error) return { error: match.error, code: match.code };
-            if (match) {
-              payeeId = match.id;
-              payee_name = match.name;
-            }
+          if (!Array.isArray(payees))
+            return { error: "Could not validate transfer destination." };
+          const match = resolvePayeeMatch(payees, payee_name);
+          if (match?.error) return { error: match.error, code: match.code };
+          if (match) {
+            const transferError = await validateTransferTarget(match);
+            if (transferError) return { error: transferError };
+            payeeId = match.id;
+            payee_name = match.name;
           }
-        } catch {}
+        } catch {
+          return { error: "Could not validate transfer destination." };
+        }
       }
     }
     let categoryId = args.category_id || null;

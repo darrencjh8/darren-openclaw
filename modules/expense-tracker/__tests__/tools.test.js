@@ -273,6 +273,9 @@ describe("ToolRegistry — budget_id validation", () => {
         test("a bare imported_description matching a transfer and a plain payee picks the transfer (#483)", async () => {
             mockFetch
                 .mockResolvedValueOnce({ ok: true, json: () => duplicateNamePayees })
+                .mockResolvedValueOnce({ ok: true, json: () => [
+                    { id: "acct-deposit", name: "Deposit Account", closed: false },
+                ] })
                 .mockResolvedValueOnce({ ok: true, json: () => ({ id: "txn-1" }) });
 
             await registry.executeTool("insert_transaction", {
@@ -283,9 +286,13 @@ describe("ToolRegistry — budget_id validation", () => {
                 imported_description: "Deposit",
             });
 
-            // One payee fetch: the same list supplies the name and the ID.
-            expect(mockFetch).toHaveBeenCalledTimes(2);
-            const postBody = JSON.parse(mockFetch.mock.calls[1][1].body);
+            // #563: the matched transfer payee's target must be checked to be
+            // open and not the booking account, so the write boundary reads
+            // /accounts between the payee lookup and the POST. The old count of
+            // 2 asserted that no such check happened.
+            expect(mockFetch).toHaveBeenCalledTimes(3);
+            expect(mockFetch.mock.calls[1][0]).toContain("/accounts");
+            const postBody = JSON.parse(mockFetch.mock.calls[2][1].body);
             // The transfer payee is the only match that creates a transfer, so
             // it wins over the plain payee listed first.
             expect(postBody.payee).toBe("payee-transfer");
@@ -556,9 +563,20 @@ describe("ToolRegistry — budget_id validation", () => {
                 json: () => duplicateNamePayees,
             });
 
+            // #563: _validate_payee also hands back the matched payee object, so
+            // insert_transaction can validate that exact payee's transfer target
+            // without re-resolving the name against a second payee list.
             await expect(
                 registry._validate_payee("deposit", "My Budget"),
-            ).resolves.toEqual({ name: "Deposit", payeeId: "payee-transfer" });
+            ).resolves.toEqual({
+                name: "Deposit",
+                payeeId: "payee-transfer",
+                payee: {
+                    id: "payee-transfer",
+                    name: "Deposit",
+                    transfer_acct: "acct-deposit",
+                },
+            });
         });
     });
 
