@@ -124,7 +124,7 @@ kanban:
     orchestrator_profile: project-manager
     default_assignee: code-reviewer
 
-timezone: Asia/Kuala_Lumpur
+timezone: Asia/Singapore
 
 mcp_servers:
     expense-tracker:
