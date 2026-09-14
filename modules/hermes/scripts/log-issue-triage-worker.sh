@@ -19,7 +19,12 @@ output_dir=/opt/data/log-issue-triage/worker-output
 mkdir -p "$output_dir"
 name=$(basename "$snapshot" .json)
 output="$output_dir/$name.txt"
-tmp="$output.tmp"
+
+# Drop any previous run's verdict first so a failed or timed-out worker can
+# never leave stale leads that the orchestrator would read as fresh.
+rm -f "$output"
+tmp="$output.tmp.$$"
+trap 'rm -f "$tmp"' EXIT INT TERM
 
 # The agent has no edit, shell, task, web, question, or planning permission.
 # `timeout` bounds stalled model calls and the only input is the redacted file.

@@ -49,10 +49,11 @@ def main():
     state_dir = Path(args.state_dir)
     cursor_path = state_dir / f"{args.component}.cursor.json"
     offset = load_cursor(cursor_path)
+    next_offset = offset
     if args.source == "-":
-        # Streams cannot seek across runs; each Docker query is time-bounded.
+        # Streams cannot seek across runs; each Docker query is time-bounded, so
+        # no cursor is written and the bounded sample is emitted whole.
         raw = sys.stdin.buffer.read(args.max_bytes)
-        next_offset = 0
     else:
         source = Path(args.source)
         try:
@@ -69,8 +70,9 @@ def main():
 
     text = raw.decode("utf-8", errors="replace")
     lines = [redact(line) for line in text.splitlines()[: args.max_lines]]
-    state_dir.mkdir(parents=True, exist_ok=True)
-    cursor_path.write_text(json.dumps({"offset": next_offset}), encoding="utf-8")
+    if args.source != "-":
+        state_dir.mkdir(parents=True, exist_ok=True)
+        cursor_path.write_text(json.dumps({"offset": next_offset}), encoding="utf-8")
     print(json.dumps({"component": args.component, "line_count": len(lines), "lines": lines}))
 
 

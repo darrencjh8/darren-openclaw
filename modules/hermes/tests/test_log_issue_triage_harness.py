@@ -24,6 +24,11 @@ class LogIssueTriageHarnessTest(unittest.TestCase):
         for filename in ("expense-tracker.json", "hermes.json", "portfolio-tracker.json"):
             self.assertIn(filename, WORKER)
 
+    def test_worker_invalidates_stale_output_and_scopes_its_temp_file(self):
+        self.assertIn('rm -f "$output"', WORKER)
+        self.assertIn('tmp="$output.tmp.$$"', WORKER)
+        self.assertIn("trap 'rm -f \"$tmp\"' EXIT INT TERM", WORKER)
+
     def test_snapshot_streams_without_stale_cursor_or_artifacts(self):
         self.assertIn("set -euo pipefail", SNAPSHOT)
         self.assertIn("timeout 30 docker logs --tail 500", SNAPSHOT)

@@ -387,8 +387,10 @@ PYEOF
 mkdir -p /opt/data/log-issue-triage/snapshots /opt/data/log-issue-triage/worker-output
 chown -R hermes:hermes /opt/data/log-issue-triage 2>/dev/null || true
 # OpenCode sees only bounded redacted artifacts and cannot mutate state; Hermes
-# alone verifies and performs any GitHub write.
-python3 <<'PYEOF'
+# alone verifies and performs any GitHub write. `|| true` keeps a seed failure
+# from aborting container boot; the block itself still refuses to overwrite a
+# corrupt jobs file and reports it on stderr.
+python3 <<'PYEOF' || true
 import datetime
 import json
 import os

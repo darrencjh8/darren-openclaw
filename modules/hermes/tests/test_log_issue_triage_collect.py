@@ -64,6 +64,33 @@ class LogIssueTriageCollectorTest(unittest.TestCase):
             self.assertEqual(again.returncode, 0, again.stderr)
             self.assertEqual(json.loads(again.stdout)["line_count"], 0)
 
+    def test_stream_mode_writes_no_cursor_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            state = root / "state"
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(COLLECTOR),
+                    "--component",
+                    "hermes",
+                    "--source",
+                    "-",
+                    "--state-dir",
+                    str(state),
+                    "--max-lines",
+                    "10",
+                    "--max-bytes",
+                    "1024",
+                ],
+                input="token=stream-secret\n",
+                text=True,
+                capture_output=True,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertNotIn("stream-secret", result.stdout)
+            self.assertFalse(state.exists())
+
     def test_rejects_unknown_component_without_reading_source(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

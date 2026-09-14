@@ -2,6 +2,7 @@
 
 import json
 import re
+import shlex
 import subprocess
 import tempfile
 import unittest
@@ -39,6 +40,19 @@ class LogIssueTriageCronTest(unittest.TestCase):
             self.assertEqual(job["schedule"]["expr"], "30 18 * * *")
             self.assertEqual(job["enabled_toolsets"], ["terminal"])
             self.assertEqual(job["workdir"], "/opt/data/log-issue-triage")
+
+    def test_seed_refuses_corrupt_jobs_file(self):
+        blocks = re.findall(r"<<'PYEOF'[^\n]*\n(.*?)\nPYEOF", SEED, re.DOTALL)
+        block = next(block for block in blocks if "LOG_ISSUE_TRIAGE_PROMPT" in block)
+        with tempfile.TemporaryDirectory() as tmp:
+            jobs_path = Path(tmp) / "cron" / "jobs.json"
+            jobs_path.parent.mkdir()
+            jobs_path.write_text("{not json", encoding="utf-8")
+            runnable = block.replace("/opt/data/cron/jobs.json", str(jobs_path))
+            result = subprocess.run(["sh", "-c", f"python3 -c {shlex.quote(runnable)} || true"], text=True, capture_output=True)
+            self.assertEqual(result.returncode, 0, result.stderr)  # `|| true` in the seed
+            self.assertIn("refusing to replace corrupt cron jobs file", result.stderr)
+            self.assertEqual(jobs_path.read_text(encoding="utf-8"), "{not json")
 
     def test_prompt_requires_bounded_workers_and_validation_before_writes(self):
         match = re.search(r'LOG_ISSUE_TRIAGE_PROMPT = """(.*?)"""', SEED, re.DOTALL)
