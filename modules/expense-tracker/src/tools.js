@@ -1349,6 +1349,16 @@ export class ToolRegistry {
     return result;
   }
 
+  /**
+   * Internal gate for issue #574: is this credit a transfer already booked
+   * INTO the credited account? Kept out of TOOLS so it is never advertised to
+   * the model (`executeTool` still dispatches any `_handle_*` name a
+   * hallucinated tool call supplies, as it already does for reserve_transfer).
+   */
+  async _handle_find_inserted_transfer(args) {
+    return this._dedup.findInsertedTransferInto(args);
+  }
+
   async _handle_reserve_transfer(args) {
     let reservation = this._dedup.reserveTransfer(args);
     // The far side may already be booked, because an alert can name the deposit
