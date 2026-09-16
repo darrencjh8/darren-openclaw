@@ -2,7 +2,7 @@
 
 Companion to `references/memory-store-capacity-and-approval-queue.md`. That file covers
 *why* the queue grows and how to tier the entries; this one covers the **automated drain**,
-running on this host as cron job `memory-triage` (daily 09:00, `deliver: origin`,
+running on this host as cron job `memory-triage` (daily 08:00, `deliver: origin`,
 `continuity: true`, `attach_to_session: true`, skill `hermes-troubleshooting`).
 
 ## Shape
