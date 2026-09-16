@@ -5,6 +5,10 @@ import { describe, it, expect, vi } from "vitest";
 import { AgentOrchestrator, LLMClient, DeepSeekClient, DOMAIN_BANK_MAP, bankFromSender } from "../src/orchestrator.js";
 import { Config } from "../src/config.js";
 import { dispatchEmail } from "../src/classify.js";
+import { DedupJournal } from "../src/dedup.js";
+import { unlinkSync } from "fs";
+import { join } from "path";
+import { tmpdir } from "os";
 
 function makeConfig(overrides = {}) {
     const defaults = {
@@ -2715,6 +2719,427 @@ describe("_resolvePhase2 transfer detection", () => {
             "insert_transaction",
             expect.anything(),
         );
+    });
+
+    // Issue #574, real redacted alert (2026-09-15, S$1.00): the counterparty
+    // bank's own email booked the pair first (journal leg `inserted`), then the
+    // Standard Chartered credit alert arrived 49 s later naming the holder —
+    // "from CHONG JIN HENG|" — a person, so Phase 1 resolved no own account and
+    // the old pipeline held a credit that was already recorded.
+    it("does not hold a credit whose transfer leg is already inserted (#574)", async () => {
+        const config = makeConfig({ USER_NAME: "there" });
+        const dbPath = join(
+            tmpdir(),
+            `dedup-574-${Date.now()}-${Math.random().toString(36).slice(2)}.db`,
+        );
+        const journal = new DedupJournal(dbPath);
+        try {
+            const reserved = journal.reserveTransfer({
+                budget_id: "budget-sgd",
+                source_account_id: "trust-891",
+                destination_account_id: "sc-bonus",
+                currency: "SGD",
+                amount_cents: 100,
+                occurred_at: "2026-09-15T23:20:02.000Z",
+            });
+            journal.markTransferInserted(reserved.entry.id, "actual-5920540f");
+
+            const tools = makeTools({
+                executeTool: vi.fn(async (name, args) => {
+                    if (name === "find_inserted_transfer")
+                        return journal.findInsertedTransferInto(args);
+                    if (name === "list_facts") return { facts: [] };
+                    if (name === "fetch_context")
+                        return {
+                            accounts: [
+                                { id: "sc-bonus", name: "SC Bonus Saver", closed: false },
+                            ],
+                            categories: [],
+                            payees: [],
+                        };
+                    if (name === "reserve_transfer")
+                        return journal.reserveTransfer(args);
+                    return { results: [] };
+                }),
+            });
+            const orch = new AgentOrchestrator(config, tools);
+
+            const p1 = fakePhase1Output({
+                merchant: "CHONG JIN HENG",
+                raw_description:
+                    "You have received a PayNow/FAST transfer of SGD 1.00 from CHONG JIN HENG| on 16-Sep-26 07:19 AM.",
+                amount_cents: 100,
+                account_id: "sc-bonus",
+                account_name: "SC Bonus Saver",
+                _is_paynow: true,
+                received_at: "2026-09-15T23:20:51.000Z",
+            });
+            const p2 = await orch._resolvePhase2(p1);
+
+            expect(p2._hold_unresolved_paynow).toBeUndefined();
+            expect(p2._is_transfer).toBe(true);
+            expect(p2._transfer).toMatchObject({
+                source_account_id: "trust-891",
+                destination_account_id: "sc-bonus",
+                amount_cents: 100,
+            });
+
+            const result = await orch._executePhase3Core(p2, { silent: false });
+
+            expect(result.action).toBe("transfer_counterpart_deduplicated");
+            expect(tools.executeTool).not.toHaveBeenCalledWith(
+                "notify_user",
+                expect.anything(),
+            );
+            expect(tools.executeTool).not.toHaveBeenCalledWith(
+                "insert_transaction",
+                expect.anything(),
+            );
+            expect(tools.executeTool).toHaveBeenCalledWith("mark_email_read", {});
+            expect(tools.executeTool).toHaveBeenCalledWith(
+                "log_decision",
+                expect.objectContaining({
+                    action: "transfer_counterpart_deduplicated",
+                }),
+            );
+            // No second reservation was created: the same lookup still sees one
+            // leg, not an ambiguous pair.
+            expect(journal.reserveTransfer(p2._transfer).status).toBe("inserted");
+            // The alert has no `occurred_at`, so the email send time is the
+            // anchor the lookup must have used.
+            expect(tools.executeTool).toHaveBeenCalledWith(
+                "find_inserted_transfer",
+                expect.objectContaining({
+                    at: "2026-09-15T23:20:51.000Z",
+                    destination_account_id: "sc-bonus",
+                }),
+            );
+        } finally {
+            journal.close();
+            try {
+                unlinkSync(dbPath);
+            } catch {}
+        }
+    });
+
+    // Review round 1 on #574: an unrelated OUTGOING leg of the same amount on
+    // the credited account is not the credit's counterparty, so the credit must
+    // still be held and surfaced.
+    it("still holds a credit when only an outgoing leg of the same amount exists (#574)", async () => {
+        const config = makeConfig({ USER_NAME: "there" });
+        const dbPath = join(
+            tmpdir(),
+            `dedup-574-out-${Date.now()}-${Math.random().toString(36).slice(2)}.db`,
+        );
+        const journal = new DedupJournal(dbPath);
+        try {
+            const outgoing = journal.reserveTransfer({
+                budget_id: "budget-sgd",
+                source_account_id: "sc-bonus",
+                destination_account_id: "trust-893",
+                currency: "SGD",
+                amount_cents: 100,
+                occurred_at: "2026-09-15T23:19:30.000Z",
+            });
+            journal.markTransferInserted(outgoing.entry.id, "actual-outgoing");
+
+            const tools = makeTools({
+                executeTool: vi.fn(async (name, args) => {
+                    if (name === "find_inserted_transfer")
+                        return journal.findInsertedTransferInto(args);
+                    if (name === "list_facts") return { facts: [] };
+                    if (name === "fetch_context")
+                        return {
+                            accounts: [
+                                { id: "sc-bonus", name: "SC Bonus Saver", closed: false },
+                            ],
+                            categories: [],
+                            payees: [],
+                        };
+                    return true;
+                }),
+            });
+            const orch = new AgentOrchestrator(config, tools);
+
+            const p2 = await orch._resolvePhase2(
+                fakePhase1Output({
+                    merchant: "CHONG JIN HENG",
+                    amount_cents: 100,
+                    account_id: "sc-bonus",
+                    account_name: "SC Bonus Saver",
+                    _is_paynow: true,
+                    received_at: "2026-09-15T23:20:51.000Z",
+                }),
+            );
+
+            expect(p2._hold_unresolved_paynow).toBe(true);
+            expect(p2._is_transfer).toBeUndefined();
+
+            const result = await orch._executePhase3Core(p2, { silent: false });
+
+            expect(result.action).toBe("notified");
+            expect(tools.executeTool).toHaveBeenCalledWith(
+                "notify_user",
+                expect.objectContaining({
+                    message: expect.stringContaining("could not be matched"),
+                }),
+            );
+        } finally {
+            journal.close();
+            try {
+                unlinkSync(dbPath);
+            } catch {}
+        }
+    });
+
+    it("still holds a person-name credit whose journal leg is a different day (#574)", async () => {
+        const config = makeConfig({ USER_NAME: "there" });
+        const dbPath = join(
+            tmpdir(),
+            `dedup-574-miss-${Date.now()}-${Math.random().toString(36).slice(2)}.db`,
+        );
+        const journal = new DedupJournal(dbPath);
+        try {
+            const reserved = journal.reserveTransfer({
+                budget_id: "budget-sgd",
+                source_account_id: "trust-891",
+                destination_account_id: "sc-bonus",
+                currency: "SGD",
+                amount_cents: 100,
+                occurred_at: "2026-09-12T23:20:02.000Z",
+            });
+            journal.markTransferInserted(reserved.entry.id, "actual-older");
+
+            const tools = makeTools({
+                executeTool: vi.fn(async (name, args) => {
+                    if (name === "find_inserted_transfer")
+                        return journal.findInsertedTransferInto(args);
+                    if (name === "list_facts") return { facts: [] };
+                    if (name === "fetch_context")
+                        return {
+                            accounts: [
+                                { id: "sc-bonus", name: "SC Bonus Saver", closed: false },
+                            ],
+                            categories: [],
+                            payees: [],
+                        };
+                    return true;
+                }),
+            });
+            const orch = new AgentOrchestrator(config, tools);
+
+            const p2 = await orch._resolvePhase2(
+                fakePhase1Output({
+                    merchant: "CHONG JIN HENG",
+                    amount_cents: 100,
+                    account_id: "sc-bonus",
+                    account_name: "SC Bonus Saver",
+                    _is_paynow: true,
+                    received_at: "2026-09-15T23:20:51.000Z",
+                }),
+            );
+
+            expect(p2._hold_unresolved_paynow).toBe(true);
+
+            const result = await orch._executePhase3Core(p2, { silent: false });
+
+            expect(result.action).toBe("notified");
+            expect(tools.executeTool).toHaveBeenCalledWith(
+                "notify_user",
+                expect.objectContaining({
+                    message: expect.stringContaining("could not be matched"),
+                }),
+            );
+        } finally {
+            journal.close();
+            try {
+                unlinkSync(dbPath);
+            } catch {}
+        }
+    });
+
+    // Review round 1 on #574: a date-only anchor is midnight UTC, not the
+    // alert's clock, so a journal window on it proves nothing. With no real
+    // timestamp anywhere the credit keeps the pre-existing hold + notify.
+    it("does not anchor the journal lookup on a date-only value (#574)", async () => {
+        const config = makeConfig({ USER_NAME: "there" });
+        const tools = makeTools({
+            executeTool: vi.fn(async (name) => {
+                if (name === "find_inserted_transfer")
+                    throw new Error("must not look up without an event clock");
+                if (name === "list_facts") return { facts: [] };
+                if (name === "fetch_context")
+                    return {
+                        accounts: [
+                            { id: "sc-bonus", name: "SC Bonus Saver", closed: false },
+                        ],
+                        categories: [],
+                        payees: [],
+                    };
+                return true;
+            }),
+        });
+        const orch = new AgentOrchestrator(config, tools);
+
+        const p2 = await orch._resolvePhase2(
+            fakePhase1Output({
+                merchant: "CHONG JIN HENG",
+                amount_cents: 100,
+                account_id: "sc-bonus",
+                account_name: "SC Bonus Saver",
+                _is_paynow: true,
+                date: "2026-09-15",
+                occurred_at: "2026-09-15",
+                received_at: "2026-09-15",
+            }),
+        );
+
+        expect(tools.executeTool).not.toHaveBeenCalledWith(
+            "find_inserted_transfer",
+            expect.anything(),
+        );
+        expect(p2._hold_unresolved_paynow).toBe(true);
+    });
+
+    // Review round 1 on #574: a date-only `occurred_at` must not shadow the
+    // email's real send clock, and a real `occurred_at` must win over it.
+    it("anchors on the first real timestamp and skips a date-only one (#574)", async () => {
+        const config = makeConfig({ USER_NAME: "there" });
+        const atCalls = [];
+        const tools = makeTools({
+            executeTool: vi.fn(async (name, args) => {
+                if (name === "find_inserted_transfer") {
+                    atCalls.push(args.at);
+                    return null;
+                }
+                if (name === "list_facts") return { facts: [] };
+                if (name === "fetch_context")
+                    return {
+                        accounts: [
+                            { id: "sc-bonus", name: "SC Bonus Saver", closed: false },
+                        ],
+                        categories: [],
+                        payees: [],
+                    };
+                return true;
+            }),
+        });
+        const orch = new AgentOrchestrator(config, tools);
+
+        await orch._resolvePhase2(
+            fakePhase1Output({
+                merchant: "CHONG JIN HENG",
+                amount_cents: 100,
+                account_id: "sc-bonus",
+                account_name: "SC Bonus Saver",
+                _is_paynow: true,
+                occurred_at: "2026-09-15",
+                received_at: "2026-09-15T23:20:51.000Z",
+            }),
+        );
+        await orch._resolvePhase2(
+            fakePhase1Output({
+                merchant: "CHONG JIN HENG",
+                amount_cents: 100,
+                account_id: "sc-bonus",
+                account_name: "SC Bonus Saver",
+                _is_paynow: true,
+                occurred_at: "2026-09-15T23:20:10.000Z",
+                received_at: "2026-09-15T23:20:51.000Z",
+            }),
+        );
+
+        expect(atCalls).toEqual([
+            "2026-09-15T23:20:51.000Z",
+            "2026-09-15T23:20:10.000Z",
+        ]);
+    });
+
+    // Review round 1 on #574: the deterministic movement parser carries its
+    // clock on `_transfer`, not on a top-level field, so a structured internal
+    // PayNow credit must still reach the journal lookup.
+    it("finds the booked leg for a structured internal credit (#574)", async () => {
+        const config = makeConfig({ USER_NAME: "there" });
+        const dbPath = join(
+            tmpdir(),
+            `dedup-574-structured-${Date.now()}-${Math.random().toString(36).slice(2)}.db`,
+        );
+        const journal = new DedupJournal(dbPath);
+        try {
+            const reserved = journal.reserveTransfer({
+                budget_id: "budget-sgd",
+                source_account_id: "trust-8931",
+                destination_account_id: "sc-bonus",
+                currency: "SGD",
+                amount_cents: 100,
+                occurred_at: "2026-09-15T23:20:02.000Z",
+            });
+            journal.markTransferInserted(reserved.entry.id, "actual-structured");
+
+            const tools = makeTools({
+                executeTool: vi.fn(async (name, args) => {
+                    if (name === "find_inserted_transfer")
+                        return journal.findInsertedTransferInto(args);
+                    if (name === "list_facts") return { facts: [] };
+                    if (name === "fetch_context")
+                        return {
+                            accounts: [
+                                { id: "sc-bonus", name: "SC Bonus Saver", closed: false },
+                            ],
+                            categories: [],
+                            payees: [],
+                        };
+                    if (name === "reserve_transfer")
+                        return journal.reserveTransfer(args);
+                    return true;
+                }),
+            });
+            const orch = new AgentOrchestrator(config, tools);
+
+            const p2 = await orch._resolvePhase2(
+                fakePhase1Output({
+                    merchant: "CHONG JIN HENG",
+                    amount_cents: 100,
+                    date: "2026-09-15",
+                    account_id: "sc-bonus",
+                    account_name: "SC Bonus Saver",
+                    _is_paynow: true,
+                    _structured_movement: true,
+                    _is_transfer: true,
+                    _transfer: {
+                        budget_id: "budget-sgd",
+                        source_account_id: "trust-8931",
+                        destination_account_id: "sc-bonus",
+                        currency: "SGD",
+                        amount_cents: 100,
+                        occurred_at: "2026-09-15T23:20:02.000Z",
+                    },
+                }),
+            );
+
+            expect(p2._hold_unresolved_paynow).toBeUndefined();
+            expect(tools.executeTool).toHaveBeenCalledWith(
+                "find_inserted_transfer",
+                expect.objectContaining({ at: "2026-09-15T23:20:02.000Z" }),
+            );
+
+            const result = await orch._executePhase3Core(p2, { silent: false });
+
+            expect(result.action).toBe("transfer_counterpart_deduplicated");
+            expect(tools.executeTool).not.toHaveBeenCalledWith(
+                "notify_user",
+                expect.anything(),
+            );
+            expect(tools.executeTool).not.toHaveBeenCalledWith(
+                "insert_transaction",
+                expect.anything(),
+            );
+        } finally {
+            journal.close();
+            try {
+                unlinkSync(dbPath);
+            } catch {}
+        }
     });
 
     // Review round 2 on #561: pre-seeding Misc for every PayNow killed the

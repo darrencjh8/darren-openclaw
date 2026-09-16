@@ -1029,6 +1029,9 @@ export class AgentOrchestrator {
                     category_id: "",
                     _is_paynow: /\bpaynow\b/i.test(emailText),
                     _paynow_merchant: /\bUnique Entity Number\b/i.test(emailText),
+                    // The alert's send time, the tightest clock available for
+                    // the transfer-journal lookup below (#574).
+                    received_at: receivedAt || "",
                 };
                 // _suffix_mappings is set only by the deterministic
                 // movement / bill-payment parsers. Strip any LLM-injected
@@ -1431,6 +1434,51 @@ export class AgentOrchestrator {
         return "bank";
     }
 
+    /**
+     * The transfer-journal leg for a credit the counterparty bank already
+     * booked INTO this account, or null. Anchored on the alert's own event
+     * time, then the email's send time: the alert and the booking are seconds
+     * apart, and the date in the body can sit on the far side of a timezone
+     * boundary (issue #574).
+     */
+    async _findBookedTransferLeg(output) {
+        // The deterministic movement parser keeps its clock on `_transfer`, the
+        // generic LLM branch on `received_at`, and a structured row may carry
+        // its own `occurred_at`. Take the first real timestamp: a date-only
+        // string parses as midnight UTC, which is not the alert's event time,
+        // so a window anchored on it would miss the booked leg and re-arm the
+        // false hold (issue #574 reviews).
+        const at = [
+            output.occurred_at,
+            output.received_at,
+            output._transfer?.occurred_at,
+        ].find((value) => value && String(value).includes("T"));
+        if (!at) return null;
+        try {
+            const leg = await this._tools.executeTool("find_inserted_transfer", {
+                budget_id: output.budget_id || "",
+                // A credit lands on the booked account, so it is the leg's
+                // destination (issue #574 review: matching the source side too
+                // would let an unrelated outgoing leg swallow a real credit).
+                destination_account_id: output.account_id || "",
+                amount_cents: output.amount_cents,
+                currency: output.currency || this._config.primaryCurrency,
+                at,
+            });
+            // Shape check: a partial row must not be read as proof that a
+            // transfer is booked.
+            return leg && leg.id && leg.source_account_id && leg.destination_account_id
+                ? leg
+                : null;
+        } catch (error) {
+            logger.warn({
+                event: "find_inserted_transfer_failed",
+                error: error.message,
+            });
+            return null;
+        }
+    }
+
     async _resolvePhase2(phase1Output) {
         const output = {
             ...phase1Output,
@@ -1520,7 +1568,32 @@ export class AgentOrchestrator {
             // lookup below finds its payee; until then a credit from it is still
             // income and is held the same way an unresolved one is.
             if (credit && (unresolved || paynowAccountMatched)) {
-                output._hold_unresolved_paynow = true;
+                // The counterparty bank's own email may already have booked
+                // this leg: the alert is then a duplicate of money already
+                // recorded, not an unresolved credit. Consult the journal before
+                // the hold is set — the later transfer block only runs for a
+                // resolved payee, so a person-name credit never reached it and
+                // the false "could not be matched" alert fired (issue #574).
+                const bookedLeg = await this._findBookedTransferLeg(output);
+                if (bookedLeg) {
+                    // Reserving this exact leg makes Phase 3 report the
+                    // duplicate and stop: nothing is booked, the email is
+                    // marked read, and no alert fires. Keep any fields the
+                    // deterministic parser already put on the reservation
+                    // (its transfer payee in particular).
+                    output._transfer = {
+                        ...(output._transfer || {}),
+                        budget_id: bookedLeg.budget_id,
+                        source_account_id: bookedLeg.source_account_id,
+                        destination_account_id: bookedLeg.destination_account_id,
+                        currency: bookedLeg.currency,
+                        amount_cents: bookedLeg.amount_cents,
+                        occurred_at: bookedLeg.occurred_at,
+                    };
+                    output._is_transfer = true;
+                } else {
+                    output._hold_unresolved_paynow = true;
+                }
             }
             if (selfMasked || (unresolved && credit)) {
                 // A masked self identity is a person, not a merchant key, and a

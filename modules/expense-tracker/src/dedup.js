@@ -192,6 +192,67 @@ export class DedupJournal {
         return reserve();
     }
 
+    /**
+     * An already-booked transfer leg INTO this account, or null.
+     *
+     * A credit alert names the account the money lands on, which is the
+     * transfer's destination. The source side is deliberately not consulted: an
+     * unrelated outgoing leg of the same amount inside the window would
+     * otherwise swallow a real incoming credit. Only `inserted` legs qualify —
+     * a `pending` row is this pipeline's own reservation, not proof of a
+     * booking. `at` is the alert's event time; the default window is the same
+     * one the journal uses to tell a sibling alert from a real repeat transfer.
+     *
+     * ponytail: amount+account+window is all the journal can correlate on —
+     * bank alerts share no reference number, so a genuinely separate transfer
+     * of the same amount into the same account inside the window is
+     * indistinguishable and reads as the booked one. Same window, same accepted
+     * trade-off the debit side already makes in `reserveTransfer` (issue #556,
+     * real repeats 237 s apart). Upgrade path: a bank-reference column on
+     * `transfer_journal`. Tracked in issue #578.
+     */
+    findInsertedTransferInto({
+        budget_id,
+        destination_account_id,
+        amount_cents,
+        currency,
+        at,
+        windowMs = TRANSFER_MATCH_WINDOW_MS,
+    }) {
+        const ts = at ? new Date(at).getTime() : NaN;
+        if (
+            !budget_id ||
+            !destination_account_id ||
+            !currency ||
+            amount_cents == null ||
+            amount_cents === "" ||
+            !Number.isFinite(ts)
+        ) {
+            return null;
+        }
+        const iso = (ms) => new Date(ms).toISOString();
+        return (
+            this._db
+                .prepare(`
+              SELECT * FROM transfer_journal
+              WHERE budget_id = ? AND destination_account_id = ?
+                AND currency = ? AND amount_cents = ?
+                AND status = 'inserted'
+                AND occurred_at >= ? AND occurred_at <= ?
+              ORDER BY occurred_at
+              LIMIT 1
+            `)
+                .get(
+                    budget_id,
+                    destination_account_id,
+                    currency,
+                    Math.abs(amount_cents),
+                    iso(ts - windowMs),
+                    iso(ts + windowMs),
+                ) || null
+        );
+    }
+
     getTransfer(id) {
         return this._db.prepare("SELECT * FROM transfer_journal WHERE id = ?").get(id) || null;
     }

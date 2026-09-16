@@ -267,6 +267,129 @@ describe("DedupJournal transfer journal", () => {
         expect(repeat.status).toBe("reserved");
         expect(repeat.entry.id).not.toBe(reserved.entry.id);
     });
+
+    // Issue #574, real redacted case: Trust booked -S$1.00 -> SC Bonus Saver
+    // +S$1.00 at 23:20:02Z, then the Standard Chartered credit alert for the
+    // same S$1.00 arrived 23:20:51Z. The alert names the credited account,
+    // which is the leg's destination.
+    it("finds an inserted leg booked into the credited account (#574)", () => {
+        const reserved = journal.reserveTransfer({
+            ...transfer,
+            budget_id: "budget-sgd",
+            source_account_id: "trust-893",
+            destination_account_id: "sc-bonus",
+            amount_cents: 100,
+            occurred_at: "2026-09-15T23:20:02.000Z",
+        });
+        journal.markTransferInserted(reserved.entry.id, "actual-transfer-7");
+
+        const fromDestination = journal.findInsertedTransferInto({
+            budget_id: "budget-sgd",
+            destination_account_id: "sc-bonus",
+            amount_cents: 100,
+            currency: "SGD",
+            at: "2026-09-15T23:20:51.000Z",
+        });
+        expect(fromDestination?.id).toBe(reserved.entry.id);
+    });
+
+    // Review round 1 on #574: the credited account is the leg's destination.
+    // Matching the source side too would let an unrelated outgoing transfer of
+    // the same amount swallow a real incoming credit.
+    it("ignores an inserted leg that only leaves the credited account (#574)", () => {
+        const outgoing = journal.reserveTransfer({
+            ...transfer,
+            budget_id: "budget-sgd",
+            source_account_id: "sc-bonus",
+            destination_account_id: "trust-893",
+            amount_cents: 100,
+            occurred_at: "2026-09-15T23:20:02.000Z",
+        });
+        journal.markTransferInserted(outgoing.entry.id, "actual-outgoing");
+
+        expect(
+            journal.findInsertedTransferInto({
+                budget_id: "budget-sgd",
+                destination_account_id: "sc-bonus",
+                amount_cents: 100,
+                currency: "SGD",
+                at: "2026-09-15T23:20:51.000Z",
+            }),
+        ).toBeNull();
+    });
+
+    it("ignores a pending leg, another account, another amount, and a far day (#574)", () => {
+        const reserved = journal.reserveTransfer({
+            ...transfer,
+            source_account_id: "trust-893",
+            destination_account_id: "sc-bonus",
+            amount_cents: 100,
+            occurred_at: "2026-09-15T23:20:02.000Z",
+        });
+        const lookup = (overrides = {}) =>
+            journal.findInsertedTransferInto({
+                budget_id: "budget-sgd",
+                destination_account_id: "sc-bonus",
+                amount_cents: 100,
+                currency: "SGD",
+                at: "2026-09-15T23:20:51.000Z",
+                ...overrides,
+            });
+
+        // A reservation this pipeline made is not proof of a booked transfer.
+        expect(lookup()).toBeNull();
+
+        journal.markTransferInserted(reserved.entry.id, "actual-transfer-7");
+        expect(lookup()?.id).toBe(reserved.entry.id);
+        expect(lookup({ destination_account_id: "ocbc-999" })).toBeNull();
+        expect(lookup({ amount_cents: 101 })).toBeNull();
+        expect(lookup({ currency: "MYR" })).toBeNull();
+        // Same amount and account three days earlier is a different event.
+        expect(lookup({ at: "2026-09-12T23:20:51.000Z" })).toBeNull();
+        expect(lookup({ destination_account_id: "" })).toBeNull();
+    });
+
+    // The window is the whole guard against a real repeat transfer of the same
+    // amount (issue #556 measured siblings 1-4 s apart and real repeats 237 s
+    // apart), so its boundary is pinned explicitly.
+    it("matches 119 s before the alert and not 121 s (#574)", () => {
+        const at = "2026-09-15T23:20:51.000Z";
+        const inside = journal.reserveTransfer({
+            ...transfer,
+            source_account_id: "trust-893",
+            destination_account_id: "sc-bonus",
+            amount_cents: 100,
+            occurred_at: "2026-09-15T23:18:52.000Z",
+        });
+        journal.markTransferInserted(inside.entry.id, "actual-inside");
+        expect(
+            journal.findInsertedTransferInto({
+                budget_id: "budget-sgd",
+                destination_account_id: "sc-bonus",
+                amount_cents: 100,
+                currency: "SGD",
+                at,
+            })?.id,
+        ).toBe(inside.entry.id);
+
+        const outside = journal.reserveTransfer({
+            ...transfer,
+            source_account_id: "trust-893",
+            destination_account_id: "ocbc-999",
+            amount_cents: 100,
+            occurred_at: "2026-09-15T23:18:50.000Z",
+        });
+        journal.markTransferInserted(outside.entry.id, "actual-outside");
+        expect(
+            journal.findInsertedTransferInto({
+                budget_id: "budget-sgd",
+                destination_account_id: "ocbc-999",
+                amount_cents: 100,
+                currency: "SGD",
+                at,
+            }),
+        ).toBeNull();
+    });
 });
 
 describe("DedupJournal message identity (#557)", () => {
