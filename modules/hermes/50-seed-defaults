@@ -545,8 +545,8 @@ MANAGED = {
     "skill": "hermes-troubleshooting",
 }
 DEFAULTS = {
-    "schedule": {"kind": "cron", "expr": "0 9 * * *", "display": "0 9 * * *"},
-    "schedule_display": "0 9 * * *",
+    "schedule": {"kind": "cron", "expr": "0 8 * * *", "display": "0 8 * * *"},
+    "schedule_display": "0 8 * * *",
     "enabled": True,
     "deliver": "telegram",
 }

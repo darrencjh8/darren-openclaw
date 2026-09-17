@@ -135,7 +135,7 @@ over these same files.
   land as they happen and the store self-regulates through the char budget.
 - Pair auto-apply with a **periodic hygiene job** (cron): consolidate memory, drop stale
   entries, and run the module-level compactor for MCP fact stores. That job exists here
-  now (`memory-triage`, daily 09:00) — implementation, judge-prompt shape, and the sandbox
+  now (`memory-triage`, daily 08:00) — implementation, judge-prompt shape, and the sandbox
   verification recipe live in `references/memory-queue-auto-triage.md`, driven by
   `scripts/memory_triage.py`.
 - Keep the store in its lane: a pre-existing `references/` doc or skill already covering a

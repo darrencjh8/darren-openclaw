@@ -799,8 +799,8 @@ prompt = j.get("prompt") or ""
 checks = {
     "name": j.get("name") == "memory-triage",
     "kind": sched.get("kind") == "cron",
-    "expr": sched.get("expr") == "0 9 * * *",
-    "display": j.get("schedule_display") == "0 9 * * *",
+    "expr": sched.get("expr") == "0 8 * * *",
+    "display": j.get("schedule_display") == "0 8 * * *",
     "enabled": j.get("enabled") is True,
     "deliver": j.get("deliver") == "telegram",
     "skills": j.get("skills") == ["hermes-troubleshooting"],
@@ -816,7 +816,7 @@ print("pass" if not bad else "fail " + repr(bad))
 PY
 )
 case "$mt_fields" in
-    pass) ok "job: cron 0 9 * * * · telegram · hermes-troubleshooting · safe prompt (snapshot/cap/audit)" ;;
+    pass) ok "job: cron 0 8 * * * · telegram · hermes-troubleshooting · safe prompt (snapshot/cap/audit)" ;;
     *) nope "memory-triage fields" "$mt_fields" ;;
 esac
 

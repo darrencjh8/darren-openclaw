@@ -351,7 +351,7 @@ one.
 
 Full schema, triage recipe, and worked example: `references/memory-store-capacity-and-approval-queue.md`.
 
-**Automated drain (built + running on this host):** cron job `memory-triage` (daily 09:00)
+**Automated drain (built + running on this host):** cron job `memory-triage` (daily 08:00)
 drives `scripts/memory_triage.py` — `list` / `stats` / `apply --plan`. Approved ops are
 replayed with `tools/memory_tool.apply_memory_pending()`, the same gate-bypassing path
 `/memory approve` uses; rejects are **archived**, never deleted. Judge-prompt shape, the
