@@ -19,6 +19,6 @@
   { "merchant": "LE TACH VENDING", "payee": "Food", "category": "Food" },
   { "merchant": "WHIZ COMMUNICATIONS", "payee": "Utilities", "category": "Utilities" },
   { "merchant": "WWW.BRAVE.COM", "payee": "Misc", "category": null },
-  { "merchant": "BUS/MRT", "payee": "Public Transport", "category": "Household" },
+  { "merchant": "BUS/MRT", "payee": "Public Transport", "category": "Ezlink" },
   { "merchant": "Ryt PayLater", "payee": "Misc", "category": null }
 ]

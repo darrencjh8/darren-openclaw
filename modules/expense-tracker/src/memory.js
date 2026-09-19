@@ -917,13 +917,20 @@ export class MemoryStore {
     const forward = [];
     const reverse = [];
     for (const f of this._facts) {
+      const entity = mappingEntity(f);
+      // Category resolution queries a payee. Only its own category mapping is
+      // authoritative: a different entity containing the same words (for
+      // example "Maxis Fibre" for "Utilities") must not win by file order.
+      if (entity === q) {
+        forward.push({ text: f, score: 1.0, match: "exact", ownEntity: true });
+        continue;
+      }
       if (f.toLowerCase().includes(q)) {
-        forward.push({ text: f, score: 1.0, match: "exact" });
+        forward.push({ text: f, score: 1.0, match: "exact", ownEntity: false });
         continue;
       }
       // The merchant carries words the stored key does not — a location suffix,
       // a terminal id. When the key still names it, this is an exact match.
-      const entity = mappingEntity(f);
       if (
         entity &&
         entity.length >= MIN_ENTITY_LENGTH &&
@@ -937,11 +944,13 @@ export class MemoryStore {
         });
       }
     }
-    // A longer entity is the more specific match when several keys fit.
+    // Prefer the mapping whose entity exactly equals the query. A longer entity
+    // is the more specific match only among merchant-key reverse matches.
+    forward.sort((a, b) => Number(b.ownEntity) - Number(a.ownEntity));
     reverse.sort((a, b) => b.specificity - a.specificity);
     return [...forward, ...reverse]
       .slice(0, topK)
-      .map(({ specificity, ...result }) => result);
+      .map(({ specificity, ownEntity, ...result }) => result);
   }
 
   // ── migration ─────────────────────────────────────────────────

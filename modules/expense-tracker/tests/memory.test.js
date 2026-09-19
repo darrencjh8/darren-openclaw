@@ -236,6 +236,21 @@ describe("MemoryStore", () => {
       expect(results[0].text).toContain("Epsilon Nova");
       expect(results[0].score).toBe(1.0);
     });
+
+    it("prefers a payee's own category over a longer entity containing it", async () => {
+      const path = tempFile(
+        ".md",
+        "# Long-Term Memory\n\n## Facts\n\n" +
+          "- Maxis Fibre maps to Malaysia Utilities category\n" +
+          "- Utilities maps to Utilities category\n",
+      );
+      const store = new MemoryStore(path);
+      store._model = null;
+
+      const results = await store.search("Utilities");
+      expect(results[0].text).toBe("Utilities maps to Utilities category");
+      unlinkSync(path);
+    });
   });
 
   // Cache invalidation tests
