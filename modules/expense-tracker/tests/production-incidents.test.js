@@ -45,6 +45,53 @@ const RYT_PAID_MERCHANT =
 const RYT_BOUGHT_MERCHANT =
     "Hi Darren, You've paid RM27.70 to BAKERY MERCHANT on 19/9/2026, 11:00 AM (GMT+8) using your Ryt Credit.";
 
+/**
+ * The bodies above are the alert sentence alone. Production sends the sentence
+ * inside a marketing template: a banner, the sentence, a wrap that splits the
+ * `using your <account>` clause across a newline, then a confidentiality footer.
+ * The parser must survive that, so every fixture below keeps the real frame.
+ */
+const RYT_FRAME = (sentence) => `[https://d314e77m1bz5zy.cloudfront.net/bee/Images/bmsx/ytdd44n0/a41/237/efm/money%20on%20the%20move.png]
+
+Hi Darren,
+
+${sentence}
+
+Need help? Reach out to our Help & Support Centre at support@rytbank.my
+[support@rytbank.my]. 
+
+[https://d314e77m1bz5zy.cloudfront.net/bee/Images/bmsx/ytdd44n0/xae/866/bzk/Footer.png]https://u45783908.ct.sendgrid.net/ls/click?upn=u001.example
+
+This email and any hyperlinks are confidential and intended only for the
+recipient. Please do not reply. If received in error, delete it and notify us at
+support@rytbank.my. Unauthorised use, disclosure, or distribution is prohibited.
+While we take precautions, YTL Digital Bank Berhad, operating under the brand
+name Ryt Bank is not responsible for any damage caused by malicious code or
+errors in this email. Ryt Bank is a member of PIDM. Ryt Bank deposits are
+protected by PIDM up to RM250,000 for each depositor.
+
+[https://u45783908.ct.sendgrid.net/wf/open?upn=u001.example]`;
+
+/** uid 919 as actually delivered: sentence wrapped mid-clause, then a footer. */
+const RYT_SENT_OWN_NAME_REAL = RYT_FRAME(
+    "You've sent RM100.00 to ACCOUNT HOLDER on 19/9/2026, 12:58 PM (GMT+8) using your\nMain Account.",
+);
+
+/** uid 911 as actually delivered. */
+const RYT_RECEIVED_OWN_NAME_REAL = RYT_FRAME(
+    "Money's in! You've received RM62.00 from ACCOUNT HOLDER on 18/9/2026, 5:04 AM (GMT+8).",
+);
+
+/** uid 917 as actually delivered: a real merchant whose name reads like a person. */
+const RYT_PAID_MERCHANT_REAL = RYT_FRAME(
+    "You've paid RM255.00 to CFF UNITED PLT on 19/9/2026, 10:50 AM (GMT+8) using your\nRyt Credit.",
+);
+
+/** uid 918 as actually delivered. */
+const RYT_BOUGHT_MERCHANT_REAL = RYT_FRAME(
+    "You've paid RM27.70 to 365 BAKERY on 19/9/2026, 11:00 AM (GMT+8) using your Ryt\nCredit.",
+);
+
 describe("person-name detection is structural, not a name list", () => {
     it("accepts a bare person name", () => {
         expect(looksLikePersonName("ACCOUNT HOLDER")).toBe(true);
@@ -63,8 +110,8 @@ describe("person-name detection is structural, not a name list", () => {
 });
 
 describe("Ryt Bank owned-name alerts (#585)", () => {
-    it("parses the uid 919 outgoing alert and flags it as a person transfer", () => {
-        const movement = parseBankMovement(RYT_SENT_OWN_NAME, {
+    it("parses the real uid 919 body, footer and line wrap included", () => {
+        const movement = parseBankMovement(RYT_SENT_OWN_NAME_REAL, {
             senderBank: "Ryt",
             receivedAt: "2026-09-19T04:58:02.000Z",
         });
@@ -80,8 +127,8 @@ describe("Ryt Bank owned-name alerts (#585)", () => {
         });
     });
 
-    it("parses the uid 911 incoming alert and flags it as a person transfer", () => {
-        const movement = parseBankMovement(RYT_RECEIVED_OWN_NAME, {
+    it("parses the real uid 911 body inside its template", () => {
+        const movement = parseBankMovement(RYT_RECEIVED_OWN_NAME_REAL, {
             senderBank: "Ryt",
             receivedAt: "2026-09-17T21:04:10.000Z",
         });
@@ -97,8 +144,8 @@ describe("Ryt Bank owned-name alerts (#585)", () => {
         });
     });
 
-    it("does not flag a merchant payment as a person transfer", () => {
-        const movement = parseBankMovement(RYT_PAID_MERCHANT, {
+    it("does not flag a real merchant payment whose name reads like a person", () => {
+        const movement = parseBankMovement(RYT_PAID_MERCHANT_REAL, {
             senderBank: "Ryt",
             receivedAt: "2026-09-19T02:50:21.000Z",
         });
@@ -106,7 +153,7 @@ describe("Ryt Bank owned-name alerts (#585)", () => {
         expect(movement).toMatchObject({
             direction: "outgoing",
             amount_cents: -25500,
-            merchant_display_name: "CLINIC MERCHANT",
+            merchant_display_name: "CFF UNITED PLT",
         });
         expect(movement.person_transfer).toBe(false);
     });
@@ -269,7 +316,7 @@ describe("hold behaviour for person-name movements (#584 / #585)", () => {
     });
 
     it("books the uid 918 merchant purchase with no category (#588)", async () => {
-        const { phase2, calls } = await orchestrate(RYT_BOUGHT_MERCHANT, {
+        const { phase2, calls } = await orchestrate(RYT_BOUGHT_MERCHANT_REAL, {
             senderBank: "Ryt",
             receivedAt: "2026-09-19T03:00:00.000Z",
             accounts: rytAccounts,
@@ -279,11 +326,43 @@ describe("hold behaviour for person-name movements (#584 / #585)", () => {
         // and nothing is learned.
         expect(phase2).toMatchObject({ payee_name: "Misc" });
         expect(phase2.category_id ?? null).toBe(null);
+        expect(calls.some((c) => c.name === "insert_transaction")).toBe(true);
         expect(
             calls.some(
                 (c) => c.name === "learn_fact" && /category/i.test(c.args?.fact || ""),
             ),
         ).toBe(false);
+    });
+
+    it("books the real uid 917 payment even though CFF UNITED PLT reads as a person name (#587)", async () => {
+        const { phase2, calls } = await orchestrate(RYT_PAID_MERCHANT_REAL, {
+            senderBank: "Ryt",
+            receivedAt: "2026-09-19T02:50:21.000Z",
+            accounts: rytAccounts,
+        });
+
+        expect(phase2._hold_unresolved_transfer).toBeUndefined();
+        expect(phase2.payee_name).toBe("Misc");
+        expect(calls.find((c) => c.name === "insert_transaction")?.args).toMatchObject({
+            account_id: "ryt-bank",
+            amount_cents: -25500,
+        });
+    });
+
+    it("holds the real uid 919 body delivered inside its template (#585)", async () => {
+        const { phase2, result, calls } = await orchestrate(RYT_SENT_OWN_NAME_REAL, {
+            senderBank: "Ryt",
+            receivedAt: "2026-09-19T04:58:02.000Z",
+            accounts: rytAccounts,
+        });
+
+        expect(phase2).toMatchObject({
+            payee_name: "Misc",
+            account_id: "ryt-bank",
+            _hold_unresolved_transfer: true,
+        });
+        expect(result.action).toBe("notified");
+        expect(calls.some((c) => c.name === "insert_transaction")).toBe(false);
     });
 });
 

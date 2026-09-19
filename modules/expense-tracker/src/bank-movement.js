@@ -214,7 +214,17 @@ export function parseBankMovement(text, { senderBank = null, receivedAt } = {}) 
   // Ryt transfer and payment alerts use sentence forms rather than labels.
   // The credited account is implicit for a received alert; a sent/paid alert
   // states the source after "using your".
-  const rytSentence = body.match(/you'?ve\s+(received|sent|paid)\s+(SGD|RM|MYR)\s*([\d,.]+)\s+(?:from|to)\s+(.+?)\s+on\s+(\d{1,2}\/\d{1,2}\/\d{4})\s*,?\s*(\d{1,2}:\d{2}\s*(?:AM|PM)?)(?:\s*\(GMT\+8\))?(?:\s+using\s+your\s+(.+?))?\.?$/i);
+  //
+  // The sentence ships inside a marketing template: a banner above it and a
+  // confidentiality footer below, with the `using your <account>` clause often
+  // wrapped across a newline. So the search is neither line-anchored nor
+  // end-anchored — it matches the sentence anywhere, over collapsed whitespace,
+  // and ends at the sentence's own full stop.
+  const rytSentence = body
+    .replace(/\s+/g, " ")
+    .match(
+      /you'?ve\s+(received|sent|paid)\s+(SGD|RM|MYR)\s*([\d,.]+)\s+(?:from|to)\s+(.+?)\s+on\s+(\d{1,2}\/\d{1,2}\/\d{4})\s*,?\s*(\d{1,2}:\d{2}\s*(?:AM|PM)?)(?:\s*\(GMT\+8\))?(?:\s+using\s+your\s+([^.]+?))?\./i,
+    );
   if (rytSentence) {
     const direction = rytSentence[1].toLowerCase() === "received" ? "incoming" : "outgoing";
     const currency = /^RM$/i.test(rytSentence[2]) || /^MYR$/i.test(rytSentence[2]) ? "MYR" : "SGD";

@@ -638,16 +638,26 @@ export class AgentOrchestrator {
         const date = movement.occurred_at?.slice(0, 10);
         if (!source || !date) return null;
 
-        // A movement whose counterparty is a bare person name and which did not
-        // resolve to another tracked account is an own/unverifiable transfer,
+        // A movement that did not resolve to another tracked account and whose
+        // counterparty is a bare person name is an own/unverifiable transfer,
         // not a merchant sale. Booking it as spend or income is what produced
         // the Ryt (#585) and one-sided OCBC deposit (#584) defects, so hold it
         // and let the user name the other side.
-        if (
+        //
+        // Scope matters: the parser only flags `person_transfer` for the
+        // "received/sent <NAME>" sentence forms. An ordinary outgoing
+        // "paid ... to <MERCHANT>" must not be held — a real merchant whose
+        // name merely reads like a person ("CFF UNITED PLT", "365 BAKERY")
+        // would otherwise be dropped from the budget silently. Incoming
+        // one-sided deposits keep the name test because their sender has no
+        // other evidence to check.
+        const unverifiablePersonMovement =
             !resolved.internal &&
+            (movement.person_transfer === true ||
+                movement.direction === "incoming") &&
             looksLikePersonName(movement.counterparty?.name) &&
-            !matchAccountByName(movement.counterparty.name, accounts, mappings.aliases).matched
-        ) {
+            !matchAccountByName(movement.counterparty.name, accounts, mappings.aliases).matched;
+        if (unverifiablePersonMovement) {
             return {
                 merchant: movement.counterparty.name,
                 amount_cents: movement.direction === "incoming"
