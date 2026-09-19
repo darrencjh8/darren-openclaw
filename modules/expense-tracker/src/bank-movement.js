@@ -169,17 +169,38 @@ function baseMovement({ direction, amount, currency, occurredAt, ownAccount, cou
  * cannot be verified, never to identify a specific person.
  */
 export function looksLikePersonName(value) {
-  const tokens = String(value || "").trim().split(/\s+/).filter(Boolean);
+  // Trailing punctuation is decoration, not a token: "ACME LIMITED." and
+  // "ACME S.A." must be judged on their words. Stripping it here also keeps the
+  // every-token test below from accepting a dotted business suffix.
+  const tokens = String(value || "")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((token) => token.replace(/[.,;:]+$/, ""))
+    .filter(Boolean);
   if (tokens.length < 2 || tokens.length > 4) return false;
+  // A bare number is never part of a person name ("365 BAKERY" is a business),
+  // but "S.A." and "BHD." must still be recognised as organisation words, so
+  // this runs on the de-punctuated token.
+  if (tokens.some((token) => /^\d+$/.test(token))) return false;
   const NON_PERSON = new Set([
-    "pte", "ltd", "llp", "inc", "co", "corp", "company", "group", "holdings",
-    "enterprise", "enterprises", "trading", "services", "service", "sdn",
-    "bhd", "berhad", "sendirian", "singapore", "malaysia", "bank", "clinic",
-    "wallet", "store", "shop", "restaurant", "cafe", "pteltd",
+    // Malaysian / Singaporean private limited forms
+    "pte", "ltd", "llp", "plc", "plt", "sdn", "bhd", "berhad", "sendirian",
+    "pteltd", "sdnbhd",
+    // Other corporate forms
+    "inc", "co", "corp", "company", "limited", "llc", "gmbh", "ag", "sa",
+    "nv", "bv", "oy", "ab", "as",
+    // Group / trade words
+    "group", "holdings", "enterprise", "enterprises", "trading", "services",
+    "service",
+    // Geography and business descriptors
+    "singapore", "malaysia", "bank", "clinic", "wallet", "store", "shop",
+    "restaurant", "cafe",
   ]);
   return tokens.every((token) => {
     if (!/^[A-Za-z][A-Za-z'’.-]*$/.test(token)) return false;
-    return !NON_PERSON.has(token.toLowerCase());
+    // Dotted forms are the same word: "S.A." must hit the "sa" entry.
+    return !NON_PERSON.has(token.replace(/\./g, "").toLowerCase());
   });
 }
 

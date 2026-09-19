@@ -107,6 +107,21 @@ describe("person-name detection is structural, not a name list", () => {
         expect(looksLikePersonName("")).toBe(false);
         expect(looksLikePersonName("Solo")).toBe(false);
     });
+
+    it("rejects business suffixes that are not in any keyword list", () => {
+        for (const business of [
+            "CFF UNITED PLT",
+            "ACME LIMITED",
+            "ACME LLC",
+            "ACME PLC",
+            "ACME GMBH",
+            "ACME S.A.",
+            "CFF UNITED PLT.",
+            "ACME LIMITED.",
+        ]) {
+            expect(looksLikePersonName(business), business).toBe(false);
+        }
+    });
 });
 
 describe("Ryt Bank owned-name alerts (#585)", () => {
@@ -343,6 +358,23 @@ describe("hold behaviour for person-name movements (#584 / #585)", () => {
 
         expect(phase2._hold_unresolved_transfer).toBeUndefined();
         expect(phase2.payee_name).toBe("Misc");
+        expect(calls.find((c) => c.name === "insert_transaction")?.args).toMatchObject({
+            account_id: "ryt-bank",
+            amount_cents: -25500,
+        });
+    });
+
+    it("books a sent payment to a business with a PLT suffix", async () => {
+        const body = RYT_FRAME(
+            "You've sent RM255.00 to CFF UNITED PLT on 19/9/2026, 10:50 AM (GMT+8) using your\nRyt Credit.",
+        );
+        const { phase2, calls } = await orchestrate(body, {
+            senderBank: "Ryt",
+            receivedAt: "2026-09-19T02:50:21.000Z",
+            accounts: rytAccounts,
+        });
+
+        expect(phase2._hold_unresolved_transfer).toBeUndefined();
         expect(calls.find((c) => c.name === "insert_transaction")?.args).toMatchObject({
             account_id: "ryt-bank",
             amount_cents: -25500,
