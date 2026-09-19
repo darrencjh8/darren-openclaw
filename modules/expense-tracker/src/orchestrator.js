@@ -2051,6 +2051,7 @@ export class AgentOrchestrator {
                 Number(llmOutput.amount_cents) > 0;
             if (scheduleCheckable) {
                 let collision = false;
+                let readFailed = false;
                 try {
                     collision = await this._tools.executeTool(
                         "check_schedule_collision",
@@ -2061,7 +2062,11 @@ export class AgentOrchestrator {
                         },
                     );
                 } catch {
+                    // Hold anyway (fail-closed), but never claim a match we did
+                    // not observe: an actual-api outage would otherwise be
+                    // reported as "matches a scheduled transaction".
                     collision = true;
+                    readFailed = true;
                 }
                 if (collision) {
                     const cents = bookableAmountCents(llmOutput.amount_cents);
@@ -2069,18 +2074,25 @@ export class AgentOrchestrator {
                         cents === null
                             ? ""
                             : `${llmOutput.currency === "MYR" ? "RM" : "S$"}${(Math.abs(cents) / 100).toFixed(2)} `;
+                    const what = `${heldAmount}${llmOutput.raw_description || llmOutput.merchant || "unknown"}`;
                     if (!silent)
                         await this._tools.executeTool("notify_user", {
-                            message: `Held: ${heldAmount}${llmOutput.raw_description || llmOutput.merchant || "unknown"} matches a scheduled transaction due around ${llmOutput.date || "today"}, so it was not booked a second time. Check the schedule in Actual.`,
+                            message: readFailed
+                                ? `Held: could not read the schedule list for ${what}, so it was held rather than booked unverified. Check the schedule in Actual.`
+                                : `Held: ${what} matches a scheduled transaction due around ${llmOutput.date || "today"}, so it was not booked a second time. Check the schedule in Actual.`,
                         });
                     await this._tools.executeTool("log_decision", {
-                        action: "held_schedule_collision",
+                        action: readFailed
+                            ? "held_schedule_check_failed"
+                            : "held_schedule_collision",
                         reasoning: llmOutput.reasoning || "",
                         timestamp: new Date().toISOString(),
                     });
                     return {
                         action: "notified",
-                        details: "Held a row that collides with a due schedule",
+                        details: readFailed
+                            ? "Held a row because the schedule list could not be read"
+                            : "Held a row that collides with a due schedule",
                     };
                 }
             }

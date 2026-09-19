@@ -399,15 +399,27 @@ describe("hold behaviour for person-name movements (#584 / #585)", () => {
 });
 
 describe("due schedule collision (#586)", () => {
-    /** The production schedule: -300600 due the day the alert arrived. */
+    /**
+     * The production schedule, exactly as the live actual-api returns it. Shape
+     * captured from `actual.getSchedules()` against the running service:
+     * ALL_KEYS = account, amount, amountOp, completed, date, id, name,
+     * next_date, payee, posts_transaction, rule. `amount` is a top-level number
+     * and `next_date` a top-level "YYYY-MM-DD" string, which is what the guard
+     * reads. Schedule 49d0925d is the one that produced the duplicate pair.
+     */
     const RENT_SCHEDULE = [
         {
-            id: "prepare-rent",
+            id: "49d0925d-a391-4924-ad32-4d5307d8e5ef",
             name: "Prepare: Rent",
             next_date: "2026-09-19",
             completed: false,
             posts_transaction: true,
             amount: -300600,
+            amountOp: "is",
+            account: "223311f9-0a52-4db7-916d-9a714fa39db3",
+            payee: "35f7e181-b723-434f-8c7d-82f62ecfefa8",
+            date: "2026-09-19",
+            rule: "rule-id",
         },
     ];
 
@@ -588,6 +600,16 @@ Reference :
 
         // An unreadable list is not proof of absence.
         expect(calls.some((c) => c.name === "insert_transaction")).toBe(false);
+
+        // ...and the hold must not claim a match it never observed. Reporting
+        // "matches a scheduled transaction" during an actual-api outage names a
+        // cause that did not occur.
+        const notify = calls.find((c) => c.name === "notify_user")?.args?.message;
+        expect(notify).toMatch(/could not read the schedule list/i);
+        expect(notify).not.toMatch(/matches a scheduled transaction/i);
+        expect(
+            calls.find((c) => c.name === "log_decision")?.args?.action,
+        ).toBe("held_schedule_check_failed");
     });
 
     it("books a one-sided deposit when no schedule matches", async () => {
