@@ -161,6 +161,28 @@ function baseMovement({ direction, amount, currency, occurredAt, ownAccount, cou
   };
 }
 
+/**
+ * True when a counterparty string is a bare person name rather than a
+ * business. Deliberately structural and list-free: a person name has 2-4
+ * alphabetic tokens and no company, bank, or digit token. It is used only to
+ * decide that an alert leg is a person-to-person movement whose destination
+ * cannot be verified, never to identify a specific person.
+ */
+export function looksLikePersonName(value) {
+  const tokens = String(value || "").trim().split(/\s+/).filter(Boolean);
+  if (tokens.length < 2 || tokens.length > 4) return false;
+  const NON_PERSON = new Set([
+    "pte", "ltd", "llp", "inc", "co", "corp", "company", "group", "holdings",
+    "enterprise", "enterprises", "trading", "services", "service", "sdn",
+    "bhd", "berhad", "sendirian", "singapore", "malaysia", "bank", "clinic",
+    "wallet", "store", "shop", "restaurant", "cafe", "pteltd",
+  ]);
+  return tokens.every((token) => {
+    if (!/^[A-Za-z][A-Za-z'’.-]*$/.test(token)) return false;
+    return !NON_PERSON.has(token.toLowerCase());
+  });
+}
+
 export function parseBankMovement(text, { senderBank = null, receivedAt } = {}) {
   const body = restoreFieldLines(String(text || ""));
   const reference = field(body, ["Reference number", "Transaction Ref", "Reference"]);
@@ -186,6 +208,40 @@ export function parseBankMovement(text, { senderBank = null, receivedAt } = {}) 
       reference_number: "", recipient_bank: null,
       merchant_display_name: merchant,
       raw_merchant_descriptor: merchant,
+    };
+  }
+
+  // Ryt transfer and payment alerts use sentence forms rather than labels.
+  // The credited account is implicit for a received alert; a sent/paid alert
+  // states the source after "using your".
+  const rytSentence = body.match(/you'?ve\s+(received|sent|paid)\s+(SGD|RM|MYR)\s*([\d,.]+)\s+(?:from|to)\s+(.+?)\s+on\s+(\d{1,2}\/\d{1,2}\/\d{4})\s*,?\s*(\d{1,2}:\d{2}\s*(?:AM|PM)?)(?:\s*\(GMT\+8\))?(?:\s+using\s+your\s+(.+?))?\.?$/i);
+  if (rytSentence) {
+    const direction = rytSentence[1].toLowerCase() === "received" ? "incoming" : "outgoing";
+    const currency = /^RM$/i.test(rytSentence[2]) || /^MYR$/i.test(rytSentence[2]) ? "MYR" : "SGD";
+    const [day, monthNumber, year] = rytSentence[5].split("/").map(Number);
+    const monthNames = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
+    const month = monthNames[monthNumber - 1];
+    const occurredAt = month && isoDateTime(`${day} ${month} ${year}`, rytSentence[6], receivedAt);
+    if (!occurredAt) return null;
+    const counterparty = rytSentence[4].trim();
+    const ownAccount = rytSentence[7]?.trim() || null;
+    // A "received/sent ... <NAME>" alert is a person-to-person movement, not a
+    // merchant payment ("paid ... at/to MERCHANT" is one). When the
+    // counterparty is a bare person name it cannot be resolved to a tracked
+    // account or a real merchant, so Phase 2 holds it instead of booking the
+    // holder's own money as spend or income (#585).
+    const personTransfer =
+      /^(received|sent)$/i.test(rytSentence[1]) && looksLikePersonName(counterparty);
+    return {
+      kind: "bank_movement", direction,
+      amount_cents: cents(currency, rytSentence[3], direction), currency,
+      occurred_at: occurredAt,
+      own_account: { name: ownAccount, bank: senderBank, suffix: null },
+      counterparty: { name: counterparty, bank: bankFromText(counterparty), suffix: null },
+      reference_number: "", recipient_bank: direction === "incoming" ? senderBank : null,
+      person_transfer: personTransfer,
+      merchant_display_name: direction === "outgoing" ? counterparty : null,
+      raw_merchant_descriptor: direction === "outgoing" ? counterparty : "",
     };
   }
 
@@ -239,11 +295,17 @@ export function parseBankMovement(text, { senderBank = null, receivedAt } = {}) 
   if (deposited) {
     const payNowSender = body.match(/PayNow\s+transfer\s+from\s+(.+?)(?:\n|$)/i)?.[1]
       ?.replace(/[.,;:!?]+$/, "").trim();
+    // OCBC one-sided deposits carry the sender solely in "Reference: from X".
+    // Preserve that evidence so Phase 2 can hold an unverified person transfer
+    // instead of turning it into income (#584).
+    const referenceSender = reference.match(/^from\s+(.+)$/i)?.[1]
+      ?.replace(/[.,;:!?]+$/, "").trim();
+    const sender = payNowSender || referenceSender;
     return baseMovement({
       direction: "incoming", amount, currency,
       occurredAt: isoDateTime("", field(body, ["Time of deposit"]), receivedAt),
       ownAccount: { bank: senderBank, suffix: suffix(deposited) },
-      counterparty: payNowSender ? namedAccount(payNowSender, bankFromText(payNowSender)) : null,
+      counterparty: sender ? namedAccount(sender, bankFromText(sender)) : null,
       reference,
       isPayNow: /\bPayNow\b/i.test(body),
     });

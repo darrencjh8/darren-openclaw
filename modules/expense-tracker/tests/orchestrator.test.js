@@ -1011,8 +1011,8 @@ describe("AgentOrchestrator", () => {
 
 // ── Auto-learn: learn_fact → update_fact on contradiction ────
 
-describe("auto-learn contradiction resolution", () => {
-    it("falls back to update_fact when learn_fact returns contradiction (category)", async () => {
+describe("category assignment is not auto-learned", () => {
+    it("does not persist a category inferred for a merchant", async () => {
         const config = makeConfig();
         const tools = makeTools({
             executeTool: vi.fn(async (name) => {
@@ -1050,24 +1050,17 @@ describe("auto-learn contradiction resolution", () => {
 
         await orch.processEmail("test-al1", "raw email");
 
-        // learn_fact was called for category
-        expect(tools.executeTool).toHaveBeenCalledWith(
+        expect(tools.executeTool).not.toHaveBeenCalledWith(
             "learn_fact",
-            expect.objectContaining({
-                fact: expect.stringContaining("category"),
-            }),
+            expect.objectContaining({ fact: expect.stringContaining("category") }),
         );
-        // update_fact was called because learn_fact returned contradiction
-        expect(tools.executeTool).toHaveBeenCalledWith(
+        expect(tools.executeTool).not.toHaveBeenCalledWith(
             "update_fact",
-            expect.objectContaining({
-                old_text: "Toast Box maps to Food category",
-                new_text: expect.stringContaining("category"),
-            }),
+            expect.anything(),
         );
     });
 
-    it("does NOT call update_fact when learn_fact succeeds with no contradiction", async () => {
+    it("does not persist a second independently inferred category", async () => {
         const config = makeConfig();
         const tools = makeTools({
             executeTool: vi.fn(async (name) => {
@@ -1097,18 +1090,14 @@ describe("auto-learn contradiction resolution", () => {
 
         await orch.processEmail("test-al2", "raw email");
 
-        // learn_fact was called for category
-        expect(tools.executeTool).toHaveBeenCalledWith(
+        expect(tools.executeTool).not.toHaveBeenCalledWith(
             "learn_fact",
-            expect.objectContaining({
-                fact: expect.stringContaining("category"),
-            }),
+            expect.objectContaining({ fact: expect.stringContaining("category") }),
         );
-        // update_fact should NOT be called for category correction
-        const updateCalls = tools.executeTool.mock.calls.filter(
-            (c) => c[0] === "update_fact",
+        expect(tools.executeTool).not.toHaveBeenCalledWith(
+            "update_fact",
+            expect.anything(),
         );
-        expect(updateCalls.length).toBe(0);
     });
 
     it("does NOT overwrite a conflicting account-type fact (issue #331)", async () => {

@@ -460,6 +460,30 @@ const TOOLS = [
     },
   },
   {
+    name: "fetch_schedules",
+    description:
+      "Fetch Actual Budget schedules (including ones not yet posted). Use to tell whether a pending scheduled transaction will post a row that looks like a transaction you are about to insert.",
+    schema: {
+      type: "object",
+      properties: { budget_id: { type: "string" } },
+      required: ["budget_id"],
+    },
+  },
+  {
+    name: "check_schedule_collision",
+    description:
+      "Check whether a not-yet-posted scheduled transaction will create a row matching this amount near this date. Use before inserting a transfer-like row so a due schedule cannot post a duplicate.",
+    schema: {
+      type: "object",
+      properties: {
+        budget_id: { type: "string" },
+        amount_cents: { type: "integer" },
+        date: { type: "string", description: "YYYY-MM-DD" },
+      },
+      required: ["budget_id", "amount_cents", "date"],
+    },
+  },
+  {
     name: "check_duplicate",
     description: "Check if a transaction already exists.",
     schema: {
@@ -1100,6 +1124,45 @@ export class ToolRegistry {
   async _handle_fetch_payees({ budget_id }) {
     if (!budget_id) return { error: "budget_id is required" };
     return this._get("/payees", budget_id);
+  }
+
+  async _handle_fetch_schedules({ budget_id }) {
+    if (!budget_id) return { error: "budget_id is required" };
+    return this._get("/schedules", budget_id);
+  }
+
+  /**
+   * True when an un-posted `posts_transaction` schedule will materialise a row
+   * matching this alert's magnitude on (or within a day of) the date.
+   *
+   * Matching is deliberately blind to the schedule's own account id: the
+   * production incident (#586) had the alert land on OCBC 360 while the due
+   * `Prepare: Rent` schedule was owned by the other leg's account, because the
+   * schedule's rule creates the paired row. `check_duplicate` cannot see any of
+   * this — it only reads posted rows.
+   *
+   * Throws when the schedule list cannot be read: an unreadable list is not
+   * proof of absence, and the caller must hold rather than risk a second row.
+   */
+  async _handle_check_schedule_collision({ budget_id, amount_cents, date }) {
+    if (!budget_id || !date) return false;
+    const amount = normalizeAmountCents(amount_cents);
+    if (amount === null || amount === undefined) return false;
+    const schedules = await this._get("/schedules", budget_id);
+    if (!Array.isArray(schedules)) {
+      throw new Error("schedule list unavailable");
+    }
+    const target = Date.parse(`${date}T00:00:00Z`);
+    if (!Number.isFinite(target)) return false;
+    const DAY = 24 * 60 * 60 * 1000;
+    return schedules.some((s) => {
+      if (!s || s.posts_transaction === false || s.completed) return false;
+      const scheduled = normalizeAmountCents(s.amount);
+      if (scheduled === null || Math.abs(scheduled) !== Math.abs(amount))
+        return false;
+      const next = Date.parse(`${s.next_date}T00:00:00Z`);
+      return Number.isFinite(next) && Math.abs(next - target) <= DAY;
+    });
   }
 
   async _handle_fetch_budget_month({ budget_id, month }) {
@@ -1805,43 +1868,9 @@ export class ToolRegistry {
       // Memory search failed — fall through to web search
     }
 
-    // Step 2: Web search + AI classification (20s timeout per FR-008)
-    if (this._config.braveSearchApiKey) {
-      try {
-        const result = await Promise.race([
-          (async () => {
-            const { results } = await this._handle_search_web({
-              merchant,
-            });
-            const payee = await this._classify_merchant(
-              merchant,
-              results,
-              budgetId,
-            );
-            return payee;
-          })(),
-          new Promise((_, reject) =>
-            setTimeout(() => reject(new Error("timeout")), 20000),
-          ),
-        ]);
-        if (result) {
-          // Route through the validated write, so a web-classified payee that
-          // is one of the user's own account names can never be stored as a
-          // merchant fact and re-poison memory (issue #561). The write failing
-          // is not fatal: the classification already succeeded. Review rounds
-          // 2 and 3 on #561.
-          await this._handle_learn_fact({
-            fact: merchant + " maps to " + result + " payee",
-            budget_id: budgetId,
-          });
-          return { payee: result, source: "web" };
-        }
-      } catch {
-        // Classification failed, fall through to fallback
-      }
-    }
-
-    // Step 3: Fallback
+    // An unverified web/LLM classification is not durable merchant evidence.
+    // Returning or learning it caused a clinic payment to become a permanent
+    // Petrol mapping (#587). Unknown merchants must remain Misc until confirmed.
     return { payee: "Misc", source: "fallback" };
   }
 
