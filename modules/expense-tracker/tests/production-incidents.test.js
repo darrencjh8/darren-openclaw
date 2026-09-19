@@ -51,7 +51,7 @@ const RYT_BOUGHT_MERCHANT =
  * `using your <account>` clause across a newline, then a confidentiality footer.
  * The parser must survive that, so every fixture below keeps the real frame.
  */
-const RYT_FRAME = (sentence) => `[https://d314e77m1bz5zy.cloudfront.net/bee/Images/bmsx/ytdd44n0/a41/237/efm/money%20on%20the%20move.png]
+const RYT_FRAME = (sentence) => `[https://cdn.example/bee/Images/bmsx/tracker/money%20on%20the%20move.png]
 
 Hi Darren,
 
@@ -60,7 +60,7 @@ ${sentence}
 Need help? Reach out to our Help & Support Centre at support@rytbank.my
 [support@rytbank.my]. 
 
-[https://d314e77m1bz5zy.cloudfront.net/bee/Images/bmsx/ytdd44n0/xae/866/bzk/Footer.png]https://u45783908.ct.sendgrid.net/ls/click?upn=u001.example
+[https://cdn.example/bee/Images/bmsx/tracker/Footer.png]https://track.example/ls/click?upn=redacted
 
 This email and any hyperlinks are confidential and intended only for the
 recipient. Please do not reply. If received in error, delete it and notify us at
@@ -70,7 +70,7 @@ name Ryt Bank is not responsible for any damage caused by malicious code or
 errors in this email. Ryt Bank is a member of PIDM. Ryt Bank deposits are
 protected by PIDM up to RM250,000 for each depositor.
 
-[https://u45783908.ct.sendgrid.net/wf/open?upn=u001.example]`;
+[https://track.example/wf/open?upn=redacted]`;
 
 /** uid 919 as actually delivered: sentence wrapped mid-clause, then a footer. */
 const RYT_SENT_OWN_NAME_REAL = RYT_FRAME(
