@@ -1291,15 +1291,10 @@ export class ToolRegistry {
     const explicitId = args.payee_id || null;
     let payeeId = explicitId;
     let payee_name = null;
-    const validateTransferTarget = async (payee) => {
-      if (!payee?.transfer_acct) return null;
-      const accounts = await this._get("/accounts", budget_id);
-      if (!Array.isArray(accounts)) return "Could not validate transfer destination.";
-      if (payee.transfer_acct === args.account_id) return "Transfer destination cannot be its source account.";
-      if (!accounts.some((account) => account.id === payee.transfer_acct && !account.closed))
-        return "Transfer destination is closed or unavailable.";
-      return null;
-    };
+    // The insert path's row always sits on `args.account_id`, so the source
+    // defaults to it when the caller does not pass one explicitly.
+    const validateTransferTarget = (payee, sourceAccountId = args.account_id) =>
+      this._validateTransferTarget(payee, budget_id, sourceAccountId);
     if (explicitId) {
       // An explicit ID comes from the caller or from Phase 2 transfer detection,
       // so it is validated here and never second-guessed by a name lookup.
@@ -1970,6 +1965,33 @@ export class ToolRegistry {
     return r.json();
   }
 
+  /**
+   * The single transfer-destination guard, shared by the insert and update
+   * paths. Returns an error string, or null when the payee is not a transfer
+   * payee or its target is a usable own account. Issue #563, #570.
+   *
+   * `sourceAccountId` is the account the row sits on: a transfer to that same
+   * account is a self-cancelling no-op and is refused.
+   */
+  async _validateTransferTarget(payee, budgetId, sourceAccountId) {
+    if (!payee?.transfer_acct) return null;
+    let accounts = null;
+    try {
+      accounts = await this._get("/accounts", budgetId);
+    } catch {
+      // Fail closed with the tool's uniform error shape: a failing accounts
+      // lookup must not surface as a thrown `insert_failed`/`update_failed`.
+      // Issue #570.
+      return "Could not validate transfer destination.";
+    }
+    if (!Array.isArray(accounts)) return "Could not validate transfer destination.";
+    if (payee.transfer_acct === sourceAccountId)
+      return "Transfer destination cannot be its source account.";
+    if (!accounts.some((account) => account.id === payee.transfer_acct && !account.closed))
+      return "Transfer destination is closed or unavailable.";
+    return null;
+  }
+
   async _handle_update_transaction(args) {
     const {
       id,
@@ -2023,6 +2045,25 @@ export class ToolRegistry {
         };
       if (updatedPayee.error) return { error: updatedPayee.error };
       fields.payee = updatedPayee.id;
+    }
+    if (updatedPayee?.transfer_acct) {
+      // The update path writes the same class of row as insert, so it needs the
+      // same transfer-destination guard: a caller must not be able to point a
+      // row at a closed account, a missing account, or its own source account.
+      // The row's own account is only read when the payee is actually a
+      // transfer payee, so an ordinary payee change stays a single PATCH.
+      // Issue #570, follow-up to #563.
+      let sourceAccountId = account_id;
+      if (sourceAccountId === undefined) {
+        const transaction = await this._get(`/transactions/${id}`, budgetId);
+        sourceAccountId = transaction?.account;
+      }
+      const transferError = await this._validateTransferTarget(
+        updatedPayee,
+        budgetId,
+        sourceAccountId,
+      );
+      if (transferError) return { error: transferError };
     }
     if (notes !== undefined) fields.notes = notes;
     if (amount !== undefined) fields.amount = amount;

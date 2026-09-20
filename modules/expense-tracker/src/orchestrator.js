@@ -1748,7 +1748,7 @@ export class AgentOrchestrator {
                     await this._detectAccountType(accountMatch.name) === "credit card" ||
                     (!output._structured_movement && transferDestinationIsAmbiguous(searchTerm, accountMatch, liveAccounts))
                 )) {
-                    // A closed/card/investment account, self target, or bank-only
+                    // A closed or card account, a self target, or a bank-only
                     // name with several own accounts cannot identify a transfer leg.
                     output.payee_name = "Misc";
                     output.payee_source = "transfer_destination_refused";

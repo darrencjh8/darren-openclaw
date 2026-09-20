@@ -654,6 +654,18 @@ describe("ToolRegistry — budget_id validation", () => {
                         },
                     ],
                 })
+                // #570: a transfer payee on the update path also reads the row's
+                // own account and the live accounts list before the PATCH.
+                .mockResolvedValueOnce({
+                    ok: true,
+                    json: () => ({ id: "txn-1", account: "acct-source" }),
+                })
+                .mockResolvedValueOnce({
+                    ok: true,
+                    json: () => [
+                        { id: "acct-deposit", name: "Deposit", closed: false },
+                    ],
+                })
                 .mockResolvedValueOnce({
                     ok: true,
                     json: () => ({ status: "updated", id: "txn-1" }),
@@ -665,7 +677,7 @@ describe("ToolRegistry — budget_id validation", () => {
                 payee_name: "Deposit",
             });
 
-            const patchBody = JSON.parse(mockFetch.mock.calls[1][1].body);
+            const patchBody = JSON.parse(mockFetch.mock.calls[3][1].body);
             // The transfer payee is the only one that creates a transfer, so it
             // is what a bare name implies; the plain one needs an explicit ID.
             expect(patchBody.payee).toBe("payee-transfer");
@@ -729,6 +741,17 @@ describe("ToolRegistry — budget_id validation", () => {
                         },
                     ],
                 })
+                // #570: the transfer-guard reads on the update path.
+                .mockResolvedValueOnce({
+                    ok: true,
+                    json: () => ({ id: "txn-1", account: "acct-source" }),
+                })
+                .mockResolvedValueOnce({
+                    ok: true,
+                    json: () => [
+                        { id: "acct-misc", name: "Misc", closed: false },
+                    ],
+                })
                 .mockResolvedValueOnce({
                     ok: true,
                     json: () => ({ status: "updated", id: "txn-1" }),
@@ -740,7 +763,7 @@ describe("ToolRegistry — budget_id validation", () => {
                 payee_name: "Misc",
             });
 
-            const patchBody = JSON.parse(mockFetch.mock.calls[1][1].body);
+            const patchBody = JSON.parse(mockFetch.mock.calls[3][1].body);
             expect(patchBody.payee).toBe("payee-misc-transfer");
         });
 
