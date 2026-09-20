@@ -58,7 +58,11 @@ function makePayees({ transferAcct }) {
  * Stub `_get` on the registry so no network is touched. `overrides` lets a test
  * make one path throw, which is how the API-failure cases are expressed.
  */
-function stubGet(registry, { transferAcct = CLOSED_ACCOUNT_ID, throwOn = null } = {}) {
+function stubGet(registry, {
+    transferAcct = CLOSED_ACCOUNT_ID,
+    throwOn = null,
+    transactionAccount = RYT_ACCOUNT_ID,
+} = {}) {
     const payees = makePayees({ transferAcct });
     const calls = [];
     registry._get = async (path) => {
@@ -68,6 +72,7 @@ function stubGet(registry, { transferAcct = CLOSED_ACCOUNT_ID, throwOn = null } 
         }
         if (path === "/payees") return payees;
         if (path === "/accounts") return LIVE_ACCOUNTS;
+        if (path.startsWith("/transactions/")) return { id: path.split("/").pop(), account: transactionAccount };
         if (path === "/categories") return [];
         return [];
     };
@@ -128,20 +133,36 @@ describe("#570 update_transaction transfer-destination guard", () => {
         });
     });
 
-    it("still updates to a valid transfer destination", async () => {
+    it("still updates to a valid transfer destination when it reads the row account", async () => {
         const cfg = new Config(testEnv);
         const registry = new ToolRegistry(cfg);
-        stubGet(registry, { transferAcct: SC_ACCOUNT_ID });
+        const { calls } = stubGet(registry, { transferAcct: SC_ACCOUNT_ID });
 
         const result = await registry.executeTool("update_transaction", {
             id: "txn-1",
             budget_id: BUDGET,
-            account_id: RYT_ACCOUNT_ID,
             payee_id: "payee-closed-transfer",
         });
 
         expect(result).not.toHaveProperty("error");
         expect(result.payee).toBe("payee-closed-transfer");
+        expect(calls).toContain("/transactions/txn-1");
+    });
+
+    it("fails closed when it cannot read the row account for a transfer update", async () => {
+        const cfg = new Config(testEnv);
+        const registry = new ToolRegistry(cfg);
+        stubGet(registry, { transferAcct: SC_ACCOUNT_ID, throwOn: "/transactions/txn-1" });
+
+        const result = await registry.executeTool("update_transaction", {
+            id: "txn-1",
+            budget_id: BUDGET,
+            payee_id: "payee-closed-transfer",
+        });
+
+        expect(result).toMatchObject({
+            error: "Could not validate transfer destination.",
+        });
     });
 
     it("applies the same guard on the bare payee_name path", async () => {

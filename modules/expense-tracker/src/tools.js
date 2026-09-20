@@ -2055,8 +2055,14 @@ export class ToolRegistry {
       // Issue #570, follow-up to #563.
       let sourceAccountId = account_id;
       if (sourceAccountId === undefined) {
-        const transaction = await this._get(`/transactions/${id}`, budgetId);
-        sourceAccountId = transaction?.account;
+        try {
+          const transaction = await this._get(`/transactions/${id}`, budgetId);
+          sourceAccountId = transaction?.account;
+        } catch {
+          // The row account is required to reject a self-targeted transfer.
+          // Do not turn a failed read into a thrown MCP error. Issue #570.
+          return { error: "Could not validate transfer destination." };
+        }
       }
       const transferError = await this._validateTransferTarget(
         updatedPayee,
