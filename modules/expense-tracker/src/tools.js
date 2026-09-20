@@ -2065,11 +2065,13 @@ export class ToolRegistry {
     // Issue #570, follow-up to #563.
     let transferPayee = updatedPayee?.transfer_acct ? updatedPayee : null;
     let transactionForGuard = null;
-    if (!transferPayee && account_id !== undefined) {
+    if (!updatedPayee && account_id !== undefined) {
       transactionForGuard = await readCurrentTransaction();
       if (!transactionForGuard)
         return { error: "Could not validate transfer destination." };
-      transferPayee = payees.find((payee) => payee.id === transactionForGuard.payee);
+      transferPayee = payees.find(
+        (payee) => payee.id === (transactionForGuard.payee || transactionForGuard.payee_id),
+      );
     }
     if (transferPayee?.transfer_acct) {
       let sourceAccountId = account_id;

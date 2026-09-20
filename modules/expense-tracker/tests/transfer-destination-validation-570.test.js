@@ -187,6 +187,48 @@ describe("#570 update_transaction transfer-destination guard", () => {
         });
     });
 
+    it("allows a combined move that replaces a transfer payee with a normal payee", async () => {
+        const cfg = new Config(testEnv);
+        const registry = new ToolRegistry(cfg);
+        const groceries = { id: "payee-groceries", name: "Groceries" };
+        registry._get = async (path) => {
+            if (path === "/payees") return [...makePayees({ transferAcct: SC_ACCOUNT_ID }), groceries];
+            if (path === "/transactions/txn-1") return { id: "txn-1", account: RYT_ACCOUNT_ID, payee: "payee-closed-transfer" };
+            return LIVE_ACCOUNTS;
+        };
+        registry._patch = async (_path, fields) => ({ id: "txn-1", ...fields });
+
+        const result = await registry.executeTool("update_transaction", {
+            id: "txn-1",
+            budget_id: BUDGET,
+            payee_id: groceries.id,
+            account_id: SC_ACCOUNT_ID,
+        });
+
+        expect(result).toMatchObject({ payee: groceries.id, account: SC_ACCOUNT_ID });
+    });
+
+    it("recognizes an existing transfer payee from Actual's payee_id response shape", async () => {
+        const cfg = new Config(testEnv);
+        const registry = new ToolRegistry(cfg);
+        registry._get = async (path) => {
+            if (path === "/payees") return makePayees({ transferAcct: SC_ACCOUNT_ID });
+            if (path === "/accounts") return LIVE_ACCOUNTS;
+            if (path === "/transactions/txn-1") return { id: "txn-1", account: RYT_ACCOUNT_ID, payee_id: "payee-closed-transfer" };
+            return [];
+        };
+
+        const result = await registry.executeTool("update_transaction", {
+            id: "txn-1",
+            budget_id: BUDGET,
+            account_id: SC_ACCOUNT_ID,
+        });
+
+        expect(result).toMatchObject({
+            error: "Transfer destination cannot be its source account.",
+        });
+    });
+
     it("fails closed when the existing transfer row has no source account", async () => {
         const cfg = new Config(testEnv);
         const registry = new ToolRegistry(cfg);
