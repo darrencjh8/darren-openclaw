@@ -286,6 +286,17 @@ export function nameMatchesBank(name, bank) {
     return aliases.some((t) => new RegExp(`\\b${t}\\b`, "i").test(lower));
 }
 
+/** Normalize a holder name for equality without turning a partial match into one. */
+function normalizeIdentityName(value) {
+    return String(value || "")
+        .normalize("NFKD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .replace(/[^\p{L}\p{N}]+/gu, " ")
+        .trim()
+        .replace(/\s+/g, " ")
+        .toLocaleLowerCase("en");
+}
+
 function transferDestinationIsAmbiguous(name, destination, accounts) {
     const direct = matchAccountByName(name, accounts);
     if (direct.matched && direct.id === destination.id) return false;
@@ -638,25 +649,21 @@ export class AgentOrchestrator {
         const date = movement.occurred_at?.slice(0, 10);
         if (!source || !date) return null;
 
-        // A movement that did not resolve to another tracked account and whose
-        // counterparty is a bare person name is an own/unverifiable transfer,
-        // not a merchant sale. Booking it as spend or income is what produced
-        // the Ryt (#585) and one-sided OCBC deposit (#584) defects, so hold it
-        // and let the user name the other side.
-        //
-        // Scope matters: the parser only flags `person_transfer` for the
-        // "received/sent <NAME>" sentence forms. An ordinary outgoing
-        // "paid ... to <MERCHANT>" must not be held — a real merchant whose
-        // name merely reads like a person ("CFF UNITED PLT", "365 BAKERY")
-        // would otherwise be dropped from the budget silently. Incoming
-        // one-sided deposits keep the name test because their sender has no
-        // other evidence to check.
+        // Hold only a known own identity, never a name-shaped guess. Company
+        // names and legitimate third parties can be two plain words, so the old
+        // structural heuristic silently held real vendor payments. The memory
+        // query above returns the existing legal-name fact for an exact holder
+        // match without exposing it to the LLM or notification text.
+        const counterparty = movement.counterparty?.name;
+        const knownOwnIdentity = counterparty && facts.some((fact) => {
+            const text = typeof fact === "string" ? fact : fact?.text || "";
+            const match = text.match(/\b(?:legal|account\s+holder)\s+name\s*:\s*([^\n.]+)/i);
+            return match && normalizeIdentityName(match[1]) === normalizeIdentityName(counterparty);
+        });
         const unverifiablePersonMovement =
             !resolved.internal &&
-            (movement.person_transfer === true ||
-                movement.direction === "incoming") &&
-            looksLikePersonName(movement.counterparty?.name) &&
-            !matchAccountByName(movement.counterparty.name, accounts, mappings.aliases).matched;
+            knownOwnIdentity &&
+            !matchAccountByName(counterparty, accounts, mappings.aliases).matched;
         if (unverifiablePersonMovement) {
             return {
                 merchant: movement.counterparty.name,

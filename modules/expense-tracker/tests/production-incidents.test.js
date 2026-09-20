@@ -220,7 +220,11 @@ describe("hold behaviour for person-name movements (#584 / #585)", () => {
                 calls.push({ name, args });
                 if (name === "fetch_context")
                     return { accounts, categories: [], payees: [] };
-                if (name === "search_memory") return { results: [] };
+                if (name === "search_memory") {
+                    return args.query === "ACCOUNT HOLDER"
+                        ? { results: [{ text: "Legal name: ACCOUNT HOLDER" }] }
+                        : { results: [] };
+                }
                 if (name === "check_duplicate") return false;
                 if (name === "check_schedule_collision") return false;
                 return true;
@@ -364,9 +368,9 @@ describe("hold behaviour for person-name movements (#584 / #585)", () => {
         });
     });
 
-    it("books a sent payment to a business with a PLT suffix", async () => {
+    it("books a sent payment to an unlisted business descriptor", async () => {
         const body = RYT_FRAME(
-            "You've sent RM255.00 to CFF UNITED PLT on 19/9/2026, 10:50 AM (GMT+8) using your\nRyt Credit.",
+            "You've sent RM255.00 to ACME CONSULTANCY on 19/9/2026, 10:50 AM (GMT+8) using your\nRyt Credit.",
         );
         const { phase2, calls } = await orchestrate(body, {
             senderBank: "Ryt",
