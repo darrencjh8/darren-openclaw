@@ -2015,10 +2015,24 @@ export class ToolRegistry {
 
     // Fetch payees once whenever validation or a category-clear guard needs it.
     let payees = null;
-    if (payee_name || payee_id !== undefined || category_id === null) {
+    if (payee_name || payee_id !== undefined || category_id === null || account_id !== undefined) {
       const result = await this._get("/payees", budgetId);
       payees = Array.isArray(result) ? result : [];
     }
+
+    // Read the existing row at most once when a later guard needs its payee or
+    // source account. An account-only move can otherwise turn an existing
+    // transfer into a self-transfer. Issue #570.
+    let currentTransaction = null;
+    const readCurrentTransaction = async () => {
+      if (currentTransaction) return currentTransaction;
+      try {
+        currentTransaction = await this._get(`/transactions/${id}`, budgetId);
+      } catch {
+        return null;
+      }
+      return currentTransaction;
+    };
 
     // Build fields to update
     const fields = {};
@@ -2046,26 +2060,27 @@ export class ToolRegistry {
       if (updatedPayee.error) return { error: updatedPayee.error };
       fields.payee = updatedPayee.id;
     }
-    if (updatedPayee?.transfer_acct) {
-      // The update path writes the same class of row as insert, so it needs the
-      // same transfer-destination guard: a caller must not be able to point a
-      // row at a closed account, a missing account, or its own source account.
-      // The row's own account is only read when the payee is actually a
-      // transfer payee, so an ordinary payee change stays a single PATCH.
-      // Issue #570, follow-up to #563.
+    // A payee change can create a transfer; an account-only move can alter the
+    // source of an existing transfer. Both must use the same target guard.
+    // Issue #570, follow-up to #563.
+    let transferPayee = updatedPayee?.transfer_acct ? updatedPayee : null;
+    let transactionForGuard = null;
+    if (!transferPayee && account_id !== undefined) {
+      transactionForGuard = await readCurrentTransaction();
+      if (!transactionForGuard)
+        return { error: "Could not validate transfer destination." };
+      transferPayee = payees.find((payee) => payee.id === transactionForGuard.payee);
+    }
+    if (transferPayee?.transfer_acct) {
       let sourceAccountId = account_id;
       if (sourceAccountId === undefined) {
-        try {
-          const transaction = await this._get(`/transactions/${id}`, budgetId);
-          sourceAccountId = transaction?.account;
-        } catch {
-          // The row account is required to reject a self-targeted transfer.
-          // Do not turn a failed read into a thrown MCP error. Issue #570.
-          return { error: "Could not validate transfer destination." };
-        }
+        transactionForGuard = transactionForGuard || await readCurrentTransaction();
+        sourceAccountId = transactionForGuard?.account;
       }
+      if (sourceAccountId == null)
+        return { error: "Could not validate transfer destination." };
       const transferError = await this._validateTransferTarget(
-        updatedPayee,
+        transferPayee,
         budgetId,
         sourceAccountId,
       );

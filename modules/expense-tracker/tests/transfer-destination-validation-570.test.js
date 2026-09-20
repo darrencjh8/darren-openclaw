@@ -165,6 +165,44 @@ describe("#570 update_transaction transfer-destination guard", () => {
         });
     });
 
+    it("refuses an account-only move of an existing transfer onto its destination", async () => {
+        const cfg = new Config(testEnv);
+        const registry = new ToolRegistry(cfg);
+        stubGet(registry, { transferAcct: SC_ACCOUNT_ID });
+        registry._get = async (path) => {
+            if (path === "/payees") return makePayees({ transferAcct: SC_ACCOUNT_ID });
+            if (path === "/accounts") return LIVE_ACCOUNTS;
+            if (path === "/transactions/txn-1") return { id: "txn-1", account: RYT_ACCOUNT_ID, payee: "payee-closed-transfer" };
+            return [];
+        };
+
+        const result = await registry.executeTool("update_transaction", {
+            id: "txn-1",
+            budget_id: BUDGET,
+            account_id: SC_ACCOUNT_ID,
+        });
+
+        expect(result).toMatchObject({
+            error: "Transfer destination cannot be its source account.",
+        });
+    });
+
+    it("fails closed when the existing transfer row has no source account", async () => {
+        const cfg = new Config(testEnv);
+        const registry = new ToolRegistry(cfg);
+        stubGet(registry, { transferAcct: SC_ACCOUNT_ID, transactionAccount: null });
+
+        const result = await registry.executeTool("update_transaction", {
+            id: "txn-1",
+            budget_id: BUDGET,
+            payee_id: "payee-closed-transfer",
+        });
+
+        expect(result).toMatchObject({
+            error: "Could not validate transfer destination.",
+        });
+    });
+
     it("applies the same guard on the bare payee_name path", async () => {
         const cfg = new Config(testEnv);
         const registry = new ToolRegistry(cfg);
