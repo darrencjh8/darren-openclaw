@@ -104,12 +104,14 @@ const FIELD_LABELS = [
   "Transaction Ref",
   "Date of Transfer",
   "Date of Payment",
+  "Transfer Date",
   "Date and Time",
   "Time of Transfer",
   "Time of Payment",
   "Time of deposit",
   "From your account",
   "To account",
+  "To payee",
   "Description",
   "Reference",
   "Amount",
@@ -134,12 +136,23 @@ export function suffix(value) {
   return match?.[1] || null;
 }
 
+/**
+ * Trailing account digits in a masked alert, e.g. "OCBC 360 ACCOUNT ******9223"
+ * or "ACCOUNT HOLDER (********3461)". Bare 4-6 digit runs are deliberately not
+ * matched: a reference number must never be read as an account.
+ */
+function maskedSuffix(value) {
+  const match = String(value || "").match(/\*{2,}\s*(\d{4,})\b/);
+  return match?.[1] || null;
+}
+
 function namedAccount(value, fallbackBank) {
   if (!value) return null;
   return {
-    name: String(value).replace(/\s*\((?:A\/C|Ref)?\s*(?:ending\s+)?-?\d+\).*$/i, "").trim(),
+    name: String(value).replace(/\s*\((?:A\/C|Ref)?\s*(?:ending\s+)?-?\*{0,}\d+\)[^)]*$/i, "")
+      .replace(/\s*\*+\d*\s*$/, "").trim(),
     bank: bankFromText(value, fallbackBank),
-    suffix: suffix(value),
+    suffix: suffix(value) || maskedSuffix(value),
   };
 }
 
@@ -343,8 +356,8 @@ export function parseBankMovement(text, { senderBank = null, receivedAt } = {}) 
   }
 
   const from = field(body, ["From your account", "From"]);
-  const to = field(body, ["To account", "To"]);
-  const dateText = field(body, ["Date of Transfer", "Date of Payment", "Date and Time", "Date"]);
+  const to = field(body, ["To account", "To payee", "To"]);
+  const dateText = field(body, ["Date of Transfer", "Date of Payment", "Transfer Date", "Date and Time", "Date"]);
   const timeText = field(body, ["Time of Transfer", "Time of Payment", "Time"])
     || (dateText.match(/\d{1,2}[:.]\d{2}\s*(?:AM|PM)?/i)?.[0] || "");
 

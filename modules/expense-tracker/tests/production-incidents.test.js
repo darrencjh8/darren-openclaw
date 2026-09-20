@@ -37,6 +37,18 @@ Account that money was deposited in: (-869001)
 Reference: from ACCOUNT HOLDER
 `;
 
+/** uid 912 - OCBC DuitNow debit to the holder's own Ryt account (redacted). */
+const OCBC_DUITNOW_OWN_ACCOUNT = `Dear ACCOUNT HOLDER,
+
+As you instructed, we have made the following transfer:
+
+Transfer Date: 18 Sep 2026 5.04AM
+Amount: MYR 62.00
+From your account: OCBC 360 ACCOUNT ******9223
+To payee: ACCOUNT HOLDER (********3461)
+Reference number: REDACTED
+`;
+
 /** uid 917 - Ryt Bank card payment to a real (but unknown-to-memory) merchant. */
 const RYT_PAID_MERCHANT =
     "Hi Darren, You've paid RM255.00 to CLINIC MERCHANT on 19/9/2026, 10:50 AM (GMT+8) using your Ryt Credit.";
@@ -212,17 +224,17 @@ Reference :
 
 describe("hold behaviour for person-name movements (#584 / #585)", () => {
     /** Orchestrator over a single Ryt/OCBC account and no matching payee. */
-    async function orchestrate(body, { senderBank, receivedAt, accounts }) {
+    async function orchestrate(body, { senderBank, receivedAt, accounts, payees = [], extraFacts = [] }) {
         const { AgentOrchestrator } = await import("../src/orchestrator.js");
         const calls = [];
         const tools = {
             executeTool: vi.fn(async (name, args) => {
                 calls.push({ name, args });
                 if (name === "fetch_context")
-                    return { accounts, categories: [], payees: [] };
+                    return { accounts, categories: [], payees };
                 if (name === "search_memory") {
                     return args.query === "ACCOUNT HOLDER"
-                        ? { results: [{ text: "Legal name: ACCOUNT HOLDER" }] }
+                        ? { results: [{ text: "Legal name: ACCOUNT HOLDER" }, ...extraFacts] }
                         : { results: [] };
                 }
                 if (name === "check_duplicate") return false;
@@ -255,6 +267,64 @@ describe("hold behaviour for person-name movements (#584 / #585)", () => {
     const ocbcAccounts = [
         { id: "ocbc-360", name: "OCBC 360", closed: false },
     ];
+    const ownAccountTransferAccounts = [
+        { id: "ocbc-360", name: "OCBC 360", closed: false },
+        { id: "ryt-bank", name: "Ryt Bank", closed: false },
+    ];
+
+    const ownAccountTransferPayees = [
+        { id: "p-ocbc-360", name: "OCBC 360", transfer_acct: "ocbc-360" },
+        { id: "p-ryt-bank", name: "Ryt Bank", transfer_acct: "ryt-bank" },
+    ];
+
+    it("books the redacted uid 912 own-name debit as a transfer when both suffixes identify accounts (#569)", async () => {
+        const { phase2, result, calls } = await orchestrate(OCBC_DUITNOW_OWN_ACCOUNT, {
+            senderBank: "OCBC",
+            receivedAt: "2026-09-17T21:04:12.000Z",
+            accounts: ownAccountTransferAccounts,
+            payees: ownAccountTransferPayees,
+            // The live suffix facts for this pair of accounts. Without them the
+            // masked trailing digits cannot name an account, and the movement is
+            // not determinable — which is the next case.
+            extraFacts: [
+                "Account ending 9223 belongs to OCBC 360",
+                "Account ending 3461 belongs to Ryt Bank",
+            ],
+        });
+
+        expect(phase2).toMatchObject({
+            account_id: "ocbc-360",
+            payee_name: "Ryt Bank",
+            category_id: null,
+            _is_transfer: true,
+            _transfer: {
+                source_account_id: "ocbc-360",
+                destination_account_id: "ryt-bank",
+            },
+        });
+        expect(phase2._hold_unresolved_transfer).toBeUndefined();
+        expect(result.action).not.toBe("notified");
+        expect(calls.some((c) => c.name === "insert_transaction")).toBe(true);
+    });
+
+    it("holds the same own-name debit as Misc with no category when neither account is known (#569)", async () => {
+        const { phase2, result, calls } = await orchestrate(OCBC_DUITNOW_OWN_ACCOUNT, {
+            senderBank: "OCBC",
+            receivedAt: "2026-09-17T21:04:12.000Z",
+            accounts: ownAccountTransferAccounts,
+            payees: ownAccountTransferPayees,
+        });
+
+        expect(phase2).toMatchObject({
+            payee_name: "Misc",
+            account_id: "ocbc-360",
+            _hold_unresolved_transfer: true,
+        });
+        expect(phase2.category_id ?? null).toBe(null);
+        expect(result.action).toBe("notified");
+        expect(calls.some((c) => c.name === "insert_transaction")).toBe(false);
+        expect(calls.some((c) => c.name === "notify_user")).toBe(true);
+    });
 
     it("holds the uid 919 own-name debit as Misc with no category (#585)", async () => {
         const { phase2, result, calls, llm } = await orchestrate(
