@@ -2014,8 +2014,11 @@ export class ToolRegistry {
     }
 
     // Fetch payees once whenever validation or a category-clear guard needs it.
+    // An account-only move does not: it must not become dependent on an
+    // endpoint its pre-guard behaviour never touched, so that path loads the
+    // list lazily and tolerates a failure. Issue #570.
     let payees = null;
-    if (payee_name || payee_id !== undefined || category_id === null || account_id !== undefined) {
+    if (payee_name || payee_id !== undefined || category_id === null) {
       const result = await this._get("/payees", budgetId);
       payees = Array.isArray(result) ? result : [];
     }
@@ -2069,9 +2072,20 @@ export class ToolRegistry {
       transactionForGuard = await readCurrentTransaction();
       if (!transactionForGuard)
         return { error: "Could not validate transfer destination." };
-      transferPayee = payees.find(
-        (payee) => payee.id === (transactionForGuard.payee || transactionForGuard.payee_id),
-      );
+      // Load the payee list only for an account-only move, and only once the
+      // row is known to carry a payee: a plain non-transfer move stays
+      // independent of the payee endpoint. Issue #570.
+      const rowPayeeId = transactionForGuard.payee || transactionForGuard.payee_id;
+      if (rowPayeeId) {
+        try {
+          payees = payees || (await this._get("/payees", budgetId));
+        } catch {
+          return { error: "Could not validate transfer destination." };
+        }
+        transferPayee = (Array.isArray(payees) ? payees : []).find(
+          (payee) => payee.id === rowPayeeId,
+        );
+      }
     }
     if (transferPayee?.transfer_acct) {
       let sourceAccountId = account_id;
@@ -2094,7 +2108,7 @@ export class ToolRegistry {
     if (category_id === null) {
       let effectivePayee = updatedPayee;
       if (!effectivePayee) {
-        const transaction = await this._get(`/transactions/${id}`, budgetId);
+        const transaction = await readCurrentTransaction();
         const transactionPayee = transaction?.payee;
         // The transaction's payee is read by ID first; a bare name goes through
         // the shared policy and is refused rather than guessed. Issue #483.

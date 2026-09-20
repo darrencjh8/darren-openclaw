@@ -229,6 +229,49 @@ describe("#570 update_transaction transfer-destination guard", () => {
         });
     });
 
+    it("moves a plain non-transfer row without touching the payee endpoint", async () => {
+        const cfg = new Config(testEnv);
+        const registry = new ToolRegistry(cfg);
+        const calls = [];
+        registry._get = async (path) => {
+            calls.push(path);
+            if (path === "/payees") throw new Error("payees unavailable");
+            if (path === "/transactions/txn-1") return { id: "txn-1", account: RYT_ACCOUNT_ID, payee: null };
+            return LIVE_ACCOUNTS;
+        };
+        registry._patch = async (_path, fields) => ({ id: "txn-1", ...fields });
+
+        const result = await registry.executeTool("update_transaction", {
+            id: "txn-1",
+            budget_id: BUDGET,
+            account_id: SC_ACCOUNT_ID,
+        });
+
+        expect(result).toMatchObject({ account: SC_ACCOUNT_ID });
+        expect(calls).not.toContain("/payees");
+    });
+
+    it("fails closed when the payee list is unreadable for an account-only transfer move", async () => {
+        const cfg = new Config(testEnv);
+        const registry = new ToolRegistry(cfg);
+        registry._get = async (path) => {
+            if (path === "/payees") throw new Error("payees unavailable");
+            if (path === "/accounts") return LIVE_ACCOUNTS;
+            if (path === "/transactions/txn-1") return { id: "txn-1", account: RYT_ACCOUNT_ID, payee: "payee-closed-transfer" };
+            return [];
+        };
+
+        const result = await registry.executeTool("update_transaction", {
+            id: "txn-1",
+            budget_id: BUDGET,
+            account_id: SC_ACCOUNT_ID,
+        });
+
+        expect(result).toMatchObject({
+            error: "Could not validate transfer destination.",
+        });
+    });
+
     it("fails closed when the existing transfer row has no source account", async () => {
         const cfg = new Config(testEnv);
         const registry = new ToolRegistry(cfg);
