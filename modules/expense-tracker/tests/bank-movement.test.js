@@ -361,6 +361,27 @@ Time : 10:00 AM SGT`,
 });
 
 describe("identityMappingsFromFacts", () => {
+  // Issue #569: an OCBC transfer alert masks both account numbers, so the only
+  // evidence is the trailing digits after the asterisks. A bare digit run is
+  // not a suffix — that would read a reference number as an account.
+  it("reads a masked trailing suffix but never a bare reference number", () => {
+    const from = parseBankMovement(
+      `Dear Customer,\nAs you instructed, we have made the following transfer:\nTransfer Date: 18 Sep 2026 5.04AM\nAmount: MYR 62.00\nFrom your account: OCBC 360 ACCOUNT ******9223\nTo payee: A Person (********3461)\nReference number: 2609180110340750\n`,
+      { senderBank: "OCBC", receivedAt: "2026-09-17T21:04:12.000Z" },
+    );
+
+    expect(from).toMatchObject({
+      direction: "outgoing",
+      amount_cents: -6200,
+      own_account: { name: "OCBC 360 ACCOUNT", bank: "OCBC", suffix: "9223" },
+      counterparty: { name: "A Person", suffix: "3461" },
+    });
+    // The reference number is longer than the masked suffixes, so it can never
+    // be mistaken for one.
+    expect(from.own_account.suffix).not.toBe("2609180110340750");
+    expect(from.counterparty.suffix).not.toBe("2609180110340750");
+  });
+
   it("maps identity facts whose account name ends in Account without truncating it", () => {
     const localAccounts = [
       { id: "dbs-account", name: "DBS Account", closed: false },
