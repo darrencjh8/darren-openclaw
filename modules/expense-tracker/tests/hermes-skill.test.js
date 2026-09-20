@@ -60,6 +60,11 @@ describe("hermes expense-tracker skill", () => {
     expect(skill.toLowerCase()).toContain("guess");
   });
 
+  it("installs the PDF decryption tool the tracker invokes", () => {
+    const dockerfile = readFileSync(dockerfilePath, "utf8");
+    expect(dockerfile).toMatch(/apt-get install[\s\S]*\bqpdf\b/);
+  });
+
   it("is still baked into the image and seeded on boot", () => {
     const dockerfile = readFileSync(dockerfilePath, "utf8");
     const seed = readFileSync(seedPath, "utf8");

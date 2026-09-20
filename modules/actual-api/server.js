@@ -560,6 +560,30 @@ app.get("/accounts/balance/:id", async (req, res) => {
     }
 });
 
+/**
+ * Read-only schedule list for the requested budget. `getSchedules()` is the
+ * only way to see a due scheduled posting BEFORE Actual materialises it: the
+ * transactions endpoint cannot, which is why an alert-derived row and a due
+ * `posts_transaction` schedule could both land (#586). Guarded like every
+ * other route so a missing or throwing library method is a 500, never a crash.
+ */
+app.get("/schedules", async (req, res) => {
+    try {
+        if (typeof actual.getSchedules !== "function") {
+            return res
+                .status(500)
+                .json({ error: "Schedules are not supported by this client" });
+        }
+        const schedules = await withBudget(req, () => actual.getSchedules());
+        if (schedules === UNKNOWN_BUDGET) {
+            return res.status(400).json({ error: "Unknown budget" });
+        }
+        res.json(Array.isArray(schedules) ? schedules : []);
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
 app.get("/payees", async (req, res) => {
     try {
         const payees = await withBudget(req, () => actual.getPayees());

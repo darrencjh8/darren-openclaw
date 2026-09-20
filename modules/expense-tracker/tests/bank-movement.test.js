@@ -143,6 +143,56 @@ To: CITI CREDIT CARDS (Ref ending 4756)
     });
   });
 
+  it("parses a redacted Ryt merchant payment written as paid to", () => {
+    const movement = parseBankMovement(
+      "Hi Darren, You've paid RM255.00 to CLINIC MERCHANT on 19/9/2026, 10:50 AM (GMT+8) using your Ryt Credit.",
+      { senderBank: "Ryt", receivedAt: "2026-09-19T02:50:21.000Z" },
+    );
+
+    expect(movement).toMatchObject({
+      direction: "outgoing",
+      amount_cents: -25500,
+      currency: "MYR",
+      occurred_at: "2026-09-19T10:50:00+08:00",
+      own_account: { name: "Ryt Credit", bank: "Ryt", suffix: null },
+      counterparty: { name: "CLINIC MERCHANT", bank: null, suffix: null },
+      merchant_display_name: "CLINIC MERCHANT",
+    });
+  });
+
+  it("parses a redacted Ryt own-name debit as a movement", () => {
+    const movement = parseBankMovement(
+      "Hi Darren, You've sent RM100.00 to ACCOUNT HOLDER on 19/9/2026, 12:58 PM (GMT+8) using your Main Account.",
+      { senderBank: "Ryt", receivedAt: "2026-09-19T04:58:02.000Z" },
+    );
+
+    expect(movement).toMatchObject({
+      direction: "outgoing",
+      amount_cents: -10000,
+      currency: "MYR",
+      occurred_at: "2026-09-19T12:58:00+08:00",
+      own_account: { name: "Main Account", bank: "Ryt", suffix: null },
+      counterparty: { name: "ACCOUNT HOLDER", bank: null, suffix: null },
+      merchant_display_name: "ACCOUNT HOLDER",
+    });
+  });
+
+  it("parses a redacted Ryt own-name credit as a movement", () => {
+    const movement = parseBankMovement(
+      "Hi Darren, Money's in! You've received RM62.00 from ACCOUNT HOLDER on 18/9/2026, 5:04 AM (GMT+8).",
+      { senderBank: "Ryt", receivedAt: "2026-09-17T21:04:10.000Z" },
+    );
+
+    expect(movement).toMatchObject({
+      direction: "incoming",
+      amount_cents: 6200,
+      currency: "MYR",
+      occurred_at: "2026-09-18T05:04:00+08:00",
+      own_account: { bank: "Ryt", suffix: null },
+      counterparty: { name: "ACCOUNT HOLDER", bank: null, suffix: null },
+    });
+  });
+
   it("parses one-sided OCBC deposit but does not invent a counterparty", () => {
     const movement = parseBankMovement(`
 A deposit was made in your account.
@@ -1337,6 +1387,7 @@ To: Nova (Ref ending 3255)
       executeTool: vi.fn(async (name, args) => {
         calls.push({ name, args });
         if (name === "check_duplicate") return false;
+        if (name === "check_schedule_collision") return false;
         if (name === "insert_transaction") throw new Error("AB down");
         return true;
       }),

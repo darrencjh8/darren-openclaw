@@ -27,6 +27,7 @@ jest.mock("@actual-app/api", () => ({
     updateTransaction: jest.fn(),
     getAccountBalance: jest.fn(),
     getBudgetMonth: jest.fn(),
+    getSchedules: jest.fn(),
 }));
 
 const { getBudgetId, buildTransaction, readWindow } = require("../server");
@@ -215,6 +216,7 @@ describe("Route handlers", () => {
         actual.addTransactions.mockReset();
         actual.deleteTransaction.mockReset();
         actual.getBudgetMonth.mockReset();
+        actual.getSchedules && actual.getSchedules.mockReset();
 
         actual.init.mockResolvedValue(undefined);
         actual.getBudgets.mockResolvedValue([
@@ -226,6 +228,34 @@ describe("Route handlers", () => {
         actual.addTransactions.mockResolvedValue(["txn-new"]);
         actual.deleteTransaction.mockResolvedValue(undefined);
         actual.getBudgetMonth.mockResolvedValue({ month: "2026-08" });
+    });
+
+    test("GET /schedules returns the schedule list", async () => {
+        actual.getSchedules = jest.fn().mockResolvedValue([
+            { id: "s1", name: "Prepare: Rent", next_date: "2026-09-19" },
+        ]);
+        const handler = findHandler("get", "/schedules");
+        const res = mockRes();
+        await handler(mockReq({ query: { budget_id: "test-budget" } }), res);
+        expect(res.json).toHaveBeenCalledWith([
+            { id: "s1", name: "Prepare: Rent", next_date: "2026-09-19" },
+        ]);
+    });
+
+    test("GET /schedules answers an empty list rather than failing", async () => {
+        actual.getSchedules = jest.fn().mockResolvedValue(null);
+        const handler = findHandler("get", "/schedules");
+        const res = mockRes();
+        await handler(mockReq({ query: { budget_id: "test-budget" } }), res);
+        expect(res.json).toHaveBeenCalledWith([]);
+    });
+
+    test("GET /schedules rejects an unknown budget", async () => {
+        actual.getSchedules = jest.fn().mockResolvedValue([]);
+        const handler = findHandler("get", "/schedules");
+        const res = mockRes();
+        await handler(mockReq({ query: { budget_id: "nope" } }), res);
+        expect(res.status).toHaveBeenCalledWith(400);
     });
 
     test("GET /health returns { status: 'ok' }", () => {

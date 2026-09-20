@@ -325,7 +325,7 @@ describe("resolve_merchant pipeline", () => {
     expect(result).toEqual({ payee: "Misc", source: "fallback" });
   });
 
-  it("resolves via web search and AI classification (T011 web path)", async () => {
+  it("does not guess or learn a merchant from web classification without durable evidence", async () => {
     const memory = mockMemoryStore();
     const config = mockConfig();
     const registry = new ToolRegistry(config, memory);
@@ -369,7 +369,8 @@ describe("resolve_merchant pipeline", () => {
       budget_id: "test-budget",
     });
 
-    expect(result).toEqual({ payee: "Coffee", source: "web" });
+    expect(result).toEqual({ payee: "Misc", source: "fallback" });
+    expect(memory.add).not.toHaveBeenCalled();
     vi.unstubAllGlobals();
   });
 
@@ -559,7 +560,7 @@ describe("resolve_merchant pipeline", () => {
 // ─────────────────────────────────────────────────────────────────────────
 
 describe("Classification prompt structure", () => {
-  it("passes merchant name, web snippets, payee list, and JSON format instruction", async () => {
+  it("does not send unknown merchants to web/LLM classification", async () => {
     const memory = mockMemoryStore();
     const config = mockConfig();
     const registry = new ToolRegistry(config, memory);
@@ -605,36 +606,13 @@ describe("Classification prompt structure", () => {
       budget_id: "test-budget",
     });
 
-    // Verify chat received a single call
-    expect(mockChat).toHaveBeenCalledTimes(1);
-
-    // The first argument is the messages array; first (and only) message
-    const messages = mockChat.mock.calls[0][0];
-    const prompt = messages[0].content;
-
-    // Contains the merchant name
-    expect(prompt).toContain('"Joe\'s Diner"');
-
-    // Contains web search snippets
-    expect(prompt).toContain("Joe's Diner");
-    expect(prompt).toContain("https://joes.example");
-    expect(prompt).toContain("A family restaurant");
-    expect(prompt).toContain("Joe's Diner Menu");
-    expect(prompt).toContain("Breakfast and lunch");
-
-    // Contains available payee list
-    expect(prompt).toContain("Food");
-    expect(prompt).toContain("Coffee");
-    expect(prompt).toContain("Groceries");
-
-    // Contains JSON output format instruction
-    expect(prompt).toContain('{ "payee"');
-    expect(prompt).toContain("Respond with a JSON object");
+    expect(mockChat).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
 
     vi.unstubAllGlobals();
   });
 
-  it("extracts JSON from mixed text response (regex fallback)", async () => {
+  it("returns Misc even when a web/LLM response suggests a payee", async () => {
     const memory = mockMemoryStore();
     const config = mockConfig();
     const registry = new ToolRegistry(config, memory);
@@ -677,9 +655,10 @@ describe("Classification prompt structure", () => {
       merchant: "Test",
       budget_id: "test-budget",
     });
-    // Verify it successfully extracted Coffee from the mixed text
-    expect(result.payee).toBe("Coffee");
-    expect(result.source).toBe("web");
+    expect(result.payee).toBe("Misc");
+    expect(result.source).toBe("fallback");
+    expect(mockChat).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
 
     vi.unstubAllGlobals();
   });
@@ -705,7 +684,7 @@ describe("Auto-learning", () => {
     vi.unstubAllGlobals();
   });
 
-  it("triggers learn_fact on web resolution (T019)", async () => {
+  it("does not auto-learn a web resolution", async () => {
     const memory = mockMemoryStore();
     const config = mockConfig();
     const registry = new ToolRegistry(config, memory);
@@ -736,20 +715,14 @@ describe("Auto-learning", () => {
       choices: [{ message: { content: '{"payee":"Coffee"}' } }],
     });
 
-    // The write goes through write-time identity validation, so the live
-    // account list is fetched first (#561).
-    const accounts = [{ id: "ocbc", name: "OCBC 360", closed: false }];
-    registry._handle_fetch_accounts = async () => accounts;
-
     await registry._handle_resolve_merchant({
       merchant: "UnchartedBiz",
       budget_id: "test-budget",
     });
 
-    expect(memory.add).toHaveBeenCalledWith(
-      "UnchartedBiz maps to Coffee payee",
-      accounts,
-    );
+    expect(memory.add).not.toHaveBeenCalled();
+    expect(mockChat).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
 
     vi.unstubAllGlobals();
   });
@@ -1618,7 +1591,7 @@ describe("Multi-word payee regex", () => {
   });
 });
 
-describe("web-path memory write is validated (#561)", () => {
+describe.skip("removed web-path merchant learning (#587)", () => {
   /**
    * Registry whose web branch returns `payee`, with live accounts supplied (or
    * an error object when the account list cannot be read).
@@ -1695,7 +1668,7 @@ describe("web-path memory write is validated (#561)", () => {
   });
 });
 
-describe("budget_id parameter", () => {
+describe.skip("removed web payee lookup budget routing (#587)", () => {
   it("routes budget_id through to payee list fetch", async () => {
     const memory = mockMemoryStore();
     const config = mockConfig();
@@ -1729,7 +1702,7 @@ describe("budget_id parameter", () => {
   });
 });
 
-describe("Timeout enforcement", () => {
+describe.skip("removed web resolution timeout (#587)", () => {
   it("falls back to Misc when web search + classification exceeds 20s", async () => {
     vi.useFakeTimers();
     const memory = mockMemoryStore();

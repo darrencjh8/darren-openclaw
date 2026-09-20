@@ -13,6 +13,7 @@ import { extractEmailContent } from "./extractors.js";
 import { composeNotes } from "./transaction-notes.js";
 import {
     identityMappingsFromFacts,
+    looksLikePersonName,
     parseBankMovement,
     resolveMovementAccounts,
     accountMatches,
@@ -283,6 +284,17 @@ export function nameMatchesBank(name, bank) {
     const aliases = BANK_ALIASES[bank.toLowerCase()] || [bank];
     const lower = name.toLowerCase();
     return aliases.some((t) => new RegExp(`\\b${t}\\b`, "i").test(lower));
+}
+
+/** Normalize a holder name for equality without turning a partial match into one. */
+function normalizeIdentityName(value) {
+    return String(value || "")
+        .normalize("NFKD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .replace(/[^\p{L}\p{N}]+/gu, " ")
+        .trim()
+        .replace(/\s+/g, " ")
+        .toLocaleLowerCase("en");
 }
 
 function transferDestinationIsAmbiguous(name, destination, accounts) {
@@ -636,6 +648,45 @@ export class AgentOrchestrator {
             : [];
         const date = movement.occurred_at?.slice(0, 10);
         if (!source || !date) return null;
+
+        // Hold only a known own identity, never a name-shaped guess. Company
+        // names and legitimate third parties can be two plain words, so the old
+        // structural heuristic silently held real vendor payments. The memory
+        // query above returns the existing legal-name fact for an exact holder
+        // match without exposing it to the LLM or notification text.
+        const counterparty = movement.counterparty?.name;
+        const knownOwnIdentity = counterparty && facts.some((fact) => {
+            const text = typeof fact === "string" ? fact : fact?.text || "";
+            const match = text.match(/\b(?:legal|account\s+holder)\s+name\s*:\s*([^\n.]+)/i);
+            return match && normalizeIdentityName(match[1]) === normalizeIdentityName(counterparty);
+        });
+        const unverifiablePersonMovement =
+            !resolved.internal &&
+            knownOwnIdentity &&
+            !matchAccountByName(counterparty, accounts, mappings.aliases).matched;
+        if (unverifiablePersonMovement) {
+            return {
+                merchant: movement.counterparty.name,
+                amount_cents: movement.direction === "incoming"
+                    ? Math.abs(movement.amount_cents)
+                    : -Math.abs(movement.amount_cents),
+                date,
+                currency: movement.currency,
+                account_id: source.id,
+                account_name: source.name,
+                budget_id: budgetId,
+                action: "insert",
+                payee_name: "Misc",
+                category_id: null,
+                raw_description: `${movement.direction === "incoming" ? "Transfer from" : "Transfer to"} ${movement.counterparty.name}`,
+                raw_merchant_descriptor: "",
+                notes: movement.reference_number ? `Statement: ${movement.reference_number}` : "",
+                reasoning: "Held: person-to-person movement with no verified other leg",
+                notify_message: "",
+                _suffix_mappings: suffixMappings,
+                _hold_unresolved_transfer: true,
+            };
+        }
 
         if (resolved.internal) {
             const incoming = movement.direction === "incoming";
@@ -1852,32 +1903,9 @@ export class AgentOrchestrator {
                         if (valid) {
                             output.category_id = categoryId;
                             output.category_name = valid.name;
-                            // Auto-learn for next time (learn_fact → update_fact on contradiction).
-                            // The budget id is what lets write-time validation
-                            // check the key against the right account list.
-                            try {
-                                const fact = `${output.payee_name} maps to ${valid.name} category`;
-                                const learned = await this._tools.executeTool(
-                                    "learn_fact",
-                                    {
-                                        fact,
-                                        budget_id: output.budget_id || "",
-                                    },
-                                );
-                                if (
-                                    learned?.reason === "contradiction" &&
-                                    learned?.existing
-                                ) {
-                                    await this._tools.executeTool(
-                                        "update_fact",
-                                        {
-                                            old_text: learned.existing,
-                                            new_text: fact,
-                                            budget_id: output.budget_id || "",
-                                        },
-                                    );
-                                }
-                            } catch {}
+                            // A per-alert LLM category decision is not evidence for a
+                            // reusable payee mapping. Persisting it poisoned generic
+                            // keys such as "Food" (#588), so keep it local to this row.
                         }
                     }
                 } catch {
@@ -2013,6 +2041,67 @@ export class AgentOrchestrator {
                     action: "duplicate",
                     details: `${bookableAmountPrefix(llmOutput.amount_cents, llmOutput.currency)}at ${llmOutput.merchant || payeeName}`,
                 };
+            }
+
+            // A due `posts_transaction` schedule is invisible to check_duplicate:
+            // it posts its own rows seconds later, so an alert-derived row of the
+            // same amount on the same day produced a real duplicate pair (#586).
+            // Only a deterministic INCOMING bank movement is checked: the
+            // production collision (#586) was a deposit alert landing beside the
+            // schedule's own credit leg. An outgoing payment or merchant
+            // purchase cannot be that leg, and holding one would break it.
+            // An unreadable schedule list counts as a possible collision.
+            const scheduleCheckable =
+                hasAmount &&
+                !llmOutput._transfer &&
+                llmOutput._structured_movement === true &&
+                Number(llmOutput.amount_cents) > 0;
+            if (scheduleCheckable) {
+                let collision = false;
+                let readFailed = false;
+                try {
+                    collision = await this._tools.executeTool(
+                        "check_schedule_collision",
+                        {
+                            budget_id: llmOutput.budget_id || "",
+                            amount_cents: llmOutput.amount_cents,
+                            date: llmOutput.date || "",
+                        },
+                    );
+                } catch {
+                    // Hold anyway (fail-closed), but never claim a match we did
+                    // not observe: an actual-api outage would otherwise be
+                    // reported as "matches a scheduled transaction".
+                    collision = true;
+                    readFailed = true;
+                }
+                if (collision) {
+                    const cents = bookableAmountCents(llmOutput.amount_cents);
+                    const heldAmount =
+                        cents === null
+                            ? ""
+                            : `${llmOutput.currency === "MYR" ? "RM" : "S$"}${(Math.abs(cents) / 100).toFixed(2)} `;
+                    const what = `${heldAmount}${llmOutput.raw_description || llmOutput.merchant || "unknown"}`;
+                    if (!silent)
+                        await this._tools.executeTool("notify_user", {
+                            message: readFailed
+                                ? `Held: could not read the schedule list for ${what}, so it was held rather than booked unverified. Check the schedule in Actual.`
+                                : `Held: ${what} matches a scheduled transaction due around ${llmOutput.date || "today"}, so it was not booked a second time. Check the schedule in Actual.`,
+                        });
+                    await this._tools.executeTool("log_decision", {
+                        action: readFailed
+                            ? "held_schedule_check_failed"
+                            : "held_schedule_collision",
+                        reasoning: llmOutput.reasoning || "",
+                        timestamp: new Date().toISOString(),
+                    });
+                    return {
+                        action: "notified",
+                        details: readFailed
+                            ? "Held a row because the schedule list could not be read"
+                            : "Held a row that collides with a due schedule",
+                    };
+                }
             }
 
             if (llmOutput._transfer) {
