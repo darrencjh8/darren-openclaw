@@ -224,7 +224,7 @@ Reference :
 
 describe("hold behaviour for person-name movements (#584 / #585)", () => {
     /** Orchestrator over a single Ryt/OCBC account and no matching payee. */
-    async function orchestrate(body, { senderBank, receivedAt, accounts, payees = [], extraFacts = [] }) {
+    async function orchestrate(body, { senderBank, receivedAt, accounts, payees = [], extraFacts = [], legalFact = "Legal name: ACCOUNT HOLDER" }) {
         const { AgentOrchestrator } = await import("../src/orchestrator.js");
         const calls = [];
         const tools = {
@@ -234,8 +234,8 @@ describe("hold behaviour for person-name movements (#584 / #585)", () => {
                     return { accounts, categories: [], payees };
                 if (name === "search_memory") {
                     return args.query === "ACCOUNT HOLDER"
-                        ? { results: [{ text: "Legal name: ACCOUNT HOLDER" }, ...extraFacts] }
-                        : { results: [] };
+                        ? { results: [{ text: legalFact }, ...extraFacts] }
+                        : { results: extraFacts };
                 }
                 if (name === "check_duplicate") return false;
                 if (name === "check_schedule_collision") return false;
@@ -275,6 +275,19 @@ describe("hold behaviour for person-name movements (#584 / #585)", () => {
     const ownAccountTransferPayees = [
         { id: "p-ocbc-360", name: "OCBC 360", transfer_acct: "ocbc-360" },
         { id: "p-ryt-bank", name: "Ryt Bank", transfer_acct: "ryt-bank" },
+    ];
+
+    // Standard Chartered savings accounts and their transfer payees, for the
+    // DBS FAST / SC PayNow reconciliation cases (#592).
+    const scAccounts = [
+        { id: "posb-cashback", name: "POSB Cashback", closed: false },
+        { id: "dbs-account", name: "DBS Account", closed: false },
+        { id: "sc-bonus", name: "SC Bonus Saver", closed: false },
+    ];
+    const scTransferPayees = [
+        { id: "p-posb", name: "POSB Cashback", transfer_acct: "posb-cashback" },
+        { id: "p-dbs", name: "DBS Account", transfer_acct: "dbs-account" },
+        { id: "p-sc", name: "SC Bonus Saver", transfer_acct: "sc-bonus" },
     ];
 
     it("books the redacted uid 912 own-name debit as a transfer when both suffixes identify accounts (#569)", async () => {
@@ -363,6 +376,205 @@ describe("hold behaviour for person-name movements (#584 / #585)", () => {
         expect(phase2.category_id ?? null).toBe(null);
         expect(result.action).toBe("notified");
         expect(calls.some((c) => c.name === "insert_transaction")).toBe(false);
+    });
+
+    it("holds the RM200 own-name debit even when the live legal-name fact carries a password suffix (#592)", async () => {
+        // Production fact shape stores the statement-password mnemonic after an
+        // arrow: `Legal name: Chong Jin Heng -> CHON (statement password)`. The
+        // old capture read the whole tail, so the holder name never matched and
+        // the RM200 was booked as spending instead of being held.
+        const { phase2, result, calls, llm } = await orchestrate(
+            "Hi Darren, You've sent RM200.00 to ACCOUNT HOLDER on 21/9/2026, 12:22 AM (GMT+8) using your Main Account.",
+            {
+                senderBank: "Ryt",
+                receivedAt: "2026-09-20T16:22:04.000Z",
+                accounts: rytAccounts,
+                legalFact:
+                    "Legal name: ACCOUNT HOLDER -> ACCOUNT (statement password)",
+            },
+        );
+
+        expect(llm).not.toHaveBeenCalled();
+        expect(phase2).toMatchObject({
+            payee_name: "Misc",
+            account_id: "ryt-bank",
+            _hold_unresolved_transfer: true,
+        });
+        expect(phase2.category_id ?? null).toBe(null);
+        expect(result.action).toBe("notified");
+        expect(calls.some((c) => c.name === "insert_transaction")).toBe(false);
+        expect(calls.some((c) => c.name === "notify_user")).toBe(true);
+    });
+
+    it("holds the RM200 own-name debit with a clean legal-name fact too (#592)", async () => {
+        const { phase2, result, calls } = await orchestrate(
+            "Hi Darren, You've sent RM200.00 to ACCOUNT HOLDER on 21/9/2026, 12:22 AM (GMT+8) using your Main Account.",
+            {
+                senderBank: "Ryt",
+                receivedAt: "2026-09-20T16:22:04.000Z",
+                accounts: rytAccounts,
+            },
+        );
+
+        expect(phase2).toMatchObject({ payee_name: "Misc" });
+        expect(phase2.category_id ?? null).toBe(null);
+        expect(result.action).toBe("notified");
+        expect(calls.some((c) => c.name === "insert_transaction")).toBe(false);
+    });
+
+    // The two SC PayNow credits and the DBS FAST emails that book their other
+    // leg, from production on 2026-09-21 (SC credit uid 930/932; DBS debit
+    // uid 929/931). The DBS alerts are internal FAST transfers
+    // (POSB/My Account -> SC Bonus Saver) whose SOURCE suffix had no memory
+    // fact, so the deterministic parser bailed and the LLM booked the
+    // destination name as a merchant expense.
+    const SC_CREDIT_5589 = `
+Dear Valued Customer,
+
+Banking Transaction
+You have received a PayNow/FAST transfer of SGD 55.89 from ACCOUNT HOLDER| on 21-Sep-26 12:29 AM.
+`;
+    const SC_CREDIT_3100 = `
+Dear Valued Customer,
+
+Banking Transaction
+You have received a PayNow/FAST transfer of SGD 31.00 from ACCOUNT HOLDER| on 21-Sep-26 12:33 AM.
+`;
+    const DBS_FAST_5589 = `Transaction Ref: 17899217887419724242
+
+Dear Customer,
+
+We refer to your FAST Interbank Funds Transfer transaction dated 21 Sep. We are pleased to confirm that the transaction was completed.
+
+Date & Time: 21 Sep 00:29 (SGT)
+Amount: SGD55.89
+From: POSB Cashback A/C ending 4380
+To: ACCOUNT HOLDER SC A/C ending 6445
+`;
+    const DBS_FAST_3100 = `Transaction Ref: 17899220094587466504
+
+Dear Customer,
+
+We refer to your FAST Interbank Funds Transfer transaction dated 21 Sep. We are pleased to confirm that the transaction was completed.
+
+Date & Time: 21 Sep 00:33 (SGT)
+Amount: SGD31.00
+From: My Account A/C ending 5750
+To: ACCOUNT HOLDER SC A/C ending 6445
+`;
+
+    it("holds the DBS FAST transfer when its source suffix is unknown, instead of booking a phantom expense (#592)", async () => {
+        const { phase2, result, calls, llm } = await orchestrate(DBS_FAST_5589, {
+            senderBank: "DBS",
+            receivedAt: "2026-09-20T16:29:52.000Z",
+            accounts: scAccounts,
+            payees: scTransferPayees,
+            // Live memory knows the destination 6445 but not the source 4380.
+            extraFacts: ["Account ending 6445 belongs to SC Bonus Saver"],
+        });
+
+        expect(llm).not.toHaveBeenCalled();
+        expect(phase2).toMatchObject({
+            payee_name: "Misc",
+            account_id: "sc-bonus",
+            _hold_unresolved_transfer: true,
+        });
+        expect(phase2.category_id ?? null).toBe(null);
+        expect(phase2.payee_name).not.toBe("Household stuffs");
+        expect(result.action).toBe("notified");
+        expect(calls.some((c) => c.name === "insert_transaction")).toBe(false);
+        expect(calls.some((c) => c.name === "notify_user")).toBe(true);
+    });
+
+    it("books the DBS FAST transfer when both suffixes are known (#592)", async () => {
+        const { phase2, result } = await orchestrate(DBS_FAST_3100, {
+            senderBank: "DBS",
+            receivedAt: "2026-09-20T16:33:34.000Z",
+            accounts: scAccounts,
+            payees: scTransferPayees,
+            // Live memory: destination 6445 and source 5750 both known.
+            extraFacts: [
+                "Account ending 6445 belongs to SC Bonus Saver",
+                "Account ending 5750 belongs to DBS Account",
+            ],
+        });
+
+        expect(phase2._is_transfer).toBe(true);
+        expect(phase2._transfer).toMatchObject({
+            source_account_id: "dbs-account",
+            destination_account_id: "sc-bonus",
+            amount_cents: 3100,
+        });
+        expect(result.action).not.toBe("notified");
+    });
+
+    it("clears the SC PayNow hold when the matching DBS transfer leg is already booked (#592)", async () => {
+        const booked = {
+            id: "leg-5589",
+            budget_id: "budget-sgd",
+            source_account_id: "posb-cashback",
+            destination_account_id: "sc-bonus",
+            currency: "SGD",
+            amount_cents: 5589,
+            occurred_at: "2026-09-21T00:29:00+08:00",
+        };
+        const tools = {
+            executeTool: vi.fn(async (name) => {
+                if (name === "find_inserted_transfer") return booked;
+                if (name === "list_facts") return { facts: [] };
+                if (name === "fetch_context")
+                    return {
+                        accounts: [
+                            { id: "sc-bonus", name: "SC Bonus Saver", closed: false },
+                        ],
+                        categories: [],
+                        payees: [],
+                    };
+                return { results: [] };
+            }),
+            getPhase1ToolSchemas: vi.fn(() => []),
+            setEmailContext: vi.fn(),
+        };
+        const { AgentOrchestrator } = await import("../src/orchestrator.js");
+        const orch = new AgentOrchestrator(
+            {
+                primaryCurrency: "SGD",
+                secondaryCurrency: "MYR",
+                primaryBudgetFile: "budget-sgd",
+                secondaryBudgetFile: "budget-myr",
+                llmProvider: "deepseek",
+                llmApiKey: "x",
+                deepseekApiKey: "x",
+            },
+            tools,
+        );
+        const p1 = {
+            merchant: "ACCOUNT HOLDER",
+            raw_description:
+                "You have received a PayNow/FAST transfer of SGD 55.89 from ACCOUNT HOLDER| on 21-Sep-26 12:29 AM.",
+            amount_cents: 5589,
+            date: "2026-09-21",
+            currency: "SGD",
+            account_id: "sc-bonus",
+            account_name: "SC Bonus Saver",
+            budget_id: "budget-sgd",
+            action: "insert",
+            payee_name: "",
+            category_id: "",
+            notes: "",
+            reasoning: "",
+            _is_paynow: true,
+            received_at: "2026-09-20T16:32:00.000Z",
+        };
+        const p2 = await orch._resolvePhase2(p1);
+
+        expect(p2._hold_unresolved_paynow).toBeUndefined();
+        expect(p2._is_transfer).toBe(true);
+        expect(p2._transfer).toMatchObject({
+            source_account_id: "posb-cashback",
+            destination_account_id: "sc-bonus",
+            amount_cents: 5589,
+        });
     });
 
     it("holds the uid 916 reference-named deposit instead of booking income (#584)", async () => {

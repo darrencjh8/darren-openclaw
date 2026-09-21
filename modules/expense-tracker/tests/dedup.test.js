@@ -2,7 +2,7 @@
  * Tests for DedupJournal — ported from tests/test_dedup.py
  */
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { DedupJournal } from "../src/dedup.js";
+import { DedupJournal, RETRY_COOLDOWN_MINUTES } from "../src/dedup.js";
 import { unlinkSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
@@ -118,6 +118,18 @@ describe("DedupJournal processed UIDs", () => {
         journal.recordProcessed("100");
         journal.recordProcessed("100");
         expect(journal.isRecentlyProcessed("100", 60)).toBe(true);
+    });
+
+    it("throttles a held (unread) email for 12 hours, not 60 minutes (#592)", () => {
+        // A held alert stays unread and is re-scanned every IDLE pass; the
+        // retry cooldown is the only thing stopping the hold reminder repeating
+        // hourly. The default window must be 12 hours.
+        expect(RETRY_COOLDOWN_MINUTES).toBe(12 * 60);
+        journal.recordProcessed("592");
+        // Still inside the window an hour later: the reminder is suppressed.
+        expect(journal.isRecentlyProcessed("592", RETRY_COOLDOWN_MINUTES)).toBe(true);
+        // Past 12 hours it retries again.
+        expect(journal.isRecentlyProcessed("592", RETRY_COOLDOWN_MINUTES - 1)).toBe(false);
     });
 });
 
