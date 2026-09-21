@@ -123,17 +123,50 @@ describe("DedupJournal processed UIDs", () => {
     it("throttles a held (unread) email for 12 hours, not 60 minutes (#592)", () => {
         // A held alert stays unread and is re-scanned every IDLE pass; the
         // retry cooldown is the only thing stopping the hold reminder repeating
-        // hourly. The default window must be 12 hours.
+        // too soon. The default window must be 12 hours.
         expect(RETRY_COOLDOWN_MINUTES).toBe(12 * 60);
-        journal.recordProcessed("592");
-        // Still inside the window an hour later: the reminder is suppressed.
-        expect(journal.isRecentlyProcessed("592")).toBe(true);
-        // The reminder repeats only after the full 12 hours: a check scoped to a
-        // 1-hour window (the old default) would not suppress it.
-        expect(journal.isRecentlyProcessed("592", 60)).toBe(true);
-        // A zero-width window sees it as expired, proving the cutoff moves with
-        // the cooldown and the record is not simply always-true.
-        expect(journal.isRecentlyProcessed("592", 0)).toBe(false);
+
+        const backdate = (uid, minutesAgo) => {
+            journal._db
+                .prepare(
+                    "INSERT OR REPLACE INTO processed_uids (uid, processed_at) VALUES (?, ?)",
+                )
+                .run(uid, new Date(Date.now() - minutesAgo * 60 * 1000).toISOString());
+        };
+
+        // 90 minutes old: suppressed by the 12h default, but NOT by a 1-hour
+        // window (the old default). This is the boundary the default controls.
+        backdate("90min", 90);
+        expect(journal.isRecentlyProcessed("90min")).toBe(true);
+        expect(journal.isRecentlyProcessed("90min", 60)).toBe(false);
+
+        // Just past the 12h default it is no longer recent.
+        backdate("13h", 13 * 60);
+        expect(journal.isRecentlyProcessed("13h")).toBe(false);
+    });
+
+    it("retains processed uids past the cleanup interval so the cooldown holds (#592)", () => {
+        // The periodic cleanup() tick runs faster than the 12h cooldown, so a
+        // 60-minute retention would purge a still-unread held email's row and
+        // re-alert it long before the cooldown elapsed.
+        const backdate = (uid, minutesAgo) => {
+            journal._db
+                .prepare(
+                    "INSERT OR REPLACE INTO processed_uids (uid, processed_at) VALUES (?, ?)",
+                )
+                .run(uid, new Date(Date.now() - minutesAgo * 60 * 1000).toISOString());
+        };
+        backdate("recent", 90); // inside the cooldown
+        backdate("stale", 13 * 60); // past the cooldown
+
+        journal.cleanupProcessedUids();
+
+        const remaining = journal._db
+            .prepare("SELECT uid FROM processed_uids")
+            .all()
+            .map((r) => r.uid);
+        expect(remaining).toContain("recent");
+        expect(remaining).not.toContain("stale");
     });
 });
 

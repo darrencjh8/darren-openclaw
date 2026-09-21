@@ -363,9 +363,16 @@ export class DedupJournal {
         })();
     }
 
-    /** Delete processed_uids entries older than 60 minutes */
+    /** Delete processed_uids entries older than the retry cooldown.
+     *  Retention must be at least RETRY_COOLDOWN_MINUTES: the periodic
+     *  `cleanup()` runs faster than the cooldown, so a shorter retention
+     *  would purge a held email's row while the message is still unread and
+     *  eligible for reprocessing — re-alerting the user long before the
+     *  cooldown elapsed (issue #592). */
     cleanupProcessedUids() {
-        const cutoff = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+        const cutoff = new Date(
+            Date.now() - RETRY_COOLDOWN_MINUTES * 60 * 1000,
+        ).toISOString();
         this._db
             .prepare("DELETE FROM processed_uids WHERE processed_at < ?")
             .run(cutoff);
@@ -383,12 +390,12 @@ export class DedupJournal {
         return result.changes;
     }
 
-    /** Run full cleanup: processed_uids (60min) + old dedup entries (90d)
+    /** Run full cleanup: processed_uids (retry cooldown) + old dedup entries (90d)
      *  + booked messages (180d). */
     cleanup() {
         this.cleanupProcessedUids();
         this.cleanupOldEntries();
-        // Message identity must outlive the 60-minute retry cooldown and any
+        // Message identity must outlive the retry cooldown and any
         // realistic reprocessing, not forever.
         this._db
             .prepare("DELETE FROM booked_messages WHERE booked_at < ?")
