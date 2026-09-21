@@ -127,9 +127,13 @@ describe("DedupJournal processed UIDs", () => {
         expect(RETRY_COOLDOWN_MINUTES).toBe(12 * 60);
         journal.recordProcessed("592");
         // Still inside the window an hour later: the reminder is suppressed.
-        expect(journal.isRecentlyProcessed("592", RETRY_COOLDOWN_MINUTES)).toBe(true);
-        // Past 12 hours it retries again.
-        expect(journal.isRecentlyProcessed("592", RETRY_COOLDOWN_MINUTES - 1)).toBe(false);
+        expect(journal.isRecentlyProcessed("592")).toBe(true);
+        // The reminder repeats only after the full 12 hours: a check scoped to a
+        // 1-hour window (the old default) would not suppress it.
+        expect(journal.isRecentlyProcessed("592", 60)).toBe(true);
+        // A zero-width window sees it as expired, proving the cutoff moves with
+        // the cooldown and the record is not simply always-true.
+        expect(journal.isRecentlyProcessed("592", 0)).toBe(false);
     });
 });
 
