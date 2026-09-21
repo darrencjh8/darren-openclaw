@@ -28,13 +28,20 @@ trap 'rm -f "$tmp"' EXIT INT TERM
 
 # The agent has no edit, shell, task, web, question, or planning permission.
 # `timeout` bounds stalled model calls and the only input is the redacted file.
+#
+# The message must come BEFORE the options: `--file` is an array-typed option
+# (opencode CLI 1.18.31), so it greedily consumes every following non-option
+# token. With the message last, `opencode run` received no message, treated the
+# prompt as a second attachment, and exited with
+# `Error: File not found: Inspect only the attached snapshot...`, so the daily
+# triage produced no lead while its status still read ok. Issue #582.
 timeout 120 opencode run \
+    "Inspect only the attached snapshot. Follow your agent contract exactly." \
     --dir /opt/data/log-issue-triage \
     --agent log-triage-worker \
     --model opencode/muse-spark-1.3-contributor-free \
     --variant high \
     --file "$snapshot" \
-    "Inspect only the attached snapshot. Follow your agent contract exactly." \
     >"$tmp"
 mv "$tmp" "$output"
 printf '%s\n' "$output"
