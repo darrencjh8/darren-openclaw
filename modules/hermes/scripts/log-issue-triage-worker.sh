@@ -12,10 +12,13 @@ case "$(basename "$snapshot")" in
     expense-tracker.json|hermes.json|portfolio-tracker.json) ;;
     *) echo "refusing unknown triage snapshot" >&2; exit 64 ;;
 esac
-snapshot=/opt/data/log-issue-triage/snapshots/"$(basename "$snapshot")"
+# Overridable so the harness can exercise this script end to end against a
+# fixture instead of the live tree. Production keeps the default. Issue #582.
+triage_root=${TRIAGE_ROOT:-/opt/data/log-issue-triage}
+snapshot=$triage_root/snapshots/"$(basename "$snapshot")"
 [ -f "$snapshot" ] || { echo "snapshot does not exist" >&2; exit 66; }
 
-output_dir=/opt/data/log-issue-triage/worker-output
+output_dir=$triage_root/worker-output
 mkdir -p "$output_dir"
 name=$(basename "$snapshot" .json)
 output="$output_dir/$name.txt"

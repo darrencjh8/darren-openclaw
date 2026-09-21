@@ -1,10 +1,15 @@
 """Contract tests for the constrained OpenCode log-triage harness."""
 
+import os
 import re
+import shutil
+import subprocess
+import tempfile
 import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
+SNAPSHOT_FIXTURE = ROOT / "modules/hermes/tests/fixtures/log-issue-triage/snapshots/hermes.json"
 SEED = (ROOT / "modules/hermes/50-seed-defaults").read_text(encoding="utf-8")
 WORKER = (ROOT / "modules/hermes/scripts/log-issue-triage-worker.sh").read_text(encoding="utf-8")
 SNAPSHOT = (ROOT / "modules/hermes/scripts/log-issue-triage-snapshot.sh").read_text(encoding="utf-8")
@@ -113,6 +118,57 @@ class LogIssueTriageHarnessTest(unittest.TestCase):
 
         message = "Inspect only the attached snapshot. Follow your agent contract exactly."
         self.assertIn(message, _positional_arguments(tokens))
+
+    def test_worker_delivers_a_real_redacted_snapshot_to_the_model(self):
+        """End-to-end: run the worker against a real snapshot with a stub CLI.
+
+        The stub records the argv the CLI actually receives and asserts the
+        message positional is present, non-empty, and accompanied by the
+        snapshot path, so arg ordering is proven by execution rather than by
+        reading the script text.
+        """
+        worker = ROOT / "modules/hermes/scripts/log-issue-triage-worker.sh"
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "snapshots").mkdir()
+            shutil.copy(SNAPSHOT_FIXTURE, root / "snapshots" / "hermes.json")
+
+            stub_dir = root / "bin"
+            stub_dir.mkdir()
+            argv_log = root / "argv.json"
+            stub = stub_dir / "opencode"
+            stub.write_text(
+                "#!/bin/sh\n"
+                'printf \'%s\\n\' "$@" > "$STUB_ARGV_LOG"\n'
+                'printf "%s\\n" "TRIAGE: NONE"\n',
+                encoding="utf-8",
+            )
+            stub.chmod(0o755)
+
+            env = dict(os.environ)
+            env["PATH"] = f"{stub_dir}{os.pathsep}{env['PATH']}"
+            env["TRIAGE_ROOT"] = str(root)
+            env["STUB_ARGV_LOG"] = str(argv_log)
+
+            result = subprocess.run(
+                ["sh", str(worker), "hermes.json"],
+                capture_output=True,
+                text=True,
+                env=env,
+                cwd=root,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(result.stdout.strip(), str(root / "worker-output" / "hermes.txt"))
+            self.assertEqual(
+                (root / "worker-output" / "hermes.txt").read_text(encoding="utf-8").strip(),
+                "TRIAGE: NONE",
+            )
+
+            argv = argv_log.read_text(encoding="utf-8").splitlines()
+            message = "Inspect only the attached snapshot. Follow your agent contract exactly."
+            self.assertIn(message, _positional_arguments(argv))
+            self.assertEqual(argv[argv.index("--file") + 1], str(root / "snapshots" / "hermes.json"))
 
     def test_worker_invalidates_stale_output_and_scopes_its_temp_file(self):
         self.assertIn('rm -f "$output"', WORKER)
