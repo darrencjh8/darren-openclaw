@@ -169,6 +169,9 @@ class LogIssueTriageHarnessTest(unittest.TestCase):
             message = "Inspect only the attached snapshot. Follow your agent contract exactly."
             self.assertIn(message, _positional_arguments(argv))
             self.assertEqual(argv[argv.index("--file") + 1], str(root / "snapshots" / "hermes.json"))
+            # The override must be applied everywhere the worker roots itself,
+            # or the test could pass while production path leaks through.
+            self.assertEqual(argv[argv.index("--dir") + 1], str(root))
 
     def test_worker_invalidates_stale_output_and_scopes_its_temp_file(self):
         self.assertIn('rm -f "$output"', WORKER)

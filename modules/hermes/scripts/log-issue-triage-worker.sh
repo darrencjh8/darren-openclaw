@@ -40,7 +40,7 @@ trap 'rm -f "$tmp"' EXIT INT TERM
 # triage produced no lead while its status still read ok. Issue #582.
 timeout 120 opencode run \
     "Inspect only the attached snapshot. Follow your agent contract exactly." \
-    --dir /opt/data/log-issue-triage \
+    --dir "$triage_root" \
     --agent log-triage-worker \
     --model opencode/muse-spark-1.3-contributor-free \
     --variant high \
