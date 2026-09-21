@@ -647,7 +647,43 @@ export class AgentOrchestrator {
             ? this._collectSuffixMappings(movement, resolved)
             : [];
         const date = movement.occurred_at?.slice(0, 10);
-        if (!source || !date) return null;
+        if (!source || !date) {
+            // An outgoing movement whose counterparty resolves to another of the
+            // user's own accounts is an internal transfer, not a merchant
+            // payment. When the source account cannot be resolved (its suffix
+            // has no memory fact yet), the LLM fallback books the counterparty
+            // name as a merchant and posts a phantom expense (issue #592: a DBS
+            // FAST transfer POSB ...4380 -> SC 6445 was booked as "Household
+            // stuffs"). Hold it for the user instead of guessing a purchase.
+            if (
+                !source &&
+                date &&
+                movement.direction === "outgoing" &&
+                destination &&
+                /\bA\/C\s*ending\s*\d{4,}/i.test(movement.counterparty?.name || "")
+            ) {
+                return {
+                    merchant: movement.counterparty?.name || "Transfer",
+                    amount_cents: -Math.abs(movement.amount_cents),
+                    date,
+                    currency: movement.currency,
+                    account_id: destination.id,
+                    account_name: destination.name,
+                    budget_id: budgetId,
+                    action: "insert",
+                    payee_name: "Misc",
+                    category_id: null,
+                    raw_description: `Transfer to ${movement.counterparty?.name || destination.name}`,
+                    raw_merchant_descriptor: "",
+                    notes: movement.reference_number ? `Statement: ${movement.reference_number}` : "",
+                    reasoning: "Held: internal transfer source account could not be resolved",
+                    notify_message: "",
+                    _suffix_mappings: suffixMappings,
+                    _hold_unresolved_transfer: true,
+                };
+            }
+            return null;
+        }
 
         // Hold only a known own identity, never a name-shaped guess. Company
         // names and legitimate third parties can be two plain words, so the old
@@ -658,7 +694,14 @@ export class AgentOrchestrator {
         const knownOwnIdentity = counterparty && facts.some((fact) => {
             const text = typeof fact === "string" ? fact : fact?.text || "";
             const match = text.match(/\b(?:legal|account\s+holder)\s+name\s*:\s*([^\n.]+)/i);
-            return match && normalizeIdentityName(match[1]) === normalizeIdentityName(counterparty);
+            if (!match) return false;
+            // The live fact carries a statement-password mnemonic after the
+            // holder name, e.g. `Legal name: Chong Jin Heng -> CHON (statement
+            // password)`. Everything after an arrow is metadata, not part of the
+            // name, so trim it before comparing or the holder never matches.
+            // Issue #592.
+            const holder = match[1].split(/\s*(?:->|→|=>)\s*/, 1)[0];
+            return normalizeIdentityName(holder) === normalizeIdentityName(counterparty);
         });
         const unverifiablePersonMovement =
             !resolved.internal &&

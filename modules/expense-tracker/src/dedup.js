@@ -24,6 +24,17 @@ import { dirname } from "path";
 // and is refused only because it carries no amount (issue #557).
 const TRANSFER_MATCH_WINDOW_MS = 2 * 60 * 1000;
 
+/**
+ * How long a processed-but-unresolved email is skipped before it is retried.
+ * Held alerts stay unread so they surface again, and this cooldown is the only
+ * thing limiting how often the hold reminder repeats (issue #592): 12 hours, so
+ * a held transfer reminds at most twice a day instead of hourly.
+ */
+const RETRY_COOLDOWN_MINUTES = 12 * 60;
+
+/** Exposed for tests: the retry cooldown a held/processed email waits through. */
+export { RETRY_COOLDOWN_MINUTES };
+
 export class DedupJournal {
     /** @param {string} dbPath - Path to dedup.db */
     constructor(dbPath = "data/dedup.db") {
@@ -277,7 +288,15 @@ export class DedupJournal {
         this._db.close();
     }
 
-    isRecentlyProcessed(uid, cooldownMinutes = 60) {
+    /**
+     * True when this UID was processed within the retry cooldown. The window is
+     * 12 hours, not the old 60 minutes: a held alert stays unread on purpose and
+     * is re-scanned every IDLE pass, so the cooldown is what throttles the
+     * repeated hold reminders. One hour nagged about the same held transfer many
+     * times a day (issue #592); twelve hours reminds at most twice a day while
+     * still retrying genuine parse failures long before they go stale.
+     */
+    isRecentlyProcessed(uid, cooldownMinutes = RETRY_COOLDOWN_MINUTES) {
         const cutoff = new Date(
             Date.now() - cooldownMinutes * 60 * 1000,
         ).toISOString();
@@ -344,9 +363,16 @@ export class DedupJournal {
         })();
     }
 
-    /** Delete processed_uids entries older than 60 minutes */
+    /** Delete processed_uids entries older than the retry cooldown.
+     *  Retention must be at least RETRY_COOLDOWN_MINUTES: the periodic
+     *  `cleanup()` runs faster than the cooldown, so a shorter retention
+     *  would purge a held email's row while the message is still unread and
+     *  eligible for reprocessing — re-alerting the user long before the
+     *  cooldown elapsed (issue #592). */
     cleanupProcessedUids() {
-        const cutoff = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+        const cutoff = new Date(
+            Date.now() - RETRY_COOLDOWN_MINUTES * 60 * 1000,
+        ).toISOString();
         this._db
             .prepare("DELETE FROM processed_uids WHERE processed_at < ?")
             .run(cutoff);
@@ -364,12 +390,12 @@ export class DedupJournal {
         return result.changes;
     }
 
-    /** Run full cleanup: processed_uids (60min) + old dedup entries (90d)
+    /** Run full cleanup: processed_uids (retry cooldown) + old dedup entries (90d)
      *  + booked messages (180d). */
     cleanup() {
         this.cleanupProcessedUids();
         this.cleanupOldEntries();
-        // Message identity must outlive the 60-minute retry cooldown and any
+        // Message identity must outlive the retry cooldown and any
         // realistic reprocessing, not forever.
         this._db
             .prepare("DELETE FROM booked_messages WHERE booked_at < ?")
