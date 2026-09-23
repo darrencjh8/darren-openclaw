@@ -1,0 +1,277 @@
+/**
+ * Regression coverage for issue #598, Actual-side half: linking two EXISTING
+ * rows into one transfer pair.
+ *
+ * The spike that fixed this contract (scratch budget, vendored @actual-app/api
+ * 26.9.0) proved:
+ *   - `updateTransaction(id, { transfer_id })` ALONE does not link: onUpdate
+ *     sees no transferred account and calls removeTransfer, nulling it back.
+ *   - `addTransactions(..., { runTransfers: true })` on a row carrying another
+ *     account's transfer payee creates a SECOND counterpart row, which is wrong
+ *     when both legs already exist (the #598 case: two Misc rows, one per leg).
+ *   - Writing each leg's payee AND transfer_id together links the pair in place
+ *     with no counterpart row, so both `transfer_id`s point at each other.
+ */
+jest.mock("fs", () => ({ mkdirSync: jest.fn() }));
+
+const mockApp = {
+    get: jest.fn(),
+    post: jest.fn(),
+    patch: jest.fn(),
+    delete: jest.fn(),
+    use: jest.fn(),
+    listen: jest.fn(),
+};
+jest.mock("express", () => {
+    const expr = () => mockApp;
+    expr.json = jest.fn(() => "json-mw");
+    return expr;
+});
+
+jest.mock("@actual-app/api", () => ({
+    init: jest.fn(),
+    getBudgets: jest.fn(),
+    downloadBudget: jest.fn(),
+    getAccounts: jest.fn(),
+    getCategories: jest.fn(),
+    getPayees: jest.fn(),
+    getTransactions: jest.fn(),
+    addTransactions: jest.fn(),
+    deleteTransaction: jest.fn(),
+    updateTransaction: jest.fn(),
+    getAccountBalance: jest.fn(),
+    getBudgetMonth: jest.fn(),
+    getSchedules: jest.fn(),
+}));
+
+const actual = require("@actual-app/api");
+require("../server");
+
+const OUTGOING = {
+    id: "cb446e1b-d5ea-4e55-9d03-ad6e8d681f57",
+    account: "ocbc-360",
+    date: "2026-09-23",
+    amount: -100000,
+    transfer_id: null,
+    payee: "p-misc",
+};
+const INCOMING = {
+    id: "fc63bac4-6f08-46a6-989a-f28997bbde51",
+    account: "posb-cashback",
+    date: "2026-09-23",
+    amount: 100000,
+    transfer_id: null,
+    payee: "p-misc",
+};
+
+describe("POST /transactions/link-transfer (#598)", () => {
+    function findHandler(method, path) {
+        const call = mockApp[method].mock.calls.find(([p]) => p === path);
+        return call ? call[1] : null;
+    }
+    function mockReq(overrides = {}) {
+        return { query: {}, body: null, params: {}, ...overrides };
+    }
+    function mockRes() {
+        return {
+            json: jest.fn().mockReturnThis(),
+            status: jest.fn().mockReturnThis(),
+        };
+    }
+
+    beforeEach(() => {
+        for (const key of Object.keys(actual)) {
+            if (actual[key] && actual[key].mockReset) actual[key].mockReset();
+        }
+        actual.init.mockResolvedValue(undefined);
+        actual.getBudgets.mockResolvedValue([
+            { name: "test-budget", groupId: "g1" },
+        ]);
+        actual.downloadBudget.mockResolvedValue(undefined);
+        actual.updateTransaction.mockResolvedValue({});
+    });
+
+    /** The pair, plus the two transfer payees Actual creates per account. */
+    function seedPair({ accounts = null, payees = null, rows = null } = {}) {
+        actual.getAccounts.mockResolvedValue(
+            accounts || [
+                { id: "ocbc-360", name: "OCBC 360", closed: false },
+                { id: "posb-cashback", name: "POSB Cashback", closed: false },
+            ],
+        );
+        actual.getPayees.mockResolvedValue(
+            payees || [
+                { id: "p-misc", name: "Misc", transfer_acct: null },
+                { id: "p-ocbc", name: "OCBC 360", transfer_acct: "ocbc-360" },
+                {
+                    id: "p-posb",
+                    name: "POSB Cashback",
+                    transfer_acct: "posb-cashback",
+                },
+            ],
+        );
+        actual.getTransactions.mockResolvedValue(rows || [OUTGOING, INCOMING]);
+    }
+
+    test("links both legs in place, with each transfer_id pointing at the other", async () => {
+        seedPair();
+        const handler = findHandler("post", "/transactions/link-transfer");
+        const res = mockRes();
+
+        await handler(
+            mockReq({
+                body: {
+                    budget_id: "test-budget",
+                    outgoing_id: OUTGOING.id,
+                    incoming_id: INCOMING.id,
+                },
+            }),
+            res,
+        );
+
+        expect(actual.updateTransaction).toHaveBeenCalledTimes(2);
+        const updates = actual.updateTransaction.mock.calls.map(([, fields]) => fields);
+        // Each leg carries its own transfer payee (the OTHER account) and the
+        // partner's id, in one call each.
+        expect(updates).toEqual(
+            expect.arrayContaining([
+                expect.objectContaining({
+                    payee: "p-posb",
+                    transfer_id: INCOMING.id,
+                }),
+                expect.objectContaining({
+                    payee: "p-ocbc",
+                    transfer_id: OUTGOING.id,
+                }),
+            ]),
+        );
+        expect(res.json).toHaveBeenCalledWith(
+            expect.objectContaining({
+                status: "linked",
+                outgoing_id: OUTGOING.id,
+                incoming_id: INCOMING.id,
+            }),
+        );
+    });
+
+    test("clears any category on both legs so no residual expense is left", async () => {
+        seedPair();
+        const handler = findHandler("post", "/transactions/link-transfer");
+        const res = mockRes();
+
+        await handler(
+            mockReq({
+                body: {
+                    budget_id: "test-budget",
+                    outgoing_id: OUTGOING.id,
+                    incoming_id: INCOMING.id,
+                },
+            }),
+            res,
+        );
+
+        for (const [, fields] of actual.updateTransaction.mock.calls) {
+            expect(fields).toHaveProperty("category", null);
+        }
+    });
+
+    test("refuses a pair that is not opposite-sign on distinct accounts", async () => {
+        seedPair({
+            rows: [OUTGOING, { ...INCOMING, amount: -100000 }],
+        });
+        const handler = findHandler("post", "/transactions/link-transfer");
+        const res = mockRes();
+
+        await handler(
+            mockReq({
+                body: {
+                    budget_id: "test-budget",
+                    outgoing_id: OUTGOING.id,
+                    incoming_id: INCOMING.id,
+                },
+            }),
+            res,
+        );
+
+        expect(actual.updateTransaction).not.toHaveBeenCalled();
+        expect(res.status).toHaveBeenCalledWith(400);
+    });
+
+    test("refuses a pair on the same account", async () => {
+        seedPair({
+            rows: [OUTGOING, { ...INCOMING, account: "ocbc-360" }],
+        });
+        const handler = findHandler("post", "/transactions/link-transfer");
+        const res = mockRes();
+
+        await handler(
+            mockReq({
+                body: {
+                    budget_id: "test-budget",
+                    outgoing_id: OUTGOING.id,
+                    incoming_id: INCOMING.id,
+                },
+            }),
+            res,
+        );
+
+        expect(actual.updateTransaction).not.toHaveBeenCalled();
+        expect(res.status).toHaveBeenCalledWith(400);
+    });
+
+    test("refuses a row that is already part of a transfer", async () => {
+        seedPair({
+            rows: [OUTGOING, { ...INCOMING, transfer_id: "someone-else" }],
+        });
+        const handler = findHandler("post", "/transactions/link-transfer");
+        const res = mockRes();
+
+        await handler(
+            mockReq({
+                body: {
+                    budget_id: "test-budget",
+                    outgoing_id: OUTGOING.id,
+                    incoming_id: INCOMING.id,
+                },
+            }),
+            res,
+        );
+
+        expect(actual.updateTransaction).not.toHaveBeenCalled();
+        expect(res.status).toHaveBeenCalledWith(400);
+    });
+
+    test("refuses a missing leg id", async () => {
+        seedPair();
+        const handler = findHandler("post", "/transactions/link-transfer");
+        const res = mockRes();
+
+        await handler(
+            mockReq({ body: { budget_id: "test-budget", outgoing_id: OUTGOING.id } }),
+            res,
+        );
+
+        expect(actual.updateTransaction).not.toHaveBeenCalled();
+        expect(res.status).toHaveBeenCalledWith(400);
+    });
+
+    test("refuses an unknown budget before touching any row", async () => {
+        seedPair();
+        const handler = findHandler("post", "/transactions/link-transfer");
+        const res = mockRes();
+
+        await handler(
+            mockReq({
+                body: {
+                    budget_id: "no-such-budget",
+                    outgoing_id: OUTGOING.id,
+                    incoming_id: INCOMING.id,
+                },
+            }),
+            res,
+        );
+
+        expect(actual.updateTransaction).not.toHaveBeenCalled();
+        expect(res.status).toHaveBeenCalledWith(400);
+    });
+});

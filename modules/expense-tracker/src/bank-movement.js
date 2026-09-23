@@ -156,7 +156,7 @@ function namedAccount(value, fallbackBank) {
   };
 }
 
-function baseMovement({ direction, amount, currency, occurredAt, ownAccount, counterparty = null, reference = "", merchant = null, descriptor = "", isPayNow = false, isPayNowMerchant = false }) {
+function baseMovement({ direction, amount, currency, occurredAt, ownAccount, counterparty = null, reference = "", merchant = null, descriptor = "", isPayNow = false, isPayNowMerchant = false, recipientBank = null }) {
   if (!amount || !currency || !occurredAt || !ownAccount?.suffix) return null;
   return {
     kind: "bank_movement",
@@ -169,6 +169,10 @@ function baseMovement({ direction, amount, currency, occurredAt, ownAccount, cou
     own_account: ownAccount,
     counterparty,
     reference_number: reference,
+    // The bank that sent the alert, when the credited own account has no other
+    // evidence of it. The inbound FAST branch sets it so the recipient-account
+    // fallback in `resolveMovementAccounts` can still name the leg (issue #598).
+    recipient_bank: recipientBank,
     merchant_display_name: merchant,
     raw_merchant_descriptor: descriptor,
   };
@@ -328,6 +332,39 @@ export function parseBankMovement(text, { senderBank = null, receivedAt } = {}) 
         suffix: uobFast[4],
       },
       reference,
+    });
+  }
+
+  // DBS inbound FAST transfer notice — no "Amount :" label.
+  //   "You have received SGD 1000.00 via FAST transfer on 23 Sep 2026 00:36  SGT.
+  //    From: CHONG JIN HENG
+  //    To: Your DBS/ POSB account ending 4380"
+  // The credited account is named only by the "To:" mask, so that suffix is the
+  // own account. Without this branch the body exits at the `Amount :` guard
+  // below, the whole alert falls through to the LLM extractor, and one FAST
+  // transfer books as two separate Misc rows (issue #598).
+  const dbsReceived = body
+    .replace(/\s+/g, " ")
+    .match(
+      /You have received\s+(SGD|MYR)\s*([\d,.]+)\s+via\s+FAST transfer\s+on\s+(.+?)(?=\s*From:|\s*To:|$)/i,
+    );
+  if (dbsReceived) {
+    const ownSuffix = suffix(
+      body.match(/(?:^|\n)\s*To\s*:\s*([^\n]+)/i)?.[1] || "",
+    );
+    if (!ownSuffix) return null;
+    return baseMovement({
+      direction: "incoming",
+      amount: dbsReceived[2],
+      currency: dbsReceived[1],
+      occurredAt: isoDateTime(dbsReceived[3], dbsReceived[3], receivedAt),
+      ownAccount: { bank: senderBank, suffix: ownSuffix },
+      counterparty: namedAccount(
+        body.match(/(?:^|\n)\s*From\s*:\s*([^\n]+)/i)?.[1],
+        null,
+      ),
+      reference,
+      recipientBank: senderBank,
     });
   }
 

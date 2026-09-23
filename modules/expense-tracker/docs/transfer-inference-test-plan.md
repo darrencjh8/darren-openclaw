@@ -299,6 +299,32 @@ Recovery and cleanup:
 
 Use `Asia/Singapore` time for matching; do not compare bare UTC dates.
 
+#### 5b. Link an already-booked far side (issue #598)
+
+A bank alert can arrive *after* the other leg has already been booked as an
+ordinary row — one `Misc` row per leg, never linked. That was the production
+incident in #598: `SGD 1,000.00` OCBC 360 → POSB Cashback produced two separate
+`Misc` rows with no category, one on each account, both `transfer_id` null.
+
+When the near leg is booked as a transfer and the far account already holds a
+row, the pipeline looks for **at most one** row that can only be the far leg and
+links the two through `POST /transactions/link-transfer`:
+
+- Opposite sign to the leg just booked, same absolute amount.
+- On the far account of the transfer, and not the account just booked.
+- `cleared === false` and `transfer_id` null (an unlinked, uncleared row).
+- Still on the unclassified `Misc` payee — the shape this pipeline writes when a
+  movement cannot be classified.
+
+Exactly one match is linked. Zero matches, several matches, or an unreadable
+response leaves both rows untouched: the user is warned instead. This is
+deliberately conservative, because the match is on (account, amount, date) and
+cannot by itself prove the two rows are the same transfer — the trade-off
+tracked in #578. The upgrade path is a bank-reference column on
+`transfer_journal`; the two #598 alerts do share the reference
+`2609230019902668` (the DBS ref `012609230019902668EPS7678794` embeds the OCBC
+ref as its middle segment), which such a column could key on.
+
 ### 6. Harden merchant inference
 
 For ordinary payments, payee resolution order is:
@@ -403,6 +429,9 @@ PASS: Same accounts and amount but transfers 30 minutes apart create two transfe
 PASS: Real reverse transfer (Zeta Card -> OCBC 111) within ten minutes creates a second transfer.
 PASS: Same amount/date with different destination account IDs creates two transfers.
 PASS: Concurrent processing of both alerts sends exactly one transfer command.
+PASS: One own-account FAST transfer whose far leg is already an uncleared Misc row links both rows into one pair via the link route, and only when exactly one candidate matches (#598).
+PASS: When the far side has zero or several matching rows, nothing is linked, no row is rewritten, and the run warns instead (#598).
+PASS: A DBS "You have received ... via FAST transfer" notice parses into an incoming movement and is held rather than booked as income, because the notice names the sender but never the sending account (#584, #598).
 ```
 
 ### Actual adapter HTTP-boundary assertions

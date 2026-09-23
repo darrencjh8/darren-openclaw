@@ -644,7 +644,7 @@ export class AgentOrchestrator {
         const source = resolved.source_account;
         const destination = resolved.destination_account;
         const suffixMappings = allowSuffixLearning
-            ? this._collectSuffixMappings(movement, resolved)
+            ? this._collectSuffixMappings(movement, resolved, accounts, mappings)
             : [];
         const date = movement.occurred_at?.slice(0, 10);
         if (!source || !date) {
@@ -735,6 +735,9 @@ export class AgentOrchestrator {
             const incoming = movement.direction === "incoming";
             const bookedAccount = incoming ? destination : source;
             const otherAccount = incoming ? source : destination;
+            // The payee naming the OTHER account is what makes this row a
+            // transfer; an incoming leg prefers the SENDING account's payee.
+            const transferPayeeId = resolved.destination_payee?.id || null;
             return {
                 merchant: movement.counterparty?.name || otherAccount.name,
                 amount_cents: incoming
@@ -747,7 +750,7 @@ export class AgentOrchestrator {
                 budget_id: budgetId,
                 action: "insert",
                 payee_name: otherAccount.name,
-                payee_id: resolved.destination_payee.id,
+                payee_id: transferPayeeId,
                 category_id: null,
                 raw_description: `Transfer ${incoming ? "from" : "to"} ${movement.counterparty?.name || otherAccount.name}`,
                 raw_merchant_descriptor: "",
@@ -764,7 +767,7 @@ export class AgentOrchestrator {
                     currency: movement.currency,
                     amount_cents: Math.abs(movement.amount_cents),
                     occurred_at: movement.occurred_at,
-                    payee_id: resolved.destination_payee.id,
+                    payee_id: transferPayeeId,
                 },
             };
         }
@@ -792,6 +795,38 @@ export class AgentOrchestrator {
         }
 
         if (movement.direction === "outgoing") {
+            const named = movement.counterparty?.name;
+            // An outgoing movement naming an account by its masked suffix that
+            // does NOT resolve to any of the user's own accounts is the other
+            // half of the #592 defect: the destination could not be verified as
+            // one of the holder's accounts, so booking the name as a merchant
+            // invents a payment that may in fact be the holder's own transfer.
+            // Held as Misc with no category instead — the payee is never guessed
+            // and no expense is recorded. Issue #592, #598.
+            const unverifiedDestination =
+                !resolved.destination_account &&
+                Boolean(movement.counterparty?.suffix);
+            if (unverifiedDestination) {
+                return {
+                    merchant: named || "Bank transfer",
+                    amount_cents: -Math.abs(movement.amount_cents),
+                    date,
+                    currency: movement.currency,
+                    account_id: source.id,
+                    account_name: source.name,
+                    budget_id: budgetId,
+                    action: "insert",
+                    payee_name: "Misc",
+                    category_id: null,
+                    raw_description: `Transfer to ${named || "an unverified account"}`,
+                    raw_merchant_descriptor: "",
+                    notes: movement.reference_number ? `Statement: ${movement.reference_number}` : "",
+                    reasoning: "Held: destination account could not be verified as one of yours",
+                    notify_message: "",
+                    _suffix_mappings: suffixMappings,
+                    _hold_unresolved_transfer: true,
+                };
+            }
             return {
                 merchant: movement.merchant_display_name || movement.counterparty?.name || "Bank payment",
                 amount_cents: -Math.abs(movement.amount_cents),
@@ -823,17 +858,53 @@ export class AgentOrchestrator {
      * These are new ground-truth facts worth persisting — unlike memory-fact
      * resolution, whose mapping is already stored.
      */
-    _collectSuffixMappings(movement, resolved) {
+    _collectSuffixMappings(movement, resolved, accounts, mappings) {
         const pairs = [];
         const seen = new Set();
+        // The identity store is only available on the orchestrator path. Callers
+        // that pass just (movement, resolved) keep the original strict
+        // name-digit behaviour: no learning without the store to check against.
+        const hasStore = mappings?.suffix instanceof Map;
+        const accountList = Array.isArray(accounts) ? accounts : [];
         const consider = (account, evidence) => {
             const value = evidence?.suffix;
             if (!account || !value) return;
             if (!/^\d{4,6}$/.test(String(value))) return;
             if (seen.has(value)) return;
-            if (!accountMatches(account, evidence)) return;
+            // A suffix that already has a stored mapping is not learned again:
+            // that fact IS the evidence, so re-deriving it adds nothing. This
+            // also keeps a memory-fact-only resolution from being re-learned
+            // from the alias that same fact created, and never overwrites a
+            // conflicting mapping from a weaker signal.
+            if (hasStore && mappings.suffix.has(value)) return;
+            // Strict: the suffix must be one of the account's own name digits.
+            // Containment (a suffix that merely tails those digits) is NOT
+            // enough — see "does not learn a suffix that only tails
+            // account-name digits".
             const accountDigits = [...account.name.matchAll(/\d{4,}/g)].map((match) => match[0]);
-            if (!accountDigits.some((digits) => digits === value)) return;
+            const exact = accountDigits.some((digits) => digits === value);
+            // An account whose NAME carries no digits at all but which is
+            // reached by a written name resolving to it ("Darren POSB" ->
+            // POSB Cashback, issue #598) is not `accountMatches`-provable: that
+            // check requires digits in the name. The mapping is exactly what
+            // turns the next alert of the same kind into a resolvable transfer,
+            // so it is kept when the written name resolves to this single live
+            // account. An account whose name DOES carry digits must match them,
+            // so no weaker signal can ever overwrite a stronger one.
+            const claimedByOther = accountList.some(
+                (other) =>
+                    other?.id !== account.id &&
+                    [...(other?.name || "").matchAll(/\d{4,}/g)].some(
+                        (match) => match[0] === value,
+                    ),
+            );
+            const nameExclusive =
+                hasStore &&
+                accountDigits.length === 0 &&
+                !claimedByOther &&
+                evidence?.name &&
+                matchAccountByName(evidence.name, accountList, mappings.aliases).id === account.id;
+            if (!exact && !nameExclusive) return;
             seen.add(value);
             pairs.push({ suffix: value, accountName: account.name });
         };
@@ -1573,6 +1644,83 @@ export class AgentOrchestrator {
         }
     }
 
+    /**
+     * Join the row just booked to the transfer's other leg when Actual already
+     * holds it as an ordinary row (#598).
+     *
+     * The two rows of the production incident were both `Misc` with no
+     * category: one per leg, never linked. This runs after the near leg is
+     * booked and asks the route for at most one row that can only be the far
+     * leg — opposite sign, the other account, uncleared, unlinked, still on
+     * `Misc`. Exactly one match is linked; zero or several stays a warning, so
+     * an ambiguous day can never silently rewrite a real payment.
+     */
+    async _linkExistingFarSide({
+        transfer,
+        bookedAccountId,
+        amountCents,
+        date,
+        budgetId,
+        bookedRowId,
+        silent,
+    }) {
+        const farAccountId = transfer?.source_account_id === bookedAccountId
+            ? transfer?.destination_account_id
+            : transfer?.source_account_id;
+        if (
+            !transfer ||
+            !budgetId ||
+            !bookedRowId ||
+            !farAccountId ||
+            farAccountId === bookedAccountId ||
+            !date ||
+            !isBookableAmountCents(amountCents)
+        ) {
+            return false;
+        }
+        try {
+            const found = await this._tools.executeTool("find_link_candidate", {
+                budget_id: budgetId,
+                account_id: farAccountId,
+                amount_cents: amountCents,
+                on_date: date,
+            });
+            // The route must name the account the row sits on as well as the
+            // row itself: an id alone is not proof the two legs are on
+            // different accounts, and linking same-account rows is a data error.
+            const farRowId =
+                found?.candidate?.account_id === farAccountId ? found.candidate.id : null;
+            if (!farRowId) return false;
+            // The out leg is the debit whichever side of the transfer the row
+            // just booked landed on.
+            const outgoingId = Number(amountCents) < 0 ? bookedRowId : farRowId;
+            const incomingId = Number(amountCents) < 0 ? farRowId : bookedRowId;
+            const linked = await this._tools.executeTool("link_transfer_pair", {
+                budget_id: budgetId,
+                outgoing_id: outgoingId,
+                incoming_id: incomingId,
+            });
+            if (!linked || linked.error) {
+                logger.warn({
+                    event: "link_transfer_pair_failed",
+                    error: linked?.error || "unknown",
+                });
+                return false;
+            }
+            await this._tools.executeTool("log_decision", {
+                action: "transfer_pair_linked",
+                reasoning: `Joined the existing row on ${farAccountId} to the booked transfer`,
+                timestamp: new Date().toISOString(),
+            });
+            return true;
+        } catch (error) {
+            // A failed link must not fail a booked transfer; the rows are still
+            // both present and correct, just unpaired.
+            logger.warn({ event: "link_existing_far_side_failed", error: error.message });
+            return false;
+        }
+    }
+
     async _resolvePhase2(phase1Output) {
         const output = {
             ...phase1Output,
@@ -2199,16 +2347,21 @@ export class AgentOrchestrator {
                     });
                     // The destination account may already hold this transfer as
                     // an ordinary row, booked from an alert that named the
-                    // deposit (issue #557). Nothing proves that row is ours, so
-                    // warn instead of touching it: the user can see the account
-                    // and decide which row to remove.
-                    if (transferReservation.far_side_candidate && !silent) {
-                        try {
-                            await this._tools.executeTool("notify_user", {
-                                message: `Transfer ${bookableAmountPrefix(llmOutput.amount_cents, llmOutput.currency)}booked. The destination account already had an uncleared entry of the same amount that day — if it is the same transfer, remove one row in Actual.`,
-                            });
-                        } catch {} // a failed warning must not fail a booked transfer
-                    }
+                    // deposit (issue #557 / #598). Rather than telling the user
+                    // to remove a row by hand, look for exactly one row that
+                    // can only be this transfer's other leg and join the two
+                    // into a real pair. Anything ambiguous, absent, or
+                    // unreadable stays a warning: the books are never rewritten
+                    // on a guess (issues #557, #578, #598).
+                    await this._linkExistingFarSide({
+                        transfer: llmOutput._transfer,
+                        bookedAccountId: accountId,
+                        amountCents: llmOutput.amount_cents,
+                        date: llmOutput.date || inserted?.date || "",
+                        budgetId: llmOutput.budget_id || "",
+                        bookedRowId: inserted?.id || null,
+                        silent,
+                    });
                 }
             } catch (e) {
                 logger.error({ event: "insert_failed", error: e.message });
