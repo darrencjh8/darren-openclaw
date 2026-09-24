@@ -7,7 +7,8 @@ for the hard routes, a flash tier for the light ones, and a separate vision mode
 That split is retired: every DeepSeek fallback in Hermes uses the single canonical
 model id `deepseek-flash`. See darrencjh8/darren-openclaw#428. The primary slots have
 since moved again — auxiliary traffic now runs on the router's Command Code DeepSeek
-Flash model, and every profile shares the `auto-thinking` pool — so the table below,
+Flash model, except the approval judge which keeps `auto-thinking`, and every profile
+shares the `auto-thinking` pool — so the table below,
 not the original proposal, is the current contract.
 
 ## Routing today

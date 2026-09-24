@@ -415,13 +415,15 @@ Setting it explicitly:
 hermes config set auxiliary.vision.provider custom:codex-router
 hermes config set auxiliary.vision.model commandcode/deepseek/deepseek-v4.1-flash
 ```
-`hermes config set` writes single keys and cannot express a `fallback_chain`, so a host
-set this way has no fallback until the next boot: `50-seed-defaults` replaces the whole
-`auxiliary` subtree from the baked config, which is what installs the
-`deepseek-flash` chain. Hand-editing `/opt/data/config.yaml` does not help either — the
-reseed overwrites `auxiliary` on every boot, so a manual edit lasts only for the current
-container's lifetime and is then silently reverted. Land the chain in
-`modules/hermes/config.yaml` and deploy; that is the only durable fix.
+Those two commands leave no `fallback_chain`. Do not try to add one with
+`hermes config set auxiliary.vision.fallback_chain '[{...}]'`: structured values for a
+key Hermes does not declare as list-typed can be persisted as a quoted JSON *string*,
+and a string-valued chain is silently dropped (NousResearch/hermes-agent#51560), which
+looks like a working fallback and is not. Land the chain in
+`modules/hermes/config.yaml` and deploy — that is the only durable and reliable fix.
+Hand-editing `/opt/data/config.yaml` does not help either: `50-seed-defaults` replaces
+the whole `auxiliary` subtree from the baked config on every boot, so a manual edit is
+silently reverted at the next container start.
 A `fallback_chain` left by an older host names the same model and is inert, and a
 top-level key the baked config does not define (such as `hooks`) survives the reseed.
 
