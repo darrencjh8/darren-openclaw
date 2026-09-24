@@ -34,6 +34,11 @@ codex-router; codex-router still hops to DeepSeek itself inside the `auto-thinki
 pool. The `commandcode/*` primaries require `COMMANDCODE_API_KEY` in the router's
 environment and are advertised in its catalog only while that key is present.
 
+The reasoning effort shown for the main agent is the only effort this plan pins. The
+profiles set their own: `architect` and `spec-auditor` at `medium`,
+`project-manager` at `low`, `code-reviewer` at `medium`. Every slot routes through
+`auto-thinking`, so the router's pool also chooses an effort per hop.
+
 `code-reviewer` keeps `fallback_providers: []` on purpose: a review round must fail
 closed rather than silently downgrade to a cheaper tier mid-round.
 

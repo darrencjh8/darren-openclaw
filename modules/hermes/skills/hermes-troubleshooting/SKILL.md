@@ -77,7 +77,7 @@ Don't answer from the session system-prompt header alone, and don't answer from 
   - `model.provider` + `model.default` — configured primary chat model
   - `fallback_providers` — where the chat loop drops after 3 failed attempts
   - `delegation.provider`/`model` — subagents (distinct from main chat!)
-  - `auxiliary.*` (vision, web_extract, compression, approval, triage_specifier, profile_describer, kanban_decomposer) — each task type has its own provider/model, plus a `fallback_chain` where the slot needs one (vision and `kanban_decomposer` do not)
+  - `auxiliary.*` (vision, web_extract, compression, approval, triage_specifier, profile_describer, kanban_decomposer) — each task type has its own provider/model, plus exactly one direct `deepseek-flash` `fallback_chain` on every slot
 
 **A model visible in config is often fallback-only or slot-specific.** Example (a host, 2026-09): `deepseek-flash` is never a *router-backed* primary — the router-backed primaries are `auto-thinking` (main, delegation, approval, and all four profiles) and `commandcode/deepseek/deepseek-v4.1-flash` (the auxiliary slots). `deepseek-flash` appears inside `fallback_providers`, one auxiliary `fallback_chain` per slot, and nowhere as a primary. So "why DeepSeek?" means either the codex-router primary was down/overloaded and the route fell through to the direct `deepseek` provider, or the user is reading the fallback list and mistaking it for the active brain. Answer with a table of role → provider → model so the status is visible.
 

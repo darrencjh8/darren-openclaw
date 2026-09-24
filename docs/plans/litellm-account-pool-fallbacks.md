@@ -8,7 +8,7 @@ how the account pools were introduced.
 
 ## Goal
 
-Route Hermes primary model calls through the Docker-hosted LiteLLM router while using ordered OpenAI subscription account pools. Use direct `deepseek-flash` only after the relevant LiteLLM pool is exhausted or unavailable. Exception: `auxiliary.vision` calls `deepseek-flash` directly with no pool route and no fallback.
+Route Hermes primary model calls through the Docker-hosted LiteLLM router while using ordered OpenAI subscription account pools. Use direct `deepseek-flash` only after the relevant LiteLLM pool is exhausted or unavailable. (At the time, `auxiliary.vision` was the exception: it called `deepseek-flash` directly with no pool route and no fallback. It now routes through codex-router like every other slot.)
 
 ## Required routing
 
