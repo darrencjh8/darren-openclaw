@@ -141,12 +141,21 @@ class DeployWorkflowRouterTests(unittest.TestCase):
         )
         self.assertIn("python tests/test_provider_smoke_live.py", smoke["run"])
 
-    def test_code_reviewer_uses_round_aware_router_without_fallback(self):
+    def test_code_reviewer_escalates_instead_of_dropping_tier(self):
         reviewer = yaml.safe_load((Path(__file__).parents[1] / "hermes/profiles/code-reviewer/config.yaml").read_text(encoding="utf-8"))
-        self.assertEqual(reviewer["model"], {"provider": "custom:codex-router", "default": "auto-thinking"})
-        self.assertEqual(reviewer["fallback_providers"], [])
+        self.assertEqual(
+            reviewer["model"],
+            {"provider": "custom:codex-router", "default": "commandcode/deepseek/deepseek-v4.1-flash"},
+        )
+        # The reviewer's fallback escalates to the pooled route rather than
+        # downgrading, so a review round is never served by a weaker tier than the
+        # one that was chosen for it.
+        self.assertEqual(
+            reviewer["fallback_providers"],
+            [{"provider": "custom:codex-router", "model": "auto-thinking"}],
+        )
         self.assertFalse(reviewer["memory"]["memory_enabled"])
-        self.assertEqual(reviewer["agent"]["reasoning_effort"], "medium")
+        self.assertEqual(reviewer["agent"]["reasoning_effort"], "high")
 
     def test_public_test_workflow_discovers_all_module_contract_tests(self):
         workflow = TEST_WORKFLOW.read_text(encoding="utf-8")

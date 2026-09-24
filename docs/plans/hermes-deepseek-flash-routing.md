@@ -25,7 +25,7 @@ not the original proposal, is the current contract.
 | Triage specifier | codex-router / `commandcode/deepseek/deepseek-v4.1-flash` | direct / `deepseek-flash` |
 | Profile describer | codex-router / `commandcode/deepseek/deepseek-v4.1-flash` | direct / `deepseek-flash` |
 | architect profile | codex-router / `auto-thinking` | direct / `deepseek-flash` |
-| code-reviewer profile | codex-router / `auto-thinking` | none — fails closed |
+| code-reviewer profile | codex-router / `commandcode/deepseek/deepseek-v4.1-flash` (reasoning high) | codex-router / `auto-thinking` |
 | spec-auditor profile | codex-router / `auto-thinking` | direct / `deepseek-flash` |
 | project-manager profile | codex-router / `auto-thinking` | direct / `deepseek-flash` |
 
@@ -37,12 +37,16 @@ environment and are advertised in its catalog only while that key is present.
 
 The reasoning effort shown for the main agent is the only effort this plan pins. The
 profiles set their own: `architect` and `spec-auditor` at `medium`,
-`project-manager` at `low`, `code-reviewer` at `medium`. The main agent and all four
-profiles route through `auto-thinking`, so the router's pool also chooses an effort
-per hop.
+`project-manager` at `low`, `code-reviewer` at `high`. All four profiles route through
+`auto-thinking` except `code-reviewer`, which pins the Command Code route directly, so
+the router's pool also chooses an effort per hop for the slots that use it.
 
-`code-reviewer` keeps `fallback_providers: []` on purpose: a review round must fail
-closed rather than silently downgrade to a cheaper tier mid-round.
+`code-reviewer` is the one slot whose fallback is not the direct `deepseek` provider:
+it falls back to `custom:codex-router` / `auto-thinking`. The direction matters — a
+review round runs the Command Code Flash model and *escalates* to the pooled route when
+that is unavailable, so an outage never serves a review from a weaker tier than the one
+chosen for it. That is the opposite of the earlier `fallback_providers: []`, which made
+the round fail closed instead.
 
 ## Notes
 

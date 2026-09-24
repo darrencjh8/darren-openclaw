@@ -4,16 +4,21 @@ providers:
         api: http://codex-router:4100/v1
         api_key: local
         transport: chat_completions
-        default_model: auto-thinking
+        default_model: commandcode/deepseek/deepseek-v4.1-flash
 
 model:
     provider: custom:codex-router
-    default: auto-thinking
+    default: commandcode/deepseek/deepseek-v4.1-flash
 
-fallback_providers: []
+# Reviews run the Command Code DeepSeek Flash model normally. The fallback is the
+# auto-thinking pool, so an outage escalates the reviewer rather than downgrading
+# it: a review round is never silently served by a weaker tier than intended.
+fallback_providers:
+    - provider: custom:codex-router
+      model: auto-thinking
 
 agent:
-    reasoning_effort: medium
+    reasoning_effort: high
     disabled_toolsets:
         - moa
 

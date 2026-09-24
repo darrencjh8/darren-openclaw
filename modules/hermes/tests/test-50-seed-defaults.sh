@@ -424,8 +424,14 @@ import yaml
 config = yaml.safe_load(open(sys.argv[1], encoding="utf-8"))
 isolated = config["memory"]["memory_enabled"] is False and config["memory"]["user_profile_enabled"] is False
 preserved = config["approvals"]["mode"] == "custom-preserved"
-routed = config["model"] == {"provider": "custom:codex-router", "default": "auto-thinking"}
-print("pass" if isolated and preserved and routed and config["fallback_providers"] == [] else "fail")
+routed = config["model"] == {
+    "provider": "custom:codex-router",
+    "default": "commandcode/deepseek/deepseek-v4.1-flash",
+}
+escalating = config["fallback_providers"] == [
+    {"provider": "custom:codex-router", "model": "auto-thinking"}
+]
+print("pass" if isolated and preserved and routed and escalating else "fail")
 PY
 )
 [ "$migration_result" = "pass" ] && ok "existing reviewer profile migrates to isolated round routing" || nope "reviewer isolation fixture" "got: $migration_result"
@@ -450,8 +456,14 @@ config = yaml.safe_load(open(sys.argv[1], encoding="utf-8"))
 memory = config.get("memory")
 isolated = isinstance(memory, dict) and memory.get("memory_enabled") is False and memory.get("user_profile_enabled") is False
 preserved = config["approvals"]["mode"] == "custom-preserved"
-routed = config["model"] == {"provider": "custom:codex-router", "default": "auto-thinking"}
-print("pass" if isolated and preserved and routed and config["fallback_providers"] == [] else "fail")
+routed = config["model"] == {
+    "provider": "custom:codex-router",
+    "default": "commandcode/deepseek/deepseek-v4.1-flash",
+}
+escalating = config["fallback_providers"] == [
+    {"provider": "custom:codex-router", "model": "auto-thinking"}
+]
+print("pass" if isolated and preserved and routed and escalating else "fail")
 PY
 )
 [ "$null_memory_status" -eq 0 ] && [ "$null_memory_result" = "pass" ] && ok "null reviewer memory migrates safely" || nope "null reviewer memory migration" "status=$null_memory_status result=$null_memory_result output=$null_memory_output"

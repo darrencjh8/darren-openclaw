@@ -22,7 +22,7 @@ Route Hermes primary model calls through the Docker-hosted LiteLLM router while 
 gpt-5.6-terra (router selects account 3 -> 2 -> 1)
 ```
 
-Use for Hermes main chat, approval, and the `code-reviewer` profile. (Vision no longer uses this pool: it routes through codex-router on the Command Code DeepSeek Flash model.)
+Use for Hermes main chat, approval, and the `code-reviewer` profile. (Vision no longer uses this pool: it routes through codex-router on the Command Code DeepSeek Flash model. The `code-reviewer` profile no longer uses it as a primary either — it runs the Command Code route and reaches this pool only as a fallback.)
 
 ### Luna pool
 

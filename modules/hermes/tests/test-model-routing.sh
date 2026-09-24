@@ -116,7 +116,7 @@ assert decomposer.get("fallback_chain") == [deepseek_fallback], (
 
 for profile, effort in {
     "architect": "medium",
-    "code-reviewer": "medium",
+    "code-reviewer": "high",
     "spec-auditor": "medium",
     "project-manager": "low",
 }.items():
@@ -125,6 +125,11 @@ for profile, effort in {
     assert profile_config_path.is_file(), f"{profile} profile config is missing"
     with open(profile_config_path) as f:
         profile_config = yaml.safe_load(f)
+    if profile == "code-reviewer":
+        # The reviewer is the one profile that does not run the auto-thinking pool:
+        # it pins the Command Code DeepSeek Flash route and escalates to
+        # auto-thinking only when that route is unavailable.
+        model = "commandcode/deepseek/deepseek-v4.1-flash"
     assert_provider(profile_config, model, profile)
     expected_provider = router_route
     assert profile_config["model"].get("provider") == expected_provider, (
@@ -139,7 +144,11 @@ for profile, effort in {
     )
     fallback = profile_config["fallback_providers"]
     if profile == "code-reviewer":
-        assert fallback == [], "code-reviewer must fail closed instead of switching review tiers"
+        # The reviewer must never be served by a weaker tier than intended, so its
+        # fallback escalates to the pooled route instead of dropping to a cheaper one.
+        assert fallback == [{"provider": router_route, "model": "auto-thinking"}], (
+            "code-reviewer must fall back to the auto-thinking pool, not a weaker tier"
+        )
         assert profile_config["memory"]["memory_enabled"] is False, (
             "code-reviewer memory must be disabled so every review has a fresh context"
         )
