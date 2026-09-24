@@ -116,7 +116,7 @@ class LogIssueTriageSnapshotTest(unittest.TestCase):
 
     SCRIPT = ROOT / "modules/hermes/scripts/log-issue-triage-snapshot.sh"
 
-    def run_snapshot(self, root, component, docker_body):
+    def run_snapshot(self, root, component, docker_body, collector_body=None):
         stub_dir = root / "bin"
         stub_dir.mkdir(exist_ok=True)
         stub = stub_dir / "docker"
@@ -129,7 +129,10 @@ class LogIssueTriageSnapshotTest(unittest.TestCase):
         staged = root / "scripts"
         staged.mkdir(exist_ok=True)
         (staged / COLLECTOR.name).write_text(
-            COLLECTOR.read_text(encoding="utf-8"), encoding="utf-8"
+            collector_body
+            if collector_body is not None
+            else COLLECTOR.read_text(encoding="utf-8"),
+            encoding="utf-8",
         )
         script = root / self.SCRIPT.name
         script.write_text(
@@ -184,6 +187,36 @@ class LogIssueTriageSnapshotTest(unittest.TestCase):
 
             self.assertNotEqual(result.returncode, 0)
             self.assertFalse((root / "snapshots" / "not-a-component.json").exists())
+
+    def test_a_failed_collector_leaves_no_partial_snapshot_behind(self):
+        """A truncated snapshot must never survive to be read as fresh evidence.
+
+        The script deletes any previous run's snapshot before writing. Without
+        that delete, a collector that dies mid-write leaves partial bytes that
+        the next triage run would read as a real sample and re-triage as new
+        leads.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            snapshot_dir = root / "snapshots"
+            snapshot_dir.mkdir()
+            stale = snapshot_dir / "hermes.json"
+            stale.write_text('{"component": "hermes", "stale": true}\n', encoding="utf-8")
+
+            result = self.run_snapshot(
+                root,
+                "hermes",
+                "#!/bin/sh\nprintf 'partial '\n",
+                collector_body=(
+                    "import sys\n"
+                    "sys.stdout.write('partial ')\n"
+                    "sys.stdout.flush()\n"
+                    "raise SystemExit(3)\n"
+                ),
+            )
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertFalse(stale.exists(), "a stale or partial snapshot survived")
 
 
 if __name__ == "__main__":

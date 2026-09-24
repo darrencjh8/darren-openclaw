@@ -344,10 +344,9 @@ PYEOF
 mkdir -p /opt/data/log-issue-triage/snapshots
 chown -R hermes:hermes /opt/data/log-issue-triage 2>/dev/null || true
 # The job sees only bounded redacted artifacts: it gets the terminal and file
-# toolsets and nothing else, and Hermes alone verifies and performs any GitHub
-# write. `|| true` keeps a seed failure
-# from aborting container boot; the block itself still refuses to overwrite a
-# corrupt jobs file and reports it on stderr.
+# toolsets and no others, and Hermes alone verifies and performs any GitHub
+# write. `|| true` keeps a seed failure from aborting container boot; the block
+# itself still refuses to overwrite a corrupt jobs file and reports it on stderr.
 python3 <<'PYEOF' || true
 import datetime
 import json
