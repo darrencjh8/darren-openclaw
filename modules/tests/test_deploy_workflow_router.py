@@ -76,7 +76,7 @@ class DeployWorkflowRouterTests(unittest.TestCase):
         self.assertIn("LLM_FINAL_FALLBACK_PROVIDER=${LLM_FINAL_FALLBACK_PROVIDER:-deepseek}", env_list)
         self.assertIn("LLM_FINAL_FALLBACK_MODEL=${LLM_FINAL_FALLBACK_MODEL:-deepseek-flash}", env_list)
 
-    def test_opencode_keys_reach_the_router_and_not_hermes(self):
+    def test_external_provider_keys_reach_the_router_and_not_hermes(self):
         # codex-router owns these providers. PR #443 retired the Zen key while
         # the router had no Zen route; the router routes to Zen, Go and Command
         # Code again, so the keys belong on the router service only.

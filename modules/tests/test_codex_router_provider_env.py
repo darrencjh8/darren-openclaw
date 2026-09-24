@@ -57,7 +57,7 @@ class CodexRouterProviderEnvTests(unittest.TestCase):
             workflow,
         )
 
-    def test_deploy_script_treats_provider_keys_as_optional(self):
+    def test_deploy_script_treats_opencode_provider_keys_as_optional(self):
         script = DEPLOY_SCRIPT.read_text(encoding="utf-8")
 
         for key in OPTIONAL_PROVIDER_KEYS:
