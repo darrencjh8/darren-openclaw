@@ -78,8 +78,10 @@ auxiliary:
     # Every auxiliary slot routes through codex-router. The Command Code
     # DeepSeek Flash route is the shared workhorse; the approval judge keeps
     # the auto-thinking pool so its verdict quality tracks the main agent.
-    # Each slot keeps exactly one direct deepseek-flash fallback, which is
-    # terminal: there is no GPT -> DeepSeek hop inside the router.
+    # Each slot keeps exactly one direct deepseek-flash fallback. That fallback
+    # is terminal: it is the last rung, and the Command Code route itself has no
+    # cross-provider hop. The auto-thinking pool used by approval does hop
+    # internally (terra-3 -> deepseek-flash -> terra-2 -> terra-1).
     vision:
         provider: custom:codex-router
         model: commandcode/deepseek/deepseek-v4.1-flash

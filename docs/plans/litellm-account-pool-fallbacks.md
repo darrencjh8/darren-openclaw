@@ -60,9 +60,9 @@ DeepSeek is the final direct fallback after the applicable LiteLLM route fails.
 
 ## Phase 2: darren-openclaw
 
-> Historical: steps 1-3 describe the pool rollout as it was planned and no longer
-> match the live config. Steps 4-6 (the `code-reviewer` profile, the kanban assignee,
-> and the `.codex/` ignore rule) still hold.
+> Historical: steps 2-3 describe the pool rollout as it was planned and no longer
+> match the live config. Steps 1 and 4-6 (the router endpoint, the `code-reviewer`
+> profile, the kanban assignee, and the `.codex/` ignore rule) still hold.
 
 1. Keep Hermes primary roles pointed at `http://codex-router:4100/v1`.
 2. Use transparent pooled aliases (`gpt-5.6-terra`, `gpt-5.6-luna`, `gpt-5.6-sol`) so LiteLLM selects the account and handles intra-pool fallback; keep exactly one direct `deepseek-flash` fallback per primary/profile route, except `auxiliary.vision`, which is direct-only.
