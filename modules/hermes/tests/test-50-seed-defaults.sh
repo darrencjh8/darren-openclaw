@@ -408,6 +408,10 @@ model:
   default: stale
 fallback_providers:
   - provider: stale
+agent:
+  reasoning_effort: low
+  disabled_toolsets:
+    - user-owned
 memory:
   memory_enabled: true
   user_profile_enabled: true
@@ -431,7 +435,12 @@ routed = config["model"] == {
 escalating = config["fallback_providers"] == [
     {"provider": "custom:codex-router", "model": "auto-thinking"}
 ]
-print("pass" if isolated and preserved and routed and escalating else "fail")
+# The stale profile carries reasoning_effort low; the baked profile pins high. The
+# effort must migrate, and the profile's own agent keys must survive it, or a
+# bumped effort stays on disk at its old value and the change never takes effect.
+effort = config["agent"]["reasoning_effort"] == "high"
+agent_preserved = config["agent"]["disabled_toolsets"] == ["user-owned"]
+print("pass" if isolated and preserved and routed and escalating and effort and agent_preserved else "fail")
 PY
 )
 [ "$migration_result" = "pass" ] && ok "existing reviewer profile migrates to isolated round routing" || nope "reviewer isolation fixture" "got: $migration_result"
@@ -442,6 +451,8 @@ model:
   default: stale
 fallback_providers:
   - provider: stale
+agent:
+  reasoning_effort: low
 memory:
 approvals:
   mode: custom-preserved
@@ -463,7 +474,8 @@ routed = config["model"] == {
 escalating = config["fallback_providers"] == [
     {"provider": "custom:codex-router", "model": "auto-thinking"}
 ]
-print("pass" if isolated and preserved and routed and escalating else "fail")
+effort = config["agent"]["reasoning_effort"] == "high"
+print("pass" if isolated and preserved and routed and escalating and effort else "fail")
 PY
 )
 [ "$null_memory_status" -eq 0 ] && [ "$null_memory_result" = "pass" ] && ok "null reviewer memory migrates safely" || nope "null reviewer memory migration" "status=$null_memory_status result=$null_memory_result output=$null_memory_output"
