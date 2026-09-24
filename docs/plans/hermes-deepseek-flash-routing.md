@@ -1,42 +1,49 @@
 # Hermes DeepSeek Flash Routing
 
-## Status: superseded
+## Status: historical
 
 This plan proposed splitting DeepSeek fallbacks across tiered model names (a pro tier
 for the hard routes, a flash tier for the light ones, and a separate vision model).
-That split is retired. Every DeepSeek route in Hermes now uses the single canonical
-model id `deepseek-flash`, and the separate vision pin is gone because the current
-model is natively multimodal. See darrencjh8/darren-openclaw#428.
+That split is retired: every DeepSeek fallback in Hermes uses the single canonical
+model id `deepseek-flash`. See darrencjh8/darren-openclaw#428. The primary slots have
+since moved again — auxiliary traffic now runs on the router's Command Code DeepSeek
+Flash model, and every profile shares the `auto-thinking` pool — so the table below,
+not the original proposal, is the current contract.
 
 ## Routing today
 
 | Role | Primary | Fallback |
 | --- | --- | --- |
-| Main agent | codex-router / `auto-thinking` (reasoning low) | direct / `deepseek-flash` |
+| Main agent | codex-router / `auto-thinking` (reasoning high) | direct / `deepseek-flash` |
 | Delegation | codex-router / `auto-thinking` | none (not supported) |
-| Vision | direct / `deepseek-flash` | none — terminal direct route; the model is natively multimodal |
-| Web extract | codex-router / `gpt-5.6-luna` | direct / `deepseek-flash` |
-| Compression | codex-router / `gpt-5.6-luna` | direct / `deepseek-flash` |
-| Approval | codex-router / `gpt-5.6-terra` | direct / `deepseek-flash` |
-| Kanban decomposer | direct / `deepseek-flash` | none — retries next 60s tick |
-| Triage specifier | codex-router / `gpt-5.6-luna` | direct / `deepseek-flash` |
-| Profile describer | codex-router / `gpt-5.6-luna` | direct / `deepseek-flash` |
-| architect profile | codex-router / `gpt-5.6-sol` | direct / `deepseek-flash` |
+| Vision | codex-router / `commandcode/deepseek/deepseek-v4.1-flash` | direct / `deepseek-flash` |
+| Web extract | codex-router / `commandcode/deepseek/deepseek-v4.1-flash` | direct / `deepseek-flash` |
+| Compression | codex-router / `commandcode/deepseek/deepseek-v4.1-flash` | direct / `deepseek-flash` |
+| Approval | codex-router / `auto-thinking` | direct / `deepseek-flash` |
+| Kanban decomposer | codex-router / `commandcode/deepseek/deepseek-v4.1-flash` | direct / `deepseek-flash` |
+| Triage specifier | codex-router / `commandcode/deepseek/deepseek-v4.1-flash` | direct / `deepseek-flash` |
+| Profile describer | codex-router / `commandcode/deepseek/deepseek-v4.1-flash` | direct / `deepseek-flash` |
+| architect profile | codex-router / `auto-thinking` | direct / `deepseek-flash` |
 | code-reviewer profile | codex-router / `auto-thinking` | none — fails closed |
-| spec-auditor profile | codex-router / `gpt-5.6-terra` | direct / `deepseek-flash` |
-| project-manager profile | codex-router / `gpt-5.6-luna` | direct / `deepseek-flash` |
+| spec-auditor profile | codex-router / `auto-thinking` | direct / `deepseek-flash` |
+| project-manager profile | codex-router / `auto-thinking` | direct / `deepseek-flash` |
 
 Hermes resolves `DEEPSEEK_API_KEY` automatically for the named `deepseek` provider,
-which serves the direct routes (`vision` and `kanban_decomposer`). No Hermes DeepSeek
-*fallback* traffic flows through codex-router; codex-router still hops to DeepSeek
-itself inside the `auto-thinking` pool.
+which serves every direct fallback. No Hermes DeepSeek *fallback* traffic flows through
+codex-router; codex-router still hops to DeepSeek itself inside the `auto-thinking`
+pool. The `commandcode/*` primaries require `COMMANDCODE_API_KEY` in the router's
+environment and are advertised in its catalog only while that key is present.
+
+`code-reviewer` keeps `fallback_providers: []` on purpose: a review round must fail
+closed rather than silently downgrade to a cheaper tier mid-round.
 
 ## Notes
 
-- Codex Router exposes `deepseek-flash` as its only native DeepSeek route, and the
-  `auto-thinking` pool uses the same id for its DeepSeek hop. That route is reachable
-  only over the Responses transport, so `deepseek-flash` is not exposed on the
-  Chat Completions transport the Hermes provider uses.
+- Codex Router exposes DeepSeek through two distinct families: the native
+  `deepseek-flash` route over the Responses transport, and the Command Code models
+  published as `commandcode/deepseek/*`. The auxiliary slots use the latter; every
+  fallback uses the former on the direct `deepseek` provider.
+- The native `deepseek-flash` route is reachable only over the Responses transport.
 - `50-seed-defaults` reseeds every config key the baked `config.yaml` defines and
   force-migrates the managed profile routing fields (`providers`, `model`,
   `fallback_providers`) on every boot, so all routing changes must land in the repo

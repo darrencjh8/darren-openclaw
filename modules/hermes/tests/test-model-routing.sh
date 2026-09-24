@@ -55,7 +55,7 @@ assert config["model"].get("provider") == router_route
 assert config["model"].get("default") == "auto-thinking"
 assert "base_url" not in config["model"]
 assert "api_key" not in config["model"]
-assert config["agent"]["reasoning_effort"] == "low"
+assert config["agent"]["reasoning_effort"] == "high"
 assert config["compression"]["threshold_tokens"] == 300000, (
     f"compression.threshold_tokens: expected 300000, got {config['compression'].get('threshold_tokens')!r}"
 )
@@ -70,26 +70,28 @@ assert config["fallback_providers"] == [deepseek_fallback], (
 )
 assert_route(config["delegation"], "auto-thinking", "delegation")
 
+aux_flash = "commandcode/deepseek/deepseek-v4.1-flash"
+
 vision = config["auxiliary"]["vision"]
-assert vision.get("provider") == "deepseek", (
-    "auxiliary.vision.provider: expected 'deepseek' (direct API), got "
+assert vision.get("provider") == router_route, (
+    "auxiliary.vision.provider: expected 'custom:codex-router', got "
     f"{vision.get('provider')!r}"
 )
-assert vision.get("model") == "deepseek-flash", (
-    f"auxiliary.vision.model: expected 'deepseek-flash', got {vision.get('model')!r}"
+assert vision.get("model") == aux_flash, (
+    f"auxiliary.vision.model: expected {aux_flash!r}, got {vision.get('model')!r}"
 )
-assert "fallback_chain" not in vision, (
-    "auxiliary.vision needs no fallback chain — deepseek-flash is natively multimodal"
+assert vision.get("fallback_chain") == [deepseek_fallback], (
+    "auxiliary.vision.fallback_chain must use deepseek-flash"
 )
 assert "base_url" not in vision, "auxiliary.vision must use its named provider URL"
 assert "api_key" not in vision, "auxiliary.vision must use its named provider API key"
 
 for task, model in {
-    "web_extract": "gpt-5.6-luna",
-    "compression": "gpt-5.6-luna",
-    "approval": "gpt-5.6-terra",
-    "triage_specifier": "gpt-5.6-luna",
-    "profile_describer": "gpt-5.6-luna",
+    "web_extract": aux_flash,
+    "compression": aux_flash,
+    "approval": "auto-thinking",
+    "triage_specifier": aux_flash,
+    "profile_describer": aux_flash,
 }.items():
     route = config["auxiliary"][task]
     assert_route(route, model, f"auxiliary.{task}")
@@ -99,25 +101,21 @@ for task, model in {
 
 assert config["kanban"]["default_assignee"] == "code-reviewer"
 decomposer = config["auxiliary"]["kanban_decomposer"]
-assert decomposer.get("provider") == "deepseek", (
-    "auxiliary.kanban_decomposer.provider: expected 'deepseek' (direct API), got "
+assert decomposer.get("provider") == router_route, (
+    "auxiliary.kanban_decomposer.provider: expected 'custom:codex-router', got "
     f"{decomposer.get('provider')!r}"
 )
-assert decomposer.get("model") == "deepseek-flash", (
-    f"auxiliary.kanban_decomposer.model: expected 'deepseek-flash', got {decomposer.get('model')!r}"
+assert decomposer.get("model") == aux_flash, (
+    f"auxiliary.kanban_decomposer.model: expected {aux_flash!r}, got {decomposer.get('model')!r}"
 )
 assert "base_url" not in decomposer, "auxiliary.kanban_decomposer must use its named provider URL"
 assert "api_key" not in decomposer, "auxiliary.kanban_decomposer must use its named provider API key"
-assert "fallback_chain" not in decomposer, (
-    "auxiliary.kanban_decomposer needs no fallback chain — decomposition retries on the next dispatch tick"
+assert decomposer.get("fallback_chain") == [deepseek_fallback], (
+    "auxiliary.kanban_decomposer.fallback_chain must use deepseek-flash"
 )
 
-for profile, (model, fallback_model) in {
-    "architect": ("gpt-5.6-sol", "deepseek-flash"),
-    "code-reviewer": ("auto-thinking", None),
-    "spec-auditor": ("gpt-5.6-terra", "deepseek-flash"),
-    "project-manager": ("gpt-5.6-luna", "deepseek-flash"),
-}.items():
+for profile in ("architect", "code-reviewer", "spec-auditor", "project-manager"):
+    model, fallback_model = "auto-thinking", "deepseek-flash"
     profile_config_path = root / "modules/hermes/profiles" / profile / "config.yaml"
     assert profile_config_path.is_file(), f"{profile} profile config is missing"
     with open(profile_config_path) as f:

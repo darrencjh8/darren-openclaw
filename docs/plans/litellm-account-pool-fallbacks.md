@@ -1,5 +1,11 @@
 # LiteLLM Account-Pool Fallback Rollout
 
+## Status: historical
+
+The pooled GPT aliases below are no longer referenced by any Hermes slot. Current
+routing lives in `docs/plans/hermes-deepseek-flash-routing.md`; this document records
+how the account pools were introduced.
+
 ## Goal
 
 Route Hermes primary model calls through the Docker-hosted LiteLLM router while using ordered OpenAI subscription account pools. Use direct `deepseek-flash` only after the relevant LiteLLM pool is exhausted or unavailable. Exception: `auxiliary.vision` calls `deepseek-flash` directly with no pool route and no fallback.
@@ -12,7 +18,7 @@ Route Hermes primary model calls through the Docker-hosted LiteLLM router while 
 gpt-5.6-terra (router selects account 3 -> 2 -> 1)
 ```
 
-Use for Hermes main chat, approval, and the `code-reviewer` profile. (Vision no longer uses this pool: it runs directly on `deepseek-flash`, which is natively multimodal.)
+Use for Hermes main chat, approval, and the `code-reviewer` profile. (Vision no longer uses this pool: it routes through codex-router on the Command Code DeepSeek Flash model.)
 
 ### Luna pool
 
