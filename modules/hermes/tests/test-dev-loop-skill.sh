@@ -78,8 +78,10 @@ for expected in \
 done
 
 echo "=== the retired reviewer slug is gone from the Hermes module ==="
-slug_hits=$(grep -rIl -- 'auto-thinking-free' \
-    "$SKILL_DIR" "$MODULE_DIR/opencode" "$MODULE_DIR/profiles" "$MODULE_DIR/scripts" "$SEED_SCRIPT" \
+# This test names the retired slug to search for it, so it is excluded from its
+# own sweep rather than papered over with a split literal.
+slug_hits=$(grep -rIl --exclude="$(basename "$0")" -- 'auto-thinking-free' \
+    "$MODULE_DIR" \
     2>/dev/null || true)
 if [ -z "$slug_hits" ]; then
     ok "modules/hermes contains no auto-thinking-free reference"

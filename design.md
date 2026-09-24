@@ -76,7 +76,6 @@ darren-openclaw/                          # Umbrella repository root (product na
 │   │   ├── SLACK.md                      # Slack app setup + manifest instructions
 │   │   ├── skills/                       # expense-tracker, image-gen, spec-auditor, hermes-troubleshooting
 │   │   ├── profiles/                     # architect, code-reviewer, project-manager, spec-auditor
-│   │   ├── opencode/                     # OpenCode CLI config for dev-loop workers
 │   │   ├── scripts/                      # Skill reconciler, Slack manifest generator
 │   │   └── tests/                        # Shell-based contract tests
 │   ├── expense-tracker/                  # Node.js ESM MCP + REST tool server

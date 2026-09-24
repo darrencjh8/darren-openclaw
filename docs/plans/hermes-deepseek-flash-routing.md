@@ -35,8 +35,8 @@ itself inside the `auto-thinking` pool.
 
 - Codex Router exposes `deepseek-flash` as its only native DeepSeek route, and the
   `auto-thinking` pool uses the same id for its DeepSeek hop. That route is reachable
-  only over the Responses transport, so `deepseek-flash` is deliberately absent from
-  the OpenCode Chat Completions catalog in `modules/hermes/opencode/opencode.json`.
+  only over the Responses transport, so `deepseek-flash` is not exposed on the
+  Chat Completions transport the Hermes provider uses.
 - `50-seed-defaults` reseeds every config key the baked `config.yaml` defines and
   force-migrates the managed profile routing fields (`providers`, `model`,
   `fallback_providers`) on every boot, so all routing changes must land in the repo

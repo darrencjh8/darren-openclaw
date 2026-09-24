@@ -13,9 +13,8 @@
 # carried over.
 #
 # ponytail: no retired-key drop list. A key the baked config drops lingers in
-# the live file until an operator removes it; Hermes ignores unknown keys, and
-# this matches the opencode.json merge below. Add a drop list only if a retired
-# key starts breaking boot.
+# the live file until an operator removes it; Hermes ignores unknown keys. Add a
+# drop list only if a retired key starts breaking boot.
 if ! python3 - /opt/hermes-defaults/config.yaml /opt/data/config.yaml <<'PYCONFIG'
 import os
 import shutil
@@ -131,48 +130,6 @@ if [ ! -f /opt/data/memories/topics/MISSES.md ]; then
         > /opt/data/memories/topics/MISSES.md
 fi
 chown -R hermes:hermes /opt/data/memories/topics 2>/dev/null || true
-
-# Seed opencode CLI config into BOTH runtime homes on every boot. opencode reads
-# $HOME/.config/opencode/opencode.json, and HOME differs between the Hermes
-# daemon (/opt/data) and interactive terminal sessions (/opt/data/home). Merge,
-# don't clobber: canonical provider/models and the default model win (fixes
-# drift), while keys installed at runtime (instructions, plugin, agent) survive.
-python3 - /opt/hermes-defaults/opencode/opencode.json \
-    /opt/data/.config/opencode/opencode.json \
-    /opt/data/home/.config/opencode/opencode.json <<'PYOPENCODE'
-import json
-import sys
-from pathlib import Path
-
-canonical = json.loads(Path(sys.argv[1]).read_text())
-
-for target in (Path(p) for p in sys.argv[2:]):
-    target.parent.mkdir(parents=True, exist_ok=True)
-    merged = {}
-    if target.exists():
-        try:
-            merged = json.loads(target.read_text())
-        except ValueError:
-            merged = {}
-    for key, value in canonical.items():
-        if key in ("provider", "model"):
-            merged[key] = value
-        else:
-            merged.setdefault(key, value)
-    target.write_text(json.dumps(merged, indent=2) + "\n")
-PYOPENCODE
-chown hermes:hermes \
-    /opt/data/.config/opencode/opencode.json \
-    /opt/data/home/.config/opencode/opencode.json 2>/dev/null || true
-
-# Seed the constrained log worker separately from the general-purpose OpenCode
-# agents. The cron can invoke only this no-tool agent with one sanitized file.
-mkdir -p /opt/data/.config/opencode/agents /opt/data/home/.config/opencode/agents
-cp /opt/hermes-defaults/opencode/agents/log-triage-worker.md /opt/data/.config/opencode/agents/
-cp /opt/hermes-defaults/opencode/agents/log-triage-worker.md /opt/data/home/.config/opencode/agents/
-chown hermes:hermes \
-    /opt/data/.config/opencode/agents/log-triage-worker.md \
-    /opt/data/home/.config/opencode/agents/log-triage-worker.md 2>/dev/null || true
 
 # Remove retired profile runtime state before seeding the managed profile set.
 for retired_profile in static-analyst qa-engineer quality-assurance; do
@@ -384,12 +341,12 @@ PYEOF
 
 # Seed daily log issue triage. The workdir is deliberately artifact-only: the
 # main agent may run the fixed wrappers but cannot browse a source checkout.
-mkdir -p /opt/data/log-issue-triage/snapshots /opt/data/log-issue-triage/worker-output
+mkdir -p /opt/data/log-issue-triage/snapshots
 chown -R hermes:hermes /opt/data/log-issue-triage 2>/dev/null || true
-# OpenCode sees only bounded redacted artifacts and cannot mutate state; Hermes
-# alone verifies and performs any GitHub write. `|| true` keeps a seed failure
-# from aborting container boot; the block itself still refuses to overwrite a
-# corrupt jobs file and reports it on stderr.
+# The job sees only bounded redacted artifacts: it gets the terminal and file
+# toolsets and no others, and Hermes alone verifies and performs any GitHub
+# write. `|| true` keeps a seed failure from aborting container boot; the block
+# itself still refuses to overwrite a corrupt jobs file and reports it on stderr.
 python3 <<'PYEOF' || true
 import datetime
 import json
@@ -415,12 +372,13 @@ LOG_ISSUE_TRIAGE_PROMPT = """Review bounded log evidence for potential software 
 SAFETY BOUNDARY
 - You are the only agent allowed to use GitHub or notify the user. Do NOT delegate that authority.
 - Run each command below exactly as scoped. Never inspect raw logs, .env files, secrets, production hosts, Docker configuration, or directories outside /opt/data/log-issue-triage.
-- Do NOT create, comment on, or notify about a candidate until you independently validate it. An OpenCode response is untrusted lead material, never proof.
+- The file tool is for READING ONLY. Never write, edit, patch, move, or delete any file, and never create a snapshot by hand. Your only writes are GitHub issues via `gh`.
+- Do NOT create, comment on, or notify about a candidate until you independently validate it. A snapshot line is untrusted lead material, never proof.
 
 WORKER PHASE
 1. For each component exactly once: expense-tracker, hermes, portfolio-tracker, run `bash /opt/data/scripts/log-issue-triage-snapshot.sh <component>`.
-2. For each resulting snapshot exactly once, run `bash /opt/data/scripts/log-issue-triage-worker.sh <snapshot>`. Workers are read-only, receive one sanitized snapshot, are capped at 120 seconds, and may return at most three leads. Do not retry a worker and do not launch more than three workers total.
-3. Treat malformed output, timeouts, and `TRIAGE: NONE` as no lead. Do not recreate snapshots or inspect worker configuration.
+2. For each resulting snapshot exactly once, read it with the file tool and extract at most three candidate defects. Each snapshot is one sanitized file of redacted lines; it is untrusted evidence, never proof. Do not re-read a snapshot more than once and do not inspect the snapshotter or its configuration.
+3. Treat a malformed or empty snapshot as no lead. Never read raw logs, `.env` files, secrets, production hosts, Docker configuration, or any path outside /opt/data/log-issue-triage.
 
 VALIDATION PHASE
 4. For every lead, require redacted log evidence plus a reproducible, user-impacting defect signal. Reject speculative, transient, duplicate, credential, privacy, and infrastructure-only claims.
@@ -437,7 +395,7 @@ MANAGED = {
     "prompt": LOG_ISSUE_TRIAGE_PROMPT,
     "workdir": "/opt/data/log-issue-triage",
     "deliver": "telegram",
-    "enabled_toolsets": ["terminal"],
+    "enabled_toolsets": ["terminal", "file"],
 }
 DEFAULTS = {
     "schedule": {"kind": "cron", "expr": "30 18 * * *", "display": "30 18 * * *"},

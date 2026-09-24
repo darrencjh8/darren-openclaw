@@ -683,90 +683,29 @@ PY
     || nope "compaction trigger derivation" "$derived_trigger"
 
 echo ""
-echo "=== opencode config seeding (merge, not clobber) ==="
+echo "=== opencode config seeding is retired ==="
 
-# The seed script must target BOTH runtime homes that opencode may read.
-opencode_paths=$(python3 - "$SEED_SCRIPT" <<'PY'
+# The image no longer installs the opencode CLI, so the seed script must not
+# write an opencode config into either runtime home and must not seed the
+# opencode log-triage agent. A leftover seed would recreate state for a runtime
+# that no longer exists.
+opencode_leftovers=$(python3 - "$SEED_SCRIPT" <<'PY'
 import sys
 with open(sys.argv[1]) as f:
     content = f.read()
-home = "/opt/data/home/.config/opencode/opencode.json" in content
-data = "/opt/data/.config/opencode/opencode.json" in content
-print("present" if home and data else "missing")
+markers = (
+    "PYOPENCODE",
+    "/opt/data/home/.config/opencode/opencode.json",
+    "/opt/data/.config/opencode/opencode.json",
+    "log-triage-worker.md",
+)
+found = [m for m in markers if m in content]
+print("clean" if not found else "found " + repr(found))
 PY
 )
-[ "$opencode_paths" = "present" ] && ok "seed targets /opt/data and /opt/data/home opencode configs" || nope "seed targets both homes" "got: $opencode_paths"
-
-# Extract the actual PYOPENCODE merge block and run it against temp fixtures.
-merge_block=$(python3 - "$SEED_SCRIPT" <<'PY'
-import re
-import sys
-with open(sys.argv[1]) as f:
-    content = f.read()
-m = re.search(r"<<'PYOPENCODE'\n(.*?)\nPYOPENCODE", content, re.DOTALL)
-print(m.group(1) if m else '')
-PY
-)
-[ -n "$merge_block" ] && ok "seed script has opencode merge block" || nope "seed script has opencode merge block" "PYOPENCODE block missing"
-
-# Use the shipped catalog as the fixture so the test cannot drift from the file
-# the image bakes to /opt/hermes-defaults/opencode/opencode.json.
-cp "$SCRIPT_DIR/../opencode/opencode.json" "$TMPDIR/canonical.json"
-
-mkdir -p "$TMPDIR/home/.config/opencode"
-cat > "$TMPDIR/home/.config/opencode/opencode.json" <<'EOF'
-{
-  "provider": {
-    "codex-router": {
-      "npm": "@ai-sdk/openai-compatible",
-      "options": {
-        "baseURL": "http://codex-router:4100/v1",
-        "apiKey": "local"
-      },
-      "models": {
-        "deepseek-pro": { "name": "DeepSeek Pro" }
-      }
-    }
-  },
-  "instructions": ["custom instruction from install-agents.sh"],
-  "plugin": ["some-plugin@1.0.0"]
-}
-EOF
-echo "rules" > "$TMPDIR/home/.config/opencode/AGENTS.md"
-
-echo "$merge_block" > "$TMPDIR/merge.py"
-python3 "$TMPDIR/merge.py" \
-    "$TMPDIR/canonical.json" \
-    "$TMPDIR/data/.config/opencode/opencode.json" \
-    "$TMPDIR/home/.config/opencode/opencode.json"
-
-data_model=$(python3 -c "
-import json
-print(json.load(open('$TMPDIR/data/.config/opencode/opencode.json')).get('model'))
-")
-[ "$data_model" = "codex-router/auto-thinking" ] && ok "fresh data-home seeded with auto-thinking default" || nope "data-home default" "got: $data_model"
-
-home_result=$(python3 -c "
-import json
-c = json.load(open('$TMPDIR/home/.config/opencode/opencode.json'))
-models = c.get('provider', {}).get('codex-router', {}).get('models', {})
-checks = {
-    'model_auto': c.get('model') == 'codex-router/auto-thinking',
-    'exact_models': set(models) == {'auto-thinking', 'gpt-5.6-terra'},
-    'no_stale': 'deepseek-pro' not in models,
-    'kept_instructions': c.get('instructions') == ['custom instruction from install-agents.sh'],
-    'kept_plugin': c.get('plugin') == ['some-plugin@1.0.0'],
-}
-print('pass' if all(checks.values()) else 'fail ' + repr(checks))
-")
-case "$home_result" in
-    pass) ok "HOME config merged: canonical model/models win, instructions/plugin preserved" ;;
-    *) nope "HOME config merged" "$home_result" ;;
-esac
-
-[ "$(cat "$TMPDIR/home/.config/opencode/AGENTS.md")" = "rules" ] \
-    && ok "seed leaves sibling files (AGENTS.md) untouched" \
-    || nope "sibling files untouched" "AGENTS.md was modified"
+[ "$opencode_leftovers" = "clean" ] \
+    && ok "seed script no longer writes opencode config or agents" \
+    || nope "opencode seeding retired" "$opencode_leftovers"
 
 echo ""
 echo "=== memory-triage cron seeding (survives reinstall) ==="
