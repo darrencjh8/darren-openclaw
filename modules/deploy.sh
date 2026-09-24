@@ -718,6 +718,13 @@ echo "--- Codex Router ---"
   check_var_optional "LLM_FALLBACK_MODEL" ""
   check_var_optional "LLM_FINAL_FALLBACK_PROVIDER" ""
   check_var_optional "LLM_FINAL_FALLBACK_MODEL" ""
+  echo "  [External Providers]"
+  # Unset simply leaves those models unpublished; the router skips the provider.
+  check_var_optional "COMMANDCODE_API_KEY" ""
+  check_var_optional "OPENCODE_GO_API_KEY" ""
+  check_var_optional "OPENCODE_ZEN_API_KEY" ""
+  check_var_optional "OPENCODE_API_KEY" ""
+  check_var_optional "CODEX_ROUTER_OPENCODE_ZEN_MODELS" ""
 fi
 
 # ---- pluggable modules (auto-discover from modules/*/module.env) ----

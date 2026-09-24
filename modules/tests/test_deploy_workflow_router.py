@@ -62,8 +62,10 @@ class DeployWorkflowRouterTests(unittest.TestCase):
         self.assertIn("LLM_API_KEY: ${{ secrets.LLM_API_KEY }}", workflow)
         self.assertIn("CODEX_ROUTER_AUTH_PASSWORD: ${{ secrets.CODEX_ROUTER_AUTH_PASSWORD }}", workflow)
         self.assertIn("DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}", workflow)
-        self.assertNotIn("OPENCODE_API_KEY", workflow)
-        self.assertNotIn("OPENCODE_ZEN_API_KEY", workflow)
+        # The router routes to external providers again, so their keys travel to
+        # the deploy environment; hermes still never receives them.
+        self.assertIn("OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}", workflow)
+        self.assertIn("OPENCODE_ZEN_API_KEY: ${{ secrets.OPENCODE_ZEN_API_KEY }}", workflow)
 
     def test_compose_passes_expense_tracker_fallback_env_vars(self):
         compose = yaml.safe_load(COMPOSE_FILE.read_text(encoding="utf-8"))
@@ -74,28 +76,30 @@ class DeployWorkflowRouterTests(unittest.TestCase):
         self.assertIn("LLM_FINAL_FALLBACK_PROVIDER=${LLM_FINAL_FALLBACK_PROVIDER:-deepseek}", env_list)
         self.assertIn("LLM_FINAL_FALLBACK_MODEL=${LLM_FINAL_FALLBACK_MODEL:-deepseek-flash}", env_list)
 
-    def test_opencode_zen_key_is_not_passed_to_codex_router(self):
+    def test_opencode_keys_reach_the_router_and_not_hermes(self):
+        # codex-router owns these providers. PR #443 retired the Zen key while
+        # the router had no Zen route; the router routes to Zen, Go and Command
+        # Code again, so the keys belong on the router service only.
         compose = yaml.safe_load(COMPOSE_FILE.read_text(encoding="utf-8"))
         router_env = compose["services"]["codex-router"]["environment"]
-        self.assertNotIn("OPENCODE_API_KEY=${OPENCODE_API_KEY:-}", router_env)
-        self.assertNotIn("OPENCODE_ZEN_API_KEY=${OPENCODE_ZEN_API_KEY:-}", router_env)
+        for key in ("OPENCODE_API_KEY", "OPENCODE_ZEN_API_KEY", "OPENCODE_GO_API_KEY", "COMMANDCODE_API_KEY"):
+            self.assertIn(f"{key}=${{{key}:-}}", router_env)
 
         deploy_script = DEPLOY_SCRIPT.read_text(encoding="utf-8")
         router_section = deploy_script.split("# ---- codex-router ----", 1)[1].split("# ---- pluggable modules", 1)[0]
-        self.assertNotIn('check_var_optional "OPENCODE_API_KEY" ""', router_section)
-        self.assertNotIn('check_var_optional "OPENCODE_ZEN_API_KEY" ""', router_section)
+        for key in ("OPENCODE_API_KEY", "OPENCODE_ZEN_API_KEY", "OPENCODE_GO_API_KEY", "COMMANDCODE_API_KEY"):
+            self.assertIn(f'check_var_optional "{key}"', router_section)
 
     def test_opencode_go_key_is_not_passed_to_hermes(self):
         compose = yaml.safe_load(COMPOSE_FILE.read_text(encoding="utf-8"))
         hermes_env = compose["services"]["hermes"]["environment"]
-        self.assertNotIn("OPENCODE_GO_API_KEY=${OPENCODE_GO_API_KEY:-}", hermes_env)
-
-        workflow = WORKFLOW.read_text(encoding="utf-8")
-        self.assertNotIn("OPENCODE_GO_API_KEY", workflow)
+        for key in ("OPENCODE_GO_API_KEY", "OPENCODE_ZEN_API_KEY", "OPENCODE_API_KEY", "COMMANDCODE_API_KEY"):
+            self.assertNotIn(f"{key}=${{{key}:-}}", hermes_env)
 
         deploy_script = DEPLOY_SCRIPT.read_text(encoding="utf-8")
         hermes_section = deploy_script.split("# ---- Hermes ----", 1)[1].split("# ---- portfolio-tracker", 1)[0]
-        self.assertNotIn("OPENCODE_GO_API_KEY", hermes_section)
+        for key in ("OPENCODE_GO_API_KEY", "OPENCODE_ZEN_API_KEY", "OPENCODE_API_KEY", "COMMANDCODE_API_KEY"):
+            self.assertNotIn(key, hermes_section)
 
     def test_public_workflow_runs_private_router_tests_at_an_explicit_ref(self):
         workflow = ROUTER_CI_WORKFLOW.read_text(encoding="utf-8")

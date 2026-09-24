@@ -119,6 +119,13 @@ services:
         environment:
             - CODEX_ROUTER_AUTH_PASSWORD=${CODEX_ROUTER_AUTH_PASSWORD}
             - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}
+            # External provider keys: discovery skips a provider whose key is
+            # absent, so an unset value simply leaves those models unpublished.
+            - COMMANDCODE_API_KEY=${COMMANDCODE_API_KEY:-}
+            - OPENCODE_GO_API_KEY=${OPENCODE_GO_API_KEY:-}
+            - OPENCODE_ZEN_API_KEY=${OPENCODE_ZEN_API_KEY:-}
+            - OPENCODE_API_KEY=${OPENCODE_API_KEY:-}
+            - CODEX_ROUTER_OPENCODE_ZEN_MODELS=${CODEX_ROUTER_OPENCODE_ZEN_MODELS:-space-bunny-free}
         restart: unless-stopped
         mem_limit: 1536m
         volumes:
