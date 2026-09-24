@@ -307,8 +307,8 @@ incident in #598: `SGD 1,000.00` OCBC 360 → POSB Cashback produced two separat
 `Misc` rows with no category, one on each account, both `transfer_id` null.
 
 When the near leg is booked as a transfer and the far account already holds a
-row, the pipeline looks for **at most one** row that can only be the far leg and
-links the two through `POST /transactions/link-transfer`:
+row, the pipeline decides that **before** it inserts, and links the two through
+`POST /transactions/link-transfer`:
 
 - Opposite sign to the leg just booked, same absolute amount.
 - On the far account of the transfer, and not the account just booked.
@@ -316,11 +316,32 @@ links the two through `POST /transactions/link-transfer`:
 - Still on the unclassified `Misc` payee — the shape this pipeline writes when a
   movement cannot be classified.
 
-Exactly one match is linked. Zero matches, several matches, or an unreadable
-response leaves both rows untouched: the user is warned instead. This is
-deliberately conservative, because the match is on (account, amount, date) and
-cannot by itself prove the two rows are the same transfer — the trade-off
-tracked in #578. The upgrade path is a bank-reference column on
+Exactly one match is linked, and the near leg is then inserted **without** the
+transfer payee, because the link route sets both legs' payees itself. Order
+matters: the `/transactions` insert always runs `addTransactions(...,
+{runTransfers: true})`, so a transfer payee on that insert makes Actual create a
+counterpart row of its own. Linking afterwards then finds the near leg already
+inside a transfer, the route refuses it (`Transaction is already part of a
+transfer`), and the incident ends with three rows and an orphaned far row
+instead of two. Round-1 review of #598 caught the original post-insert ordering;
+the guard is `insert.args.payee_id` being unset when a far side was matched.
+
+So the decision is three-way, not two-way:
+
+| Far side | Action |
+| --- | --- |
+| Exactly one candidate | Insert without transfer payee, then link both legs |
+| No candidate (`matches: 0`) | Insert normally, with the transfer payee |
+| Several candidates, unreadable, or read failed | Book **nothing**, notify the user |
+
+Booking nothing on the last row is deliberate: inserting the near leg there would
+create the duplicate counterpart and orphan every candidate. The near leg is held
+with its reservation, and the user is told the far account has more than one
+uncleared row.
+
+This is deliberately conservative, because the match is on (account, amount,
+date) and cannot by itself prove the two rows are the same transfer — the
+trade-off tracked in #578. The upgrade path is a bank-reference column on
 `transfer_journal`; the two #598 alerts do share the reference
 `2609230019902668` (the DBS ref `012609230019902668EPS7678794` embeds the OCBC
 ref as its middle segment), which such a column could key on.

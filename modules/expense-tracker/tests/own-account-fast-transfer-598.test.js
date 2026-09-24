@@ -320,9 +320,14 @@ describe("books the pair and links the existing row on the far side (#598)", () 
     const OUTGOING_ROW = "cb446e1b-d5ea-4e55-9d03-ad6e8d681f57";
     const INCOMING_ROW = "fc63bac4-6f08-46a6-989a-f28997bbde51";
 
-    async function run(body, { candidate, senderBank, receivedAt }) {
+    async function run(body, { candidate, matches = "auto", senderBank, receivedAt }) {
         const { AgentOrchestrator } = await import("../src/orchestrator.js");
         const calls = [];
+        // Rows as Actual would hold them. The link route rewrites BOTH legs'
+        // payees, which is the contract that makes an insert-with-transfer-payee
+        // create a counterpart row — the failure this suite guards (#598).
+        const rows = new Map();
+        let inserts = 0;
         const tools = {
             executeTool: vi.fn(async (name, args) => {
                 calls.push({ name, args });
@@ -332,13 +337,52 @@ describe("books the pair and links the existing row on the far side (#598)", () 
                 if (name === "check_duplicate") return false;
                 if (name === "check_schedule_collision") return false;
                 if (name === "find_link_candidate" && args.account_id === "posb-cashback")
-                    return { candidate };
-                if (name === "insert_transaction")
-                    return { id: OUTGOING_ROW, error: null };
+                    return {
+                        candidate,
+                        matches:
+                            matches === "auto" ? (candidate ? 1 : 0) : matches,
+                    };
+                if (name === "insert_transaction") {
+                    inserts += 1;
+                    const id = inserts === 1 ? OUTGOING_ROW : `inserted-${inserts}`;
+                    rows.set(id, {
+                        id,
+                        account: args.account_id,
+                        amount: args.amount_cents,
+                        payee: args.payee_id || null,
+                        transfer_id: null,
+                    });
+                    // Actual's route runs addTransactions(..., {runTransfers:true}):
+                    // a transfer payee makes the engine create the counterpart.
+                    if (args.payee_id) {
+                        const counterpart = `counterpart-${rows.size}`;
+                        rows.set(counterpart, {
+                            id: counterpart,
+                            account: args.account_id === "ocbc-360" ? "posb-cashback" : "ocbc-360",
+                            amount: -args.amount_cents,
+                            payee: null,
+                            transfer_id: id,
+                        });
+                        rows.get(id).transfer_id = counterpart;
+                    }
+                    return { id, error: null };
+                }
                 if (name === "reserve_transfer")
                     return { status: "reserved", entry: { id: 1 } };
                 if (name === "complete_transfer") return true;
-                if (name === "link_transfer_pair") return { status: "linked" };
+                if (name === "link_transfer_pair") {
+                    // The route rejects a leg that is already inside a transfer.
+                    const out = rows.get(args.outgoing_id);
+                    const inc = rows.get(args.incoming_id);
+                    if (!out || !inc) return { error: "Transaction not found" };
+                    if (out.transfer_id || inc.transfer_id)
+                        return { error: "Transaction is already part of a transfer" };
+                    out.transfer_id = inc.id;
+                    inc.transfer_id = out.id;
+                    out.payee = "p-ocbc";
+                    inc.payee = "p-posb";
+                    return { status: "linked" };
+                }
                 return true;
             }),
             getPhase1ToolSchemas: vi.fn(() => []),
@@ -363,8 +407,8 @@ describe("books the pair and links the existing row on the far side (#598)", () 
         return { phase1, phase2, result, calls };
     }
 
-    it("links the OCBC leg to the exact POSB row it matches", async () => {
-        const { calls } = await run(OCBC_TRANSFER_REQUEST, {
+    it("links the OCBC leg to the exact POSB row it matches, without inserting a second row", async () => {
+        const { calls, result } = await run(OCBC_TRANSFER_REQUEST, {
             candidate: { id: INCOMING_ROW, account_id: "posb-cashback" },
             senderBank: "OCBC",
             receivedAt: "2026-09-22T16:36:43.000Z",
@@ -383,18 +427,61 @@ describe("books the pair and links the existing row on the far side (#598)", () 
             amount_cents: -100000,
             on_date: "2026-09-23",
         });
+        // The regression this suite exists for: the near leg must be inserted
+        // WITHOUT the transfer payee. With it, Actual's `runTransfers` creates a
+        // counterpart of its own, the link route then rejects the already-linked
+        // near leg, and the incident ends with three rows instead of two.
+        const insert = calls.find((c) => c.name === "insert_transaction");
+        expect(insert.args.payee_id).toBeUndefined();
+        expect(result.action).not.toBe("notified");
     });
 
-    it("warns instead of linking when the far side is ambiguous or absent", async () => {
-        for (const candidate of [null, { id: INCOMING_ROW }]) {
-            const { calls } = await run(OCBC_TRANSFER_REQUEST, {
-                candidate,
-                senderBank: "OCBC",
-                receivedAt: "2026-09-22T16:36:43.000Z",
-            });
-            // Never rewrite a row on an ambiguous match; say so instead.
-            expect(calls.some((c) => c.name === "link_transfer_pair")).toBe(false);
-        }
+    it("books nothing when the far side is ambiguous", async () => {
+        // Several rows could be the far leg: writing either one is a guess, and
+        // inserting the near leg would create a counterpart and orphan them all.
+        const { calls, result } = await run(OCBC_TRANSFER_REQUEST, {
+            candidate: null,
+            matches: 2,
+            senderBank: "OCBC",
+            receivedAt: "2026-09-22T16:36:43.000Z",
+        });
+
+        expect(calls.some((c) => c.name === "link_transfer_pair")).toBe(false);
+        expect(calls.some((c) => c.name === "insert_transaction")).toBe(false);
+        expect(calls.some(
+            (c) => c.name === "notify_user" && /more than one uncleared row/.test(c.args.message),
+        )).toBe(true);
+        expect(result.action).toBe("notified");
+    });
+
+    it("books nothing when the far account cannot be read", async () => {
+        // An unreadable far side is not an absent one: booking would risk the
+        // duplicate counterpart this fix removes.
+        const { calls, result } = await run(OCBC_TRANSFER_REQUEST, {
+            candidate: null,
+            matches: null,
+            senderBank: "OCBC",
+            receivedAt: "2026-09-22T16:36:43.000Z",
+        });
+
+        expect(calls.some((c) => c.name === "insert_transaction")).toBe(false);
+        expect(calls.some((c) => c.name === "link_transfer_pair")).toBe(false);
+        expect(result.action).toBe("notified");
+    });
+
+    it("inserts normally when no far side exists yet", async () => {
+        // The ordinary case: the alert arrives first, so the row goes in with
+        // its transfer payee and Actual creates the counterpart as before.
+        const { calls } = await run(OCBC_TRANSFER_REQUEST, {
+            candidate: null,
+            matches: 0,
+            senderBank: "OCBC",
+            receivedAt: "2026-09-22T16:36:43.000Z",
+        });
+
+        const insert = calls.find((c) => c.name === "insert_transaction");
+        expect(insert.args.payee_id).toBe("p-posb");
+        expect(calls.some((c) => c.name === "link_transfer_pair")).toBe(false);
     });
 });
 

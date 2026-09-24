@@ -1645,38 +1645,36 @@ export class AgentOrchestrator {
     }
 
     /**
-     * Join the row just booked to the transfer's other leg when Actual already
-     * holds it as an ordinary row (#598).
+     * The transfer's other leg, already sitting in Actual as an ordinary
+     * uncategorised row, or a reason not to touch anything (#598).
      *
      * The two rows of the production incident were both `Misc` with no
-     * category: one per leg, never linked. This runs after the near leg is
-     * booked and asks the route for at most one row that can only be the far
-     * leg — opposite sign, the other account, uncleared, unlinked, still on
-     * `Misc`. Exactly one match is linked; zero or several stays a warning, so
-     * an ambiguous day can never silently rewrite a real payment.
+     * category: one per leg, never linked. This is consulted BEFORE the near
+     * leg is inserted, because that insert carries the destination's transfer
+     * payee and the Actual route runs `runTransfers` unconditionally — which
+     * links the new row to a freshly created counterpart. On a far side that
+     * already exists, that leaves a duplicate counterpart and orphans the
+     * pre-existing row: three rows where the incident had two (proven against
+     * a real budget, issue #598 review round 1).
+     *
+     * Returns `{farRowId}` to join the existing row, `{hold: true}` when the
+     * far side is ambiguous or unreadable and nothing may be written, or
+     * `{farRowId: null}` when there is genuinely no far side and the normal
+     * insert path is correct.
      */
-    async _linkExistingFarSide({
-        transfer,
-        bookedAccountId,
-        amountCents,
-        date,
-        budgetId,
-        bookedRowId,
-        silent,
-    }) {
+    async _findExistingFarSide({ transfer, bookedAccountId, amountCents, date, budgetId }) {
         const farAccountId = transfer?.source_account_id === bookedAccountId
             ? transfer?.destination_account_id
             : transfer?.source_account_id;
         if (
             !transfer ||
             !budgetId ||
-            !bookedRowId ||
             !farAccountId ||
             farAccountId === bookedAccountId ||
             !date ||
             !isBookableAmountCents(amountCents)
         ) {
-            return false;
+            return { farRowId: null };
         }
         try {
             const found = await this._tools.executeTool("find_link_candidate", {
@@ -1690,7 +1688,38 @@ export class AgentOrchestrator {
             // different accounts, and linking same-account rows is a data error.
             const farRowId =
                 found?.candidate?.account_id === farAccountId ? found.candidate.id : null;
-            if (!farRowId) return false;
+            if (farRowId) return { farRowId, farAccountId };
+            // `matches: null` means the read failed: an absent far side and an
+            // unreadable one are not the same answer, and only one of them is
+            // safe to book against.
+            if (found?.matches == null) {
+                logger.warn({ event: "far_side_unreadable", account_id: farAccountId });
+                return { hold: true, reason: "unreadable" };
+            }
+            if (Number(found.matches) > 1) {
+                logger.warn({
+                    event: "far_side_ambiguous",
+                    account_id: farAccountId,
+                    matches: found.matches,
+                });
+                return { hold: true, reason: "ambiguous" };
+            }
+            return { farRowId: null };
+        } catch (error) {
+            logger.warn({ event: "find_existing_far_side_failed", error: error.message });
+            return { hold: true, reason: "unreadable" };
+        }
+    }
+
+    /**
+     * Join the near leg to the far side that is already booked, through the
+     * actual-api link route (#598). Both legs must be unlinked for the route to
+     * accept the pair, which is exactly why this runs instead of an insert that
+     * creates its own counterpart.
+     */
+    async _linkExistingFarSide({ transfer, budgetId, farRowId, bookedRowId, amountCents }) {
+        if (!budgetId || !farRowId || !bookedRowId || !transfer) return false;
+        try {
             // The out leg is the debit whichever side of the transfer the row
             // just booked landed on.
             const outgoingId = Number(amountCents) < 0 ? bookedRowId : farRowId;
@@ -1709,7 +1738,7 @@ export class AgentOrchestrator {
             }
             await this._tools.executeTool("log_decision", {
                 action: "transfer_pair_linked",
-                reasoning: `Joined the existing row on ${farAccountId} to the booked transfer`,
+                reasoning: `Joined the existing row ${farRowId} to the booked transfer`,
                 timestamp: new Date().toISOString(),
             });
             return true;
@@ -2314,6 +2343,50 @@ export class AgentOrchestrator {
                 }
             }
 
+            // The far side may already be booked as an ordinary row, from an
+            // alert that named the deposit (#557 / #598). Decide that BEFORE the
+            // insert: this insert carries the destination's transfer payee, and
+            // the Actual route runs `runTransfers` unconditionally, which links
+            // the new row to a counterpart it creates itself. On an existing far
+            // row that yields a duplicate counterpart and orphans the real one —
+            // three rows where the incident had two (issue #598 review round 1).
+            let existingFarSide = { farRowId: null };
+            if (llmOutput._transfer && transferReservation?.status === "reserved") {
+                existingFarSide = await this._findExistingFarSide({
+                    transfer: llmOutput._transfer,
+                    bookedAccountId: accountId,
+                    amountCents: llmOutput.amount_cents,
+                    date: llmOutput.date || new Date().toISOString().slice(0, 10),
+                    budgetId: llmOutput.budget_id || "",
+                });
+                if (existingFarSide.hold) {
+                    // Ambiguous or unreadable: the near leg is NOT booked either,
+                    // because booking it would create the duplicate counterpart.
+                    // Hold both legs as they are and surface it (issue #598).
+                    const ambiguous = existingFarSide.reason === "ambiguous";
+                    if (!silent) {
+                        await this._tools.executeTool("notify_user", {
+                            message: ambiguous
+                                ? `Held: ${bookableAmountPrefix(llmOutput.amount_cents, llmOutput.currency)}transfer ${llmOutput.date || "today"} has more than one uncleared row on the far account, so the two legs were left unlinked. Resolve the duplicate rows in Actual.`
+                                : `Held: could not read the far account for the ${bookableAmountPrefix(llmOutput.amount_cents, llmOutput.currency)}transfer ${llmOutput.date || "today"}, so the destination leg was not booked and the transfer was left unlinked.`,
+                        });
+                    }
+                    await this._tools.executeTool("log_decision", {
+                        action: ambiguous
+                            ? "held_ambiguous_far_side"
+                            : "held_unreadable_far_side",
+                        reasoning: llmOutput.reasoning || "",
+                        timestamp: new Date().toISOString(),
+                    });
+                    return {
+                        action: "notified",
+                        details: ambiguous
+                            ? "Held a transfer whose far side has several candidates"
+                            : "Held a transfer whose far account could not be read",
+                    };
+                }
+            }
+
             // Insert transaction
             try {
                 const inserted = await this._tools.executeTool("insert_transaction", {
@@ -2323,7 +2396,13 @@ export class AgentOrchestrator {
                     amount_cents: llmOutput.amount_cents,
                     imported_description: payeeName,
                     category_id: categoryId,
-                    payee_id: llmOutput.payee_id || undefined,
+                    // The far side is already booked, so this row must NOT carry
+                    // the transfer payee: that is what makes the route create a
+                    // counterpart. It goes in plain and the link route then sets
+                    // both legs' payees to each other (#598 review round 1).
+                    payee_id: existingFarSide.farRowId
+                        ? undefined
+                        : llmOutput.payee_id || undefined,
                     notes: composeNotes({
                         notes: llmOutput.notes || "",
                         merchantDescriptor: llmOutput.raw_merchant_descriptor || "",
@@ -2345,23 +2424,23 @@ export class AgentOrchestrator {
                         id: transferReservation.entry.id,
                         actual_transaction_id: inserted?.id || null,
                     });
-                    // The destination account may already hold this transfer as
-                    // an ordinary row, booked from an alert that named the
-                    // deposit (issue #557 / #598). Rather than telling the user
-                    // to remove a row by hand, look for exactly one row that
-                    // can only be this transfer's other leg and join the two
-                    // into a real pair. Anything ambiguous, absent, or
-                    // unreadable stays a warning: the books are never rewritten
-                    // on a guess (issues #557, #578, #598).
-                    await this._linkExistingFarSide({
-                        transfer: llmOutput._transfer,
-                        bookedAccountId: accountId,
-                        amountCents: llmOutput.amount_cents,
-                        date: llmOutput.date || inserted?.date || "",
-                        budgetId: llmOutput.budget_id || "",
-                        bookedRowId: inserted?.id || null,
-                        silent,
-                    });
+                    // Join the two existing rows into one pair. A failure here
+                    // leaves both rows correct and merely unlinked, so it is
+                    // logged and surfaced rather than thrown (#598).
+                    if (existingFarSide.farRowId) {
+                        const linked = await this._linkExistingFarSide({
+                            transfer: llmOutput._transfer,
+                            budgetId: llmOutput.budget_id || "",
+                            farRowId: existingFarSide.farRowId,
+                            bookedRowId: inserted?.id || null,
+                            amountCents: llmOutput.amount_cents,
+                        });
+                        if (!linked && !silent) {
+                            await this._tools.executeTool("notify_user", {
+                                message: `Transfer ${bookableAmountPrefix(llmOutput.amount_cents, llmOutput.currency)}booked but the two rows could not be linked in Actual. Link them as a transfer in the app.`,
+                            });
+                        }
+                    }
                 }
             } catch (e) {
                 logger.error({ event: "insert_failed", error: e.message });

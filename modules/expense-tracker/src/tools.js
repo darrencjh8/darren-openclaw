@@ -1520,7 +1520,7 @@ export class ToolRegistry {
 
   async _handle_find_link_candidate({ budget_id, account_id, amount_cents, on_date } = {}) {
     if (!budget_id || !account_id || !on_date || amount_cents == null) {
-      return { candidate: null };
+      return { candidate: null, matches: 0 };
     }
     // Read-only, and deliberately conservative — this decides whether an
     // already-booked row gets rewritten, so an ambiguous or absent match must
@@ -1530,6 +1530,12 @@ export class ToolRegistry {
     // unclassified `Misc` payee — the shape this pipeline writes when it cannot
     // classify a movement. Exactly one such row may exist; two is a data
     // question for the user, not a guess.
+    //
+    // `matches` is reported as well as the candidate because the caller must
+    // tell "no far side exists" (book the pair the normal way) apart from
+    // "several rows could be the far side" (book nothing and tell the user).
+    // Collapsing both to `candidate: null` made the caller unable to avoid
+    // creating a second counterpart row (issue #598 review round 1).
     try {
       const [rows, payees] = await Promise.all([
         this._get("/transactions", budget_id, {
@@ -1552,14 +1558,15 @@ export class ToolRegistry {
           misc &&
           tx.payee === misc.id,
       );
-      if (matches.length !== 1) return { candidate: null };
-      return { candidate: { id: matches[0].id, account_id } };
+      if (matches.length !== 1) return { candidate: null, matches: matches.length };
+      return { candidate: { id: matches[0].id, account_id }, matches: 1 };
     } catch (error) {
       logger.warn({
         event: "find_link_candidate_failed",
         error: error.message,
       });
-      return { candidate: null };
+      // Unreadable is not "none": the caller must not insert on a failed read.
+      return { candidate: null, matches: null };
     }
   }
 

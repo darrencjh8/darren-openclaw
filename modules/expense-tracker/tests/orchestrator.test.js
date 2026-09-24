@@ -866,6 +866,10 @@ describe("AgentOrchestrator", () => {
                 if (name === "check_duplicate") return false;
                 if (name === "reserve_transfer")
                     return { status: "reserved", entry: { id: "resv-1" } };
+                // A transfer inserts only after reading the far side (#598);
+                // this budget has no far row, so the insert goes ahead.
+                if (name === "find_link_candidate")
+                    return { candidate: null, matches: 0 };
                 if (name === "insert_transaction")
                     return {
                         error: 'Payee ID "p-transfer" not found in payee list.',
@@ -2441,6 +2445,10 @@ describe("_resolvePhase2 transfer detection", () => {
                 if (name === "check_duplicate") return true;
                 if (name === "reserve_transfer")
                     return { status: "reserved", entry: { id: "resv-2" } };
+                // The second identical transfer is booked only after the far
+                // side is read and comes back empty (#598, #556).
+                if (name === "find_link_candidate")
+                    return { candidate: null, matches: 0 };
                 return true;
             }),
         });
