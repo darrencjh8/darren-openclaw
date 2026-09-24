@@ -68,20 +68,6 @@ When a model works in the current chat but an auxiliary task or reviewer reports
 
 Do not paste raw upstream HTML, tokens, or full request bodies into chat. Extract only status, model group, fallback names, reset/expiry metadata, and short redacted error summaries.
 
-**OpenCode relays (opencode.ai/zen) — typed quota errors. Historical: no relay provider is configured on this host.** `200` on `/v1/models` + `429`/`401` on a minimal chat completion meant an account quota/billing problem, NOT a key or config problem. Error bodies carried `error.type`: `FreeUsageLimitError` (429, free-tier rate limit — could be quota OR User-Agent gating, no ETA), `GoUsageLimitError` (429, weekly quota, reset ETA in message), `CreditsError` (401, no paid balance). "Free" models were free but still rate-limited — free ≠ unlimited. **Caveat — free-tier `FreeUsageLimitError` was often UA gating, not quota:** the relay whitelisted OpenCode-CLI User-Agents and 429ed anything else, including Hermes's own `HermesAgent/x` attribution UA, even with healthy quota. "Works in my IDE/PC but 429 from the server" with the same egress IP was the tell — the IDE sent an `opencode` UA, Hermes did not. The recipe was to re-probe the chat completion with an `opencode` UA before blaming the account (verified on mimo-v2.5-free, 2026-09-04). As of 2026-09-09 the free-tier gate was two-factor: the request also had to carry an `x-opencode-session` header (any stable id) or zen returned 400 `MissingSessionID` ("OpenCode's free tier can only be used in OpenCode") — and a proxy that forwarded its client's UA (codex-router's zen hops did, before they were removed) could never pass the gate for agent clients. When every fallback 429ed and paid models returned 401, landing on the last provider (deepseek) was correct behavior, not a misconfiguration. Probe recipe + relay routes + taxonomy: `references/opencode-quota-errors.md`.
-
-## "Is that opencode run going well / what model is it using?" — inspect a live run read-only
-
-A background `opencode` TUI or `run` can be parked or working without producing Hermes process output. Never poke the live process — its state is fully readable from a COPY of its SQLite DB.
-
-1. **Identify the process → repo:** `ps aux | grep opencode`; then `ls -l /proc/<PID>/cwd` (which worktree), `tr '\0' ' ' < /proc/<PID>/cmdline` (`opencode` alone = interactive TUI), `ps -o pid,etime,stat -p <PID>` (`Ssl+` = TUI session leader).
-2. **Gauge code progress in that repo:** `git log --oneline -8`, `git status --short`, `git rev-list --count <base>..HEAD`, plus `.dev-loop/state.md` if present (phase/tdd_cycles/head_sha). Branch tip == base SHA with only untracked files ⇒ real work never started.
-3. **Read session state from a copy:** opencode state lives in `~/.local/share/opencode/opencode.db` — SQLite in **WAL mode**, so copy `opencode.db-wal` and `opencode.db-shm` too, into a scratch dir under the write-safe root (`/workspace` and `/tmp` both work), then query with python3 sqlite3 (`file:...?mode=ro` URI). No sqlite3 CLI on the host.
-4. **Answer the questions:** `session` rows carry `model` as JSON (`{"id":...,"providerID":...,"variant":...}`), `agent` (build/plan), token/cost counters, `time_created`/`time_updated` (epoch **milliseconds**); `message`/`part` data JSON repeats modelID/providerID per turn. Open `todo` rows = queued work.
-5. **Staleness heuristic:** recent `time_updated` + open todos = actively working; only an old smoke-test session (reply `OPENCODE_SMOKE_OK`) + 0 commits + DB mtime frozen = parked at the TUI prompt, real prompt never fed in.
-
-Full schema + copy-paste query: `references/opencode-live-session-inspection.md`. Host quirk: inline `python3 -c` trips an approval card — write scratch scripts under /workspace with write_file and run `python3 file.py` instead.
-
 ## Model-identity questions — "which model are you / why does config mention a model I never picked?"
 
 Don't answer from the session system-prompt header alone, and don't answer from config alone — they answer different questions:

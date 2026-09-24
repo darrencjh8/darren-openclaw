@@ -125,7 +125,7 @@ Compose runs with project name `modules`, so the default container names are `mo
 
 Skills and profiles are baked into the Hermes image and seeded onto the data volume at boot:
 
-- `modules/hermes/Dockerfile` copies `config.yaml`, `SOUL.md.template`, `opencode/`, `skills/`, `scripts/`, and `profiles/` into `/opt/hermes-defaults/`, then installs `50-seed-defaults` as `/etc/cont-init.d/50-seed-defaults`.
+- `modules/hermes/Dockerfile` copies `config.yaml`, `SOUL.md.template`, `skills/`, `scripts/`, and `profiles/` into `/opt/hermes-defaults/`, then installs `50-seed-defaults` as `/etc/cont-init.d/50-seed-defaults`.
 - On boot, `modules/hermes/50-seed-defaults`:
   - merges `/opt/hermes-defaults/config.yaml` into `/opt/data/config.yaml` (baked keys win; top-level keys the baked config does not define are carried over),
   - seeds `SOUL.md` only if absent,

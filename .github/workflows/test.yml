@@ -135,12 +135,11 @@ jobs:
               run: bash modules/hermes/tests/test-docker-compose-env.sh
             - name: Test Hermes Slack platform wiring
               run: python -m unittest modules.hermes.tests.test_slack_platform -v
-            - name: Test Hermes log-issue triage harness
+            - name: Test Hermes log-issue triage
               run: |
                 python -m unittest \
                   modules.hermes.tests.test_log_issue_triage_collect \
                   modules.hermes.tests.test_log_issue_triage_cron \
-                  modules.hermes.tests.test_log_issue_triage_harness \
                   -v
 
     image-gen:

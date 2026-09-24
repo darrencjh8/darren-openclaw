@@ -104,7 +104,6 @@ darren-openclaw/
 │   │   ├── 50-seed-defaults          # Container init: seeds config, SOUL, cron jobs, skills
 │   │   ├── SOUL.md.template
 │   │   ├── SLACK.md                  # Slack app setup and Socket Mode notes
-│   │   ├── opencode/                 # opencode/Codex CLI defaults
 │   │   ├── profiles/                 # architect, code-reviewer, project-manager, spec-auditor
 │   │   ├── scripts/                  # github-auth, memory-backup/restore/triage, portfolio-sync, slack-manifest, skill sync
 │   │   ├── skills/                   # expense-tracker, image-gen, spec-auditor, hermes-troubleshooting

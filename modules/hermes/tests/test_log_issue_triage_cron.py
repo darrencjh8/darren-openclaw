@@ -19,7 +19,7 @@ class LogIssueTriageCronTest(unittest.TestCase):
         self.assertIn('"name": "log-issue-triage"', SEED)
         self.assertIn('"expr": "30 18 * * *"', SEED)
         self.assertIn('"deliver": "telegram"', SEED)
-        self.assertIn('"enabled_toolsets": ["terminal"]', SEED)
+        self.assertIn('"enabled_toolsets": ["terminal", "file"]', SEED)
 
     def test_seed_creates_idempotent_job_with_scoped_tools(self):
         blocks = re.findall(r"<<'PYEOF'[^\n]*\n(.*?)\nPYEOF", SEED, re.DOTALL)
@@ -38,7 +38,7 @@ class LogIssueTriageCronTest(unittest.TestCase):
             job = jobs[0]
             self.assertEqual(job["name"], "log-issue-triage")
             self.assertEqual(job["schedule"]["expr"], "30 18 * * *")
-            self.assertEqual(job["enabled_toolsets"], ["terminal"])
+            self.assertEqual(job["enabled_toolsets"], ["terminal", "file"])
             self.assertEqual(job["workdir"], "/opt/data/log-issue-triage")
 
     def test_seed_refuses_corrupt_jobs_file(self):
@@ -54,13 +54,13 @@ class LogIssueTriageCronTest(unittest.TestCase):
             self.assertIn("refusing to replace corrupt cron jobs file", result.stderr)
             self.assertEqual(jobs_path.read_text(encoding="utf-8"), "{not json")
 
-    def test_prompt_requires_bounded_workers_and_validation_before_writes(self):
+    def test_prompt_reads_snapshots_natively_and_validates_before_writes(self):
         match = re.search(r'LOG_ISSUE_TRIAGE_PROMPT = """(.*?)"""', SEED, re.DOTALL)
         self.assertIsNotNone(match)
         prompt = match.group(1)
         for required in (
             'log-issue-triage-snapshot.sh',
-            'log-issue-triage-worker.sh',
+            'read it with the file tool',
             'at most three',
             'Do NOT create, comment on, or notify',
             'gh issue list',
@@ -69,6 +69,15 @@ class LogIssueTriageCronTest(unittest.TestCase):
             'If no candidate is confirmed, reply exactly: [SILENT]',
         ):
             self.assertIn(required, prompt)
+
+    def test_prompt_no_longer_references_a_separate_worker_runtime(self):
+        """The job reads snapshots itself; no subprocess worker or OpenCode remains."""
+        match = re.search(r'LOG_ISSUE_TRIAGE_PROMPT = """(.*?)"""', SEED, re.DOTALL)
+        self.assertIsNotNone(match)
+        prompt = match.group(1)
+        self.assertNotIn('log-issue-triage-worker.sh', prompt)
+        self.assertNotIn('OpenCode', prompt)
+        self.assertNotIn('opencode', prompt)
 
 
 if __name__ == "__main__":
