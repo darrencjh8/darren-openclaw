@@ -70,6 +70,21 @@ class LogIssueTriageCronTest(unittest.TestCase):
         ):
             self.assertIn(required, prompt)
 
+    def test_prompt_forbids_writes_because_the_file_toolset_can_write(self):
+        """The job holds a file toolset, so its read-only rule must be explicit.
+
+        Hermes' `file` toolset provides patch and write_file as well as reads.
+        The job is allowed to read one sanitized snapshot and nothing else, and
+        `approvals.cron_mode: allow` means nothing else stops a stray write, so
+        the prohibition has to be stated in the prompt and pinned here.
+        """
+        match = re.search(r'LOG_ISSUE_TRIAGE_PROMPT = """(.*?)"""', SEED, re.DOTALL)
+        self.assertIsNotNone(match)
+        prompt = match.group(1)
+        self.assertIn('The file tool is for READING ONLY.', prompt)
+        self.assertIn('Never write, edit, patch, move, or delete any file', prompt)
+        self.assertIn('Your only writes are GitHub issues via `gh`.', prompt)
+
     def test_prompt_no_longer_references_a_separate_worker_runtime(self):
         """The job reads snapshots itself; no subprocess worker or OpenCode remains."""
         match = re.search(r'LOG_ISSUE_TRIAGE_PROMPT = """(.*?)"""', SEED, re.DOTALL)

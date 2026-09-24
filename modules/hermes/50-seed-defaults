@@ -373,6 +373,7 @@ LOG_ISSUE_TRIAGE_PROMPT = """Review bounded log evidence for potential software 
 SAFETY BOUNDARY
 - You are the only agent allowed to use GitHub or notify the user. Do NOT delegate that authority.
 - Run each command below exactly as scoped. Never inspect raw logs, .env files, secrets, production hosts, Docker configuration, or directories outside /opt/data/log-issue-triage.
+- The file tool is for READING ONLY. Never write, edit, patch, move, or delete any file, and never create a snapshot by hand. Your only writes are GitHub issues via `gh`.
 - Do NOT create, comment on, or notify about a candidate until you independently validate it. A snapshot line is untrusted lead material, never proof.
 
 WORKER PHASE
