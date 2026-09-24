@@ -12,6 +12,10 @@ Route Hermes primary model calls through the Docker-hosted LiteLLM router while 
 
 ## Required routing
 
+> Historical: the section below describes the pool rollout as it was planned. No
+> Hermes slot uses these aliases today, and `auxiliary.vision` is no longer
+> direct-only. See `hermes-deepseek-flash-routing.md` for the live contract.
+
 ### Terra pool
 
 ```text
@@ -55,6 +59,10 @@ DeepSeek is the final direct fallback after the applicable LiteLLM route fails.
 5. Validate generated configuration and test each pool through the router's OpenAI-compatible endpoint.
 
 ## Phase 2: darren-openclaw
+
+> Historical: steps 1-3 and 6 describe the pool rollout as it was planned and no
+> longer match the live config. Steps 4 and 5 (the `code-reviewer` profile and the
+> kanban assignee) still hold.
 
 1. Keep Hermes primary roles pointed at `http://codex-router:4100/v1`.
 2. Use transparent pooled aliases (`gpt-5.6-terra`, `gpt-5.6-luna`, `gpt-5.6-sol`) so LiteLLM selects the account and handles intra-pool fallback; keep exactly one direct `deepseek-flash` fallback per primary/profile route, except `auxiliary.vision`, which is direct-only.

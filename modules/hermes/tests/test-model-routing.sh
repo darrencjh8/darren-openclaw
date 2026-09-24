@@ -114,7 +114,12 @@ assert decomposer.get("fallback_chain") == [deepseek_fallback], (
     "auxiliary.kanban_decomposer.fallback_chain must use deepseek-flash"
 )
 
-for profile in ("architect", "code-reviewer", "spec-auditor", "project-manager"):
+for profile, effort in {
+    "architect": "medium",
+    "code-reviewer": "medium",
+    "spec-auditor": "medium",
+    "project-manager": "low",
+}.items():
     model, fallback_model = "auto-thinking", "deepseek-flash"
     profile_config_path = root / "modules/hermes/profiles" / profile / "config.yaml"
     assert profile_config_path.is_file(), f"{profile} profile config is missing"
@@ -128,6 +133,10 @@ for profile in ("architect", "code-reviewer", "spec-auditor", "project-manager")
     assert profile_config["model"].get("default") == model
     assert "base_url" not in profile_config["model"]
     assert "api_key" not in profile_config["model"]
+    assert profile_config["agent"]["reasoning_effort"] == effort, (
+        f"{profile}.agent.reasoning_effort: expected {effort!r}, got "
+        f"{profile_config['agent'].get('reasoning_effort')!r}"
+    )
     fallback = profile_config["fallback_providers"]
     if profile == "code-reviewer":
         assert fallback == [], "code-reviewer must fail closed instead of switching review tiers"
