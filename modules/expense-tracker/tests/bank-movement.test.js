@@ -966,6 +966,10 @@ To: CITI CREDIT CARDS (Ref ending 4756)
           { text: "OverseaChinese Banking Corporation Ltd maps to Charity payee", score: 1 },
         ] };
         if (name === "reserve_transfer") return { status: "inserted", entry: { id: 1 } };
+        // The far-side read the #598 fix makes before reserving. This credit's
+        // counterpart is already recorded in the journal, so no Actual-row
+        // candidate exists and the read must not change this path.
+        if (name === "find_link_candidate") return { candidate: null, matches: 0 };
         return true;
       }),
       getPhase1ToolSchemas: vi.fn(() => []),

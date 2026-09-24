@@ -2746,6 +2746,11 @@ describe("_resolvePhase2 transfer detection", () => {
                     if (name === "find_inserted_transfer")
                         return journal.findInsertedTransferInto(args);
                     if (name === "list_facts") return { facts: [] };
+                    // The far-side read the #598 fix makes before reserving. These
+                    // credits' counterparts are journal legs, not pre-booked
+                    // Actual rows, so there is no candidate to link (#574).
+                    if (name === "find_link_candidate")
+                        return { candidate: null, matches: 0 };
                     if (name === "fetch_context")
                         return {
                             accounts: [
@@ -2756,6 +2761,11 @@ describe("_resolvePhase2 transfer detection", () => {
                         };
                     if (name === "reserve_transfer")
                         return journal.reserveTransfer(args);
+                    // The far-side read the #598 fix makes before reserving:
+                    // this credit's other leg is a journal entry, not an
+                    // existing Actual row, so there is no candidate here.
+                    if (name === "find_link_candidate")
+                        return { candidate: null, matches: 0 };
                     return { results: [] };
                 }),
             });
@@ -2845,6 +2855,11 @@ describe("_resolvePhase2 transfer detection", () => {
                     if (name === "find_inserted_transfer")
                         return journal.findInsertedTransferInto(args);
                     if (name === "list_facts") return { facts: [] };
+                    // The far-side read the #598 fix makes before reserving. These
+                    // credits' counterparts are journal legs, not pre-booked
+                    // Actual rows, so there is no candidate to link (#574).
+                    if (name === "find_link_candidate")
+                        return { candidate: null, matches: 0 };
                     if (name === "fetch_context")
                         return {
                             accounts: [
@@ -2912,6 +2927,11 @@ describe("_resolvePhase2 transfer detection", () => {
                     if (name === "find_inserted_transfer")
                         return journal.findInsertedTransferInto(args);
                     if (name === "list_facts") return { facts: [] };
+                    // The far-side read the #598 fix makes before reserving. These
+                    // credits' counterparts are journal legs, not pre-booked
+                    // Actual rows, so there is no candidate to link (#574).
+                    if (name === "find_link_candidate")
+                        return { candidate: null, matches: 0 };
                     if (name === "fetch_context")
                         return {
                             accounts: [
@@ -3078,6 +3098,11 @@ describe("_resolvePhase2 transfer detection", () => {
                     if (name === "find_inserted_transfer")
                         return journal.findInsertedTransferInto(args);
                     if (name === "list_facts") return { facts: [] };
+                    // The far-side read the #598 fix makes before reserving. These
+                    // credits' counterparts are journal legs, not pre-booked
+                    // Actual rows, so there is no candidate to link (#574).
+                    if (name === "find_link_candidate")
+                        return { candidate: null, matches: 0 };
                     if (name === "fetch_context")
                         return {
                             accounts: [

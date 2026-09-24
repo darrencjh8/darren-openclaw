@@ -323,11 +323,33 @@ describe("books the pair and links the existing row on the far side (#598)", () 
     async function run(body, { candidate, matches = "auto", senderBank, receivedAt }) {
         const { AgentOrchestrator } = await import("../src/orchestrator.js");
         const calls = [];
-        // Rows as Actual would hold them. The link route rewrites BOTH legs'
-        // payees, which is the contract that makes an insert-with-transfer-payee
-        // create a counterpart row — the failure this suite guards (#598).
+        // Rows as Actual would hold them, and the WIRE body each insert produced.
+        // The distinction matters: the orchestrator-supplied args are not what
+        // Actual sees. `insert_transaction` re-derives a payee from
+        // `imported_description` when no explicit id is given, so the body can
+        // carry a transfer payee even when `args.payee_id` is undefined — the
+        // exact hole that let a green suite ship a broken fix twice (#598 R2-H1).
         const rows = new Map();
+        const wires = [];
         let inserts = 0;
+        // The pre-existing far row, exactly as the incident held it: the POSB
+        // credit already booked as an ordinary uncategorised `Misc` row.
+        rows.set(INCOMING_ROW, {
+            id: INCOMING_ROW,
+            account: "posb-cashback",
+            amount: 100000,
+            payee: "p-misc",
+            transfer_id: null,
+            cleared: false,
+        });
+        // Mirrors `_handle_insert_transaction`: an explicit id wins, otherwise
+        // the imported description is resolved against the live payee list.
+        const resolveWirePayee = (args) => {
+            if (args.suppress_transfer_payee) return { payee: null, name: "Misc" };
+            if (args.payee_id) return { payee: args.payee_id, name: null };
+            const named = payees.find((p) => p.name === args.imported_description);
+            return { payee: named ? named.id : null, name: args.imported_description };
+        };
         const tools = {
             executeTool: vi.fn(async (name, args) => {
                 calls.push({ name, args });
@@ -345,20 +367,24 @@ describe("books the pair and links the existing row on the far side (#598)", () 
                 if (name === "insert_transaction") {
                     inserts += 1;
                     const id = inserts === 1 ? OUTGOING_ROW : `inserted-${inserts}`;
+                    const wire = resolveWirePayee(args);
+                    wires.push({ id, ...wire, account: args.account_id });
                     rows.set(id, {
                         id,
                         account: args.account_id,
                         amount: args.amount_cents,
-                        payee: args.payee_id || null,
+                        payee: wire.payee,
                         transfer_id: null,
                     });
                     // Actual's route runs addTransactions(..., {runTransfers:true}):
-                    // a transfer payee makes the engine create the counterpart.
-                    if (args.payee_id) {
+                    // a TRANSFER payee on the wire makes the engine create the
+                    // counterpart and link the row itself.
+                    const wirePayee = payees.find((p) => p.id === wire.payee);
+                    if (wirePayee?.transfer_acct) {
                         const counterpart = `counterpart-${rows.size}`;
                         rows.set(counterpart, {
                             id: counterpart,
-                            account: args.account_id === "ocbc-360" ? "posb-cashback" : "ocbc-360",
+                            account: wirePayee.transfer_acct,
                             amount: -args.amount_cents,
                             payee: null,
                             transfer_id: id,
@@ -404,11 +430,11 @@ describe("books the pair and links the existing row on the far side (#598)", () 
         const phase1 = await orch._runPhase1(body, { senderBank, receivedAt });
         const phase2 = await orch._resolvePhase2(phase1);
         const result = await orch._executePhase3(phase2);
-        return { phase1, phase2, result, calls };
+        return { phase1, phase2, result, calls, wires, rows };
     }
 
     it("links the OCBC leg to the exact POSB row it matches, without inserting a second row", async () => {
-        const { calls, result } = await run(OCBC_TRANSFER_REQUEST, {
+        const { calls, result, wires, rows } = await run(OCBC_TRANSFER_REQUEST, {
             candidate: { id: INCOMING_ROW, account_id: "posb-cashback" },
             senderBank: "OCBC",
             receivedAt: "2026-09-22T16:36:43.000Z",
@@ -427,16 +453,24 @@ describe("books the pair and links the existing row on the far side (#598)", () 
             amount_cents: -100000,
             on_date: "2026-09-23",
         });
-        // The regression this suite exists for: the near leg must be inserted
-        // WITHOUT the transfer payee. With it, Actual's `runTransfers` creates a
-        // counterpart of its own, the link route then rejects the already-linked
-        // near leg, and the incident ends with three rows instead of two.
-        const insert = calls.find((c) => c.name === "insert_transaction");
-        expect(insert.args.payee_id).toBeUndefined();
+        // The regression this suite exists for, asserted on the WIRE rather than
+        // on the args: no transfer payee may reach Actual, or `runTransfers`
+        // creates a counterpart of its own, the route then refuses the already
+        // linked near leg, and the incident ends with three rows instead of two.
+        const transferPayeeIds = payees
+            .filter((p) => p.transfer_acct)
+            .map((p) => p.id);
+        for (const wire of wires) {
+            expect(transferPayeeIds).not.toContain(wire.payee);
+        }
+        // Exactly one row per leg: the pre-existing POSB row plus the new OCBC
+        // row. A third row means a duplicate counterpart was created.
+        expect(rows.size).toBe(2);
+        expect([...rows.values()].filter((r) => r.account === "posb-cashback")).toHaveLength(1);
         expect(result.action).not.toBe("notified");
     });
 
-    it("books nothing when the far side is ambiguous", async () => {
+    it("books nothing and reserves nothing when the far side is ambiguous", async () => {
         // Several rows could be the far leg: writing either one is a guess, and
         // inserting the near leg would create a counterpart and orphan them all.
         const { calls, result } = await run(OCBC_TRANSFER_REQUEST, {
@@ -448,15 +482,18 @@ describe("books the pair and links the existing row on the far side (#598)", () 
 
         expect(calls.some((c) => c.name === "link_transfer_pair")).toBe(false);
         expect(calls.some((c) => c.name === "insert_transaction")).toBe(false);
+        expect(calls.some((c) => c.name === "reserve_transfer")).toBe(false);
         expect(calls.some(
             (c) => c.name === "notify_user" && /more than one uncleared row/.test(c.args.message),
         )).toBe(true);
         expect(result.action).toBe("notified");
     });
 
-    it("books nothing when the far account cannot be read", async () => {
+    it("books nothing and reserves nothing when the far account cannot be read", async () => {
         // An unreadable far side is not an absent one: booking would risk the
-        // duplicate counterpart this fix removes.
+        // duplicate counterpart this fix removes. Nothing may be reserved
+        // either, or the transfer goes `pending` and every later alert is
+        // short-circuited before the read runs again (#598 review round 2).
         const { calls, result } = await run(OCBC_TRANSFER_REQUEST, {
             candidate: null,
             matches: null,
@@ -466,13 +503,14 @@ describe("books the pair and links the existing row on the far side (#598)", () 
 
         expect(calls.some((c) => c.name === "insert_transaction")).toBe(false);
         expect(calls.some((c) => c.name === "link_transfer_pair")).toBe(false);
+        expect(calls.some((c) => c.name === "reserve_transfer")).toBe(false);
         expect(result.action).toBe("notified");
     });
 
     it("inserts normally when no far side exists yet", async () => {
         // The ordinary case: the alert arrives first, so the row goes in with
         // its transfer payee and Actual creates the counterpart as before.
-        const { calls } = await run(OCBC_TRANSFER_REQUEST, {
+        const { calls, wires } = await run(OCBC_TRANSFER_REQUEST, {
             candidate: null,
             matches: 0,
             senderBank: "OCBC",
@@ -481,7 +519,92 @@ describe("books the pair and links the existing row on the far side (#598)", () 
 
         const insert = calls.find((c) => c.name === "insert_transaction");
         expect(insert.args.payee_id).toBe("p-posb");
+        expect(insert.args.suppress_transfer_payee).toBeUndefined();
+        // The counterpart still gets created on this path — the suppression is
+        // only for the far-side-found case.
+        expect(wires[0].payee).toBe("p-posb");
         expect(calls.some((c) => c.name === "link_transfer_pair")).toBe(false);
+    });
+});
+
+// ── The suppression, on the real handler ────────────────────────
+
+describe("insert_transaction suppresses the derived transfer payee (#598)", () => {
+    /**
+     * The regression that shipped a broken fix twice: clearing `payee_id` at
+     * the call site is not enough, because the real handler re-derives a payee
+     * from `imported_description` and would put the destination's transfer payee
+     * on the wire anyway. These tests drive the real `ToolRegistry`, so the
+     * suppression has to exist in `tools.js` — a mock cannot fake it.
+     */
+    async function registry(posted = []) {
+        const { Config } = await import("../src/config.js");
+        const { ToolRegistry } = await import("../src/tools.js");
+        const cfg = new Config({
+            DEEPSEEK_API_KEY: "sk-test",
+            ACTUAL_BUDGET_URL: "http://test:5006",
+            ACTUAL_BUDGET_PASSWORD: "pw",
+            ACTUAL_PRIMARY_BUDGET_FILE: "test-budget",
+            DEDUP_DB_PATH: ":memory:",
+        });
+        const reg = new ToolRegistry(cfg);
+        reg._get = vi.fn(async (path) => {
+            if (path === "/payees")
+                return [
+                    { id: "p-posb", name: "POSB Cashback", transfer_acct: "posb-cashback" },
+                    { id: "p-misc", name: "Misc", transfer_acct: null },
+                ];
+            if (path === "/accounts")
+                return [
+                    { id: "ocbc-360", name: "OCBC 360", closed: false },
+                    { id: "posb-cashback", name: "POSB Cashback", closed: false },
+                ];
+            return [];
+        });
+        reg._post = vi.fn(async (path, body) => {
+            posted.push({ path, body });
+            return { id: "actual-row-1" };
+        });
+        return reg;
+    }
+
+    it("sends no transfer payee when the far side was already found", async () => {
+        const posted = [];
+        const reg = await registry(posted);
+
+        const result = await reg.executeTool("insert_transaction", {
+            budget_id: "budget-sgd",
+            account_id: "ocbc-360",
+            date: "2026-09-23",
+            amount_cents: -100000,
+            imported_description: "POSB Cashback",
+            suppress_transfer_payee: true,
+        });
+
+        expect(result.error).toBeUndefined();
+        const body = posted.find((p) => p.path === "/transactions").body;
+        expect(body.payee).toBeUndefined();
+        // Without the flag the same call WOULD carry the derived transfer payee.
+        expect(body.payee_name).toBe("Misc");
+    });
+
+    it("still derives the transfer payee when the far side was not found", async () => {
+        const posted = [];
+        const reg = await registry(posted);
+
+        await reg.executeTool("insert_transaction", {
+            budget_id: "budget-sgd",
+            account_id: "ocbc-360",
+            date: "2026-09-23",
+            amount_cents: -100000,
+            imported_description: "POSB Cashback",
+        });
+
+        const body = posted.find((p) => p.path === "/transactions").body;
+        // The ordinary path keeps its behaviour: the imported description
+        // resolves to the destination's transfer payee, and Actual books the
+        // counterpart itself.
+        expect(body.payee).toBe("p-posb");
     });
 });
 

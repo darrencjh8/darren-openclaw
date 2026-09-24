@@ -1289,13 +1289,26 @@ export class ToolRegistry {
     // Unlike update_transaction, an unknown name is not an error — it becomes
     // "Misc" (see _validate_payee) — while an ambiguous name is refused.
     const explicitId = args.payee_id || null;
+    // The far-side-found insert must carry NO transfer payee at all (#598).
+    // Clearing `payee_id` is not enough: with it falsy this handler falls into
+    // the name branch, resolves `imported_description` (the destination account
+    // name) against the live payee list, and sends that transfer payee anyway —
+    // which makes Actual's `runTransfers` create a duplicate counterpart and
+    // link the row before the pair can be joined (review round 2, R2-H1). So the
+    // suppression is explicit and applies to the derived payee too.
+    const suppressTransferPayee = args.suppress_transfer_payee === true;
     let payeeId = explicitId;
     let payee_name = null;
     // The insert path's row always sits on `args.account_id`, so the source
     // defaults to it when the caller does not pass one explicitly.
     const validateTransferTarget = (payee, sourceAccountId = args.account_id) =>
       this._validateTransferTarget(payee, budget_id, sourceAccountId);
-    if (explicitId) {
+    if (suppressTransferPayee) {
+      // Both legs are already present: the row goes in plain, unclassified, and
+      // the link route sets both legs' payees to each other afterwards.
+      payeeId = null;
+      payee_name = "Misc";
+    } else if (explicitId) {
       // An explicit ID comes from the caller or from Phase 2 transfer detection,
       // so it is validated here and never second-guessed by a name lookup.
       let payees = null;

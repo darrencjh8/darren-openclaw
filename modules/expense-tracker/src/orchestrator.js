@@ -1686,8 +1686,18 @@ export class AgentOrchestrator {
             // The route must name the account the row sits on as well as the
             // row itself: an id alone is not proof the two legs are on
             // different accounts, and linking same-account rows is a data error.
-            const farRowId =
-                found?.candidate?.account_id === farAccountId ? found.candidate.id : null;
+            // A candidate on some other account is exactly that data error, so
+            // it holds — degrading to "no far side" would book with the transfer
+            // payee and recreate the duplicate counterpart (#598 review round 2).
+            if (found?.candidate && found.candidate.account_id !== farAccountId) {
+                logger.warn({
+                    event: "far_side_candidate_wrong_account",
+                    account_id: farAccountId,
+                    candidate_account: found.candidate.account_id,
+                });
+                return { hold: true, reason: "unreadable" };
+            }
+            const farRowId = found?.candidate?.id || null;
             if (farRowId) return { farRowId, farAccountId };
             // `matches: null` means the read failed: an absent far side and an
             // unreadable one are not the same answer, and only one of them is
@@ -2324,34 +2334,15 @@ export class AgentOrchestrator {
                 }
             }
 
-            if (llmOutput._transfer) {
-                transferReservation = await this._tools.executeTool(
-                    "reserve_transfer",
-                    llmOutput._transfer,
-                );
-                if (transferReservation?.status === "inserted") {
-                    if (!silent) await this._tools.executeTool("mark_email_read", {});
-                    await this._tools.executeTool("log_decision", {
-                        action: "transfer_counterpart_deduplicated",
-                        reasoning: llmOutput.reasoning || "",
-                        timestamp: new Date().toISOString(),
-                    });
-                    return { action: "transfer_counterpart_deduplicated", details: "Transfer counterpart matched" };
-                }
-                if (transferReservation?.status === "pending" || transferReservation?.status === "ambiguous") {
-                    return { action: "notified", details: "Transfer pending reconciliation" };
-                }
-            }
-
-            // The far side may already be booked as an ordinary row, from an
-            // alert that named the deposit (#557 / #598). Decide that BEFORE the
-            // insert: this insert carries the destination's transfer payee, and
-            // the Actual route runs `runTransfers` unconditionally, which links
-            // the new row to a counterpart it creates itself. On an existing far
-            // row that yields a duplicate counterpart and orphans the real one —
-            // three rows where the incident had two (issue #598 review round 1).
+            // Declared here because the insert below needs the decision.
             let existingFarSide = { farRowId: null };
-            if (llmOutput._transfer && transferReservation?.status === "reserved") {
+            if (llmOutput._transfer) {
+                // The far side may already be booked as an ordinary row, from an
+                // alert that named the deposit (#557 / #598). Decide that BEFORE
+                // the transfer reservation: an ambiguous or unreadable far side
+                // has to be retryable, and a reservation taken first would mark
+                // the transfer `pending` and short-circuit every later pass
+                // before this read ever ran (#598 review round 2, R2-M).
                 existingFarSide = await this._findExistingFarSide({
                     transfer: llmOutput._transfer,
                     bookedAccountId: accountId,
@@ -2362,7 +2353,8 @@ export class AgentOrchestrator {
                 if (existingFarSide.hold) {
                     // Ambiguous or unreadable: the near leg is NOT booked either,
                     // because booking it would create the duplicate counterpart.
-                    // Hold both legs as they are and surface it (issue #598).
+                    // Nothing is reserved, so a later alert retries this read
+                    // instead of being stuck behind a pending transfer (#598).
                     const ambiguous = existingFarSide.reason === "ambiguous";
                     if (!silent) {
                         await this._tools.executeTool("notify_user", {
@@ -2385,6 +2377,32 @@ export class AgentOrchestrator {
                             : "Held a transfer whose far account could not be read",
                     };
                 }
+
+                transferReservation = await this._tools.executeTool(
+                    "reserve_transfer",
+                    llmOutput._transfer,
+                );
+                if (transferReservation?.status === "inserted") {
+                    if (!silent) await this._tools.executeTool("mark_email_read", {});
+                    await this._tools.executeTool("log_decision", {
+                        action: "transfer_counterpart_deduplicated",
+                        reasoning: llmOutput.reasoning || "",
+                        timestamp: new Date().toISOString(),
+                    });
+                    return { action: "transfer_counterpart_deduplicated", details: "Transfer counterpart matched" };
+                }
+                if (transferReservation?.status === "pending" || transferReservation?.status === "ambiguous") {
+                    // The far-side read above has already run and come back
+                    // 'no candidate', so this is a genuine duplicate still
+                    // awaiting its counterpart. Surface it: the short-circuit
+                    // used to be silent (#598 review round 2, R2-M).
+                    if (!silent) {
+                        await this._tools.executeTool("notify_user", {
+                            message: `Held: ${bookableAmountPrefix(llmOutput.amount_cents, llmOutput.currency)}transfer ${llmOutput.date || "today"} is already partially recorded and is waiting for its other leg. Check the transfer in Actual.`,
+                        });
+                    }
+                    return { action: "notified", details: "Transfer pending reconciliation" };
+                }
             }
 
             // Insert transaction
@@ -2396,13 +2414,17 @@ export class AgentOrchestrator {
                     amount_cents: llmOutput.amount_cents,
                     imported_description: payeeName,
                     category_id: categoryId,
-                    // The far side is already booked, so this row must NOT carry
-                    // the transfer payee: that is what makes the route create a
-                    // counterpart. It goes in plain and the link route then sets
-                    // both legs' payees to each other (#598 review round 1).
+                    // The far side is already booked, so this row must carry no
+                    // transfer payee at all: that is what makes the route create
+                    // a counterpart. Suppressed at the wire, because dropping
+                    // `payee_id` alone still lets the insert re-derive the same
+                    // transfer payee from the imported description (#598 R2-H1).
                     payee_id: existingFarSide.farRowId
                         ? undefined
                         : llmOutput.payee_id || undefined,
+                    suppress_transfer_payee: existingFarSide.farRowId
+                        ? true
+                        : undefined,
                     notes: composeNotes({
                         notes: llmOutput.notes || "",
                         merchantDescriptor: llmOutput.raw_merchant_descriptor || "",

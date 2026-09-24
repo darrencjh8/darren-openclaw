@@ -316,28 +316,40 @@ row, the pipeline decides that **before** it inserts, and links the two through
 - Still on the unclassified `Misc` payee — the shape this pipeline writes when a
   movement cannot be classified.
 
-Exactly one match is linked, and the near leg is then inserted **without** the
-transfer payee, because the link route sets both legs' payees itself. Order
-matters: the `/transactions` insert always runs `addTransactions(...,
-{runTransfers: true})`, so a transfer payee on that insert makes Actual create a
-counterpart row of its own. Linking afterwards then finds the near leg already
-inside a transfer, the route refuses it (`Transaction is already part of a
-transfer`), and the incident ends with three rows and an orphaned far row
-instead of two. Round-1 review of #598 caught the original post-insert ordering;
-the guard is `insert.args.payee_id` being unset when a far side was matched.
+Exactly one match is linked, and the near leg is then inserted with **no payee at
+all**, because the link route sets both legs' payees itself. Order matters: the
+`/transactions` insert always runs `addTransactions(..., {runTransfers: true})`,
+so a transfer payee on that insert makes Actual create a counterpart row of its
+own. Linking afterwards then finds the near leg already inside a transfer, the
+route refuses it (`Transaction is already part of a transfer`), and the incident
+ends with three rows and an orphaned far row instead of two.
+
+Two review rounds were needed to get this right, and both failures were the same
+mistake in different clothes — asserting on the tracker's own intent rather than
+on what reaches Actual:
+
+1. **Round 1** rejected the original *post-insert* ordering (link after booking).
+2. **Round 2** rejected clearing only `payee_id`: the real `insert_transaction`
+   handler re-derives a payee from `imported_description`, so the destination's
+   transfer payee reached the wire anyway and the duplicate counterpart came
+   back. The suppression is therefore an explicit `suppress_transfer_payee`
+   argument handled in `tools.js`, and the test that guards it drives the real
+   `ToolRegistry` — a mocked `executeTool` cannot fake this, which is exactly how
+   the hole survived a green suite twice.
 
 So the decision is three-way, not two-way:
 
 | Far side | Action |
 | --- | --- |
-| Exactly one candidate | Insert without transfer payee, then link both legs |
+| Exactly one candidate | Insert with no payee, then link both legs |
 | No candidate (`matches: 0`) | Insert normally, with the transfer payee |
 | Several candidates, unreadable, or read failed | Book **nothing**, notify the user |
 
 Booking nothing on the last row is deliberate: inserting the near leg there would
-create the duplicate counterpart and orphan every candidate. The near leg is held
-with its reservation, and the user is told the far account has more than one
-uncleared row.
+create the duplicate counterpart and orphan every candidate. The read also runs
+**before** the transfer reservation is taken, so nothing is left `pending` — a
+reservation taken first would short-circuit every later alert before the read
+could run again, and a genuinely ambiguous far side has to stay retryable.
 
 This is deliberately conservative, because the match is on (account, amount,
 date) and cannot by itself prove the two rows are the same transfer — the
