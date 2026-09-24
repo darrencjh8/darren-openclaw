@@ -144,10 +144,11 @@ for profile, effort in {
     )
     fallback = profile_config["fallback_providers"]
     if profile == "code-reviewer":
-        # The reviewer must never be served by a weaker tier than intended, so its
-        # fallback escalates to the pooled route instead of dropping to a cheaper one.
+        # The reviewer's fallback is the pooled route, not the direct deepseek
+        # provider, and it is an availability fallback rather than a strength
+        # guarantee: the pool picks its own model per hop.
         assert fallback == [{"provider": router_route, "model": "auto-thinking"}], (
-            "code-reviewer must fall back to the auto-thinking pool, not a weaker tier"
+            "code-reviewer must fall back to the auto-thinking pool"
         )
         assert profile_config["memory"]["memory_enabled"] is False, (
             "code-reviewer memory must be disabled so every review has a fresh context"

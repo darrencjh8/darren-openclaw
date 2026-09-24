@@ -397,8 +397,8 @@ Full catalog + provider table + diagnostic transcript: `references/image-gen-bac
 
 Vision routes through codex-router on the Command Code DeepSeek Flash model, with one
 direct `deepseek-flash` fallback. Both the primary and the fallback model are natively
-multimodal; the fallback is terminal because provider reasoning state must not convert
-across providers:
+multimodal. The fallback is the last rung of the chain: the Command Code route has no
+cross-provider hop of its own, so the direct `deepseek` route is where it ends:
 
 ```yaml
 auxiliary:

@@ -42,11 +42,11 @@ profiles set their own: `architect` and `spec-auditor` at `medium`,
 the router's pool also chooses an effort per hop for the slots that use it.
 
 `code-reviewer` is the one slot whose fallback is not the direct `deepseek` provider:
-it falls back to `custom:codex-router` / `auto-thinking`. The direction matters — a
-review round runs the Command Code Flash model and *escalates* to the pooled route when
-that is unavailable, so an outage never serves a review from a weaker tier than the one
-chosen for it. That is the opposite of the earlier `fallback_providers: []`, which made
-the round fail closed instead.
+it falls back to `custom:codex-router` / `auto-thinking`. That is an availability
+fallback of last resort, not a strength guarantee. The pool chooses its own model per
+hop and can itself serve `deepseek-flash`, so a round that falls through to it may run
+on a weaker model than the pinned Command Code route. Keep the primary healthy rather
+than relying on the fallback to hold a tier.
 
 ## Notes
 

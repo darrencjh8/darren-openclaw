@@ -147,9 +147,9 @@ class DeployWorkflowRouterTests(unittest.TestCase):
             reviewer["model"],
             {"provider": "custom:codex-router", "default": "commandcode/deepseek/deepseek-v4.1-flash"},
         )
-        # The reviewer's fallback escalates to the pooled route rather than
-        # downgrading, so a review round is never served by a weaker tier than the
-        # one that was chosen for it.
+        # The reviewer's fallback is the pooled route, not the direct deepseek
+        # provider; it is an availability fallback, so the pool may itself serve a
+        # weaker model than the pinned primary.
         self.assertEqual(
             reviewer["fallback_providers"],
             [{"provider": "custom:codex-router", "model": "auto-thinking"}],

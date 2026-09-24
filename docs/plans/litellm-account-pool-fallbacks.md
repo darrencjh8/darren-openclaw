@@ -4,7 +4,10 @@
 
 The pooled GPT aliases below are no longer referenced by any Hermes slot. Current
 routing lives in `docs/plans/hermes-deepseek-flash-routing.md`; this document records
-how the account pools were introduced.
+how the account pools were introduced. Scope note: the separate `expense-tracker`
+module still routes on the Terra and Luna aliases (see its `src/config.js` and the
+`LLM_FALLBACK_MODEL` default in `docker-compose.yml`), so the aliases are not retired
+repo-wide and must stay published by the router.
 
 ## Goal
 
