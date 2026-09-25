@@ -222,10 +222,9 @@ class DeployWorkflowRouterTests(unittest.TestCase):
         self.assertIn("hermes codex-router checkout could not be advanced", checkout_block)
         # The success line is printed from the script's own output, not the exit code,
         # so the four exit-0 skip outcomes cannot report success on a stale checkout.
-        # Pin the discriminating grep, not a substring the success sentence already
-        # contains, so a revert to exit-code-only success cannot stay green.
-        self.assertIn('grep -q "is at "', checkout_block)
-        self.assertIn("CHECKOUT_OUTPUT", checkout_block)
+        # Pin the discriminating line verbatim, so a revert to exit-code-only success
+        # cannot stay green behind a substring the success sentence already contains.
+        self.assertIn('if printf \'%s\' "$CHECKOUT_OUTPUT" | grep -q "is at "; then', checkout_block)
         self.assertIn("CHECKOUT_OUTPUT=", checkout_block)
 
         refresh = Path(__file__).parents[1] / "hermes/scripts/refresh-codex-router-checkout.sh"
