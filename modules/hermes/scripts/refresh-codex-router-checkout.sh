@@ -46,6 +46,12 @@ if [ ! -d "$CHECKOUT/.git" ]; then
     exit 0
 fi
 
+# The short SHA for the skip notices, so a deploy log shows which revision stayed
+# behind rather than only that something was skipped.
+head_line() {
+    git -C "$CHECKOUT" rev-parse --short HEAD 2>/dev/null || echo unborn
+}
+
 # Writers serialize on a lock inside .git, so it is never untracked work. A hermes
 # deploy recreates this container, which starts the boot hook on the same checkout
 # while the deploy is still running this script.
@@ -65,7 +71,7 @@ cd "$CHECKOUT"
 # A dirty checkout, a session branch, or a detached HEAD all belong to someone else:
 # skip them with a notice and never discard or rewrite their content.
 if [ -n "$(git status --porcelain 2>/dev/null)" ]; then
-    echo "refresh-codex-router-checkout: $CHECKOUT is dirty; leaving it alone"
+    echo "refresh-codex-router-checkout: $CHECKOUT is dirty; leaving it alone (HEAD $(head_line))"
     exit 0
 fi
 # The assignment form matters: on an unborn HEAD `rev-parse` prints HEAD *and*
@@ -73,9 +79,8 @@ fi
 # `set -eu` would abort before the comparison. Overwriting on failure keeps both
 # the unborn and the detached case on the one notice below.
 branch_name=$(git rev-parse --abbrev-ref HEAD 2>/dev/null) || branch_name=HEAD
-current_branch=$branch_name
-if [ "$current_branch" != "$BRANCH" ]; then
-    echo "refresh-codex-router-checkout: $CHECKOUT is on '$current_branch', not $BRANCH; leaving it alone"
+if [ "$branch_name" != "$BRANCH" ]; then
+    echo "refresh-codex-router-checkout: $CHECKOUT is on '$branch_name', not $BRANCH; leaving it alone (HEAD $(head_line))"
     exit 0
 fi
 
@@ -86,11 +91,15 @@ if ! timeout 120 git -c credential.helper='!gh auth git-credential' fetch --quie
     echo "refresh-codex-router-checkout: could not fetch origin $BRANCH" >&2
     exit 1
 fi
+# Read FETCH_HEAD once, while the lock still means this process is the only writer
+# this script controls; re-reading it later would act on whatever a concurrent git
+# command left there.
+fetched=$(git rev-parse FETCH_HEAD)
 
 if [ -n "$TARGET_REV" ]; then
     # Reachability from the fetched head is the contract, not local object
     # presence: a commit only this checkout holds must not be installed.
-    if ! git merge-base --is-ancestor "$TARGET_REV" FETCH_HEAD 2>/dev/null; then
+    if ! git merge-base --is-ancestor "$TARGET_REV" "$fetched" 2>/dev/null; then
         echo "refresh-codex-router-checkout: target $TARGET_REV is not on origin/$BRANCH" >&2
         exit 1
     fi
@@ -98,7 +107,7 @@ if [ -n "$TARGET_REV" ]; then
     # that is the same end state: nothing to move.
     if git merge-base --is-ancestor "$TARGET_REV" HEAD 2>/dev/null; then
         echo "refresh-codex-router-checkout: $CHECKOUT already contains $TARGET_REV"
-        echo "refresh-codex-router-checkout: $CHECKOUT is at $(git rev-parse --short HEAD)"
+        echo "refresh-codex-router-checkout: $CHECKOUT is at $(head_line)"
         exit 0
     fi
     if ! git merge --ff-only --quiet "$TARGET_REV"; then
@@ -107,7 +116,7 @@ if [ -n "$TARGET_REV" ]; then
     fi
 else
     if ! git merge --ff-only --quiet FETCH_HEAD; then
-        echo "refresh-codex-router-checkout: $CHECKOUT cannot fast-forward to origin/$BRANCH" >&2
+        echo "refresh-codex-router-checkout: $CHECKOUT cannot fast-forward to $fetched" >&2
         exit 1
     fi
 fi

@@ -212,7 +212,7 @@ refresh_log=/dev/null
 if true 2>>/opt/data/logs/codex-router-skills-sync.log; then
     refresh_log=/opt/data/logs/codex-router-skills-sync.log
 fi
-su -m -s /bin/sh hermes -c '/opt/hermes-defaults/scripts/refresh-codex-router-checkout.sh' 2>>"$refresh_log" \
+su -m -s /bin/sh hermes -c '/opt/hermes-defaults/scripts/refresh-codex-router-checkout.sh' >>"$refresh_log" 2>&1 \
     || echo "WARNING: could not advance the codex-router checkout in /workspace" >&2
 
 python3 -c '

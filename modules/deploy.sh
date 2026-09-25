@@ -1035,7 +1035,7 @@ if should_deploy "codex-router" || should_deploy "hermes"; then
       failed=$((failed + 1))
     elif docker cp "$CHECKOUT_SCRIPT" hermes:/tmp/refresh-codex-router-checkout.sh \
         && [ -n "$CHECKOUT_TARGET" ] \
-        && CHECKOUT_OUTPUT=$(docker exec -u hermes hermes sh /tmp/refresh-codex-router-checkout.sh "$CHECKOUT_TARGET" 2>&1); then
+        && CHECKOUT_OUTPUT=$(docker exec -e CODEX_ROUTER_LOCK_WAIT_SECONDS=300 -u hermes hermes sh /tmp/refresh-codex-router-checkout.sh "$CHECKOUT_TARGET" 2>&1); then
       printf '%s\n' "$CHECKOUT_OUTPUT"
       # The success line comes from the script's own report, not from the exit
       # code: four outcomes exit 0 without advancing anything, and reporting those

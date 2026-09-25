@@ -33,7 +33,7 @@ sh -n "$SCRIPT" && ok "refresh script parses as POSIX sh" || nope "refresh scrip
 echo "=== both writers call the refresh ==="
 grep -Fq -- 'refresh-codex-router-checkout.sh' "$DEPLOY_SCRIPT" \
     && ok "deploy.sh runs the refresh" || nope "deploy.sh runs the refresh"
-grep -Fq -- 'docker exec -u hermes hermes' "$DEPLOY_SCRIPT" \
+grep -Fq -- 'docker exec -e CODEX_ROUTER_LOCK_WAIT_SECONDS=300 -u hermes hermes' "$DEPLOY_SCRIPT" \
     && ok "deploy.sh runs it as the checkout's owner" || nope "deploy.sh runs it as the checkout's owner"
 # The router-or-hermes scope itself is asserted against the new block in
 # test_deploy_workflow_router.py: matching it here also matched the sibling

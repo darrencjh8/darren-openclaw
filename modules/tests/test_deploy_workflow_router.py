@@ -203,7 +203,9 @@ class DeployWorkflowRouterTests(unittest.TestCase):
         self.assertIn("modules/hermes/scripts/refresh-codex-router-checkout.sh", checkout_block)
         # The checkout belongs to the container's hermes user; root writes would
         # leave its objects unwritable for the sessions that create worktrees.
-        self.assertIn("docker exec -u hermes hermes", checkout_block)
+        # The owner, plus a lock wait longer than the boot fetch bound: a saturating
+        # fetch during a hermes recreate must not turn into a red deploy.
+        self.assertIn("docker exec -e CODEX_ROUTER_LOCK_WAIT_SECONDS=300 -u hermes hermes", checkout_block)
         self.assertIn("failed=$((failed + 1))", checkout_block)
         # A hermes deploy recreates the container, so the block must wait for it
         # rather than run docker exec against a container that is still starting.
@@ -212,7 +214,7 @@ class DeployWorkflowRouterTests(unittest.TestCase):
         # The copy, the run, the removal and the outcome report are the block's
         # behaviour, so they are pinned rather than left to wording.
         self.assertIn("docker cp \"$CHECKOUT_SCRIPT\" hermes:/tmp/refresh-codex-router-checkout.sh", checkout_block)
-        self.assertIn("docker exec -u hermes hermes sh /tmp/refresh-codex-router-checkout.sh", checkout_block)
+        self.assertIn("docker exec -e CODEX_ROUTER_LOCK_WAIT_SECONDS=300 -u hermes hermes sh /tmp/refresh-codex-router-checkout.sh", checkout_block)
         self.assertIn("docker exec hermes rm -f /tmp/refresh-codex-router-checkout.sh", checkout_block)
         self.assertIn("--- Hermes Codex Router Checkout ---", checkout_block)
         self.assertIn("hermes codex-router checkout is at this deploy's revision", checkout_block)
