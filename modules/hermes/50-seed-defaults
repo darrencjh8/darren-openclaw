@@ -2,7 +2,7 @@
 # Copyright © 2022 Dell Inc. or its subsidiaries. All Rights Reserved.
 
 # shellcheck shell=sh
-# shellcheck disable=SC2015,SC2235
+# shellcheck disable=SC2235,SC2015
 # Seed baked-in config, SOUL, skills, and scripts on every boot.
 # Then resolve any remaining ${VAR} placeholders that Hermes doesn't auto-substitute.
 # Seed the baked config WITHOUT clobbering the whole live file. A raw copy
