@@ -210,29 +210,46 @@ class DeployWorkflowRouterTests(unittest.TestCase):
         self.assertTrue(refresh.is_file(), "refresh script is shipped")
         self.assertTrue(refresh.stat().st_mode & 0o111, "refresh script is executable")
         refresh_body = refresh.read_text(encoding="utf-8")
+        # The deploy runs it as `sh <path>` and the boot hook execs it, so the body
+        # must be POSIX shell: a bash-only body would pass a bash-only suite and
+        # then fail every codex-router deploy under dash.
+        self.assertTrue(refresh_body.startswith("#!/bin/sh\n"), "refresh script is POSIX sh")
+        self.assertIn("set -eu", refresh_body)
         # A dirty checkout belongs to a live session: skip it, never force it.
         self.assertIn("status --porcelain", refresh_body)
         self.assertIn("--ff-only", refresh_body)
         self.assertIn("credential.helper", refresh_body)
-        # A session branch checked out in the base repository is not ours to move.
-        self.assertIn("symbolic-ref", refresh_body)
+        # A session branch — or a detached HEAD — in the base repository is not
+        # ours to move.
+        self.assertIn("rev-parse --abbrev-ref HEAD", refresh_body)
         # Two writers can overlap (a hermes deploy recreates the container while
         # the boot hook runs), so they serialize on a lock with a bounded wait.
         self.assertIn("flock", refresh_body)
         self.assertIn("CODEX_ROUTER_LOCK_WAIT_SECONDS", refresh_body)
         # The safety claim is the absence of the destructive alternatives: this
         # script must never have a way to discard a session's work or touch a
-        # session's worktree.
+        # session's checkout. The check covers comments too, which is why the file
+        # may not name the forbidden literal anywhere.
         for destructive in ("reset --hard", "stash", "rebase", "checkout -f", "push --force", "worktree"):
             self.assertNotIn(destructive, refresh_body)
+        # The expected branch is a literal: no call site sets a branch override.
+        self.assertNotIn("CODEX_ROUTER_BRANCH", refresh_body)
+        self.assertNotIn("CODEX_ROUTER_BRANCH", checkout_block)
 
         boot = (Path(__file__).parents[1] / "hermes/50-seed-defaults").read_text(encoding="utf-8")
-        self.assertIn("refresh-codex-router-checkout.sh", boot)
-        # Boot runs as root, so the refresh has to drop to the checkout's owner.
-        self.assertRegex(boot, r"su -s /bin/sh hermes -c '[^']*refresh-codex-router-checkout\.sh'")
+        # The baked path, not a filename match: /opt/data/scripts/ holds a copy that
+        # a fresh volume may not have reseeded yet.
+        self.assertIn(
+            "su -s /bin/sh hermes -c '/opt/hermes-defaults/scripts/refresh-codex-router-checkout.sh'", boot
+        )
         # A boot hook may not fail the boot: the refresh call carries a fallback
         # that reports the failure and lets the boot continue.
         self.assertIn('|| echo "WARNING: could not advance the codex-router checkout', boot)
+        # Placement matters: test-50-seed-defaults.sh extracts and executes the
+        # skills probe block and asserts its log exactly, so the refresh call must
+        # sit after that block's fi rather than inside it.
+        probe_end = boot.index("sync-codex-router-skills.sh 2>/dev/null || true\nfi")
+        self.assertGreater(boot.index("refresh-codex-router-checkout.sh", probe_end), probe_end)
 
     def test_hermes_deploy_health_gate_retries_before_failing(self):
         deploy_script = DEPLOY_SCRIPT.read_text(encoding="utf-8")

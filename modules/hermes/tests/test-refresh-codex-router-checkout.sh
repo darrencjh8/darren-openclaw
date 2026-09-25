@@ -28,7 +28,7 @@ nope() { printf 'FAIL %s\n' "$1"; fail=1; }
 echo "=== the script ships and parses ==="
 [ -f "$SCRIPT" ] && ok "refresh script exists" || nope "refresh script exists"
 [ -x "$SCRIPT" ] && ok "refresh script is executable" || nope "refresh script is executable"
-bash -n "$SCRIPT" && ok "refresh script parses" || nope "refresh script parses"
+sh -n "$SCRIPT" && ok "refresh script parses as POSIX sh" || nope "refresh script parses as POSIX sh"
 
 echo "=== both writers call the refresh ==="
 grep -Fq -- 'refresh-codex-router-checkout.sh' "$DEPLOY_SCRIPT" \
@@ -40,8 +40,8 @@ grep -Fq -- 'docker exec -u hermes hermes' "$DEPLOY_SCRIPT" \
 # skills block, so it passed before the block existed.
 grep -Fq -- 'refresh-codex-router-checkout.sh' "$SEED_SCRIPT" \
     && ok "the boot hook refreshes the checkout" || nope "the boot hook refreshes the checkout"
-grep -Eq "su -s /bin/sh hermes -c '[^']*refresh-codex-router-checkout" "$SEED_SCRIPT" \
-    && ok "the boot hook runs the refresh as hermes" || nope "the boot hook runs the refresh as hermes"
+grep -Eq "su -s /bin/sh hermes -c '/opt/hermes-defaults/scripts/refresh-codex-router-checkout\\.sh'" "$SEED_SCRIPT" \
+    && ok "the boot hook runs the baked refresh as hermes" || nope "the boot hook runs the baked refresh as hermes"
 
 echo "=== behaviour against real repositories ==="
 sandbox=$(mktemp -d)
@@ -76,8 +76,10 @@ advance_origin() {
 }
 
 run_refresh() {
+    # Always through `sh`, never the shebang: the deploy runs `sh <path>`, so a
+    # bash-only body must fail here rather than in production.
     rc=0
-    out=$(CODEX_ROUTER_CHECKOUT="$checkout" "$SCRIPT" "$@" 2>&1) || rc=$?
+    out=$(CODEX_ROUTER_CHECKOUT="$checkout" sh "$SCRIPT" "$@" 2>&1) || rc=$?
 }
 
 # Already current: a no-op the deploy can run on every push.
@@ -89,13 +91,15 @@ else
     nope "an up-to-date checkout is left alone and exits 0 (rc=$rc): $out"
 fi
 
-# Behind: fast-forward to the fetched head.
+# Behind: fast-forward to the fetched head, and name the revision it landed on so
+# a deploy log carries the SHA the container ended up at.
 advance_origin second
 run_refresh
-if [ "$rc" -eq 0 ] && [ "$(git -C "$checkout" rev-parse HEAD)" = "$(git -C "$sandbox/seed" rev-parse HEAD)" ]; then
-    ok "a clean stale checkout fast-forwards to origin/main"
+if [ "$rc" -eq 0 ] && [ "$(git -C "$checkout" rev-parse HEAD)" = "$(git -C "$sandbox/seed" rev-parse HEAD)" ] \
+    && printf '%s' "$out" | grep -q "$(git -C "$checkout" rev-parse --short HEAD)"; then
+    ok "a clean stale checkout fast-forwards to origin/main and prints the new short SHA"
 else
-    nope "a clean stale checkout fast-forwards to origin/main (rc=$rc): $out"
+    nope "a clean stale checkout fast-forwards to origin/main and prints the new short SHA (rc=$rc): $out"
 fi
 
 # An explicit target wins over the fetched head: the deploy pins the revision it
@@ -116,7 +120,7 @@ fi
 
 # A target HEAD already contains is satisfied, not forced: boot may already have
 # advanced past the revision a later deploy pins.
-contained=$(git -C "$checkout" rev-parse HEAD~1)
+contained=$(git -C "$checkout" rev-parse HEAD~1 2>/dev/null || true)
 run_refresh "$contained"
 if [ "$rc" -eq 0 ] && [ "$(git -C "$checkout" rev-parse HEAD)" = "$checkout_head" ]; then
     ok "a target the checkout already contains is a no-op"
@@ -136,6 +140,34 @@ else
     nope "a checkout on another branch is skipped (rc=$rc): $out"
 fi
 git -C "$checkout" checkout -q main
+
+# A detached HEAD is a skip, not a silent success with an empty branch name.
+git -C "$checkout" checkout -q --detach
+detached_head=$(git -C "$checkout" rev-parse HEAD)
+run_refresh
+if [ "$rc" -eq 0 ] && [ "$(git -C "$checkout" rev-parse HEAD)" = "$detached_head" ] \
+    && printf '%s' "$out" | grep -q "on 'HEAD'"; then
+    ok "a detached HEAD is skipped and named"
+else
+    nope "a detached HEAD is skipped and named (rc=$rc): $out"
+fi
+git -C "$checkout" checkout -q main
+
+# An object that exists locally but is not on the fetched branch is not a valid
+# target: reachability is the contract, not local object presence.
+git -C "$checkout" checkout -q -b side-work
+printf 'side\n' > "$checkout/side.txt"
+git -C "$checkout" add side.txt
+git -C "$checkout" commit -qm side
+side_commit=$(git -C "$checkout" rev-parse HEAD)
+git -C "$checkout" checkout -q main
+side_head=$(git -C "$checkout" rev-parse HEAD)
+run_refresh "$side_commit"
+if [ "$rc" -ne 0 ] && [ "$(git -C "$checkout" rev-parse HEAD)" = "$side_head" ]; then
+    ok "a target only reachable locally is refused without moving"
+else
+    nope "a target only reachable locally is refused without moving (rc=$rc): $out"
+fi
 
 # Dirty: a live session owns the checkout. Leave the bytes and the HEAD alone.
 printf 'session work\n' >> "$checkout/file.txt"
@@ -180,6 +212,17 @@ else
     nope "a target missing from the fetched history fails without moving (rc=$rc): $out"
 fi
 
+# An unreachable origin is the most likely production failure (network, gh
+# credentials). It must fail loudly and move nothing.
+git -C "$checkout" remote set-url origin "$sandbox/absent.git"
+run_refresh
+if [ "$rc" -ne 0 ] && [ "$(git -C "$checkout" rev-parse HEAD)" = "$diverged_head" ]; then
+    ok "an unreachable origin fails the fetch without moving HEAD"
+else
+    nope "an unreachable origin fails the fetch without moving HEAD (rc=$rc): $out"
+fi
+git -C "$checkout" remote set-url origin "$origin"
+
 # Busy lock: another writer is refreshing the same checkout. The deploy must see
 # a failure rather than report success on a revision it never applied.
 (
@@ -189,7 +232,7 @@ fi
 lock_holder=$!
 sleep 1
 rc=0
-out=$(CODEX_ROUTER_CHECKOUT="$checkout" CODEX_ROUTER_LOCK_WAIT_SECONDS=1 "$SCRIPT" 2>&1) || rc=$?
+out=$(CODEX_ROUTER_CHECKOUT="$checkout" CODEX_ROUTER_LOCK_WAIT_SECONDS=1 sh "$SCRIPT" 2>&1) || rc=$?
 wait "$lock_holder" 2>/dev/null || true
 if [ "$rc" -ne 0 ] && [ "$(git -C "$checkout" rev-parse HEAD)" = "$diverged_head" ]; then
     ok "a held lock fails the run and leaves every ref alone"
@@ -199,7 +242,7 @@ fi
 
 # Absent: a container that has not created the checkout yet is not an error.
 rc=0
-out=$(CODEX_ROUTER_CHECKOUT="$sandbox/absent" CODEX_ROUTER_LOCK_WAIT_SECONDS=1 "$SCRIPT" 2>&1) || rc=$?
+out=$(CODEX_ROUTER_CHECKOUT="$sandbox/absent" CODEX_ROUTER_LOCK_WAIT_SECONDS=1 sh "$SCRIPT" 2>&1) || rc=$?
 if [ "$rc" -eq 0 ]; then
     ok "an absent checkout is skipped and exits 0"
 else

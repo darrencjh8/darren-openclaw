@@ -38,15 +38,27 @@ retry-budget fix (#153) never reaches it.
 
 ### 1. New `modules/hermes/scripts/refresh-codex-router-checkout.sh`
 
-One writer for the checkout. Inputs and interface, exactly:
+One writer for the checkout. The deploy runs it as `sh <path>`, the boot hook execs
+it, and the suite runs it as `sh "$SCRIPT"`, so the file is POSIX shell: its first
+line is `#!/bin/sh`, it sets `set -eu`, and it carries `# shellcheck shell=sh` like
+the skill reconciler. A bash-only body must not be able to pass the suite and then
+fail a production deploy under dash.
+
+Inputs and interface, exactly:
 
 - `CHECKOUT=${CODEX_ROUTER_CHECKOUT:-/workspace/codex-router}` — the path override
   the behaviour suite drives the script through.
-- `BRANCH=${CODEX_ROUTER_BRANCH:-main}` — the only branch it will move; the suite
-  hard-codes `main`.
-- `LOCK_WAIT_SECONDS=${CODEX_ROUTER_LOCK_WAIT_SECONDS:-120}` — the lock bound.
-- `TARGET_REV="$1"`, optional. With it, the checkout must end at that revision;
-  without it, at the fetched head.
+- `BRANCH=main` — a literal, not a knob: neither call site sets it and no test
+  exercises another value, so a configurable branch would be untested flexibility.
+- `LOCK_WAIT_SECONDS=${CODEX_ROUTER_LOCK_WAIT_SECONDS:-120}` — the lock bound. A
+  value that is not a positive integer falls back to the default rather than being
+  passed to `flock`, whose own failure would be reported as contention. `flock` is
+  assumed present (the image and CI both have it, and the sibling reconciler
+  already relies on it); a missing `flock` fails the run loudly instead of running
+  unlocked.
+- `TARGET_REV="${1:-}"`, optional. With it, the checkout must end at that revision;
+  without it, at the fetched head. `${1:-}` rather than `$1`, because the boot hook
+  always calls it with no argument and `set -u` would abort on a bare `$1`.
 
 Order of operations, which is the whole contract:
 
@@ -56,40 +68,51 @@ Order of operations, which is the whole contract:
    path the script promises to skip.
 2. Acquire `flock` on `$CHECKOUT/.git/codex-router-checkout.lock`, waiting up to
    `LOCK_WAIT_SECONDS` (inside `.git`, so it never appears as untracked work). On
-   timeout: print `another writer held <path> for <n>s; giving up` and exit 1,
-   leaving every ref untouched. Taking the lock here — after the checkout is known
-   to be a repository, before any state is read — is what makes the next two checks
-   act on state no other writer can move.
+   timeout: print `another writer held <path> for <LOCK_WAIT_SECONDS>s; giving up`
+   and exit 1, leaving every ref untouched. Taking the lock here — after the
+   checkout is known to be a repository, before any state is read — is what makes
+   the next two checks act on state no other writer can move.
 3. Inside the lock, re-read the state: a dirty checkout (`git status --porcelain`
    non-empty) prints `<path> is dirty; leaving it alone` and exits 0; a checkout
-   whose `git symbolic-ref --quiet --short HEAD` is not `BRANCH` prints
-   `<path> is on '<branch>', not <branch>; leaving it alone` and exits 0. Both are
-   a live session's state and are never stashed, reset, rebased, or forced.
+   whose `git rev-parse --abbrev-ref HEAD` is not `BRANCH` prints
+   `<path> is on '<branch>', not <branch>; leaving it alone` and exits 0. A detached
+   HEAD is that same case and reports `<branch>` as `HEAD`: it is a deliberate skip,
+   never a silent pass, because `git symbolic-ref` would print an empty name there.
+   Both states are a live session's and are never stashed, reset, rebased, or
+   forced.
 4. Fetch: `git -c credential.helper='!gh auth git-credential' fetch --quiet origin
    "$BRANCH"`. This updates `refs/remotes/origin/$BRANCH` and writes `FETCH_HEAD`;
    the no-argument case below advances to `FETCH_HEAD`, i.e. the head of that
-   branch at fetch time. A fetch failure exits 1.
+   branch at fetch time. A fetch failure — the most likely production failure, from
+   the network or gh's credentials — exits 1 with `could not fetch origin <branch>`.
 5. Move `HEAD`, only by fast-forward:
-   - with a target: a target that is not a commit in the fetched history
-     (`git cat-file -e "$TARGET^{commit}"`) exits 1; a target `HEAD` already
-     contains (`git merge-base --is-ancestor "$TARGET" HEAD`) is a no-op that exits
-     0, because boot can already have advanced past the revision a later deploy
-     pins; otherwise `git merge --ff-only --quiet "$TARGET"`, and its failure exits
-     1;
+   - with a target: a target that is not reachable from the fetched head
+     (`git merge-base --is-ancestor "$TARGET" FETCH_HEAD`) exits 1 with `target
+     <sha> is not on origin/<branch>`. Reachability is the contract, not local
+     object presence: `git cat-file -e` would accept a local-only commit that the
+     branch does not carry. A target `HEAD` already contains
+     (`git merge-base --is-ancestor "$TARGET" HEAD`) is a no-op that exits 0,
+     because boot can already have advanced past the revision a later deploy pins;
+     otherwise `git merge --ff-only --quiet "$TARGET"`, and its failure exits 1;
    - without a target: `git merge --ff-only --quiet FETCH_HEAD`, and its failure
      exits 1.
-6. Print the resulting `git rev-parse --short HEAD` so a deploy log shows what the
-   container is on (the verification step below reads it).
+6. Print `refresh-codex-router-checkout: <path> is at <git rev-parse --short HEAD>`
+   on stdout, so the deploy log shows the revision the container ended on and the
+   suite can assert it.
 
-It runs as the container's `hermes` user, never touches a worktree, and contains no
-`reset`, `stash`, `rebase`, `checkout -f`, `push --force`, or `worktree` verb.
+It runs as the container's `hermes` user, never touches a session checkout, and
+contains none of the literals `reset --hard`, `stash`, `rebase`, `checkout -f`,
+`push --force`, or `worktree` — comments included, because the guard test is a
+substring check over the whole file.
 
 ### 2. `modules/deploy.sh`
 
-A new block marked `# ---- Hermes container codex-router checkout ----`, inside the
-existing `should_deploy "codex-router" || should_deploy "hermes"` scope (the same
-scope as the skill reconcile, so the 5-minute `sync-codex-router.yml` router-only
-dispatch reaches it). It:
+A new sibling `if should_deploy "codex-router" || should_deploy "hermes"; then … fi`
+block (not nested inside the skills payload block), marked
+`# ---- Hermes container codex-router checkout ----`, placed after that payload
+block and after the existing `failed=0` initialisation, before the Hermes gateway
+health gate. Same scope as the skill reconcile, so the 5-minute
+`sync-codex-router.yml` router-only dispatch reaches it. It:
 
 - guards the host-side checkout (`[ ! -d "$ROOT/modules/codex-router" ]`), the
   script, and the container (`docker inspect hermes`), each printing a notice and
@@ -119,31 +142,57 @@ so it tracks `origin/main`; a recreated container heals itself. It runs the
 image-baked copy `/opt/hermes-defaults/scripts/refresh-codex-router-checkout.sh`
 (`COPY scripts/` in the Dockerfile, plus `chmod +x`): that copy changes exactly when
 the hermes image is rebuilt, which is when this hook changes, while the deploy's own
-`docker cp` copy is what refreshes the container between rebuilds. The call carries
-a fallback (`|| echo "WARNING: could not advance the codex-router checkout …"`), so
-a failed refresh logs and never fails the boot, and it appends to the same
+`docker cp` copy is what refreshes the container between rebuilds. The call is a
+line of its own **after** the skills probe block's `fi` — not inside it — with its
+own guarded redirect: `test-50-seed-defaults.sh` extracts that probe block, executes
+it, stubs only the reconcile script, and asserts the log equals exactly the stub's
+output, so a call inside the block would run an unstubbed path and break an
+assertion this plan lists in Verification. The call carries a fallback
+(`|| echo "WARNING: could not advance the codex-router checkout …"`), so a failed
+refresh logs and never fails the boot, and it appends to the same
 `/opt/data/logs/codex-router-skills-sync.log` the reconcile writes.
+
+Recovery: the script never forces, so a checkout that diverged from `origin/main`
+(for example after a force-push to codex-router) keeps failing every deploy and
+boot refresh. The documented escape hatch is an operator or session command in the
+container, `git -C /workspace/codex-router fetch origin main && git -C
+/workspace/codex-router reset --hard origin/main`, which this plan records in
+`DEPLOY.md` beside the script so a red deploy has a next step.
 
 ### 4. Tests and docs
 
-`modules/hermes/tests/test-refresh-codex-router-checkout.sh` drives the script
-against real repositories through `CODEX_ROUTER_CHECKOUT`:
-up-to-date no-op; fast-forward to `FETCH_HEAD`; an explicit target that must land
-`HEAD` on that revision and *away* from the fetched head; a target `HEAD` already
-contains (no-op); dirty skip with the work intact; wrong-branch skip; diverged
-failure; a target missing from the fetched history; and a busy lock
-(`CODEX_ROUTER_LOCK_WAIT_SECONDS=1` with the lock held) that must exit non-zero
-with every ref unchanged. It also pins both call sites, with the scope and marker
-assertions kept out of the sibling block's text.
+`modules/hermes/tests/test-refresh-codex-router-checkout.sh` runs the script as
+`sh "$SCRIPT"` (never via its shebang, so a bash-only body cannot pass here and
+then fail a deploy under dash) and checks `sh -n`. It drives it against real
+repositories through `CODEX_ROUTER_CHECKOUT`:
+
+- an up-to-date checkout: no-op;
+- a stale clean checkout: fast-forward to `FETCH_HEAD`, and stdout names the new
+  short SHA (step 6);
+- an explicit target: `HEAD` lands on that revision and *away* from the fetched
+  head; a target `HEAD` already contains: no-op;
+- a target that exists locally but is unreachable from the fetched head: exit 1,
+  refs unchanged;
+- a target missing from the fetched history (all-zeros): exit 1, refs unchanged;
+- a dirty checkout: skip with the work intact; a wrong-branch checkout: skip; a
+  detached HEAD: skip and the notice names `HEAD`;
+- a diverged checkout: exit 1; an unreachable origin: fetch failure exits 1 with
+  refs unchanged; an absent checkout: skip with exit 0;
+- a busy lock (`CODEX_ROUTER_LOCK_WAIT_SECONDS=1` with the lock held): exit 1 with
+  every ref unchanged.
+
+It also pins both call sites, with the scope and marker assertions kept out of the
+sibling block's text.
 
 `modules/tests/test_deploy_workflow_router.py::test_hermes_container_checkout_is_refreshed`
 pins the deploy block (scope, marker, guards, readiness poll, `rev-parse HEAD`
-target, `docker exec -u hermes`, `failed` counter), the script (executable; dirty,
-branch and lock guards; `--ff-only`; `credential.helper`; no destructive or
-`worktree` verb), and the boot call (owner, baked path, never-fail-the-boot
-fallback). The new suite is wired into the `hermes-scripts` job of
-`.github/workflows/test.yml`, and `DEPLOY.md`'s inventory of the scripts that
-reconcile the container gains the refresh.
+target, `docker exec -u hermes`, `failed` counter), the script (POSIX `#!/bin/sh`
+with `set -eu`, executable; dirty, branch, detached-HEAD and lock guards;
+`--ff-only`; `credential.helper`; no destructive literal, comments included), and
+the boot call (owner, the literal `/opt/hermes-defaults/scripts/refresh-codex-router-checkout.sh`
+path, never-fail-the-boot fallback). The new suite is wired into the
+`hermes-scripts` job of `.github/workflows/test.yml`, and `DEPLOY.md`'s inventory of
+the scripts that reconcile the container gains the refresh and its recovery step.
 
 ## Questions and answers
 
@@ -204,9 +253,11 @@ repository-local driver source, plus the installed skill copies.
   or re-inits each state that is still wanted.
 - The dev-loop plan pack's Change scaffold: it looks for
   `.github/workflows/tests.yml`, reports "no test command" and "no test files" for
-  this repository, and was bound to a dangling commit in round 1. Regenerating the
-  pack here is automatic (the next `plan` run does it), but the filename assumption
-  is a driver defect, tracked in
+  this repository, and was bound to a dangling commit in round 1. A later round
+  added that its file list also omits `DEPLOY.md` (which base..HEAD does change) and
+  that its HEAD predates the revision carrying the reviewed plan. Regenerating the
+  pack here is automatic (the next `plan` run does it), but every other defect is
+  the pack builder's, tracked in
   [codex-router#161](https://github.com/darrencjh8/codex-router/issues/161).
 - `/opt/data/home/.codex/skills` (September generation). It is inert — no `codex`
   binary exists in the container — and the reconciler's shadow list does not cover
