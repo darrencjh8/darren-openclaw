@@ -192,7 +192,12 @@ class DeployWorkflowRouterTests(unittest.TestCase):
             "# Hermes gateway", 1
         )[0]
 
-        self.assertIn('should_deploy "codex-router" || should_deploy "hermes"', checkout_block)
+        # A full deploy recreates the container too, so the `all` arm is load-bearing:
+        # deploy.yml passes `--component all` for unmatched changed files and for the
+        # manual dispatch, and should_deploy returns 1 for both named arms under it.
+        self.assertIn(
+            'should_deploy "codex-router" || should_deploy "hermes" || should_deploy "all"', checkout_block
+        )
         # Deterministic target: the revision this deploy checked out, never
         # whatever main happens to be at deploy time.
         self.assertIn('git -C "$ROOT/modules/codex-router" rev-parse HEAD', checkout_block)
@@ -212,7 +217,12 @@ class DeployWorkflowRouterTests(unittest.TestCase):
         self.assertIn("docker exec hermes rm -f /tmp/refresh-codex-router-checkout.sh", checkout_block)
         self.assertIn("--- Hermes Codex Router Checkout ---", checkout_block)
         self.assertIn("hermes codex-router checkout is at this deploy's revision", checkout_block)
+        self.assertIn("hermes codex-router checkout left alone", checkout_block)
         self.assertIn("hermes codex-router checkout could not be advanced", checkout_block)
+        # The success line is printed from the script's own output, not the exit code,
+        # so the four exit-0 skip outcomes cannot report success on a stale checkout.
+        self.assertIn("is at", checkout_block)
+        self.assertIn("CHECKOUT_OUTPUT=", checkout_block)
 
         refresh = Path(__file__).parents[1] / "hermes/scripts/refresh-codex-router-checkout.sh"
         self.assertTrue(refresh.is_file(), "refresh script is shipped")
@@ -234,6 +244,8 @@ class DeployWorkflowRouterTests(unittest.TestCase):
         # the boot hook runs), so they serialize on a lock with a bounded wait.
         self.assertIn("flock", refresh_body)
         self.assertIn("CODEX_ROUTER_LOCK_WAIT_SECONDS", refresh_body)
+        # A hung fetch would hold the lock past its bound and block both callers.
+        self.assertIn("timeout 120", refresh_body)
         # The safety claim is the absence of the destructive alternatives: this
         # script must never have a way to discard a session's work or touch a
         # session's checkout. The check covers comments too, which is why the file

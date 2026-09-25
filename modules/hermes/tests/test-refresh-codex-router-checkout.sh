@@ -240,6 +240,18 @@ else
     nope "a held lock fails the run and leaves every ref alone (rc=$rc): $out"
 fi
 
+# A non-integer lock bound falls back to the default instead of being handed to
+# flock, so a typo cannot turn a free lock into a failed deploy.
+advance_origin seventh
+nonnumeric_head=$(git -C "$checkout" rev-parse HEAD)
+rc=0
+out=$(CODEX_ROUTER_CHECKOUT="$checkout" CODEX_ROUTER_LOCK_WAIT_SECONDS=soon sh "$SCRIPT" 2>&1) || rc=$?
+if [ "$rc" -eq 0 ] && [ "$(git -C "$checkout" rev-parse HEAD)" != "$nonnumeric_head" ]; then
+    ok "a non-integer lock bound falls back to the default and still advances"
+else
+    nope "a non-integer lock bound falls back to the default and still advances (rc=$rc): $out"
+fi
+
 # Unborn: a fresh `git init` has no commit, and `git rev-parse --abbrev-ref HEAD`
 # exits 128 there, so the script must notice and skip instead of aborting.
 git init -q "$sandbox/unborn"

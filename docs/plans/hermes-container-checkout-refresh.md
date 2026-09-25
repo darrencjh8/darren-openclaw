@@ -80,8 +80,12 @@ Order of operations, which is the whole contract:
    never a silent pass, because `git symbolic-ref` would print an empty name there.
    Both states are a live session's and are never stashed, reset, rebased, or
    forced.
-4. Fetch: `git -c credential.helper='!gh auth git-credential' fetch --quiet origin
-   "$BRANCH"`. This updates `refs/remotes/origin/$BRANCH` and writes `FETCH_HEAD`;
+4. Fetch, bounded: `timeout 120 git -c credential.helper='!gh auth git-credential'
+   fetch --quiet origin "$BRANCH"`. The bound matters because the lock serializes
+   writers, not time: a hung fetch would hold the lock and block the deploy's `docker
+   exec` and the boot hook, which is the boot risk the skill reconciler documents for
+   its own network step. This updates `refs/remotes/origin/$BRANCH` and writes
+   `FETCH_HEAD`;
    the no-argument case below advances to `FETCH_HEAD`, i.e. the head of that
    branch at fetch time. A fetch failure — the most likely production failure, from
    the network or gh's credentials — exits 1 with `could not fetch origin <branch>`.
@@ -107,16 +111,25 @@ substring check over the whole file.
 
 ### 2. `modules/deploy.sh`
 
-A new sibling `if should_deploy "codex-router" || should_deploy "hermes"; then … fi`
-block (not nested inside the skills payload block), marked
-`# ---- Hermes container codex-router checkout ----`, placed after that payload
-block and after the existing `failed=0` initialisation, before the Hermes gateway
-health gate. Same scope as the skill reconcile, so the 5-minute
-`sync-codex-router.yml` router-only dispatch reaches it. It:
+A new sibling `if should_deploy "codex-router" || should_deploy "hermes" ||
+should_deploy "all"; then … fi` block (not nested inside the skills payload block),
+marked `# ---- Hermes container codex-router checkout ----`, placed after that
+payload block and after the existing `failed=0` initialisation, before the Hermes
+gateway health gate. The `all` arm matters as much as the other two: `deploy.yml`
+passes `--component all` whenever the changed files match nothing watched (a docs or
+`modules/hermes/`-only push, this plan's own merge included) or when the manual
+`components: all` input is used, and `should_deploy` returns 1 for both named arms
+under `all` — so without it a full deploy would recreate the container and skip the
+refresh, leaving the checkout stale while the router is redeployed from the fresh
+one. The 5-minute `sync-codex-router.yml` router-only dispatch also reaches it. It:
 
-- guards the host-side checkout (`[ ! -d "$ROOT/modules/codex-router" ]`), the
-  script, and the container (`docker inspect hermes`), each printing a notice and
-  skipping — in CI a missing checkout counts toward `failed`;
+- guards the host-side checkout (`[ ! -d "$ROOT/modules/codex-router" ]`) and the
+  script (`[ ! -f "$CHECKOUT_SCRIPT" ]`): each prints a notice and, in CI only
+  (`[ -n "${GITHUB_ACTIONS:-}" ]`), counts toward `failed`, exactly as the sibling
+  block accounts for its own two; an absent container (`docker inspect hermes`)
+  prints a notice and skips without counting, and a readiness timeout after the poll
+  below counts toward `failed` everywhere, because a container that cannot run the
+  refresh is a broken environment in CI and a local run should say so too;
 - waits for the container the way the sibling block above does (up to 15 × 2s
   `docker exec hermes true`), because a `hermes` deploy recreates it and `docker
   exec` during init returns non-zero; the sibling's own poll is not enough, its
@@ -131,11 +144,15 @@ health gate. Same scope as the skill reconcile, so the 5-minute
 - removes the copied script afterwards (`docker exec hermes rm -f
   /tmp/refresh-codex-router-checkout.sh`, best-effort, exactly as the sibling block
   removes its own staged script);
-- prints its outcome on the block's own lines: `--- Hermes Codex Router Checkout ---`
-  before the run, then either `✓ hermes codex-router checkout is at this deploy's
-  revision` or `✗ hermes codex-router checkout could not be advanced`. The test pins
-  those strings, so the copy, the run, the removal and the report cannot be
-  reworded away without a red suite.
+- captures the script's output and prints its outcome on the block's own lines:
+  `--- Hermes Codex Router Checkout ---` before the run, then the success line
+  `✓ hermes codex-router checkout is at this deploy's revision` **only** when that
+  output carries the script's step-6 `is at` line, a distinct
+  `⏭ hermes codex-router checkout left alone` when it exited 0 without advancing
+  (absent, dirty, other branch, unborn), and `✗ hermes codex-router checkout could
+  not be advanced` on a non-zero exit. Deriving the success line from the exit code
+  alone reported success on a stale checkout for those four skip outcomes, which is
+  the failure this change exists to prevent. The test pins all three strings.
 
 The environment is therefore **advanced to at least the deployed revision**: the
 container checkout is never behind what the deploy shipped, but a boot between
@@ -144,7 +161,7 @@ treats an already-contained revision as satisfied rather than as an error.
 
 ### 3. `modules/hermes/50-seed-defaults`
 
-Run the same refresh on boot as `hermes` (`su -s /bin/sh hermes -c`), with no target
+Run the same refresh on boot as `hermes` (`su -m -s /bin/sh hermes -c`), with no target
 so it tracks `origin/main`; a recreated container heals itself. It runs the
 image-baked copy `/opt/hermes-defaults/scripts/refresh-codex-router-checkout.sh`
 (`COPY scripts/` in the Dockerfile, plus `chmod +x`): that copy changes exactly when
@@ -155,8 +172,10 @@ line of its own **after** both the skills probe block's `fi` and the hook's
 that position: `test-50-seed-defaults.sh` extracts and executes the probe block,
 stubs only the reconcile script, and asserts the log equals exactly the stub's
 output, so a call inside the block would run an unstubbed path and break an
-assertion this plan lists in Verification; and the fetch needs a credential, which
-on a fresh volume only exists after that `gh auth login` has written gh's config.
+assertion this plan lists in Verification; and the fetch needs a credential, which on a
+fresh volume comes from `GH_TOKEN` in the hook's environment — the `gh auth login`
+block is a second, weaker path, because it runs `su` without `-m` and writes gh's
+config into hermes' HOME, which this call does not read.
 The call is `su -m -s /bin/sh hermes -c '/opt/hermes-defaults/scripts/refresh-codex-router-checkout.sh'`:
 `-m` preserves the environment, because the hook's environment carries `GH_TOKEN`
 (from `modules/docker-compose.yml`) and `su` resets it by default, so without `-m`
@@ -257,7 +276,7 @@ one revision, because boot may already have moved it ahead of the reconciled roo
 
 Q: Which identity runs the refresh?
 Assumption: The container's `hermes` user in both callers (`docker exec -u hermes`,
-`su -s /bin/sh hermes -c`). (Planner-inferred, not operator-confirmed.) Verified: the
+`su -m -s /bin/sh hermes -c`). (Planner-inferred, not operator-confirmed.) Verified: the
 checkout is owned by `hermes`, running as root trips git's `dubious ownership`, and
 root writes would leave objects the sessions cannot extend when they create
 worktrees.
