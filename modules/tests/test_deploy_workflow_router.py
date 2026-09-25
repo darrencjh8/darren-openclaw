@@ -192,12 +192,11 @@ class DeployWorkflowRouterTests(unittest.TestCase):
             "# Hermes gateway", 1
         )[0]
 
-        # A full deploy recreates the container too, so the `all` arm is load-bearing:
-        # deploy.yml passes `--component all` for unmatched changed files and for the
-        # manual dispatch, and should_deploy returns 1 for both named arms under it.
-        self.assertIn(
-            'should_deploy "codex-router" || should_deploy "hermes" || should_deploy "all"', checkout_block
-        )
+        # Two arms are enough: should_deploy returns 0 as soon as any component is
+        # `all`, so a full deploy reaches this block through the named arms. The test
+        # pins the two-arm form so a redundant third arm cannot creep back in.
+        self.assertIn('should_deploy "codex-router" || should_deploy "hermes"', checkout_block)
+        self.assertNotIn('should_deploy "all"', checkout_block)
         # Deterministic target: the revision this deploy checked out, never
         # whatever main happens to be at deploy time.
         self.assertIn('git -C "$ROOT/modules/codex-router" rev-parse HEAD', checkout_block)

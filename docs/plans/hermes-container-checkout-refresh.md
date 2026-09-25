@@ -73,18 +73,21 @@ Order of operations, which is the whole contract:
    checkout is known to be a repository, before any state is read — is what makes
    the next two checks act on state no other writer can move.
 3. Inside the lock, re-read the state: a dirty checkout (`git status --porcelain`
-   non-empty) prints `<path> is dirty; leaving it alone` and exits 0; a checkout
-   whose `git rev-parse --abbrev-ref HEAD` is not `BRANCH` prints
-   `<path> is on '<branch>', not <branch>; leaving it alone` and exits 0. A detached
-   HEAD is that same case and reports `<branch>` as `HEAD`: it is a deliberate skip,
-   never a silent pass, because `git symbolic-ref` would print an empty name there.
-   Both states are a live session's and are never stashed, reset, rebased, or
-   forced.
+   non-empty) prints `<path> is dirty; leaving it alone` and exits 0; then
+   `branch_name=$(git rev-parse --abbrev-ref HEAD 2>/dev/null) || branch_name=HEAD`,
+   and a `branch_name` that is not `BRANCH` prints
+   `<path> is on '<branch>', not <branch>; leaving it alone` and exits 0. The `||`
+   fallback is load-bearing twice over, not decoration: a detached HEAD makes
+   `rev-parse` print `HEAD`, while an **unborn** HEAD (a fresh checkout with no
+   commit) makes it exit 128, which under `set -eu` would abort the script instead of
+   skipping — so the assignment must absorb that failure and let the comparison route
+   both cases to the same notice. Both are a live session's state and are never
+   stashed, reset, rebased, or forced.
 4. Fetch, bounded: `timeout 120 git -c credential.helper='!gh auth git-credential'
    fetch --quiet origin "$BRANCH"`. The bound matters because the lock serializes
    writers, not time: a hung fetch would hold the lock and block the deploy's `docker
-   exec` and the boot hook, which is the boot risk the skill reconciler documents for
-   its own network step. This updates `refs/remotes/origin/$BRANCH` and writes
+   exec` and the boot hook until their own budgets expire. `timeout` is assumed
+   present, like `flock` — it is coreutils, which the image and CI both have. This updates `refs/remotes/origin/$BRANCH` and writes
    `FETCH_HEAD`;
    the no-argument case below advances to `FETCH_HEAD`, i.e. the head of that
    branch at fetch time. A fetch failure — the most likely production failure, from
@@ -111,17 +114,16 @@ substring check over the whole file.
 
 ### 2. `modules/deploy.sh`
 
-A new sibling `if should_deploy "codex-router" || should_deploy "hermes" ||
-should_deploy "all"; then … fi` block (not nested inside the skills payload block),
-marked `# ---- Hermes container codex-router checkout ----`, placed after that
-payload block and after the existing `failed=0` initialisation, before the Hermes
-gateway health gate. The `all` arm matters as much as the other two: `deploy.yml`
-passes `--component all` whenever the changed files match nothing watched (a docs or
-`modules/hermes/`-only push, this plan's own merge included) or when the manual
-`components: all` input is used, and `should_deploy` returns 1 for both named arms
-under `all` — so without it a full deploy would recreate the container and skip the
-refresh, leaving the checkout stale while the router is redeployed from the fresh
-one. The 5-minute `sync-codex-router.yml` router-only dispatch also reaches it. It:
+A new sibling `if should_deploy "codex-router" || should_deploy "hermes"; then …
+fi` block (not nested inside the skills payload block), marked
+`# ---- Hermes container codex-router checkout ----`, placed after that payload
+block and after the existing `failed=0` initialisation, before the Hermes gateway
+health gate. No `all` arm: `should_deploy` returns 0 as soon as any component is
+`all`, so under `--component all` — which `deploy.yml` passes when the changed files
+match nothing watched, including this plan's own merge, or when the manual
+`components: all` input is used — both named arms already match and the block is
+reached. A `modules/hermes/`-only push is a `hermes` deploy, not an `all` one. The
+5-minute `sync-codex-router.yml` router-only dispatch reaches it too. It:
 
 - guards the host-side checkout (`[ ! -d "$ROOT/modules/codex-router" ]`) and the
   script (`[ ! -f "$CHECKOUT_SCRIPT" ]`): each prints a notice and, in CI only
@@ -173,9 +175,9 @@ that position: `test-50-seed-defaults.sh` extracts and executes the probe block,
 stubs only the reconcile script, and asserts the log equals exactly the stub's
 output, so a call inside the block would run an unstubbed path and break an
 assertion this plan lists in Verification; and the fetch needs a credential, which on a
-fresh volume comes from `GH_TOKEN` in the hook's environment — the `gh auth login`
-block is a second, weaker path, because it runs `su` without `-m` and writes gh's
-config into hermes' HOME, which this call does not read.
+fresh volume comes from `GH_TOKEN`, preserved in the hook's environment by `su -m`.
+The `gh auth login` block above is not what makes this work: it runs `su` without
+`-m`, so it writes gh's config into hermes' HOME while this call reads root's.
 The call is `su -m -s /bin/sh hermes -c '/opt/hermes-defaults/scripts/refresh-codex-router-checkout.sh'`:
 `-m` preserves the environment, because the hook's environment carries `GH_TOKEN`
 (from `modules/docker-compose.yml`) and `su` resets it by default, so without `-m`

@@ -163,7 +163,8 @@ side_commit=$(git -C "$checkout" rev-parse HEAD)
 git -C "$checkout" checkout -q main
 side_head=$(git -C "$checkout" rev-parse HEAD)
 run_refresh "$side_commit"
-if [ "$rc" -ne 0 ] && [ "$(git -C "$checkout" rev-parse HEAD)" = "$side_head" ]; then
+if [ "$rc" -ne 0 ] && [ "$(git -C "$checkout" rev-parse HEAD)" = "$side_head" ] \
+    && printf '%s' "$out" | grep -q "is not on origin/"; then
     ok "a target only reachable locally is refused without moving"
 else
     nope "a target only reachable locally is refused without moving (rc=$rc): $out"
@@ -190,7 +191,7 @@ git -C "$checkout" checkout -q -- file.txt
     git commit -qm local
 )
 run_refresh
-if [ "$rc" -ne 0 ]; then
+if [ "$rc" -ne 0 ] && printf '%s' "$out" | grep -q "cannot fast-forward"; then
     ok "a clean diverged checkout fails loudly instead of being forced"
 else
     nope "a clean diverged checkout fails loudly instead of being forced: $out"
@@ -200,13 +201,15 @@ fi
 # revision and the branch it fetched must agree.
 diverged_head=$(git -C "$checkout" rev-parse HEAD)
 run_refresh "$(git -C "$sandbox/seed" rev-parse HEAD)"
-if [ "$rc" -ne 0 ] && [ "$(git -C "$checkout" rev-parse HEAD)" = "$diverged_head" ]; then
+if [ "$rc" -ne 0 ] && [ "$(git -C "$checkout" rev-parse HEAD)" = "$diverged_head" ] \
+    && printf '%s' "$out" | grep -q "cannot fast-forward"; then
     ok "a diverged checkout refuses a reachable target without moving"
 else
     nope "a diverged checkout refuses a reachable target without moving (rc=$rc): $out"
 fi
 run_refresh 0000000000000000000000000000000000000000
-if [ "$rc" -ne 0 ] && [ "$(git -C "$checkout" rev-parse HEAD)" = "$diverged_head" ]; then
+if [ "$rc" -ne 0 ] && [ "$(git -C "$checkout" rev-parse HEAD)" = "$diverged_head" ] \
+    && printf '%s' "$out" | grep -q "is not on origin/"; then
     ok "a target missing from the fetched history fails without moving"
 else
     nope "a target missing from the fetched history fails without moving (rc=$rc): $out"
@@ -216,7 +219,8 @@ fi
 # credentials). It must fail loudly and move nothing.
 git -C "$checkout" remote set-url origin "$sandbox/absent.git"
 run_refresh
-if [ "$rc" -ne 0 ] && [ "$(git -C "$checkout" rev-parse HEAD)" = "$diverged_head" ]; then
+if [ "$rc" -ne 0 ] && [ "$(git -C "$checkout" rev-parse HEAD)" = "$diverged_head" ] \
+    && printf '%s' "$out" | grep -q "could not fetch origin"; then
     ok "an unreachable origin fails the fetch without moving HEAD"
 else
     nope "an unreachable origin fails the fetch without moving HEAD (rc=$rc): $out"
@@ -234,7 +238,8 @@ sleep 1
 rc=0
 out=$(CODEX_ROUTER_CHECKOUT="$checkout" CODEX_ROUTER_LOCK_WAIT_SECONDS=1 sh "$SCRIPT" 2>&1) || rc=$?
 wait "$lock_holder" 2>/dev/null || true
-if [ "$rc" -ne 0 ] && [ "$(git -C "$checkout" rev-parse HEAD)" = "$diverged_head" ]; then
+if [ "$rc" -ne 0 ] && [ "$(git -C "$checkout" rev-parse HEAD)" = "$diverged_head" ] \
+    && printf '%s' "$out" | grep -q "giving up"; then
     ok "a held lock fails the run and leaves every ref alone"
 else
     nope "a held lock fails the run and leaves every ref alone (rc=$rc): $out"
