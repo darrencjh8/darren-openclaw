@@ -29,106 +29,169 @@ base, so this measurement is what the change is justified by):
   `git -c credential.helper='!gh auth git-credential' ls-remote origin main`
   returns `c80dfb8`. Because that helper only runs for an HTTPS remote, the fetch
   depends on the remote staying HTTPS — a `git://` or `file://` remote would need
-  no credentials but a rewritten one could break it.
+  no credentials, but a rewritten one could break it.
 
 So a production dev-loop run executes a driver that predates #140, and the P0
 retry-budget fix (#153) never reaches it.
 
 ## Change
 
-1. **New `modules/hermes/scripts/refresh-codex-router-checkout.sh`** — the single
-   writer for the checkout. It:
-   - holds an exclusive lock (`flock` on `$CHECKOUT/.git/codex-router-checkout.lock`,
-     bounded wait) across the fetch and the merge, because a `hermes` deploy
-     recreates the container and the boot hook then runs this script while the
-     deploy is still running it;
-   - skips, with a printed notice and exit 0, when the checkout is absent, dirty, or
-     on a branch other than the expected one (`git symbolic-ref --quiet --short
-     HEAD`), because a live session owns those states;
-   - fetches the branch with gh's credential helper, then moves `HEAD` to the
-     requested revision: a target `HEAD` already contains is a no-op, a target
-     `HEAD` is an ancestor of is a fast-forward, and anything else — a diverged
-     checkout, or a target missing from the fetched history — exits non-zero
-     without forcing;
-   - with no argument, tracks the fetched head;
-   - never stashes, resets, rebases, or forces, and never touches a worktree.
-2. **`modules/deploy.sh`** — a new `# ---- Hermes container codex-router checkout ----`
-   block inside the existing
-   `should_deploy "codex-router" || should_deploy "hermes"` scope. It guards what
-   the sibling skills block guards: the host-side checkout
-   (`[ ! -d "$ROOT/modules/codex-router" ]`), the script, and
-   `docker inspect hermes`, each printing a notice and skipping outside CI; in CI a
-   missing checkout or a refresh failure counts toward `failed`. It copies the
-   script into the container and runs it as `hermes` with the revision this deploy
-   checked out (`git -C "$ROOT/modules/codex-router" rev-parse HEAD`), so the
-   running container, the skill roots, and the checkout describe one revision.
-3. **`modules/hermes/50-seed-defaults`** — run the refresh on boot as `hermes`
-   (`su -s /bin/sh hermes -c`), with no target so it tracks `origin/main`; a
-   recreated container heals itself. It runs the image-baked copy
-   `/opt/hermes-defaults/scripts/refresh-codex-router-checkout.sh`: that path only
-   changes when the hermes image is rebuilt, which is exactly when this file
-   changes, and the deploy's own copy is what refreshes the container between
-   rebuilds. Failure logs a warning and never fails the boot.
-4. **Tests** — new behaviour suite
-   `modules/hermes/tests/test-refresh-codex-router-checkout.sh` exercises the
-   script against real repositories: up-to-date no-op, fast-forward, an explicit
-   target that must move `HEAD` to that revision and away from the fetched head, a
-   target `HEAD` already contains (no-op), dirty skip, wrong-branch skip, diverged
-   failure, and absent skip; it also pins both call sites, scoped to the new deploy
-   block where the sibling block would otherwise satisfy the same text.
-   `modules/tests/test_deploy_workflow_router.py` gains
-   `test_hermes_container_checkout_is_refreshed`, which pins the deploy block, the
-   checkout marker, the owning user, the script's dirty and branch guards, the
-   absence of destructive git verbs, and the boot call's "never fail the boot"
-   shape. The new suite is wired into the `hermes-scripts` job of
-   `.github/workflows/test.yml`.
+### 1. New `modules/hermes/scripts/refresh-codex-router-checkout.sh`
+
+One writer for the checkout. Inputs and interface, exactly:
+
+- `CHECKOUT=${CODEX_ROUTER_CHECKOUT:-/workspace/codex-router}` — the path override
+  the behaviour suite drives the script through.
+- `BRANCH=${CODEX_ROUTER_BRANCH:-main}` — the only branch it will move; the suite
+  hard-codes `main`.
+- `LOCK_WAIT_SECONDS=${CODEX_ROUTER_LOCK_WAIT_SECONDS:-120}` — the lock bound.
+- `TARGET_REV="$1"`, optional. With it, the checkout must end at that revision;
+  without it, at the fetched head.
+
+Order of operations, which is the whole contract:
+
+1. If `$CHECKOUT/.git` is not a directory, print `no checkout at <path>; skipping`
+   and exit 0. The lock file lives inside `.git`, so this guard must come first:
+   acquiring the lock before it would fail the redirection and exit non-zero for a
+   path the script promises to skip.
+2. Acquire `flock` on `$CHECKOUT/.git/codex-router-checkout.lock`, waiting up to
+   `LOCK_WAIT_SECONDS` (inside `.git`, so it never appears as untracked work). On
+   timeout: print `another writer held <path> for <n>s; giving up` and exit 1,
+   leaving every ref untouched. Taking the lock here — after the checkout is known
+   to be a repository, before any state is read — is what makes the next two checks
+   act on state no other writer can move.
+3. Inside the lock, re-read the state: a dirty checkout (`git status --porcelain`
+   non-empty) prints `<path> is dirty; leaving it alone` and exits 0; a checkout
+   whose `git symbolic-ref --quiet --short HEAD` is not `BRANCH` prints
+   `<path> is on '<branch>', not <branch>; leaving it alone` and exits 0. Both are
+   a live session's state and are never stashed, reset, rebased, or forced.
+4. Fetch: `git -c credential.helper='!gh auth git-credential' fetch --quiet origin
+   "$BRANCH"`. This updates `refs/remotes/origin/$BRANCH` and writes `FETCH_HEAD`;
+   the no-argument case below advances to `FETCH_HEAD`, i.e. the head of that
+   branch at fetch time. A fetch failure exits 1.
+5. Move `HEAD`, only by fast-forward:
+   - with a target: a target that is not a commit in the fetched history
+     (`git cat-file -e "$TARGET^{commit}"`) exits 1; a target `HEAD` already
+     contains (`git merge-base --is-ancestor "$TARGET" HEAD`) is a no-op that exits
+     0, because boot can already have advanced past the revision a later deploy
+     pins; otherwise `git merge --ff-only --quiet "$TARGET"`, and its failure exits
+     1;
+   - without a target: `git merge --ff-only --quiet FETCH_HEAD`, and its failure
+     exits 1.
+6. Print the resulting `git rev-parse --short HEAD` so a deploy log shows what the
+   container is on (the verification step below reads it).
+
+It runs as the container's `hermes` user, never touches a worktree, and contains no
+`reset`, `stash`, `rebase`, `checkout -f`, `push --force`, or `worktree` verb.
+
+### 2. `modules/deploy.sh`
+
+A new block marked `# ---- Hermes container codex-router checkout ----`, inside the
+existing `should_deploy "codex-router" || should_deploy "hermes"` scope (the same
+scope as the skill reconcile, so the 5-minute `sync-codex-router.yml` router-only
+dispatch reaches it). It:
+
+- guards the host-side checkout (`[ ! -d "$ROOT/modules/codex-router" ]`), the
+  script, and the container (`docker inspect hermes`), each printing a notice and
+  skipping — in CI a missing checkout counts toward `failed`;
+- waits for the container the way the sibling block above does (up to 15 × 2s
+  `docker exec hermes true`), because a `hermes` deploy recreates it and `docker
+  exec` during init returns non-zero; the sibling's own poll is not enough, its
+  result is not reused here;
+- copies the script in (`docker cp` to `/tmp`) and runs it as the checkout's owner
+  (`docker exec -u hermes hermes sh /tmp/refresh-codex-router-checkout.sh
+  "$CHECKOUT_TARGET"`), with `CHECKOUT_TARGET=$(git -C "$ROOT/modules/codex-router"
+  rev-parse HEAD)`;
+- counts any failure toward `failed` unconditionally, matching the sibling block's
+  counter; production deploys always run in CI, so this is the same outcome on the
+  path that matters, and a local run still reports it;
+- removes the copied script afterwards.
+
+The environment is therefore **advanced to at least the deployed revision**: the
+container checkout is never behind what the deploy shipped, but a boot between
+deploys can leave it ahead of the reconciled roots, which is why the target case
+treats an already-contained revision as satisfied rather than as an error.
+
+### 3. `modules/hermes/50-seed-defaults`
+
+Run the same refresh on boot as `hermes` (`su -s /bin/sh hermes -c`), with no target
+so it tracks `origin/main`; a recreated container heals itself. It runs the
+image-baked copy `/opt/hermes-defaults/scripts/refresh-codex-router-checkout.sh`
+(`COPY scripts/` in the Dockerfile, plus `chmod +x`): that copy changes exactly when
+the hermes image is rebuilt, which is when this hook changes, while the deploy's own
+`docker cp` copy is what refreshes the container between rebuilds. The call carries
+a fallback (`|| echo "WARNING: could not advance the codex-router checkout …"`), so
+a failed refresh logs and never fails the boot, and it appends to the same
+`/opt/data/logs/codex-router-skills-sync.log` the reconcile writes.
+
+### 4. Tests and docs
+
+`modules/hermes/tests/test-refresh-codex-router-checkout.sh` drives the script
+against real repositories through `CODEX_ROUTER_CHECKOUT`:
+up-to-date no-op; fast-forward to `FETCH_HEAD`; an explicit target that must land
+`HEAD` on that revision and *away* from the fetched head; a target `HEAD` already
+contains (no-op); dirty skip with the work intact; wrong-branch skip; diverged
+failure; a target missing from the fetched history; and a busy lock
+(`CODEX_ROUTER_LOCK_WAIT_SECONDS=1` with the lock held) that must exit non-zero
+with every ref unchanged. It also pins both call sites, with the scope and marker
+assertions kept out of the sibling block's text.
+
+`modules/tests/test_deploy_workflow_router.py::test_hermes_container_checkout_is_refreshed`
+pins the deploy block (scope, marker, guards, readiness poll, `rev-parse HEAD`
+target, `docker exec -u hermes`, `failed` counter), the script (executable; dirty,
+branch and lock guards; `--ff-only`; `credential.helper`; no destructive or
+`worktree` verb), and the boot call (owner, baked path, never-fail-the-boot
+fallback). The new suite is wired into the `hermes-scripts` job of
+`.github/workflows/test.yml`, and `DEPLOY.md`'s inventory of the scripts that
+reconcile the container gains the refresh.
 
 ## Questions and answers
 
 Q: When the checkout cannot be advanced, what should the deploy do?
-Assumption: Skip an absent or dirty checkout with a printed notice, and fail the deploy
-when a clean checkout cannot fast-forward. A dirty checkout is normal — a live
-session is mid-work — and must never break an unrelated deploy; a clean checkout
-that cannot move means the environment disagrees with what was shipped, which is
-the failure this issue exists to make loud. (Operator selected the other two
-questions and left this one to the recommendation.)
+Assumption: Skip an absent, dirty, or other-branch checkout with a printed notice,
+and fail the deploy when a clean checkout cannot reach the target — including a lock
+that stays held past `LOCK_WAIT_SECONDS`, which exits non-zero because a silent skip
+would report success with nothing verified. (Planner-inferred: the operator selected
+the boot-parity and scope questions and left this one to this recommendation.)
 
 Q: Should the refresh also run at container boot?
-A: Yes. The boot hook runs the same script as `hermes` with no target, tracking
-`origin/main`, so a recreated container heals itself.
+A: Yes. (Operator-selected.) The boot hook runs the same script as `hermes` with no
+target, tracking `origin/main`, so a recreated container heals itself.
 
 Q: Which deploys refresh the checkout?
-A: Both a router-only deploy (`components=codex-router`) and a `hermes` deploy —
-the same scope as the skill reconcile.
+A: Both a router-only deploy (`components=codex-router`) and a `hermes` deploy.
+(Operator-selected.) That is the same scope as the skill reconcile.
 
 Q: Which revision does the deploy target?
-Assumption: The revision this deploy checked out (`git -C "$ROOT/modules/codex-router"
-rev-parse HEAD`), not whatever `main` is at deploy time, so the running container,
-the skill roots, and the checkout describe one revision. Boot has no such revision
-available, so it tracks `origin/main`; a boot between deploys can be ahead of the
-reconciled roots.
+Assumption: The revision this deploy checked out (`git -C
+"$ROOT/modules/codex-router" rev-parse HEAD`), not whatever `main` is at deploy
+time, so the checkout is advanced to at least the deployed revision — not to exactly
+one revision, because boot may already have moved it ahead of the reconciled roots.
+(Planner-inferred, not operator-confirmed.)
 
 Q: Which identity runs the refresh?
-Assumption: The container's `hermes` user in both callers (`docker exec -u hermes`, `su -s
-/bin/sh hermes -c`). Verified: the checkout is owned by `hermes`, running as root
-trips git's `dubious ownership`, and root writes would leave objects the sessions
-cannot extend when they create worktrees.
+Assumption: The container's `hermes` user in both callers (`docker exec -u hermes`,
+`su -s /bin/sh hermes -c`). (Planner-inferred, not operator-confirmed.) Verified: the
+checkout is owned by `hermes`, running as root trips git's `dubious ownership`, and
+root writes would leave objects the sessions cannot extend when they create
+worktrees.
 
 Q: How does the fetch authenticate?
 Assumption: An inline `-c credential.helper='!gh auth git-credential'` on the fetch,
 because the image's git has no credential helper and gh is already authenticated.
-Verified: `git ls-remote origin main` returns `c80dfb8` with that helper. Nothing
-is persisted to git config.
+(Planner-inferred, not operator-confirmed.) Verified: `git ls-remote origin main`
+returns `c80dfb8` with that helper. Nothing is persisted to git config.
 
 Q: Can this disturb a session that is using the checkout?
-Assumption: No. The script operates on the base repository only, never on a worktree, and
-skips a dirty checkout entirely; a fetch plus fast-forward leaves existing
-worktrees and stashes untouched.
+Assumption: No. (Planner-inferred, not operator-confirmed.) The script operates on
+the base repository only, never on a worktree, skips a dirty or other-branch
+checkout entirely, and holds its lock across the fetch and the merge; a fetch plus
+fast-forward leaves existing worktrees and stashes untouched.
 
 Q: Do other checkouts in the container need the same treatment?
-Assumption: No. Searching the session database for `dev-loop/scripts/loop.py` found this
-checkout as the only repository-local driver source, plus the installed skill
-copies.
+Assumption: No. (Planner-inferred, not operator-confirmed.) Searching the session
+database for `dev-loop/scripts/loop.py` found this checkout as the only
+repository-local driver source, plus the installed skill copies.
 
 ## Out of scope
 
@@ -158,5 +221,6 @@ copies.
   `bash modules/hermes/tests/test-50-seed-defaults.sh`,
   `bash modules/hermes/tests/test-deploy.sh`
 - `shellcheck modules/hermes/scripts/*.sh modules/hermes/50-seed-defaults`
+- `DEPLOY.md` names the refresh beside the other container-reconciling scripts
 - after merge the deploy log must print the checkout's new short SHA, and a fresh
   session's driver path must resolve to the deployed revision

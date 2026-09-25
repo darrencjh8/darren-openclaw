@@ -164,9 +164,42 @@ else
     nope "a clean diverged checkout fails loudly instead of being forced: $out"
 fi
 
+# A target the fetch did not bring is an error, not a silent no-op: the deploy's
+# revision and the branch it fetched must agree.
+diverged_head=$(git -C "$checkout" rev-parse HEAD)
+run_refresh "$(git -C "$sandbox/seed" rev-parse HEAD)"
+if [ "$rc" -ne 0 ] && [ "$(git -C "$checkout" rev-parse HEAD)" = "$diverged_head" ]; then
+    ok "a diverged checkout refuses a reachable target without moving"
+else
+    nope "a diverged checkout refuses a reachable target without moving (rc=$rc): $out"
+fi
+run_refresh 0000000000000000000000000000000000000000
+if [ "$rc" -ne 0 ] && [ "$(git -C "$checkout" rev-parse HEAD)" = "$diverged_head" ]; then
+    ok "a target missing from the fetched history fails without moving"
+else
+    nope "a target missing from the fetched history fails without moving (rc=$rc): $out"
+fi
+
+# Busy lock: another writer is refreshing the same checkout. The deploy must see
+# a failure rather than report success on a revision it never applied.
+(
+    flock -w 5 9
+    sleep 5
+) 9>"$checkout/.git/codex-router-checkout.lock" &
+lock_holder=$!
+sleep 1
+rc=0
+out=$(CODEX_ROUTER_CHECKOUT="$checkout" CODEX_ROUTER_LOCK_WAIT_SECONDS=1 "$SCRIPT" 2>&1) || rc=$?
+wait "$lock_holder" 2>/dev/null || true
+if [ "$rc" -ne 0 ] && [ "$(git -C "$checkout" rev-parse HEAD)" = "$diverged_head" ]; then
+    ok "a held lock fails the run and leaves every ref alone"
+else
+    nope "a held lock fails the run and leaves every ref alone (rc=$rc): $out"
+fi
+
 # Absent: a container that has not created the checkout yet is not an error.
 rc=0
-out=$(CODEX_ROUTER_CHECKOUT="$sandbox/absent" "$SCRIPT" 2>&1) || rc=$?
+out=$(CODEX_ROUTER_CHECKOUT="$sandbox/absent" CODEX_ROUTER_LOCK_WAIT_SECONDS=1 "$SCRIPT" 2>&1) || rc=$?
 if [ "$rc" -eq 0 ]; then
     ok "an absent checkout is skipped and exits 0"
 else

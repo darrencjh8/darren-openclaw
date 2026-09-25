@@ -201,6 +201,10 @@ class DeployWorkflowRouterTests(unittest.TestCase):
         # leave its objects unwritable for the sessions that create worktrees.
         self.assertIn("docker exec -u hermes hermes", checkout_block)
         self.assertIn("failed=$((failed + 1))", checkout_block)
+        # A hermes deploy recreates the container, so the block must wait for it
+        # rather than run docker exec against a container that is still starting.
+        self.assertIn("for _ in $(seq 1 15)", checkout_block)
+        self.assertIn("docker exec hermes true", checkout_block)
 
         refresh = Path(__file__).parents[1] / "hermes/scripts/refresh-codex-router-checkout.sh"
         self.assertTrue(refresh.is_file(), "refresh script is shipped")
@@ -213,11 +217,13 @@ class DeployWorkflowRouterTests(unittest.TestCase):
         # A session branch checked out in the base repository is not ours to move.
         self.assertIn("symbolic-ref", refresh_body)
         # Two writers can overlap (a hermes deploy recreates the container while
-        # the boot hook runs), so they serialize on a lock.
+        # the boot hook runs), so they serialize on a lock with a bounded wait.
         self.assertIn("flock", refresh_body)
+        self.assertIn("CODEX_ROUTER_LOCK_WAIT_SECONDS", refresh_body)
         # The safety claim is the absence of the destructive alternatives: this
-        # script must never have a way to discard a session's work.
-        for destructive in ("reset --hard", "stash", "rebase", "checkout -f", "push --force"):
+        # script must never have a way to discard a session's work or touch a
+        # session's worktree.
+        for destructive in ("reset --hard", "stash", "rebase", "checkout -f", "push --force", "worktree"):
             self.assertNotIn(destructive, refresh_body)
 
         boot = (Path(__file__).parents[1] / "hermes/50-seed-defaults").read_text(encoding="utf-8")
