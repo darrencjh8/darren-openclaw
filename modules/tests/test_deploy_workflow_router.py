@@ -210,12 +210,23 @@ class DeployWorkflowRouterTests(unittest.TestCase):
         self.assertIn("status --porcelain", refresh_body)
         self.assertIn("--ff-only", refresh_body)
         self.assertIn("credential.helper", refresh_body)
+        # A session branch checked out in the base repository is not ours to move.
+        self.assertIn("symbolic-ref", refresh_body)
+        # Two writers can overlap (a hermes deploy recreates the container while
+        # the boot hook runs), so they serialize on a lock.
+        self.assertIn("flock", refresh_body)
+        # The safety claim is the absence of the destructive alternatives: this
+        # script must never have a way to discard a session's work.
+        for destructive in ("reset --hard", "stash", "rebase", "checkout -f", "push --force"):
+            self.assertNotIn(destructive, refresh_body)
 
         boot = (Path(__file__).parents[1] / "hermes/50-seed-defaults").read_text(encoding="utf-8")
         self.assertIn("refresh-codex-router-checkout.sh", boot)
-        # Boot runs as root, so the refresh has to drop to the checkout's owner,
-        # and it must never fail the boot.
+        # Boot runs as root, so the refresh has to drop to the checkout's owner.
         self.assertRegex(boot, r"su -s /bin/sh hermes -c '[^']*refresh-codex-router-checkout\.sh'")
+        # A boot hook may not fail the boot: the refresh call carries a fallback
+        # that reports the failure and lets the boot continue.
+        self.assertIn('|| echo "WARNING: could not advance the codex-router checkout', boot)
 
     def test_hermes_deploy_health_gate_retries_before_failing(self):
         deploy_script = DEPLOY_SCRIPT.read_text(encoding="utf-8")

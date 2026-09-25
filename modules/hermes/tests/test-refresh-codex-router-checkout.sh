@@ -35,9 +35,9 @@ grep -Fq -- 'refresh-codex-router-checkout.sh' "$DEPLOY_SCRIPT" \
     && ok "deploy.sh runs the refresh" || nope "deploy.sh runs the refresh"
 grep -Fq -- 'docker exec -u hermes hermes' "$DEPLOY_SCRIPT" \
     && ok "deploy.sh runs it as the checkout's owner" || nope "deploy.sh runs it as the checkout's owner"
-grep -Eq 'should_deploy "codex-router".*should_deploy "hermes"' "$DEPLOY_SCRIPT" \
-    && ok "deploy.sh refreshes on a router-only and a hermes deploy" \
-    || nope "deploy.sh refreshes on a router-only and a hermes deploy"
+# The router-or-hermes scope itself is asserted against the new block in
+# test_deploy_workflow_router.py: matching it here also matched the sibling
+# skills block, so it passed before the block existed.
 grep -Fq -- 'refresh-codex-router-checkout.sh' "$SEED_SCRIPT" \
     && ok "the boot hook refreshes the checkout" || nope "the boot hook refreshes the checkout"
 grep -Eq "su -s /bin/sh hermes -c '[^']*refresh-codex-router-checkout" "$SEED_SCRIPT" \
@@ -98,19 +98,48 @@ else
     nope "a clean stale checkout fast-forwards to origin/main (rc=$rc): $out"
 fi
 
-# An explicit target wins over the fetched head: the deploy pins its revision.
+# An explicit target wins over the fetched head: the deploy pins the revision it
+# checked out. HEAD is deliberately behind the target and the target is
+# deliberately behind the fetched head, so an implementation that only
+# fast-forwards to FETCH_HEAD lands on the wrong commit and fails here.
 advance_origin third
+advance_origin fourth
+fetched=$(git -C "$sandbox/seed" rev-parse HEAD)
 target=$(git -C "$sandbox/seed" rev-parse HEAD~1)
 run_refresh "$target"
-if [ "$rc" -eq 0 ] && [ "$(git -C "$checkout" rev-parse HEAD)" = "$target" ]; then
+checkout_head=$(git -C "$checkout" rev-parse HEAD)
+if [ "$rc" -eq 0 ] && [ "$checkout_head" = "$target" ] && [ "$checkout_head" != "$fetched" ]; then
     ok "an explicit revision is checked out instead of the fetched head"
 else
-    nope "an explicit revision is checked out instead of the fetched head (rc=$rc): $out"
+    nope "an explicit revision is checked out instead of the fetched head (rc=$rc, head=$checkout_head, target=$target, fetched=$fetched): $out"
 fi
+
+# A target HEAD already contains is satisfied, not forced: boot may already have
+# advanced past the revision a later deploy pins.
+contained=$(git -C "$checkout" rev-parse HEAD~1)
+run_refresh "$contained"
+if [ "$rc" -eq 0 ] && [ "$(git -C "$checkout" rev-parse HEAD)" = "$checkout_head" ]; then
+    ok "a target the checkout already contains is a no-op"
+else
+    nope "a target the checkout already contains is a no-op (rc=$rc): $out"
+fi
+
+# On a session's own branch the base checkout is not ours to move.
+git -C "$checkout" checkout -q -b session-work
+advance_origin fifth
+branch_head=$(git -C "$checkout" rev-parse HEAD)
+run_refresh
+if [ "$rc" -eq 0 ] && [ "$(git -C "$checkout" rev-parse HEAD)" = "$branch_head" ] \
+    && [ "$(git -C "$checkout" rev-parse --abbrev-ref HEAD)" = "session-work" ]; then
+    ok "a checkout on another branch is skipped"
+else
+    nope "a checkout on another branch is skipped (rc=$rc): $out"
+fi
+git -C "$checkout" checkout -q main
 
 # Dirty: a live session owns the checkout. Leave the bytes and the HEAD alone.
 printf 'session work\n' >> "$checkout/file.txt"
-advance_origin fourth
+advance_origin sixth
 dirty_head=$(git -C "$checkout" rev-parse HEAD)
 run_refresh
 if [ "$rc" -eq 0 ] && [ "$(git -C "$checkout" rev-parse HEAD)" = "$dirty_head" ] \
