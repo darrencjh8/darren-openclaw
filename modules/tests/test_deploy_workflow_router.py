@@ -1,6 +1,7 @@
 # Copyright © 2022 Dell Inc. or its subsidiaries. All Rights Reserved.
 
 from pathlib import Path
+import re
 import subprocess
 import unittest
 
@@ -295,6 +296,17 @@ class DeployWorkflowRouterTests(unittest.TestCase):
         start = deploy.index(anchor)
         end = deploy.index("\n      fi\n", start) + len("\n      fi\n")
         classifier = deploy[start:end]
+        # The classifier derives success from the script's own report, so the two
+        # files are one contract with a token in each: the script stops being
+        # classified as success the moment either success report is reworded, and
+        # the cases above independently catch a change to the token itself.
+        script = Path(__file__).parents[1] / "hermes/scripts/refresh-codex-router-checkout.sh"
+        script_body = script.read_text(encoding="utf-8")
+        for success_report in ("is at $(head_line)", "is at $(git rev-parse --short HEAD)"):
+            self.assertIn(
+                success_report, script_body,
+                f"the refresh script never reports {success_report!r}, which the deploy classifier matches as success",
+            )
         cases = {
             # script lines 116 and 130: advanced, or already at the target.
             "refresh-codex-router-checkout: /workspace/codex-router is at 3f60a775": True,
