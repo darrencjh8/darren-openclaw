@@ -82,6 +82,29 @@ run_refresh() {
     out=$(CODEX_ROUTER_CHECKOUT="$checkout" sh "$SCRIPT" "$@" 2>&1) || rc=$?
 }
 
+# The deploy decides success from this script's report, not from its exit code:
+# four skip outcomes exit 0. Run a case's captured output through the deploy
+# block's own classifier, so the two files are bound by execution in both
+# directions rather than by a token restated here.
+CLASSIFIER=$(sed -n '/grep -q "is at "; then/,/^      fi$/p' "$DEPLOY_SCRIPT")
+if [ -z "$CLASSIFIER" ]; then
+    nope "the deploy block's checkout classifier is extractable"
+fi
+
+classify() {
+    GREEN="" YELLOW="" NC="" CHECKOUT_OUTPUT="$1" bash -c "$CLASSIFIER" 2>/dev/null
+}
+
+# $1 label, $2 captured output, $3 expected: success or alone.
+expect_classified() {
+    line=$(classify "$2")
+    if [ "$3" = success ]; then
+        case "$line" in *"is at this deploy's revision"*) ok "$1" ;; *) nope "$1 (classifier said: $line)" ;; esac
+    else
+        case "$line" in *"left alone"*) ok "$1" ;; *) nope "$1 (classifier said: $line)" ;; esac
+    fi
+}
+
 # Already current: a no-op the deploy can run on every push.
 before=$(git -C "$checkout" rev-parse HEAD)
 run_refresh
@@ -101,6 +124,7 @@ if [ "$rc" -eq 0 ] && [ "$(git -C "$checkout" rev-parse HEAD)" = "$(git -C "$san
 else
     nope "a clean stale checkout fast-forwards to origin/main and prints the new short SHA (rc=$rc): $out"
 fi
+expect_classified "the deploy reports a real advance as success" "$out" success
 
 # An explicit target wins over the fetched head: the deploy pins the revision it
 # checked out. HEAD is deliberately behind the target and the target is
@@ -139,6 +163,7 @@ if [ "$rc" -eq 0 ] && [ "$(git -C "$checkout" rev-parse HEAD)" = "$branch_head" 
 else
     nope "a checkout on another branch is skipped (rc=$rc): $out"
 fi
+expect_classified "the deploy leaves a session branch alone" "$out" alone
 git -C "$checkout" checkout -q main
 
 # A detached HEAD is a skip, not a silent success with an empty branch name.
@@ -181,6 +206,7 @@ if [ "$rc" -eq 0 ] && [ "$(git -C "$checkout" rev-parse HEAD)" = "$dirty_head" ]
 else
     nope "a dirty checkout is skipped with its work intact (rc=$rc): $out"
 fi
+expect_classified "the deploy leaves a dirty checkout alone" "$out" alone
 git -C "$checkout" checkout -q -- file.txt
 
 # Diverged: clean but not a fast-forward. That is an environment bug, not a skip.
@@ -270,6 +296,7 @@ if [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -q "on 'HEAD'"; then
 else
     nope "an unborn checkout is skipped without aborting (rc=$rc): $out"
 fi
+expect_classified "the deploy leaves an unborn checkout alone" "$out" alone
 
 # Absent: a container that has not created the checkout yet is not an error.
 rc=0
@@ -279,5 +306,6 @@ if [ "$rc" -eq 0 ]; then
 else
     nope "an absent checkout is skipped and exits 0 (rc=$rc): $out"
 fi
+expect_classified "the deploy leaves an absent checkout alone" "$out" alone
 
 exit "$fail"
