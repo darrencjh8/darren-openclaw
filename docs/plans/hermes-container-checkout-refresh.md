@@ -128,7 +128,14 @@ health gate. Same scope as the skill reconcile, so the 5-minute
 - counts any failure toward `failed` unconditionally, matching the sibling block's
   counter; production deploys always run in CI, so this is the same outcome on the
   path that matters, and a local run still reports it;
-- removes the copied script afterwards.
+- removes the copied script afterwards (`docker exec hermes rm -f
+  /tmp/refresh-codex-router-checkout.sh`, best-effort, exactly as the sibling block
+  removes its own staged script);
+- prints its outcome on the block's own lines: `--- Hermes Codex Router Checkout ---`
+  before the run, then either `✓ hermes codex-router checkout is at this deploy's
+  revision` or `✗ hermes codex-router checkout could not be advanced`. The test pins
+  those strings, so the copy, the run, the removal and the report cannot be
+  reworded away without a red suite.
 
 The environment is therefore **advanced to at least the deployed revision**: the
 container checkout is never behind what the deploy shipped, but a boot between
@@ -143,21 +150,45 @@ image-baked copy `/opt/hermes-defaults/scripts/refresh-codex-router-checkout.sh`
 (`COPY scripts/` in the Dockerfile, plus `chmod +x`): that copy changes exactly when
 the hermes image is rebuilt, which is when this hook changes, while the deploy's own
 `docker cp` copy is what refreshes the container between rebuilds. The call is a
-line of its own **after** the skills probe block's `fi` — not inside it — with its
-own guarded redirect: `test-50-seed-defaults.sh` extracts that probe block, executes
-it, stubs only the reconcile script, and asserts the log equals exactly the stub's
+line of its own **after** both the skills probe block's `fi` and the hook's
+`gh auth login --with-token` block, with its own guarded redirect. Two reasons for
+that position: `test-50-seed-defaults.sh` extracts and executes the probe block,
+stubs only the reconcile script, and asserts the log equals exactly the stub's
 output, so a call inside the block would run an unstubbed path and break an
-assertion this plan lists in Verification. The call carries a fallback
-(`|| echo "WARNING: could not advance the codex-router checkout …"`), so a failed
-refresh logs and never fails the boot, and it appends to the same
-`/opt/data/logs/codex-router-skills-sync.log` the reconcile writes.
+assertion this plan lists in Verification; and the fetch needs a credential, which
+on a fresh volume only exists after that `gh auth login` has written gh's config.
+The call is `su -m -s /bin/sh hermes -c '/opt/hermes-defaults/scripts/refresh-codex-router-checkout.sh'`:
+`-m` preserves the environment, because the hook's environment carries `GH_TOKEN`
+(from `modules/docker-compose.yml`) and `su` resets it by default, so without `-m`
+the boot fetch would run with no credential on a volume whose gh config is also
+missing. It carries a fallback (`|| echo "WARNING: could not advance the
+codex-router checkout …"`), so a failed refresh logs and never fails the boot, and
+it appends to the same `/opt/data/logs/codex-router-skills-sync.log` the reconcile
+writes. Verification gains one boot-path check: after a container recreate or a
+`50-seed-defaults` re-run on a fresh volume, the log must show either the advanced
+SHA or a fetch error, never silence.
+
+Why boot at all: `/workspace` is a host bind mount (`modules/docker-compose.yml`),
+so a container recreate alone preserves the checkout. Boot covers the cases that do
+not — a fresh or restored volume, and a checkout left behind by a failed deploy.
+
+Accepted risk, session interaction: the refresh fast-forwards this checkout while a
+live session may be executing the driver from it, and the newer driver refuses that
+session's schema-3 state. Nothing here can reliably detect an in-flight session, so
+the risk is accepted and documented; the remedy is the one
+[#614](https://github.com/darrencjh8/darren-openclaw/issues/614) already carries for
+the parked states — archive `.agents/dev-loop-state.json` and re-init after the
+session's work is captured. That issue's scope was widened to name this case.
 
 Recovery: the script never forces, so a checkout that diverged from `origin/main`
 (for example after a force-push to codex-router) keeps failing every deploy and
-boot refresh. The documented escape hatch is an operator or session command in the
-container, `git -C /workspace/codex-router fetch origin main && git -C
-/workspace/codex-router reset --hard origin/main`, which this plan records in
-`DEPLOY.md` beside the script so a red deploy has a next step.
+boot refresh. The documented escape hatch is run inside the container as `hermes`,
+with the credential helper the plan's own context says is required:
+`git -C /workspace/codex-router -c credential.helper='!gh auth git-credential' fetch
+origin main && git -C /workspace/codex-router reset --hard origin/main`. The
+`reset --hard` **discards uncommitted changes in that checkout**, which is why it is
+an operator decision and not something the script does; `DEPLOY.md` records both
+halves beside the script.
 
 ### 4. Tests and docs
 
@@ -178,11 +209,15 @@ repositories through `CODEX_ROUTER_CHECKOUT`:
   detached HEAD: skip and the notice names `HEAD`;
 - a diverged checkout: exit 1; an unreachable origin: fetch failure exits 1 with
   refs unchanged; an absent checkout: skip with exit 0;
+- an unborn checkout (a fresh `git init` with no commits): skip with exit 0, because
+  `git rev-parse --abbrev-ref HEAD` exits 128 there and the script must not abort;
 - a busy lock (`CODEX_ROUTER_LOCK_WAIT_SECONDS=1` with the lock held): exit 1 with
   every ref unchanged.
 
 It also pins both call sites, with the scope and marker assertions kept out of the
-sibling block's text.
+sibling block's text, and the Python test pins the boot call's position after the
+hook's `gh auth login` block, its `su -m` environment preservation, the baked path
+literal, and the copy/run/remove triple plus success echo of the deploy block.
 
 `modules/tests/test_deploy_workflow_router.py::test_hermes_container_checkout_is_refreshed`
 pins the deploy block (scope, marker, guards, readiness poll, `rev-parse HEAD`
@@ -205,7 +240,9 @@ the boot-parity and scope questions and left this one to this recommendation.)
 
 Q: Should the refresh also run at container boot?
 A: Yes. (Operator-selected.) The boot hook runs the same script as `hermes` with no
-target, tracking `origin/main`, so a recreated container heals itself.
+target, tracking `origin/main`, so a fresh or restored volume heals itself. Not a
+plain recreate: `/workspace` is a host bind mount, so recreating the container keeps
+the checkout; boot covers the volume cases and a checkout left by a failed deploy.
 
 Q: Which deploys refresh the checkout?
 A: Both a router-only deploy (`components=codex-router`) and a `hermes` deploy.
@@ -237,6 +274,16 @@ the base repository only, never on a worktree, skips a dirty or other-branch
 checkout entirely, and holds its lock across the fetch and the merge; a fetch plus
 fast-forward leaves existing worktrees and stashes untouched.
 
+Q: Can the refresh disturb a live session that is driving this checkout?
+Assumption: It can, and that is an accepted risk rather than a guarded case.
+(Planner-inferred, operator-confirmed as accepted risk.) A session executing the
+driver from `/workspace/codex-router` can be fast-forwarded under itself, and the
+newer driver then refuses its schema-3 state, exactly as the parked states are
+refused. Nothing here can reliably detect an in-flight session, and a heuristic
+guard would be worse than the risk; the remedy is #614's, whose scope now names this
+case: archive `.agents/dev-loop-state.json` and re-init after the session's work is
+captured.
+
 Q: Do other checkouts in the container need the same treatment?
 Assumption: No. (Planner-inferred, not operator-confirmed.) Searching the session
 database for `dev-loop/scripts/loop.py` found this checkout as the only
@@ -253,11 +300,9 @@ repository-local driver source, plus the installed skill copies.
   or re-inits each state that is still wanted.
 - The dev-loop plan pack's Change scaffold: it looks for
   `.github/workflows/tests.yml`, reports "no test command" and "no test files" for
-  this repository, and was bound to a dangling commit in round 1. A later round
-  added that its file list also omits `DEPLOY.md` (which base..HEAD does change) and
-  that its HEAD predates the revision carrying the reviewed plan. Regenerating the
-  pack here is automatic (the next `plan` run does it), but every other defect is
-  the pack builder's, tracked in
+  this repository, and was bound to a dangling commit in round 1. Regenerating the
+  pack here is automatic (the next `plan` run does it), but the filename assumption
+  and the rest are the pack builder's, tracked in
   [codex-router#161](https://github.com/darrencjh8/codex-router/issues/161).
 - `/opt/data/home/.codex/skills` (September generation). It is inert — no `codex`
   binary exists in the container — and the reconciler's shadow list does not cover

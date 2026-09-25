@@ -40,8 +40,8 @@ grep -Fq -- 'docker exec -u hermes hermes' "$DEPLOY_SCRIPT" \
 # skills block, so it passed before the block existed.
 grep -Fq -- 'refresh-codex-router-checkout.sh' "$SEED_SCRIPT" \
     && ok "the boot hook refreshes the checkout" || nope "the boot hook refreshes the checkout"
-grep -Eq "su -s /bin/sh hermes -c '/opt/hermes-defaults/scripts/refresh-codex-router-checkout\\.sh'" "$SEED_SCRIPT" \
-    && ok "the boot hook runs the baked refresh as hermes" || nope "the boot hook runs the baked refresh as hermes"
+grep -Eq "su -m -s /bin/sh hermes -c '/opt/hermes-defaults/scripts/refresh-codex-router-checkout\\.sh'" "$SEED_SCRIPT" \
+    && ok "the boot hook preserves the environment for the baked refresh" || nope "the boot hook preserves the environment for the baked refresh"
 
 echo "=== behaviour against real repositories ==="
 sandbox=$(mktemp -d)
@@ -238,6 +238,18 @@ if [ "$rc" -ne 0 ] && [ "$(git -C "$checkout" rev-parse HEAD)" = "$diverged_head
     ok "a held lock fails the run and leaves every ref alone"
 else
     nope "a held lock fails the run and leaves every ref alone (rc=$rc): $out"
+fi
+
+# Unborn: a fresh `git init` has no commit, and `git rev-parse --abbrev-ref HEAD`
+# exits 128 there, so the script must notice and skip instead of aborting.
+git init -q "$sandbox/unborn"
+git -C "$sandbox/unborn" symbolic-ref HEAD refs/heads/main
+rc=0
+out=$(CODEX_ROUTER_CHECKOUT="$sandbox/unborn" CODEX_ROUTER_LOCK_WAIT_SECONDS=1 sh "$SCRIPT" 2>&1) || rc=$?
+if [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -q "on 'HEAD'"; then
+    ok "an unborn checkout is skipped without aborting"
+else
+    nope "an unborn checkout is skipped without aborting (rc=$rc): $out"
 fi
 
 # Absent: a container that has not created the checkout yet is not an error.

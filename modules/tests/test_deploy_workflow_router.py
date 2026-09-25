@@ -205,6 +205,14 @@ class DeployWorkflowRouterTests(unittest.TestCase):
         # rather than run docker exec against a container that is still starting.
         self.assertIn("for _ in $(seq 1 15)", checkout_block)
         self.assertIn("docker exec hermes true", checkout_block)
+        # The copy, the run, the removal and the outcome report are the block's
+        # behaviour, so they are pinned rather than left to wording.
+        self.assertIn("docker cp \"$CHECKOUT_SCRIPT\" hermes:/tmp/refresh-codex-router-checkout.sh", checkout_block)
+        self.assertIn("docker exec -u hermes hermes sh /tmp/refresh-codex-router-checkout.sh", checkout_block)
+        self.assertIn("docker exec hermes rm -f /tmp/refresh-codex-router-checkout.sh", checkout_block)
+        self.assertIn("--- Hermes Codex Router Checkout ---", checkout_block)
+        self.assertIn("hermes codex-router checkout is at this deploy's revision", checkout_block)
+        self.assertIn("hermes codex-router checkout could not be advanced", checkout_block)
 
         refresh = Path(__file__).parents[1] / "hermes/scripts/refresh-codex-router-checkout.sh"
         self.assertTrue(refresh.is_file(), "refresh script is shipped")
@@ -238,18 +246,23 @@ class DeployWorkflowRouterTests(unittest.TestCase):
 
         boot = (Path(__file__).parents[1] / "hermes/50-seed-defaults").read_text(encoding="utf-8")
         # The baked path, not a filename match: /opt/data/scripts/ holds a copy that
-        # a fresh volume may not have reseeded yet.
+        # a fresh volume may not have reseeded yet. `-m` preserves the environment,
+        # because GH_TOKEN lives there and `su` resets it by default.
         self.assertIn(
-            "su -s /bin/sh hermes -c '/opt/hermes-defaults/scripts/refresh-codex-router-checkout.sh'", boot
+            "su -m -s /bin/sh hermes -c '/opt/hermes-defaults/scripts/refresh-codex-router-checkout.sh'", boot
         )
         # A boot hook may not fail the boot: the refresh call carries a fallback
         # that reports the failure and lets the boot continue.
         self.assertIn('|| echo "WARNING: could not advance the codex-router checkout', boot)
-        # Placement matters: test-50-seed-defaults.sh extracts and executes the
-        # skills probe block and asserts its log exactly, so the refresh call must
-        # sit after that block's fi rather than inside it.
+        # Placement matters twice over. test-50-seed-defaults.sh extracts and
+        # executes the skills probe block and asserts its log exactly, so the call
+        # must sit after that block's fi; and the fetch needs the credential that
+        # `gh auth login --with-token` writes, so it must also sit after that.
         probe_end = boot.index("sync-codex-router-skills.sh 2>/dev/null || true\nfi")
-        self.assertGreater(boot.index("refresh-codex-router-checkout.sh", probe_end), probe_end)
+        call_index = boot.index("refresh-codex-router-checkout.sh", probe_end)
+        self.assertGreater(call_index, probe_end)
+        auth_index = boot.index("gh auth login --with-token")
+        self.assertGreater(call_index, auth_index)
 
     def test_hermes_deploy_health_gate_retries_before_failing(self):
         deploy_script = DEPLOY_SCRIPT.read_text(encoding="utf-8")
