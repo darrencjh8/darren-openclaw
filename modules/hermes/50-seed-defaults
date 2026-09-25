@@ -201,6 +201,20 @@ if [ -n "${FRIDAY_PAT:-}" ]; then
     rm -f /tmp/.gh-token-init
 fi
 
+# The container's own codex-router checkout is the driver dev-loop sessions
+# execute (`codex/skills/dev-loop/scripts/loop.py`), so it must not stay pinned
+# to an old revision while the reconciled skill roots move. No target: track
+# origin/main. `su -m` preserves GH_TOKEN, which the fetch needs, because the hook
+# runs as root and `su` resets the environment by default. A failed refresh logs
+# a warning and never fails the boot.
+# shellcheck disable=SC2015
+refresh_log=/dev/null
+if true 2>>/opt/data/logs/codex-router-skills-sync.log; then
+    refresh_log=/opt/data/logs/codex-router-skills-sync.log
+fi
+su -m -s /bin/sh hermes -c '/opt/hermes-defaults/scripts/refresh-codex-router-checkout.sh' 2>>"$refresh_log" \
+    || echo "WARNING: could not advance the codex-router checkout in /workspace" >&2
+
 python3 -c '
 import os, re, glob
 paths = ["/opt/data/config.yaml", "/opt/data/SOUL.md"]

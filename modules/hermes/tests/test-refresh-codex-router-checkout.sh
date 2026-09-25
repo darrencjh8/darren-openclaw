@@ -246,12 +246,14 @@ else
 fi
 
 # A non-integer lock bound falls back to the default instead of being handed to
-# flock, so a typo cannot turn a free lock into a failed deploy.
+# flock, so a typo cannot turn a free lock into a failed deploy. Its own checkout,
+# because the shared one is deliberately diverged by this point.
+git clone -q "$origin" "$sandbox/lockval"
 advance_origin seventh
-nonnumeric_head=$(git -C "$checkout" rev-parse HEAD)
+lockval_head=$(git -C "$sandbox/lockval" rev-parse HEAD)
 rc=0
-out=$(CODEX_ROUTER_CHECKOUT="$checkout" CODEX_ROUTER_LOCK_WAIT_SECONDS=soon sh "$SCRIPT" 2>&1) || rc=$?
-if [ "$rc" -eq 0 ] && [ "$(git -C "$checkout" rev-parse HEAD)" != "$nonnumeric_head" ]; then
+out=$(CODEX_ROUTER_CHECKOUT="$sandbox/lockval" CODEX_ROUTER_LOCK_WAIT_SECONDS=soon sh "$SCRIPT" 2>&1) || rc=$?
+if [ "$rc" -eq 0 ] && [ "$(git -C "$sandbox/lockval" rev-parse HEAD)" != "$lockval_head" ]; then
     ok "a non-integer lock bound falls back to the default and still advances"
 else
     nope "a non-integer lock bound falls back to the default and still advances (rc=$rc): $out"
