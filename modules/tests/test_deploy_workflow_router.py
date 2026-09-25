@@ -1,6 +1,7 @@
 # Copyright © 2022 Dell Inc. or its subsidiaries. All Rights Reserved.
 
 from pathlib import Path
+import subprocess
 import unittest
 
 import yaml
@@ -13,6 +14,7 @@ TEST_WORKFLOW = Path(__file__).parents[2] / ".github/workflows/test.yml"
 ROUTER_CI_WORKFLOW = Path(__file__).parents[2] / ".github/workflows/codex-router-ci.yml"
 DEPLOY_SCRIPT = Path(__file__).parents[1] / "deploy.sh"
 HERMES_CONFIG = Path(__file__).parents[1] / "hermes/config.yaml"
+BEHAVIOUR_SUITE = Path(__file__).parents[1] / "hermes/tests/test-refresh-codex-router-checkout.sh"
 
 
 class DeployWorkflowRouterTests(unittest.TestCase):
@@ -278,6 +280,21 @@ class DeployWorkflowRouterTests(unittest.TestCase):
         self.assertGreater(call_index, probe_end)
         auth_index = boot.index("gh auth login --with-token")
         self.assertGreater(call_index, auth_index)
+
+    def test_the_checkout_refresh_classifier_leaves_a_skipped_checkout_alone(self):
+        """The deploy's success signal is derived from the script's report.
+
+        The classifier is executed against the script's real stdout, not against a
+        copy of it: the behaviour suite captures that output for the advance and for
+        each skip path and runs the deploy block's extracted classifier over it, so
+        rewording a notice cannot turn a stale checkout into a reported success.
+        """
+        behaviour = BEHAVIOUR_SUITE.read_text(encoding="utf-8")
+        self.assertIn("CLASSIFIER=$(sed -n '/grep -q \"is at \"; then/", behaviour)
+        self.assertIn('expect_classified "the deploy reports a real advance as success" "$out" success', behaviour)
+        self.assertIn('expect_classified "the deploy leaves a dirty checkout alone" "$out" alone', behaviour)
+        completed = subprocess.run(["bash", str(BEHAVIOUR_SUITE)], capture_output=True, text=True)
+        self.assertEqual(completed.returncode, 0, completed.stdout[-2000:])
 
     def test_hermes_deploy_health_gate_retries_before_failing(self):
         deploy_script = DEPLOY_SCRIPT.read_text(encoding="utf-8")
