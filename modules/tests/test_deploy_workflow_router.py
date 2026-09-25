@@ -222,7 +222,10 @@ class DeployWorkflowRouterTests(unittest.TestCase):
         self.assertIn("hermes codex-router checkout could not be advanced", checkout_block)
         # The success line is printed from the script's own output, not the exit code,
         # so the four exit-0 skip outcomes cannot report success on a stale checkout.
-        self.assertIn("is at", checkout_block)
+        # Pin the discriminating grep, not a substring the success sentence already
+        # contains, so a revert to exit-code-only success cannot stay green.
+        self.assertIn('grep -q "is at "', checkout_block)
+        self.assertIn("CHECKOUT_OUTPUT", checkout_block)
         self.assertIn("CHECKOUT_OUTPUT=", checkout_block)
 
         refresh = Path(__file__).parents[1] / "hermes/scripts/refresh-codex-router-checkout.sh"
@@ -246,7 +249,7 @@ class DeployWorkflowRouterTests(unittest.TestCase):
         self.assertIn("flock", refresh_body)
         self.assertIn("CODEX_ROUTER_LOCK_WAIT_SECONDS", refresh_body)
         # A hung fetch would hold the lock past its bound and block both callers.
-        self.assertIn("timeout 120", refresh_body)
+        self.assertIn("timeout --kill-after=10 120", refresh_body)
         # The safety claim is the absence of the destructive alternatives: this
         # script must never have a way to discard a session's work or touch a
         # session's checkout. The check covers comments too, which is why the file

@@ -207,7 +207,6 @@ fi
 # origin/main. `su -m` preserves GH_TOKEN, which the fetch needs, because the hook
 # runs as root and `su` resets the environment by default. A failed refresh logs
 # a warning and never fails the boot.
-# shellcheck disable=SC2015
 refresh_log=/dev/null
 if true 2>>/opt/data/logs/codex-router-skills-sync.log; then
     refresh_log=/opt/data/logs/codex-router-skills-sync.log

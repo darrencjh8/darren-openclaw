@@ -70,7 +70,13 @@ cd "$CHECKOUT"
 # Read the state inside the lock, so no other writer can move it under these checks.
 # A dirty checkout, a session branch, or a detached HEAD all belong to someone else:
 # skip them with a notice and never discard or rewrite their content.
-if [ -n "$(git status --porcelain 2>/dev/null)" ]; then
+# A failing `git status` is not an empty one: without this, a held index lock would
+# read as "clean" and the run would fail later with a misleading divergence message.
+status_out=$(git status --porcelain) || {
+    echo "refresh-codex-router-checkout: $CHECKOUT: git status failed; leaving it alone" >&2
+    exit 1
+}
+if [ -n "$status_out" ]; then
     echo "refresh-codex-router-checkout: $CHECKOUT is dirty; leaving it alone (HEAD $(head_line))"
     exit 0
 fi
@@ -87,7 +93,7 @@ fi
 # The image's git has no credential helper; gh is authenticated, so borrow its.
 # The bound matters because the lock serializes writers, not time: a hung fetch
 # would hold it and block the deploy's docker exec and the boot hook.
-if ! timeout 120 git -c credential.helper='!gh auth git-credential' fetch --quiet origin "$BRANCH"; then
+if ! timeout --kill-after=10 120 git -c credential.helper='!gh auth git-credential' fetch --quiet origin "$BRANCH"; then
     echo "refresh-codex-router-checkout: could not fetch origin $BRANCH" >&2
     exit 1
 fi
@@ -115,7 +121,7 @@ if [ -n "$TARGET_REV" ]; then
         exit 1
     fi
 else
-    if ! git merge --ff-only --quiet FETCH_HEAD; then
+    if ! git merge --ff-only --quiet "$fetched"; then
         echo "refresh-codex-router-checkout: $CHECKOUT cannot fast-forward to $fetched" >&2
         exit 1
     fi
