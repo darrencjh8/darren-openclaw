@@ -291,6 +291,11 @@ class DeployWorkflowRouterTests(unittest.TestCase):
         """
         behaviour = BEHAVIOUR_SUITE.read_text(encoding="utf-8")
         self.assertIn("CLASSIFIER=$(sed -n '/grep -q \"is at \"; then/", behaviour)
+        self.assertIn(
+            'expect_classified "the deploy reports a real advance as success" "$out" success', behaviour,
+            "if the refresh script never reports a token the deploy classifier matches, a real advance "
+            "is reported as left alone",
+        )
         self.assertIn('expect_classified "the deploy reports a real advance as success" "$out" success', behaviour)
         self.assertIn('expect_classified "the deploy leaves a dirty checkout alone" "$out" alone', behaviour)
         completed = subprocess.run(["bash", str(BEHAVIOUR_SUITE)], capture_output=True, text=True)
