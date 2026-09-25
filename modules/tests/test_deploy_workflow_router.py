@@ -179,6 +179,44 @@ class DeployWorkflowRouterTests(unittest.TestCase):
             deploy_script,
         )
 
+    def test_hermes_container_checkout_is_refreshed(self):
+        # Dev-loop sessions in the Hermes container drive the gate from their own
+        # checkout (`codex/skills/dev-loop/scripts/loop.py`), so a checkout pinned
+        # to an old revision runs an old gate no matter what the skill roots hold.
+        # Measured 2026-09-25: the reconciled roots were current while
+        # /workspace/codex-router sat at 2e0fcfc, six commits behind origin/main,
+        # so the shipped driver never reached a session. Two writers must advance
+        # it: the deploy to the revision it checked out, and boot to main.
+        deploy_script = DEPLOY_SCRIPT.read_text(encoding="utf-8")
+        checkout_block = deploy_script.split("# ---- Hermes container codex-router checkout ----", 1)[1].split(
+            "# Hermes gateway", 1
+        )[0]
+
+        self.assertIn('should_deploy "codex-router" || should_deploy "hermes"', checkout_block)
+        # Deterministic target: the revision this deploy checked out, never
+        # whatever main happens to be at deploy time.
+        self.assertIn('git -C "$ROOT/modules/codex-router" rev-parse HEAD', checkout_block)
+        self.assertIn("modules/hermes/scripts/refresh-codex-router-checkout.sh", checkout_block)
+        # The checkout belongs to the container's hermes user; root writes would
+        # leave its objects unwritable for the sessions that create worktrees.
+        self.assertIn("docker exec -u hermes hermes", checkout_block)
+        self.assertIn("failed=$((failed + 1))", checkout_block)
+
+        refresh = Path(__file__).parents[1] / "hermes/scripts/refresh-codex-router-checkout.sh"
+        self.assertTrue(refresh.is_file(), "refresh script is shipped")
+        self.assertTrue(refresh.stat().st_mode & 0o111, "refresh script is executable")
+        refresh_body = refresh.read_text(encoding="utf-8")
+        # A dirty checkout belongs to a live session: skip it, never force it.
+        self.assertIn("status --porcelain", refresh_body)
+        self.assertIn("--ff-only", refresh_body)
+        self.assertIn("credential.helper", refresh_body)
+
+        boot = (Path(__file__).parents[1] / "hermes/50-seed-defaults").read_text(encoding="utf-8")
+        self.assertIn("refresh-codex-router-checkout.sh", boot)
+        # Boot runs as root, so the refresh has to drop to the checkout's owner,
+        # and it must never fail the boot.
+        self.assertRegex(boot, r"su -s /bin/sh hermes -c '[^']*refresh-codex-router-checkout\.sh'")
+
     def test_hermes_deploy_health_gate_retries_before_failing(self):
         deploy_script = DEPLOY_SCRIPT.read_text(encoding="utf-8")
         gate = deploy_script.split("# Hermes gateway", 1)[1].split(

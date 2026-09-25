@@ -131,6 +131,8 @@ jobs:
               run: bash modules/hermes/tests/test-deploy.sh
             - name: Test codex-router skills sync
               run: bash modules/hermes/tests/test-codex-router-skills-sync.sh
+            - name: Test codex-router checkout refresh
+              run: bash modules/hermes/tests/test-refresh-codex-router-checkout.sh
             - name: Test docker-compose hermes env vars
               run: bash modules/hermes/tests/test-docker-compose-env.sh
             - name: Test Hermes Slack platform wiring
