@@ -1002,6 +1002,58 @@ if should_deploy "codex-router" || should_deploy "hermes"; then
   fi
 fi
 
+# ---- Hermes container codex-router checkout ----
+# Dev-loop sessions in the container drive the gate from the container's own
+# codex-router checkout (`codex/skills/dev-loop/scripts/loop.py`), so the skill
+# roots alone do not change which driver runs: the checkout has to advance too.
+# Measured 2026-09-25: the reconciled roots were current while
+# /workspace/codex-router sat six commits behind origin/main, so the deployed
+# driver never reached a session. Two arms are enough here: should_deploy returns 0
+# as soon as any component is `all`, so a full deploy reaches this block as well.
+if should_deploy "codex-router" || should_deploy "hermes"; then
+  CHECKOUT_SCRIPT="$ROOT/modules/hermes/scripts/refresh-codex-router-checkout.sh"
+  if [ ! -d "$ROOT/modules/codex-router" ]; then
+    echo "  (codex-router checkout not present; skipping container checkout refresh)" >&2
+    [ -n "${GITHUB_ACTIONS:-}" ] && failed=$((failed + 1))
+  elif [ ! -f "$CHECKOUT_SCRIPT" ]; then
+    echo "  (checkout refresh script missing; skipping container checkout refresh)" >&2
+    [ -n "${GITHUB_ACTIONS:-}" ] && failed=$((failed + 1))
+  elif ! docker inspect hermes >/dev/null 2>&1; then
+    echo "  (hermes container not present; skipping container checkout refresh)"
+  else
+    CHECKOUT_READY=false
+    for _ in $(seq 1 15); do
+      if docker exec hermes true 2>/dev/null; then CHECKOUT_READY=true; break; fi
+      sleep 2
+    done
+    CHECKOUT_TARGET=$(git -C "$ROOT/modules/codex-router" rev-parse HEAD 2>/dev/null || true)
+    echo ""
+    echo "--- Hermes Codex Router Checkout ---"
+    CHECKOUT_OUTPUT=""
+    if [ "$CHECKOUT_READY" != true ]; then
+      echo -e "  ${RED}✗ hermes container did not become ready for the checkout refresh${NC}"
+      failed=$((failed + 1))
+    elif docker cp "$CHECKOUT_SCRIPT" hermes:/tmp/refresh-codex-router-checkout.sh \
+        && [ -n "$CHECKOUT_TARGET" ] \
+        && CHECKOUT_OUTPUT=$(docker exec -e CODEX_ROUTER_LOCK_WAIT_SECONDS=300 -u hermes hermes sh /tmp/refresh-codex-router-checkout.sh "$CHECKOUT_TARGET" 2>&1); then
+      printf '%s\n' "$CHECKOUT_OUTPUT"
+      # The success line comes from the script's own report, not from the exit
+      # code: four outcomes exit 0 without advancing anything, and reporting those
+      # as current is the failure this block exists to prevent.
+      if printf '%s' "$CHECKOUT_OUTPUT" | grep -q "is at "; then
+        echo -e "  ${GREEN}✓ hermes codex-router checkout is at this deploy's revision${NC}"
+      else
+        echo -e "  ${YELLOW}⏭ hermes codex-router checkout left alone${NC}"
+      fi
+    else
+      printf '%s\n' "$CHECKOUT_OUTPUT"
+      echo -e "  ${RED}✗ hermes codex-router checkout could not be advanced${NC}"
+      failed=$((failed + 1))
+    fi
+    docker exec hermes rm -f /tmp/refresh-codex-router-checkout.sh 2>/dev/null || true
+  fi
+fi
+
 # Hermes gateway (the dashboard is disabled in compose, so its port would always fail)
 # Needs extra wait: config migration + profile seeding registers the supervised
 # gateway service after container start, so poll it with the same bounded budget

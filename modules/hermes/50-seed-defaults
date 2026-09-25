@@ -2,7 +2,7 @@
 # Copyright © 2022 Dell Inc. or its subsidiaries. All Rights Reserved.
 
 # shellcheck shell=sh
-# shellcheck disable=SC2015,SC2235
+# shellcheck disable=SC2235,SC2015
 # Seed baked-in config, SOUL, skills, and scripts on every boot.
 # Then resolve any remaining ${VAR} placeholders that Hermes doesn't auto-substitute.
 # Seed the baked config WITHOUT clobbering the whole live file. A raw copy
@@ -200,6 +200,19 @@ if [ -n "${FRIDAY_PAT:-}" ]; then
     su -s /bin/sh hermes -c "gh auth login --with-token < /tmp/.gh-token-init" 2>/dev/null || true
     rm -f /tmp/.gh-token-init
 fi
+
+# The container's own codex-router checkout is the driver dev-loop sessions
+# execute (`codex/skills/dev-loop/scripts/loop.py`), so it must not stay pinned
+# to an old revision while the reconciled skill roots move. No target: track
+# origin/main. `su -m` preserves GH_TOKEN, which the fetch needs, because the hook
+# runs as root and `su` resets the environment by default. A failed refresh logs
+# a warning and never fails the boot.
+refresh_log=/dev/null
+if true 2>>/opt/data/logs/codex-router-skills-sync.log; then
+    refresh_log=/opt/data/logs/codex-router-skills-sync.log
+fi
+su -m -s /bin/sh hermes -c '/opt/hermes-defaults/scripts/refresh-codex-router-checkout.sh' >>"$refresh_log" 2>&1 \
+    || echo "WARNING: could not advance the codex-router checkout in /workspace" >&2
 
 python3 -c '
 import os, re, glob

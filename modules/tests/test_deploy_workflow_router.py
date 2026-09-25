@@ -1,6 +1,7 @@
 # Copyright © 2022 Dell Inc. or its subsidiaries. All Rights Reserved.
 
 from pathlib import Path
+import subprocess
 import unittest
 
 import yaml
@@ -13,6 +14,7 @@ TEST_WORKFLOW = Path(__file__).parents[2] / ".github/workflows/test.yml"
 ROUTER_CI_WORKFLOW = Path(__file__).parents[2] / ".github/workflows/codex-router-ci.yml"
 DEPLOY_SCRIPT = Path(__file__).parents[1] / "deploy.sh"
 HERMES_CONFIG = Path(__file__).parents[1] / "hermes/config.yaml"
+BEHAVIOUR_SUITE = Path(__file__).parents[1] / "hermes/tests/test-refresh-codex-router-checkout.sh"
 
 
 class DeployWorkflowRouterTests(unittest.TestCase):
@@ -178,6 +180,136 @@ class DeployWorkflowRouterTests(unittest.TestCase):
             "/package/admin/s6/command/s6-svstat -o up /run/service/gateway-default",
             deploy_script,
         )
+
+    def test_hermes_container_checkout_is_refreshed(self):
+        # Dev-loop sessions in the Hermes container drive the gate from their own
+        # checkout (`codex/skills/dev-loop/scripts/loop.py`), so a checkout pinned
+        # to an old revision runs an old gate no matter what the skill roots hold.
+        # Measured 2026-09-25: the reconciled roots were current while
+        # /workspace/codex-router sat at 2e0fcfc, six commits behind origin/main,
+        # so the shipped driver never reached a session. Two writers must advance
+        # it: the deploy to the revision it checked out, and boot to main.
+        deploy_script = DEPLOY_SCRIPT.read_text(encoding="utf-8")
+        checkout_block = deploy_script.split("# ---- Hermes container codex-router checkout ----", 1)[1].split(
+            "# Hermes gateway", 1
+        )[0]
+
+        # Two arms are enough: should_deploy returns 0 as soon as any component is
+        # `all`, so a full deploy reaches this block through the named arms. The test
+        # pins the two-arm form so a redundant third arm cannot creep back in.
+        self.assertIn('should_deploy "codex-router" || should_deploy "hermes"', checkout_block)
+        self.assertNotIn('should_deploy "all"', checkout_block)
+        # Deterministic target: the revision this deploy checked out, never
+        # whatever main happens to be at deploy time.
+        self.assertIn('git -C "$ROOT/modules/codex-router" rev-parse HEAD', checkout_block)
+        self.assertIn("modules/hermes/scripts/refresh-codex-router-checkout.sh", checkout_block)
+        # The checkout belongs to the container's hermes user; root writes would
+        # leave its objects unwritable for the sessions that create worktrees.
+        # The owner, plus a lock wait longer than the boot fetch bound: a saturating
+        # fetch during a hermes recreate must not turn into a red deploy.
+        self.assertIn("docker exec -e CODEX_ROUTER_LOCK_WAIT_SECONDS=300 -u hermes hermes", checkout_block)
+        self.assertIn("failed=$((failed + 1))", checkout_block)
+        # A hermes deploy recreates the container, so the block must wait for it
+        # rather than run docker exec against a container that is still starting.
+        self.assertIn("for _ in $(seq 1 15)", checkout_block)
+        self.assertIn("docker exec hermes true", checkout_block)
+        # The copy, the run, the removal and the outcome report are the block's
+        # behaviour, so they are pinned rather than left to wording.
+        self.assertIn("docker cp \"$CHECKOUT_SCRIPT\" hermes:/tmp/refresh-codex-router-checkout.sh", checkout_block)
+        self.assertIn("docker exec -e CODEX_ROUTER_LOCK_WAIT_SECONDS=300 -u hermes hermes sh /tmp/refresh-codex-router-checkout.sh", checkout_block)
+        self.assertIn("docker exec hermes rm -f /tmp/refresh-codex-router-checkout.sh", checkout_block)
+        # The recovery recipe is pasted into an interactive shell, where history
+        # expansion rewrites an unquoted `!gh`; the outer single quotes are what
+        # keep the helper intact, so the runnable form is pinned verbatim.
+        deploy_doc = (Path(__file__).parents[2] / "DEPLOY.md").read_text(encoding="utf-8")
+        self.assertIn(
+            "docker exec -u hermes hermes sh -c 'git -C /workspace/codex-router "
+            "-c credential.helper=\"!gh auth git-credential\" fetch origin main",
+            deploy_doc,
+            "the recovery command must be paste-safe: outer single quotes, inner double quotes",
+        )
+        self.assertIn("--- Hermes Codex Router Checkout ---", checkout_block)
+        self.assertIn("hermes codex-router checkout is at this deploy's revision", checkout_block)
+        self.assertIn("hermes codex-router checkout left alone", checkout_block)
+        self.assertIn("hermes codex-router checkout could not be advanced", checkout_block)
+        # The success line is printed from the script's own output, not the exit code,
+        # so the four exit-0 skip outcomes cannot report success on a stale checkout.
+        # Pin the discriminating line verbatim, so a revert to exit-code-only success
+        # cannot stay green behind a substring the success sentence already contains.
+        self.assertIn('if printf \'%s\' "$CHECKOUT_OUTPUT" | grep -q "is at "; then', checkout_block)
+        self.assertIn("CHECKOUT_OUTPUT=", checkout_block)
+
+        refresh = Path(__file__).parents[1] / "hermes/scripts/refresh-codex-router-checkout.sh"
+        self.assertTrue(refresh.is_file(), "refresh script is shipped")
+        self.assertTrue(refresh.stat().st_mode & 0o111, "refresh script is executable")
+        refresh_body = refresh.read_text(encoding="utf-8")
+        # The deploy runs it as `sh <path>` and the boot hook execs it, so the body
+        # must be POSIX shell: a bash-only body would pass a bash-only suite and
+        # then fail every codex-router deploy under dash.
+        self.assertTrue(refresh_body.startswith("#!/bin/sh\n"), "refresh script is POSIX sh")
+        self.assertIn("set -eu", refresh_body)
+        # A dirty checkout belongs to a live session: skip it, never force it.
+        self.assertIn("status --porcelain", refresh_body)
+        self.assertIn("--ff-only", refresh_body)
+        self.assertIn("credential.helper", refresh_body)
+        # A session branch — or a detached HEAD — in the base repository is not
+        # ours to move.
+        self.assertIn("rev-parse --abbrev-ref HEAD", refresh_body)
+        # Two writers can overlap (a hermes deploy recreates the container while
+        # the boot hook runs), so they serialize on a lock with a bounded wait.
+        self.assertIn("flock", refresh_body)
+        self.assertIn("CODEX_ROUTER_LOCK_WAIT_SECONDS", refresh_body)
+        # A hung fetch would hold the lock past its bound and block both callers.
+        self.assertIn("timeout --kill-after=10 120", refresh_body)
+        # The safety claim is the absence of the destructive alternatives: this
+        # script must never have a way to discard a session's work or touch a
+        # session's checkout. The check covers comments too, which is why the file
+        # may not name the forbidden literal anywhere.
+        for destructive in ("reset --hard", "stash", "rebase", "checkout -f", "push --force", "worktree"):
+            self.assertNotIn(destructive, refresh_body)
+        # The expected branch is a literal: no call site sets a branch override.
+        self.assertNotIn("CODEX_ROUTER_BRANCH", refresh_body)
+        self.assertNotIn("CODEX_ROUTER_BRANCH", checkout_block)
+
+        boot = (Path(__file__).parents[1] / "hermes/50-seed-defaults").read_text(encoding="utf-8")
+        # The baked path, not a filename match: /opt/data/scripts/ holds a copy that
+        # a fresh volume may not have reseeded yet. `-m` preserves the environment,
+        # because GH_TOKEN lives there and `su` resets it by default.
+        self.assertIn(
+            "su -m -s /bin/sh hermes -c '/opt/hermes-defaults/scripts/refresh-codex-router-checkout.sh'", boot
+        )
+        # A boot hook may not fail the boot: the refresh call carries a fallback
+        # that reports the failure and lets the boot continue.
+        self.assertIn('|| echo "WARNING: could not advance the codex-router checkout', boot)
+        # Placement matters twice over. test-50-seed-defaults.sh extracts and
+        # executes the skills probe block and asserts its log exactly, so the call
+        # must sit after that block's fi; and the fetch needs the credential that
+        # `gh auth login --with-token` writes, so it must also sit after that.
+        probe_end = boot.index("sync-codex-router-skills.sh 2>/dev/null || true\nfi")
+        call_index = boot.index("refresh-codex-router-checkout.sh", probe_end)
+        self.assertGreater(call_index, probe_end)
+        auth_index = boot.index("gh auth login --with-token")
+        self.assertGreater(call_index, auth_index)
+
+    def test_the_checkout_refresh_classifier_leaves_a_skipped_checkout_alone(self):
+        """The deploy's success signal is derived from the script's report.
+
+        The classifier is executed against the script's real stdout, not against a
+        copy of it: the behaviour suite captures that output for the advance and for
+        each skip path and runs the deploy block's extracted classifier over it, so
+        rewording a notice cannot turn a stale checkout into a reported success.
+        """
+        behaviour = BEHAVIOUR_SUITE.read_text(encoding="utf-8")
+        self.assertIn("CLASSIFIER=$(sed -n '/grep -q \"is at \"; then/", behaviour)
+        self.assertIn(
+            'expect_classified "the deploy reports a real advance as success" "$out" success', behaviour,
+            "if the refresh script never reports a token the deploy classifier matches, a real advance "
+            "is reported as left alone",
+        )
+        self.assertIn('expect_classified "the deploy reports a real advance as success" "$out" success', behaviour)
+        self.assertIn('expect_classified "the deploy leaves a dirty checkout alone" "$out" alone', behaviour)
+        completed = subprocess.run(["bash", str(BEHAVIOUR_SUITE)], capture_output=True, text=True)
+        self.assertEqual(completed.returncode, 0, completed.stdout[-2000:])
 
     def test_hermes_deploy_health_gate_retries_before_failing(self):
         deploy_script = DEPLOY_SCRIPT.read_text(encoding="utf-8")
