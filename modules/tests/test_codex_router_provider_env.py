@@ -24,6 +24,16 @@ PROVIDER_KEYS = (
     "OPENCODE_API_KEY",
 )
 
+# COMMANDCODE_API_KEY is deliberately not in this set: six Hermes auxiliary slots
+# pin a commandcode/* primary, so a missing key silently breaks them instead of
+# merely leaving a provider's models unpublished. See
+# test_deploy_script_requires_the_commandcode_key.
+OPTIONAL_PROVIDER_KEYS = (
+    "OPENCODE_GO_API_KEY",
+    "OPENCODE_ZEN_API_KEY",
+    "OPENCODE_API_KEY",
+)
+
 
 class CodexRouterProviderEnvTests(unittest.TestCase):
     def test_router_service_forwards_provider_keys(self):
@@ -47,12 +57,22 @@ class CodexRouterProviderEnvTests(unittest.TestCase):
             workflow,
         )
 
-    def test_deploy_script_treats_provider_keys_as_optional(self):
+    def test_deploy_script_treats_opencode_provider_keys_as_optional(self):
         script = DEPLOY_SCRIPT.read_text(encoding="utf-8")
 
-        for key in PROVIDER_KEYS:
+        for key in OPTIONAL_PROVIDER_KEYS:
             self.assertIn(f'check_var_optional "{key}"', script)
         self.assertIn('check_var_optional "CODEX_ROUTER_OPENCODE_ZEN_MODELS"', script)
+
+    def test_deploy_script_requires_the_commandcode_key(self):
+        script = DEPLOY_SCRIPT.read_text(encoding="utf-8")
+
+        # The router only publishes commandcode/* while this key is present, and a
+        # model the router never publishes does not fire an auxiliary slot's
+        # fallback_chain. An unset key therefore breaks those slots outright, so
+        # the deploy must refuse rather than ship that state.
+        self.assertIn('check_var "COMMANDCODE_API_KEY" ""', script)
+        self.assertNotIn('check_var_optional "COMMANDCODE_API_KEY"', script)
 
 
 if __name__ == "__main__":

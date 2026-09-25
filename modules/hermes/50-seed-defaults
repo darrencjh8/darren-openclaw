@@ -167,6 +167,18 @@ for name in managed_routing_profiles:
     for key in ("providers", "model", "fallback_providers"):
         if key in defaults:
             target[key] = defaults[key]
+    # `agent` is migrated per-subkey rather than wholesale: the profile's other
+    # agent settings stay user-owned, but reasoning_effort is part of the routing
+    # contract this migration exists to enforce. Without it the effort never
+    # reaches a host whose profile config already exists (the seed above only
+    # copies an absent file), so a bumped effort would ship green and unused.
+    default_agent = defaults.get("agent")
+    if isinstance(default_agent, dict) and "reasoning_effort" in default_agent:
+        agent = target.get("agent")
+        if not isinstance(agent, dict):
+            agent = {}
+            target["agent"] = agent
+        agent["reasoning_effort"] = default_agent["reasoning_effort"]
     if name == "code-reviewer":
         memory = target.get("memory")
         if not isinstance(memory, dict):

@@ -408,6 +408,10 @@ model:
   default: stale
 fallback_providers:
   - provider: stale
+agent:
+  reasoning_effort: low
+  disabled_toolsets:
+    - user-owned
 memory:
   memory_enabled: true
   user_profile_enabled: true
@@ -424,8 +428,19 @@ import yaml
 config = yaml.safe_load(open(sys.argv[1], encoding="utf-8"))
 isolated = config["memory"]["memory_enabled"] is False and config["memory"]["user_profile_enabled"] is False
 preserved = config["approvals"]["mode"] == "custom-preserved"
-routed = config["model"] == {"provider": "custom:codex-router", "default": "auto-thinking"}
-print("pass" if isolated and preserved and routed and config["fallback_providers"] == [] else "fail")
+routed = config["model"] == {
+    "provider": "custom:codex-router",
+    "default": "commandcode/deepseek/deepseek-v4.1-flash",
+}
+escalating = config["fallback_providers"] == [
+    {"provider": "custom:codex-router", "model": "auto-thinking"}
+]
+# The stale profile carries reasoning_effort low; the baked profile pins high. The
+# effort must migrate, and the profile's own agent keys must survive it, or a
+# bumped effort stays on disk at its old value and the change never takes effect.
+effort = config["agent"]["reasoning_effort"] == "high"
+agent_preserved = config["agent"]["disabled_toolsets"] == ["user-owned"]
+print("pass" if isolated and preserved and routed and escalating and effort and agent_preserved else "fail")
 PY
 )
 [ "$migration_result" = "pass" ] && ok "existing reviewer profile migrates to isolated round routing" || nope "reviewer isolation fixture" "got: $migration_result"
@@ -436,6 +451,8 @@ model:
   default: stale
 fallback_providers:
   - provider: stale
+agent:
+  reasoning_effort: low
 memory:
 approvals:
   mode: custom-preserved
@@ -450,8 +467,15 @@ config = yaml.safe_load(open(sys.argv[1], encoding="utf-8"))
 memory = config.get("memory")
 isolated = isinstance(memory, dict) and memory.get("memory_enabled") is False and memory.get("user_profile_enabled") is False
 preserved = config["approvals"]["mode"] == "custom-preserved"
-routed = config["model"] == {"provider": "custom:codex-router", "default": "auto-thinking"}
-print("pass" if isolated and preserved and routed and config["fallback_providers"] == [] else "fail")
+routed = config["model"] == {
+    "provider": "custom:codex-router",
+    "default": "commandcode/deepseek/deepseek-v4.1-flash",
+}
+escalating = config["fallback_providers"] == [
+    {"provider": "custom:codex-router", "model": "auto-thinking"}
+]
+effort = config["agent"]["reasoning_effort"] == "high"
+print("pass" if isolated and preserved and routed and escalating and effort else "fail")
 PY
 )
 [ "$null_memory_status" -eq 0 ] && [ "$null_memory_result" = "pass" ] && ok "null reviewer memory migrates safely" || nope "null reviewer memory migration" "status=$null_memory_status result=$null_memory_result output=$null_memory_output"

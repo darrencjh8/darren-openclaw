@@ -20,7 +20,7 @@ grep -Eq '^        api: http://codex-router:4100/v1$' "$CONFIG" && ok "provider 
 grep -Eq '^        transport: chat_completions$' "$CONFIG" && ok "provider pins Chat Completions transport" || nope "provider transport" "missing"
 grep -Eq '^    provider: custom:codex-router$' "$CONFIG" && ok "Hermes uses named Codex Router provider" || nope "Hermes provider" "missing"
 grep -Eq '^    default: auto-thinking$' "$CONFIG" && ok "main model routes via auto-thinking" || nope "main model" "missing"
-grep -Eq '^        model: gpt-5\.6-luna$' "$CONFIG" && ok "Luna consumers use pooled alias" || nope "Luna pool" "missing"
+grep -Eq '^        model: commandcode/deepseek/deepseek-v4\.1-flash$' "$CONFIG" && ok "auxiliary slots use the Command Code DeepSeek Flash route" || nope "auxiliary model" "missing"
 
 if grep -REq 'gpt-5\.6-(terra|luna|sol)-[123]' "$SCRIPT_DIR/../config.yaml" "$SCRIPT_DIR/../profiles"; then
     nope "no account-pinned GPT aliases" "found account suffix"

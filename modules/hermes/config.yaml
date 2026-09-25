@@ -21,7 +21,7 @@ compression:
     proactive_prune_tokens: 48000
 
 agent:
-    reasoning_effort: low
+    reasoning_effort: high
     disabled_toolsets:
         - moa
 
@@ -75,39 +75,52 @@ web:
     extract_backend: firecrawl
 
 auxiliary:
+    # Every auxiliary slot routes through codex-router. The Command Code
+    # DeepSeek Flash route is the shared workhorse; the approval judge keeps
+    # the auto-thinking pool so its verdict quality tracks the main agent.
+    # Each slot keeps exactly one direct deepseek-flash fallback. That fallback
+    # is terminal: it is the last rung, and the Command Code route itself has no
+    # cross-provider hop. The auto-thinking pool used by approval does hop
+    # internally (terra-3 -> deepseek-flash -> terra-2 -> terra-1).
     vision:
-        provider: deepseek
-        model: deepseek-flash
+        provider: custom:codex-router
+        model: commandcode/deepseek/deepseek-v4.1-flash
+        fallback_chain:
+            - provider: deepseek
+              model: deepseek-flash
     web_extract:
         provider: custom:codex-router
-        model: gpt-5.6-luna
+        model: commandcode/deepseek/deepseek-v4.1-flash
         fallback_chain:
             - provider: deepseek
               model: deepseek-flash
     compression:
         provider: custom:codex-router
-        model: gpt-5.6-luna
+        model: commandcode/deepseek/deepseek-v4.1-flash
         fallback_chain:
             - provider: deepseek
               model: deepseek-flash
     approval:
         provider: custom:codex-router
-        model: gpt-5.6-terra
+        model: auto-thinking
         fallback_chain:
             - provider: deepseek
               model: deepseek-flash
     kanban_decomposer:
-        provider: deepseek
-        model: deepseek-flash
+        provider: custom:codex-router
+        model: commandcode/deepseek/deepseek-v4.1-flash
+        fallback_chain:
+            - provider: deepseek
+              model: deepseek-flash
     triage_specifier:
         provider: custom:codex-router
-        model: gpt-5.6-luna
+        model: commandcode/deepseek/deepseek-v4.1-flash
         fallback_chain:
             - provider: deepseek
               model: deepseek-flash
     profile_describer:
         provider: custom:codex-router
-        model: gpt-5.6-luna
+        model: commandcode/deepseek/deepseek-v4.1-flash
         fallback_chain:
             - provider: deepseek
               model: deepseek-flash

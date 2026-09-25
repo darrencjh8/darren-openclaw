@@ -1,10 +1,23 @@
 # LiteLLM Account-Pool Fallback Rollout
 
+## Status: historical
+
+The pooled GPT aliases below are no longer referenced by any Hermes slot. Current
+routing lives in `docs/plans/hermes-deepseek-flash-routing.md`; this document records
+how the account pools were introduced. Scope note: the separate `expense-tracker`
+module still routes on the Terra and Luna aliases (see its `src/config.js` and the
+`LLM_FALLBACK_MODEL` default in `docker-compose.yml`), so the aliases are not retired
+repo-wide and must stay published by the router.
+
 ## Goal
 
-Route Hermes primary model calls through the Docker-hosted LiteLLM router while using ordered OpenAI subscription account pools. Use direct `deepseek-flash` only after the relevant LiteLLM pool is exhausted or unavailable. Exception: `auxiliary.vision` calls `deepseek-flash` directly with no pool route and no fallback.
+Route Hermes primary model calls through the Docker-hosted LiteLLM router while using ordered OpenAI subscription account pools. Use direct `deepseek-flash` only after the relevant LiteLLM pool is exhausted or unavailable. (At the time, `auxiliary.vision` was the exception: it called `deepseek-flash` directly with no pool route and no fallback. It now routes through codex-router like every other slot.)
 
 ## Required routing
+
+> Historical: the section below describes the pool rollout as it was planned. No
+> Hermes slot uses these aliases today, and `auxiliary.vision` is no longer
+> direct-only. See `hermes-deepseek-flash-routing.md` for the live contract.
 
 ### Terra pool
 
@@ -12,7 +25,7 @@ Route Hermes primary model calls through the Docker-hosted LiteLLM router while 
 gpt-5.6-terra (router selects account 3 -> 2 -> 1)
 ```
 
-Use for Hermes main chat, approval, and the `code-reviewer` profile. (Vision no longer uses this pool: it runs directly on `deepseek-flash`, which is natively multimodal.)
+Use for Hermes main chat, approval, and the `code-reviewer` profile. (Vision no longer uses this pool: it routes through codex-router on the Command Code DeepSeek Flash model. The `code-reviewer` profile no longer uses it as a primary either — it runs the Command Code route and reaches this pool only as a fallback.)
 
 ### Luna pool
 
@@ -49,6 +62,10 @@ DeepSeek is the final direct fallback after the applicable LiteLLM route fails.
 5. Validate generated configuration and test each pool through the router's OpenAI-compatible endpoint.
 
 ## Phase 2: darren-openclaw
+
+> Historical: steps 2-3 describe the pool rollout as it was planned and no longer
+> match the live config. Steps 1 and 4-6 (the router endpoint, the `code-reviewer`
+> profile, the kanban assignee, and the `.codex/` ignore rule) still hold.
 
 1. Keep Hermes primary roles pointed at `http://codex-router:4100/v1`.
 2. Use transparent pooled aliases (`gpt-5.6-terra`, `gpt-5.6-luna`, `gpt-5.6-sol`) so LiteLLM selects the account and handles intra-pool fallback; keep exactly one direct `deepseek-flash` fallback per primary/profile route, except `auxiliary.vision`, which is direct-only.

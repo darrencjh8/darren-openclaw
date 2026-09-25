@@ -46,8 +46,11 @@ Conclusion: the chatgpt.com backend does not expose the hosted image_generation 
 ## DeepSeek — input only (2026-08)
 
 - No image generation endpoint exists. Janus family = self-host only.
-- Vision model: `deepseek-flash` via `https://api.deepseek.com/chat/completions`, OpenAI-style, content part:
+- Direct-API vision capability (2026-08): `deepseek-flash` via `https://api.deepseek.com/chat/completions`, OpenAI-style, content part:
   `{"type": "image_url", "image_url": {"url": "data:image/png;base64,<b64>"}}`
+  This records the DeepSeek API's own endpoint. `deepseek-flash` is now the
+  `auxiliary.vision` fallback route; the primary is
+  `commandcode/deepseek/deepseek-v4.1-flash` reached through codex-router.
 - Response includes `reasoning_content` (counts toward tokens) — small `max_tokens` yields empty `content`. Verified working with a 64×64 hand-rolled PNG; the model even described pixelation accurately.
 
 ## Diagnostics

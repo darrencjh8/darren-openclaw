@@ -76,7 +76,7 @@ class DeployWorkflowRouterTests(unittest.TestCase):
         self.assertIn("LLM_FINAL_FALLBACK_PROVIDER=${LLM_FINAL_FALLBACK_PROVIDER:-deepseek}", env_list)
         self.assertIn("LLM_FINAL_FALLBACK_MODEL=${LLM_FINAL_FALLBACK_MODEL:-deepseek-flash}", env_list)
 
-    def test_opencode_keys_reach_the_router_and_not_hermes(self):
+    def test_external_provider_keys_reach_the_router_and_not_hermes(self):
         # codex-router owns these providers. PR #443 retired the Zen key while
         # the router had no Zen route; the router routes to Zen, Go and Command
         # Code again, so the keys belong on the router service only.
@@ -87,8 +87,13 @@ class DeployWorkflowRouterTests(unittest.TestCase):
 
         deploy_script = DEPLOY_SCRIPT.read_text(encoding="utf-8")
         router_section = deploy_script.split("# ---- codex-router ----", 1)[1].split("# ---- pluggable modules", 1)[0]
-        for key in ("OPENCODE_API_KEY", "OPENCODE_ZEN_API_KEY", "OPENCODE_GO_API_KEY", "COMMANDCODE_API_KEY"):
+        for key in ("OPENCODE_API_KEY", "OPENCODE_ZEN_API_KEY", "OPENCODE_GO_API_KEY"):
             self.assertIn(f'check_var_optional "{key}"', router_section)
+        # Command Code is the exception: Hermes auxiliary slots pin a commandcode/*
+        # primary, so this one is required and validated by
+        # test_codex_router_provider_env.
+        self.assertIn('check_var "COMMANDCODE_API_KEY" ""', router_section)
+        self.assertNotIn('check_var_optional "COMMANDCODE_API_KEY"', router_section)
 
     def test_opencode_go_key_is_not_passed_to_hermes(self):
         compose = yaml.safe_load(COMPOSE_FILE.read_text(encoding="utf-8"))
@@ -136,12 +141,21 @@ class DeployWorkflowRouterTests(unittest.TestCase):
         )
         self.assertIn("python tests/test_provider_smoke_live.py", smoke["run"])
 
-    def test_code_reviewer_uses_round_aware_router_without_fallback(self):
+    def test_code_reviewer_escalates_instead_of_dropping_tier(self):
         reviewer = yaml.safe_load((Path(__file__).parents[1] / "hermes/profiles/code-reviewer/config.yaml").read_text(encoding="utf-8"))
-        self.assertEqual(reviewer["model"], {"provider": "custom:codex-router", "default": "auto-thinking"})
-        self.assertEqual(reviewer["fallback_providers"], [])
+        self.assertEqual(
+            reviewer["model"],
+            {"provider": "custom:codex-router", "default": "commandcode/deepseek/deepseek-v4.1-flash"},
+        )
+        # The reviewer's fallback is the pooled route, not the direct deepseek
+        # provider; it is an availability fallback, so the pool may itself serve a
+        # weaker model than the pinned primary.
+        self.assertEqual(
+            reviewer["fallback_providers"],
+            [{"provider": "custom:codex-router", "model": "auto-thinking"}],
+        )
         self.assertFalse(reviewer["memory"]["memory_enabled"])
-        self.assertEqual(reviewer["agent"]["reasoning_effort"], "medium")
+        self.assertEqual(reviewer["agent"]["reasoning_effort"], "high")
 
     def test_public_test_workflow_discovers_all_module_contract_tests(self):
         workflow = TEST_WORKFLOW.read_text(encoding="utf-8")

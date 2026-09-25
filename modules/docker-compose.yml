@@ -121,6 +121,10 @@ services:
             - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}
             # External provider keys: discovery skips a provider whose key is
             # absent, so an unset value simply leaves those models unpublished.
+            # COMMANDCODE_API_KEY is the exception: Hermes pins six auxiliary
+            # slots to a commandcode/* model, so an unpublished Command Code
+            # provider breaks them outright instead of degrading. deploy.sh
+            # validates it as required.
             - COMMANDCODE_API_KEY=${COMMANDCODE_API_KEY:-}
             - OPENCODE_GO_API_KEY=${OPENCODE_GO_API_KEY:-}
             - OPENCODE_ZEN_API_KEY=${OPENCODE_ZEN_API_KEY:-}

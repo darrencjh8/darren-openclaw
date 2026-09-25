@@ -77,9 +77,9 @@ Don't answer from the session system-prompt header alone, and don't answer from 
   - `model.provider` + `model.default` — configured primary chat model
   - `fallback_providers` — where the chat loop drops after 3 failed attempts
   - `delegation.provider`/`model` — subagents (distinct from main chat!)
-  - `auxiliary.*` (vision, web_extract, compression, approval, triage_specifier, profile_describer, kanban_decomposer) — each task type has its own provider/model, plus a `fallback_chain` where the slot needs one (vision and `kanban_decomposer` do not)
+  - `auxiliary.*` (vision, web_extract, compression, approval, triage_specifier, profile_describer, kanban_decomposer) — each task type has its own provider/model, plus exactly one direct `deepseek-flash` `fallback_chain` on every slot
 
-**A model visible in config is often fallback-only or slot-specific.** Example (a host, 2026-09): `deepseek-flash` is never a *router-backed* primary — the router-backed primaries are `auto-thinking` (main, delegation, code-reviewer) and the pooled GPT aliases (`gpt-5.6-terra`, `gpt-5.6-luna`, `gpt-5.6-sol` for the auxiliary slots and the other profiles). `deepseek-flash` appears inside `fallback_providers` and some auxiliary `fallback_chain`s, plus two direct primaries on the `deepseek` provider: `auxiliary.vision` (natively multimodal, no fallback) and `auxiliary.kanban_decomposer` (no router hop). So "why DeepSeek?" means either the codex-router primary was down/overloaded and the route fell through to the direct `deepseek` provider, or the slot is vision or the kanban decomposer, or the user is reading the fallback list and mistaking it for the active brain. Answer with a table of role → provider → model so the status is visible.
+**A model visible in config is often fallback-only or slot-specific.** Example (a host, 2026-09): `deepseek-flash` is never a *router-backed* primary — the router-backed primaries are `auto-thinking` (main, delegation, approval, and three of the four profiles) and `commandcode/deepseek/deepseek-v4.1-flash` (the six auxiliary slots that are not the approval judge, plus the `code-reviewer` profile). `approval` uses `auto-thinking`. `deepseek-flash` appears inside `fallback_providers`, one auxiliary `fallback_chain` per slot, and nowhere as a primary. So "why DeepSeek?" means either the codex-router primary was down/overloaded and the route fell through to the direct `deepseek` provider, or the user is reading the fallback list and mistaking it for the active brain. Answer with a table of role → provider → model so the status is visible.
 
 **Diagnostic:** `env | grep -iE 'model|provider|deepseek'` (redact key values), then read `/opt/data/config.yaml` sections `model:`, `fallback_providers:`, `auxiliary:`, `delegation:`; per-profile overrides live at `/opt/data/profiles/<name>/config.yaml`.
 
@@ -393,27 +393,34 @@ Backend routing: `image_gen.provider` (plugin backends: fal, openai, openai-code
 
 Full catalog + provider table + diagnostic transcript: `references/image-gen-backends.md`.
 
-## DeepSeek vision input (auxiliary.vision)
+## Vision input (auxiliary.vision)
 
-`deepseek-flash` is natively multimodal and the direct DeepSeek API is the terminal
-route for vision, so vision runs on it directly — no router hop and no `fallback_chain`
-by design:
+Vision routes through codex-router on the Command Code DeepSeek Flash model, with one
+direct `deepseek-flash` fallback. Both the primary and the fallback model are natively
+multimodal. The fallback is the last rung of the chain: the Command Code route has no
+cross-provider hop of its own, so the direct `deepseek` route is where it ends:
 
 ```yaml
 auxiliary:
     vision:
-        provider: deepseek
-        model: deepseek-flash
+        provider: custom:codex-router
+        model: commandcode/deepseek/deepseek-v4.1-flash
+        fallback_chain:
+            - provider: deepseek
+              model: deepseek-flash
 ```
 
 Setting it explicitly:
 ```bash
-hermes config set auxiliary.vision.provider deepseek
-hermes config set auxiliary.vision.model deepseek-flash
+hermes config set auxiliary.vision.provider custom:codex-router
+hermes config set auxiliary.vision.model commandcode/deepseek/deepseek-v4.1-flash
 ```
-`hermes config set` writes single keys; it does not clear a `fallback_chain` left on a
-host that predates this change. That stale chain names the same model and is inert, and
-`50-seed-defaults` reseeds the keys the baked config defines on the next boot, while a
+Those two commands leave no `fallback_chain`, and neither does any other write to
+`/opt/data/config.yaml`: `50-seed-defaults` replaces the whole `auxiliary` subtree from
+the baked config on every boot, so a hand edit or a `hermes config set` is silently
+reverted at the next container start. Land the chain in `modules/hermes/config.yaml`
+and deploy; that is the only durable fix.
+A `fallback_chain` left by an older host names the same model and is inert, and a
 top-level key the baked config does not define (such as `hooks`) survives the reseed.
 
 **Verify the wiring resolves:**
