@@ -1,6 +1,7 @@
 # Copyright © 2022 Dell Inc. or its subsidiaries. All Rights Reserved.
 
 from pathlib import Path
+import subprocess
 import unittest
 
 import yaml
@@ -278,6 +279,43 @@ class DeployWorkflowRouterTests(unittest.TestCase):
         self.assertGreater(call_index, probe_end)
         auth_index = boot.index("gh auth login --with-token")
         self.assertGreater(call_index, auth_index)
+
+    def test_the_checkout_refresh_classifier_leaves_a_skipped_checkout_alone(self):
+        """Run the deploy's real output classifier, not a copy of its text.
+
+        The success line is derived from the script's report because four outcomes
+        exit 0 without advancing anything. Pinning the discriminator as a string
+        would stay green if a later edit widened it and updated the literal in
+        lockstep, so the branch is extracted from deploy.sh and executed against
+        captured outputs.
+        """
+        deploy = DEPLOY_SCRIPT.read_text(encoding="utf-8")
+        anchor = 'if printf \'%s\' "$CHECKOUT_OUTPUT" | grep -q "is at "; then'
+        self.assertIn(anchor, deploy, "the deploy's checkout classifier moved; update this test")
+        start = deploy.index(anchor)
+        end = deploy.index("\n      fi\n", start) + len("\n      fi\n")
+        classifier = deploy[start:end]
+        cases = {
+            # script lines 116 and 130: advanced, or already at the target.
+            "refresh-codex-router-checkout: /workspace/codex-router is at 3f60a775": True,
+            # line 80: dirty. The notice carries a HEAD sha, never "is at ".
+            "refresh-codex-router-checkout: /workspace/codex-router is dirty; "
+            "leaving it alone (HEAD 3f60a775)": False,
+            # line 89: another branch, or a detached HEAD reported as HEAD.
+            "refresh-codex-router-checkout: /workspace/codex-router is on 'feat/x', not main; "
+            "leaving it alone (HEAD 3f60a775)": False,
+            # line 45: no checkout yet, which is a skip and not a success.
+            "refresh-codex-router-checkout: no checkout at /workspace/codex-router; skipping": False,
+        }
+        for output, expected in cases.items():
+            completed = subprocess.run(
+                ["bash", "-c", 'GREEN=""; YELLOW=""; NC=""; CHECKOUT_OUTPUT=$1\n' + classifier, "bash", output],
+                capture_output=True, text=True, check=True,
+            )
+            self.assertEqual(
+                "is at this deploy's revision" in completed.stdout, expected,
+                f"classifier misreported {output!r}: {completed.stdout!r}",
+            )
 
     def test_hermes_deploy_health_gate_retries_before_failing(self):
         deploy_script = DEPLOY_SCRIPT.read_text(encoding="utf-8")
