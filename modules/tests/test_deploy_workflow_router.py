@@ -218,6 +218,16 @@ class DeployWorkflowRouterTests(unittest.TestCase):
         self.assertIn("docker cp \"$CHECKOUT_SCRIPT\" hermes:/tmp/refresh-codex-router-checkout.sh", checkout_block)
         self.assertIn("docker exec -e CODEX_ROUTER_LOCK_WAIT_SECONDS=300 -u hermes hermes sh /tmp/refresh-codex-router-checkout.sh", checkout_block)
         self.assertIn("docker exec hermes rm -f /tmp/refresh-codex-router-checkout.sh", checkout_block)
+        # The recovery recipe is pasted into an interactive shell, where history
+        # expansion rewrites an unquoted `!gh`; the outer single quotes are what
+        # keep the helper intact, so the runnable form is pinned verbatim.
+        deploy_doc = (Path(__file__).parents[2] / "DEPLOY.md").read_text(encoding="utf-8")
+        self.assertIn(
+            "docker exec -u hermes hermes sh -c 'git -C /workspace/codex-router "
+            "-c credential.helper=\"!gh auth git-credential\" fetch origin main",
+            deploy_doc,
+            "the recovery command must be paste-safe: outer single quotes, inner double quotes",
+        )
         self.assertIn("--- Hermes Codex Router Checkout ---", checkout_block)
         self.assertIn("hermes codex-router checkout is at this deploy's revision", checkout_block)
         self.assertIn("hermes codex-router checkout left alone", checkout_block)
