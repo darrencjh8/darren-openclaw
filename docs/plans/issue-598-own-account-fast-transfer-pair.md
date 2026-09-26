@@ -1,6 +1,6 @@
 QUESTIONS
-q: Does AC-3's "ambiguous/absent match stays held" require holding when no far-side row is found at all? | assumption: No. "Absent" in AC-3 describes the #598 production shape, where the far leg was never booked as a transfer and the near leg was being booked as a Misc expense instead of being held. The fix holds exactly that case. In the ordinary transfer path no far row exists yet, so there is nothing to link and Actual's own engine pairs the counterpart from the transfer payee; holding there would stall every normal transfer until its other leg arrived, which is a worse defect than the one being fixed. The narrower gap — a far row that exists but is invisible to the read because of its payee, its cleared flag, or a timezone day skew — is recorded as accepted risk with a tracking issue rather than fixed here.
-q: Should the settle-based AC-3 proof become a CI test in this same change? | assumption: No, not in this change. It needs a multi-second settle to let `updateTransaction`'s async batch flush, which makes it slow and timing-dependent in CI, and adding it would commit a new revision and reset the two review approvals already recorded on this HEAD. It is recorded on the pull request as verification and tracked as a follow-up issue.
+q: Does AC-3 require holding when no far-side row exists? | assumption: No. In the ordinary path the far row has not arrived, so holding would stall every transfer. The narrower invisible-row gap is accepted risk and tracked.
+q: Add the settle-based AC-3 proof to CI now? | assumption: No. It is slow and timing-dependent; it is tracked as follow-up coverage.
 
 # Plan: #598 own-account FAST transfer pair
 
