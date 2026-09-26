@@ -877,9 +877,17 @@ app.post("/transactions/link-transfer", async (req, res) => {
             try {
                 await actual.updateTransaction(incoming.id, incomingFields);
             } catch (error) {
-                // The public API has no atomic two-row update. Restore the first
-                // leg before surfacing the failed second write, so retries still
-                // see two ordinary rows instead of an unrecoverable half-pair.
+                // The public API has no atomic two-row update. The first write
+                // does not only touch its own row: the engine's onUpdate sees a
+                // transfer payee plus a transfer_id and keeps the pair
+                // consistent, so the incoming row has already adopted the
+                // outgoing account's transfer payee by the time the second
+                // write fails. Restoring the first leg alone would therefore
+                // leave a half-pair whose far side no longer matches the
+                // tracker's Misc-payee candidate search, so neither leg is
+                // restored and a retry can never relink the pair.
+                // Restore BOTH rows, each to the fields it was read with, so the
+                // pair is exactly the unlinked one the caller can retry.
                 try {
                     await actual.updateTransaction(outgoing.id, {
                         payee: outgoing.payee || null,
@@ -889,6 +897,11 @@ app.post("/transactions/link-transfer", async (req, res) => {
                         // getTransactions, which would silently blank the
                         // category the compensation is meant to restore.
                         category: outgoing.category || null,
+                    });
+                    await actual.updateTransaction(incoming.id, {
+                        payee: incoming.payee || null,
+                        transfer_id: incoming.transfer_id || null,
+                        category: incoming.category || null,
                     });
                 } catch (rollbackError) {
                     throw new Error(

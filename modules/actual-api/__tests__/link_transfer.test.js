@@ -167,7 +167,7 @@ describe("POST /transactions/link-transfer (#598)", () => {
         }
     });
 
-    test("compensates the first leg when the second link write fails", async () => {
+    test("compensates BOTH legs when the second link write fails", async () => {
         // Fixture rows carry `category`, the field the engine actually returns:
         // a row read back from `getTransactions` has `category`, never
         // `category_id` (which is the DB column, verified against the vendored
@@ -182,7 +182,7 @@ describe("POST /transactions/link-transfer (#598)", () => {
         actual.updateTransaction
             .mockResolvedValueOnce({})
             .mockRejectedValueOnce(new Error("temporary Actual failure"))
-            .mockResolvedValueOnce({});
+            .mockResolvedValue({});
         const handler = findHandler("post", "/transactions/link-transfer");
         const res = mockRes();
 
@@ -197,16 +197,25 @@ describe("POST /transactions/link-transfer (#598)", () => {
             res,
         );
 
-        expect(actual.updateTransaction).toHaveBeenCalledTimes(3);
-        expect(actual.updateTransaction).toHaveBeenLastCalledWith(OUTGOING.id, {
+        // write 1, the failed write 2, then a restore for EACH leg: the engine's
+        // onUpdate already moved the counterpart's payee when write 1 landed, so
+        // restoring the first leg alone would leave a half-pair a retry cannot
+        // relink (proven on the real engine).
+        expect(actual.updateTransaction).toHaveBeenCalledTimes(4);
+        expect(actual.updateTransaction).toHaveBeenNthCalledWith(3, OUTGOING.id, {
             payee: "p-misc",
             transfer_id: null,
             category: "cat-groceries",
         });
+        expect(actual.updateTransaction).toHaveBeenNthCalledWith(4, INCOMING.id, {
+            payee: "p-misc",
+            transfer_id: null,
+            category: "cat-income",
+        });
         expect(res.status).toHaveBeenCalledWith(500);
     });
 
-    test("reports compensation failure when the first-leg rollback cannot be written", async () => {
+    test("reports compensation failure when a compensation write cannot be written", async () => {
         seedPair();
         actual.updateTransaction
             .mockResolvedValueOnce({})
