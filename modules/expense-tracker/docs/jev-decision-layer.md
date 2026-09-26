@@ -68,6 +68,32 @@ threshold is met.
 (`_validate_payee`) — and an ambiguous name **throws** `AMBIGUOUS_PAYEE` with the candidate IDs rather
 than picking by list order (issue #483).
 
+### What was measured, and what it changed
+
+`tools/jev-account-poc.mjs` runs the shipped resolvers over the 69 real alert emails, building the
+account list and the mappings from memory's own account facts (18 accounts) because the live
+`/accounts` list needs the budget.
+
+**Not one of the 69 alerts parses as a bank movement: 0/69.** `parseBankMovement` covers the Ryt
+sentence forms (`… was paid at X using your Main Account on 2/9/2026 …`) and label-based alerts
+(`Amount :`), while the corpus is dominated by this shape:
+
+```text
+A transaction of SGD 8.50 was made with your UOB Card ending 1234 on 26/08/26 at HAPPY HAWKER@289C COMP.
+```
+
+That returns `null`, so `resolveMovementAccounts` never runs for these emails and the deterministic
+movement-to-account path is not what assigns their account. The account is instead placed by name
+resolution over whatever Phase 1 extracted, through `matchAccountByName` / `resolveFactAccount`
+against the live account list. So the seam a decision layer would join is the **name-matching
+refusal**, not the movement parser.
+
+This also corrects an earlier claim of mine in this plan: the account half is **not** measurable by
+reusing `parseBankMovement` on this corpus. What is measurable is how often an alert names a known
+account at all, and how often the resolver refuses the name it does see. The corpus still has no
+record of which account each transaction was actually booked to, so it remains a resolution and
+refusal rate, never an accuracy.
+
 ### Account
 
 Entirely deterministic; no model makes the decision:
