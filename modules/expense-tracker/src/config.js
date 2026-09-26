@@ -66,6 +66,15 @@ export class Config {
     this.statementDbPath = env.STATEMENT_DB_PATH || "data/statement.db";
     this.memoryPath = env.MEMORY_PATH || "data/MEMORY.md";
     this.braveSearchApiKey = env.BRAVE_SEARCH_API_KEY || "";
+    // Typed decision layer for payee resolution. Off unless asked for, so the
+    // merge changes no behaviour until a production run is chosen.
+    this.jevEnabled = env.JEV_ENABLED === "1";
+    this.jevEndpoint = env.JEV_ENDPOINT || "https://api.commandcode.ai/provider/v1/systemone";
+    this.jevModel = env.JEV_MODEL || "typesafe/jev";
+    this.jevApiKey = env.JEV_API_KEY || env.COMMANDCODE_API_KEY || "";
+    this.jevThreshold = Number(env.JEV_THRESHOLD || "0.95");
+    this.jevMaxCandidates = Number(env.JEV_MAX_CANDIDATES || "60");
+    this.jevTimeoutMs = Number(env.JEV_TIMEOUT_MS || "8000");
     this.logLevel = env.LOG_LEVEL || "INFO";
   }
 

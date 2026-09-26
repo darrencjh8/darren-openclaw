@@ -12,6 +12,7 @@ import { isBookableAmountCents } from "./amounts.js";
 import { extractPdfFromBuffer, extractEmailContent } from "./extractors.js";
 import { LLMClient } from "./orchestrator.js";
 import { factNamesMerchant } from "./memory.js";
+import { choosePayee } from "./jev.js";
 import { composeNotes } from "./transaction-notes.js";
 import { logger, getLogger, redactSensitive } from "./logging.js";
 
@@ -1860,7 +1861,25 @@ export class ToolRegistry {
         }
       }
     } catch {
-      // Memory search failed — fall through to web search
+      // Memory search failed — fall through to the decision layer, then Misc
+    }
+
+    // A typed decision over the live payee list, on the miss path only and only
+    // above a confidence threshold. Measured basis: docs/jev-decision-layer.md.
+    // It never learns, because an unverifiable answer becoming durable evidence
+    // is exactly what #587 was.
+    if (this._config && this._config.jevEnabled) {
+      try {
+        const payees = await this._get("/payees", budgetId);
+        const decision = await choosePayee({
+          merchant,
+          payees: Array.isArray(payees) ? payees : [],
+          config: this._config,
+        });
+        if (decision) return { payee: decision.payee, source: "jev" };
+      } catch {
+        // A payee list that cannot be read leaves today's behaviour in place.
+      }
     }
 
     // An unverified web/LLM classification is not durable merchant evidence.
