@@ -168,10 +168,15 @@ describe("POST /transactions/link-transfer (#598)", () => {
     });
 
     test("compensates the first leg when the second link write fails", async () => {
+        // Fixture rows carry `category`, the field the engine actually returns:
+        // a row read back from `getTransactions` has `category`, never
+        // `category_id` (which is the DB column, verified against the vendored
+        // engine). A fixture using `category_id` cannot see the route reading
+        // the wrong one.
         seedPair({
             rows: [
-                { ...OUTGOING, category_id: "cat-groceries" },
-                { ...INCOMING, category_id: "cat-income" },
+                { ...OUTGOING, category: "cat-groceries" },
+                { ...INCOMING, category: "cat-income" },
             ],
         });
         actual.updateTransaction

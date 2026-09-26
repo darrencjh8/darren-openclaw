@@ -884,7 +884,11 @@ app.post("/transactions/link-transfer", async (req, res) => {
                     await actual.updateTransaction(outgoing.id, {
                         payee: outgoing.payee || null,
                         transfer_id: outgoing.transfer_id || null,
-                        category: outgoing.category_id || null,
+                        // The external row field is `category`; `category_id` is
+                        // the DB column and is undefined on a row read back from
+                        // getTransactions, which would silently blank the
+                        // category the compensation is meant to restore.
+                        category: outgoing.category || null,
                     });
                 } catch (rollbackError) {
                     throw new Error(
