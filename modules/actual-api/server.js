@@ -761,6 +761,199 @@ app.get("/transactions/:id", async (req, res) => {
     }
 });
 
+/**
+ * Link two EXISTING rows on two different accounts into one transfer pair
+ * (issue #598).
+ *
+ * Actual only writes `transfer_id` from its transfer engine, and that engine is
+ * reachable two ways, both wrong for a pair that already exists:
+ *   - `runTransfers` on a row carrying the other account's transfer payee calls
+ *     onInsert/onUpdate with no `transfer_id`, so it creates a SECOND
+ *     counterpart row — the #598 incident already has one row per leg.
+ *   - Writing `transfer_id` alone is undone: onUpdate sees no transferred
+ *     account and calls removeTransfer, which nulls it back.
+ * Writing each leg's own transfer payee AND the partner's `transfer_id`
+ * together links the pair in place and creates no counterpart row. Both are
+ * verified against a scratch budget on the vendored @actual-app/api 26.9.0.
+ */
+app.post("/transactions/link-transfer", async (req, res) => {
+    try {
+        const { outgoing_id, incoming_id } = req.body || {};
+        if (!outgoing_id || !incoming_id) {
+            return res
+                .status(400)
+                .json({ error: "outgoing_id and incoming_id are required" });
+        }
+        if (outgoing_id === incoming_id) {
+            return res
+                .status(400)
+                .json({ error: "A transfer needs two distinct transactions" });
+        }
+        // The assertion, the reads and the writes share one locked critical
+        // section, so a concurrent budget switch cannot land the second write
+        // in a different budget (#390, #506).
+        const outcome = await withBudget(req, async () => {
+            // The route receives ids, not the legs' dates. Keep the existing
+            // all-history lookup, but include the Singapore calendar day through
+            // its end. UTC "today" excluded a 00:36 SGT #598 pair for a third of
+            // the clock and made the route return 404 before either link write.
+            const singaporeTomorrow = new Date(
+                Date.now() + 8 * 3600000 + 86400000,
+            ).toISOString().slice(0, 10);
+            const [rows, payees, accounts] = await Promise.all([
+                actual.getTransactions(undefined, "1970-01-01", singaporeTomorrow),
+                actual.getPayees(),
+                actual.getAccounts(),
+            ]);
+            const byId = new Map((rows || []).map((row) => [row.id, row]));
+            const outgoing = byId.get(outgoing_id);
+            const incoming = byId.get(incoming_id);
+            if (!outgoing || !incoming) {
+                return { error: "Transaction not found", status: 404 };
+            }
+            // A leg already inside a transfer must not be re-pointed: its
+            // counterpart row belongs to the pair it was booked with.
+            if (outgoing.transfer_id || incoming.transfer_id) {
+                return {
+                    error: "Transaction is already part of a transfer",
+                    status: 400,
+                };
+            }
+            // The pair contract the #598 fallback matches on: opposite signs, a
+            // distinct account each, and the same magnitude. A same-account or
+            // same-sign pair is a data error, not a transfer.
+            if (outgoing.account === incoming.account) {
+                return {
+                    error: "Transfer legs must sit on two different accounts",
+                    status: 400,
+                };
+            }
+            if (
+                !Number.isInteger(outgoing.amount) ||
+                !Number.isInteger(incoming.amount) ||
+                outgoing.amount === 0 ||
+                incoming.amount === 0 ||
+                Math.sign(outgoing.amount) === Math.sign(incoming.amount) ||
+                Math.abs(outgoing.amount) !== Math.abs(incoming.amount)
+            ) {
+                return {
+                    error: "Transfer legs must be opposite, equal amounts",
+                    status: 400,
+                };
+            }
+            const live = (accounts || []).filter((a) => !a.closed);
+            const isLive = (id) => live.some((account) => account.id === id);
+            if (!isLive(outgoing.account) || !isLive(incoming.account)) {
+                return { error: "Transfer account is closed or unavailable", status: 400 };
+            }
+            // Each leg needs the OTHER account's transfer payee. Without it the
+            // engine has no transferred account to point at, so the link cannot
+            // be written at all.
+            const payeeFor = (accountId) =>
+                (payees || []).find(
+                    (payee) => payee.transfer_acct === accountId && payee.id,
+                ) || null;
+            const payeeForIncoming = payeeFor(incoming.account);
+            const payeeForOutgoing = payeeFor(outgoing.account);
+            if (!payeeForIncoming || !payeeForOutgoing) {
+                return {
+                    error: "No transfer payee for one of the accounts",
+                    status: 400,
+                };
+            }
+            // A leg that already points at a transfer account while carrying no
+            // transfer_id is a half-pair left by a failed link-back (the engine
+            // inserts the counterpart first and links it back second). Writing
+            // such a leg, or restoring its transfer payee, makes the engine's
+            // onUpdate call addTransfer and INSERT a third counterpart row, so
+            // refuse the pair up front instead of inventing a transaction.
+            const transferAcctIds = new Set(
+                (payees || [])
+                    .filter((payee) => payee.transfer_acct)
+                    .map((payee) => payee.id),
+            );
+            if (
+                (!outgoing.transfer_id && transferAcctIds.has(outgoing.payee)) ||
+                (!incoming.transfer_id && transferAcctIds.has(incoming.payee))
+            ) {
+                return {
+                    error: "A leg already points at a transfer account while unlinked",
+                    status: 400,
+                };
+            }
+            // Cleared categories belong to an expense/income pair; a transfer
+            // pair carries none, or the residual expense #598 is about stays.
+            const outgoingFields = {
+                payee: payeeForIncoming.id,
+                transfer_id: incoming.id,
+                category: null,
+            };
+            const incomingFields = {
+                payee: payeeForOutgoing.id,
+                transfer_id: outgoing.id,
+                category: null,
+            };
+            await actual.updateTransaction(outgoing.id, outgoingFields);
+            try {
+                await actual.updateTransaction(incoming.id, incomingFields);
+            } catch (error) {
+                // The public API has no atomic two-row update. The first write
+                // does not only touch its own row: the engine's onUpdate sees a
+                // transfer payee plus a transfer_id and keeps the pair
+                // consistent, so the incoming row has already adopted the
+                // outgoing account's transfer payee by the time the second
+                // write fails. Restoring the first leg alone would therefore
+                // leave a half-pair whose far side no longer matches the
+                // tracker's Misc-payee candidate search, so neither leg is
+                // restored and a retry can never relink the pair.
+                // Restore BOTH rows, each to the fields it was read with, so the
+                // pair is exactly the unlinked one the caller can retry.
+                try {
+                    await actual.updateTransaction(outgoing.id, {
+                        payee: outgoing.payee || null,
+                        transfer_id: outgoing.transfer_id || null,
+                        // The external row field is `category`; `category_id` is
+                        // the DB column and is undefined on a row read back from
+                        // getTransactions, which would silently blank the
+                        // category the compensation is meant to restore.
+                        category: outgoing.category || null,
+                    });
+                    // The engine's updateTransfer also copies the written row's
+                    // notes and schedule onto the counterpart, so restore those
+                    // too: without it a failed link leaves the incoming row
+                    // advertising the outgoing leg's statement reference.
+                    await actual.updateTransaction(incoming.id, {
+                        payee: incoming.payee || null,
+                        transfer_id: incoming.transfer_id || null,
+                        category: incoming.category || null,
+                        notes: incoming.notes ?? null,
+                        schedule: incoming.schedule ?? null,
+                    });
+                } catch (rollbackError) {
+                    throw new Error(
+                        `Transfer link failed and compensation failed: ${rollbackError.message}`,
+                    );
+                }
+                throw error;
+            }
+            return {
+                status: "linked",
+                outgoing_id: outgoing.id,
+                incoming_id: incoming.id,
+            };
+        });
+        if (outcome === UNKNOWN_BUDGET) {
+            return res.status(400).json({ error: "Unknown budget" });
+        }
+        if (outcome.error) {
+            return res.status(outcome.status || 400).json({ error: outcome.error });
+        }
+        res.json(outcome);
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
 app.get("/transactions", async (req, res) => {
     try {
         const { account_id, cleared, since_date, until_date } = req.query;

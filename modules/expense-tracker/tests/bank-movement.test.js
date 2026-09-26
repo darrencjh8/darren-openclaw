@@ -510,6 +510,10 @@ Description : UEN123-REFERENCE
         ] };
         if (name === "reserve_transfer") return { status: "reserved", entry: { id: 1 } };
         if (name === "check_duplicate") return false;
+        // The far-side read the #598 fix always makes before a transfer insert.
+        // An empty far account answers "no far side yet", so the insert
+        // proceeds normally with its transfer payee.
+        if (name === "find_link_candidate") return { candidate: null, matches: 0 };
         if (name === "insert_transaction") return { id: "actual-1" };
         return true;
       }),
@@ -567,6 +571,10 @@ To: CITI CREDIT CARDS (Ref ending 4756)
         ] };
         if (name === "reserve_transfer") return { status: "reserved", entry: { id: 1 } };
         if (name === "check_duplicate") return false;
+        // The far-side read the #598 fix always makes before a transfer insert.
+        // An empty far account answers "no far side yet", so the insert
+        // proceeds normally with its transfer payee.
+        if (name === "find_link_candidate") return { candidate: null, matches: 0 };
         if (name === "insert_transaction") return { id: "actual-1" };
         return true;
       }),
@@ -958,6 +966,10 @@ To: CITI CREDIT CARDS (Ref ending 4756)
           { text: "OverseaChinese Banking Corporation Ltd maps to Charity payee", score: 1 },
         ] };
         if (name === "reserve_transfer") return { status: "inserted", entry: { id: 1 } };
+        // The far-side read the #598 fix makes before reserving. This credit's
+        // counterpart is already recorded in the journal, so no Actual-row
+        // candidate exists and the read must not change this path.
+        if (name === "find_link_candidate") return { candidate: null, matches: 0 };
         return true;
       }),
       getPhase1ToolSchemas: vi.fn(() => []),

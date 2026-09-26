@@ -1289,13 +1289,26 @@ export class ToolRegistry {
     // Unlike update_transaction, an unknown name is not an error — it becomes
     // "Misc" (see _validate_payee) — while an ambiguous name is refused.
     const explicitId = args.payee_id || null;
+    // The far-side-found insert must carry NO transfer payee at all (#598).
+    // Clearing `payee_id` is not enough: with it falsy this handler falls into
+    // the name branch, resolves `imported_description` (the destination account
+    // name) against the live payee list, and sends that transfer payee anyway —
+    // which makes Actual's `runTransfers` create a duplicate counterpart and
+    // link the row before the pair can be joined (review round 2, R2-H1). So the
+    // suppression is explicit and applies to the derived payee too.
+    const suppressTransferPayee = args.suppress_transfer_payee === true;
     let payeeId = explicitId;
     let payee_name = null;
     // The insert path's row always sits on `args.account_id`, so the source
     // defaults to it when the caller does not pass one explicitly.
     const validateTransferTarget = (payee, sourceAccountId = args.account_id) =>
       this._validateTransferTarget(payee, budget_id, sourceAccountId);
-    if (explicitId) {
+    if (suppressTransferPayee) {
+      // Both legs are already present: the row goes in plain, unclassified, and
+      // the link route sets both legs' payees to each other afterwards.
+      payeeId = null;
+      payee_name = "Misc";
+    } else if (explicitId) {
       // An explicit ID comes from the caller or from Phase 2 transfer detection,
       // so it is validated here and never second-guessed by a name lookup.
       let payees = null;
@@ -1417,6 +1430,35 @@ export class ToolRegistry {
     return this._dedup.findInsertedTransferInto(args);
   }
 
+  /**
+   * Reserve the far side of a bare movement, and link the pair once both
+   * halves are known (#598).
+   *
+   * Reserved review decision: this is deliberately NOT an automatic
+   * reconciler. An earlier draft matched rows on (account, amount, window)
+   * and wrote the link itself, but that match cannot tell a real sibling
+   * apart from an unrelated movement of the same size on the same day — the
+   * trade-off already tracked in #578 — so a wrong match would silently
+   * rewrite the user's books. The candidate step above is read-only and
+   * refuses an ambiguous match; this step takes the ids explicitly, so the
+   * write is always attributable to a decision someone made.
+   */
+  async _handle_link_transfer_pair({ budget_id, outgoing_id, incoming_id } = {}) {
+      if (!budget_id || !outgoing_id || !incoming_id) {
+          return { error: "budget_id, outgoing_id and incoming_id are required" };
+      }
+      try {
+          return await this._post("/transactions/link-transfer", {
+              budget_id,
+              outgoing_id,
+              incoming_id,
+          });
+      } catch (error) {
+          logger.warn({ event: "link_transfer_pair_failed", error: error.message });
+          return { error: error.message };
+      }
+  }
+
   async _handle_reserve_transfer(args) {
     let reservation = this._dedup.reserveTransfer(args);
     // The far side may already be booked, because an alert can name the deposit
@@ -1487,6 +1529,58 @@ export class ToolRegistry {
       // Cannot prove Actual absence: retain pending reservation.
     }
     return reservation;
+  }
+
+  async _handle_find_link_candidate({ budget_id, account_id, amount_cents, on_date } = {}) {
+    if (!budget_id || !account_id || !on_date || amount_cents == null) {
+      return { candidate: null, matches: 0 };
+    }
+    // Read-only, and deliberately conservative — this decides whether an
+    // already-booked row gets rewritten, so an ambiguous or absent match must
+    // leave the books alone (issues #557, #578, #598). The row must be the
+    // OTHER leg of this transfer: the opposite sign of the leg being booked, on
+    // the other account, uncleared, unlinked, and still parked on the
+    // unclassified `Misc` payee — the shape this pipeline writes when it cannot
+    // classify a movement. Exactly one such row may exist; two is a data
+    // question for the user, not a guess.
+    //
+    // `matches` is reported as well as the candidate because the caller must
+    // tell "no far side exists" (book the pair the normal way) apart from
+    // "several rows could be the far side" (book nothing and tell the user).
+    // Collapsing both to `candidate: null` made the caller unable to avoid
+    // creating a second counterpart row (issue #598 review round 1).
+    try {
+      const [rows, payees] = await Promise.all([
+        this._get("/transactions", budget_id, {
+          since_date: on_date,
+          until_date: on_date,
+          account_id,
+        }),
+        this._get("/payees", budget_id),
+      ]);
+      const misc = Array.isArray(payees)
+        ? payees.find((p) => p.name === "Misc" && !p.transfer_acct)
+        : null;
+      const wanted = -Math.sign(amount_cents) * Math.abs(amount_cents);
+      const matches = (Array.isArray(rows) ? rows : []).filter(
+        (tx) =>
+          tx.account === account_id &&
+          tx.amount === wanted &&
+          !tx.transfer_id &&
+          tx.cleared === false &&
+          misc &&
+          tx.payee === misc.id,
+      );
+      if (matches.length !== 1) return { candidate: null, matches: matches.length };
+      return { candidate: { id: matches[0].id, account_id }, matches: 1 };
+    } catch (error) {
+      logger.warn({
+        event: "find_link_candidate_failed",
+        error: error.message,
+      });
+      // Unreadable is not "none": the caller must not insert on a failed read.
+      return { candidate: null, matches: null };
+    }
   }
 
   async _handle_complete_transfer({ id, actual_transaction_id }) {

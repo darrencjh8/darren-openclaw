@@ -239,6 +239,11 @@ describe("hold behaviour for person-name movements (#584 / #585)", () => {
                 }
                 if (name === "check_duplicate") return false;
                 if (name === "check_schedule_collision") return false;
+                // The far-side read the #598 fix makes before reserving. Nothing
+                // is pre-booked in Actual for these fixtures, so there is no
+                // candidate and the insert path stays unchanged.
+                if (name === "find_link_candidate")
+                    return { candidate: null, matches: 0 };
                 return true;
             }),
             getPhase1ToolSchemas: vi.fn(() => []),
@@ -522,6 +527,10 @@ To: ACCOUNT HOLDER SC A/C ending 6445
             executeTool: vi.fn(async (name) => {
                 if (name === "find_inserted_transfer") return booked;
                 if (name === "list_facts") return { facts: [] };
+                // The far-side read the #598 fix makes before reserving. These
+                // legs come from the journal, not from existing Actual rows.
+                if (name === "find_link_candidate")
+                    return { candidate: null, matches: 0 };
                 if (name === "fetch_context")
                     return {
                         accounts: [

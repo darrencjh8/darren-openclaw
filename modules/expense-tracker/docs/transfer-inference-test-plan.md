@@ -299,6 +299,65 @@ Recovery and cleanup:
 
 Use `Asia/Singapore` time for matching; do not compare bare UTC dates.
 
+#### 5b. Link an already-booked far side (issue #598)
+
+A bank alert can arrive *after* the other leg has already been booked as an
+ordinary row — one `Misc` row per leg, never linked. That was the production
+incident in #598: `SGD 1,000.00` OCBC 360 → POSB Cashback produced two separate
+`Misc` rows with no category, one on each account, both `transfer_id` null.
+
+When the near leg is booked as a transfer and the far account already holds a
+row, the pipeline decides that **before** it inserts, and links the two through
+`POST /transactions/link-transfer`:
+
+- Opposite sign to the leg just booked, same absolute amount.
+- On the far account of the transfer, and not the account just booked.
+- `cleared === false` and `transfer_id` null (an unlinked, uncleared row).
+- Still on the unclassified `Misc` payee — the shape this pipeline writes when a
+  movement cannot be classified.
+
+Exactly one match is linked, and the near leg is then inserted with **no payee at
+all**, because the link route sets both legs' payees itself. Order matters: the
+`/transactions` insert always runs `addTransactions(..., {runTransfers: true})`,
+so a transfer payee on that insert makes Actual create a counterpart row of its
+own. Linking afterwards then finds the near leg already inside a transfer, the
+route refuses it (`Transaction is already part of a transfer`), and the incident
+ends with three rows and an orphaned far row instead of two.
+
+Two review rounds were needed to get this right, and both failures were the same
+mistake in different clothes — asserting on the tracker's own intent rather than
+on what reaches Actual:
+
+1. **Round 1** rejected the original *post-insert* ordering (link after booking).
+2. **Round 2** rejected clearing only `payee_id`: the real `insert_transaction`
+   handler re-derives a payee from `imported_description`, so the destination's
+   transfer payee reached the wire anyway and the duplicate counterpart came
+   back. The suppression is therefore an explicit `suppress_transfer_payee`
+   argument handled in `tools.js`, and the test that guards it drives the real
+   `ToolRegistry` — a mocked `executeTool` cannot fake this, which is exactly how
+   the hole survived a green suite twice.
+
+So the decision is three-way, not two-way:
+
+| Far side | Action |
+| --- | --- |
+| Exactly one candidate | Insert with no payee, then link both legs |
+| No candidate (`matches: 0`) | Insert normally, with the transfer payee |
+| Several candidates, unreadable, or read failed | Book **nothing**, notify the user |
+
+Booking nothing on the last row is deliberate: inserting the near leg there would
+create the duplicate counterpart and orphan every candidate. The read also runs
+**before** the transfer reservation is taken, so nothing is left `pending` — a
+reservation taken first would short-circuit every later alert before the read
+could run again, and a genuinely ambiguous far side has to stay retryable.
+
+This is deliberately conservative, because the match is on (account, amount,
+date) and cannot by itself prove the two rows are the same transfer — the
+trade-off tracked in #578. The upgrade path is a bank-reference column on
+`transfer_journal`; the two #598 alerts do share the reference
+`2609230019902668` (the DBS ref `012609230019902668EPS7678794` embeds the OCBC
+ref as its middle segment), which such a column could key on.
+
 ### 6. Harden merchant inference
 
 For ordinary payments, payee resolution order is:
@@ -403,6 +462,9 @@ PASS: Same accounts and amount but transfers 30 minutes apart create two transfe
 PASS: Real reverse transfer (Zeta Card -> OCBC 111) within ten minutes creates a second transfer.
 PASS: Same amount/date with different destination account IDs creates two transfers.
 PASS: Concurrent processing of both alerts sends exactly one transfer command.
+PASS: One own-account FAST transfer whose far leg is already an uncleared Misc row links both rows into one pair via the link route, and only when exactly one candidate matches (#598).
+PASS: When the far side has zero or several matching rows, nothing is linked, no row is rewritten, and the run warns instead (#598).
+PASS: A DBS "You have received ... via FAST transfer" notice parses into an incoming movement and is held rather than booked as income, because the notice names the sender but never the sending account (#584, #598).
 ```
 
 ### Actual adapter HTTP-boundary assertions
