@@ -10,7 +10,7 @@ One own-account FAST transfer (OCBC 360 → POSB Cashback, SGD 1,000.00, 2026-09
 
 ## Status of this change
 
-The implementation is already written and reviewed on branch `fix/598-own-account-fast-transfer-pair`: three commits (`2be2232`, `83bf200`, `a4be72b`) against `c0113b7`. Four review rounds ran under the previous gate protocol and closed two High, two Medium, and one Low finding; the last two rounds returned APPROVE on the unchanged HEAD, and CI is green on `a4be72b`.
+The implementation is already written and reviewed on branch `fix/598-own-account-fast-transfer-pair`: three commits (`2be2232`, `83bf200`, `a4be72b`), since merged with `origin/main` so the branch carries the current base `aa8b50f`. Four review rounds ran under the previous gate protocol and closed two High, two Medium, and one Low finding; the last two rounds returned APPROVE on the unchanged HEAD, and CI is green on `a4be72b`.
 
 This plan therefore records the change under the current gate rather than proposing new work. There are no further code mutations: everything the plan describes is already committed and covered by tests in this branch. The only open item is a Low finding, which this plan disposes of as accepted risk in line with the policy that a Low or Nit finding is closed by disposition and never by mutation.
 
@@ -32,7 +32,7 @@ The transfer arrives as two separate bank alerts (OCBC outgoing, DBS inbound) an
 
 ## Verification
 
-- Reproduction recorded at the base revision: the DBS inbound body fails to parse as an incoming movement at `0faf111` and parses at HEAD.
+- Reproduction recorded at the base revision: the DBS inbound body fails to parse as an incoming movement at `aa8b50f` and parses at HEAD.
 - Targeted tests: `modules/expense-tracker/tests/own-account-fast-transfer-598.test.js` (17 tests, including wire-level assertions that the transfer payee is suppressed, driven through the real `ToolRegistry` rather than a mock), `modules/actual-api/__tests__/link_transfer.test.js` (+7 tests).
 - Mutation check: disabling the payee suppression turns the wire-level test red, so the test guards the defect rather than restating the implementation.
 - Full suites: expense-tracker 1163 passed / 5 skipped; actual-api jest 199 passed.
