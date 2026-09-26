@@ -135,7 +135,11 @@ jobs:
                   GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
                   BRAVE_SEARCH_API_KEY: ${{ secrets.BRAVE_SEARCH_API_KEY }}
                   CODEX_ROUTER_AUTH_PASSWORD: ${{ secrets.CODEX_ROUTER_AUTH_PASSWORD }}
-                  CODEX_ROUTER_OPENCODE_MAX_RUNS: ${{ vars.CODEX_ROUTER_OPENCODE_MAX_RUNS || 4 }}
+                  COMMANDCODE_API_KEY: ${{ secrets.COMMANDCODE_API_KEY }}
+                  OPENCODE_GO_API_KEY: ${{ secrets.OPENCODE_GO_API_KEY }}
+                  OPENCODE_ZEN_API_KEY: ${{ secrets.OPENCODE_ZEN_API_KEY }}
+                  OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
+                  CODEX_ROUTER_OPENCODE_ZEN_MODELS: ${{ vars.CODEX_ROUTER_OPENCODE_ZEN_MODELS || 'space-bunny-free' }}
                   LLM_PROVIDER: ${{ vars.LLM_PROVIDER || 'litellm' }}
                   LLM_BASE_URL: ${{ vars.LLM_BASE_URL || 'http://codex-router:4100/v1' }}
                   LLM_MODEL: ${{ vars.LLM_MODEL || 'auto-thinking' }}

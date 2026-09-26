@@ -604,8 +604,6 @@ if $GITHUB_MODE || check_file "$HERMES_ENV"; then
   check_var_optional "BRAVE_SEARCH_API_KEY" "$HERMES_ENV"
   check_var_optional "FIRECRAWL_API_KEY" "$HERMES_ENV"
   check_var_optional "NOTION_API_KEY" "$HERMES_ENV"
-  # Overallocatable dev-loop OpenCode concurrency cap; unset is valid (driver uses 4).
-  check_var_optional "CODEX_ROUTER_OPENCODE_MAX_RUNS" "$HERMES_ENV"
 fi
 fi
 
@@ -718,6 +716,18 @@ echo "--- Codex Router ---"
   check_var_optional "LLM_FALLBACK_MODEL" ""
   check_var_optional "LLM_FINAL_FALLBACK_PROVIDER" ""
   check_var_optional "LLM_FINAL_FALLBACK_MODEL" ""
+  echo "  [External Providers]"
+  # Required: six Hermes auxiliary slots pin commandcode/deepseek/deepseek-v4.1-flash
+  # as their primary, and the router only publishes commandcode/* while this key is
+  # present. A model the router never publishes does not fire the slots'
+  # deepseek-flash fallback_chain, so an unset key breaks compression, vision,
+  # web_extract, kanban_decomposer, triage_specifier, and profile_describer outright
+  # instead of degrading. Fail the deploy loudly rather than ship that state.
+  check_var "COMMANDCODE_API_KEY" ""
+  check_var_optional "OPENCODE_GO_API_KEY" ""
+  check_var_optional "OPENCODE_ZEN_API_KEY" ""
+  check_var_optional "OPENCODE_API_KEY" ""
+  check_var_optional "CODEX_ROUTER_OPENCODE_ZEN_MODELS" ""
 fi
 
 # ---- pluggable modules (auto-discover from modules/*/module.env) ----
@@ -989,6 +999,58 @@ if should_deploy "codex-router" || should_deploy "hermes"; then
       echo -e "  ${RED}✗ codex-router skill sync failed${NC}"
       failed=$((failed + 1))
     fi
+  fi
+fi
+
+# ---- Hermes container codex-router checkout ----
+# Dev-loop sessions in the container drive the gate from the container's own
+# codex-router checkout (`codex/skills/dev-loop/scripts/loop.py`), so the skill
+# roots alone do not change which driver runs: the checkout has to advance too.
+# Measured 2026-09-25: the reconciled roots were current while
+# /workspace/codex-router sat six commits behind origin/main, so the deployed
+# driver never reached a session. Two arms are enough here: should_deploy returns 0
+# as soon as any component is `all`, so a full deploy reaches this block as well.
+if should_deploy "codex-router" || should_deploy "hermes"; then
+  CHECKOUT_SCRIPT="$ROOT/modules/hermes/scripts/refresh-codex-router-checkout.sh"
+  if [ ! -d "$ROOT/modules/codex-router" ]; then
+    echo "  (codex-router checkout not present; skipping container checkout refresh)" >&2
+    [ -n "${GITHUB_ACTIONS:-}" ] && failed=$((failed + 1))
+  elif [ ! -f "$CHECKOUT_SCRIPT" ]; then
+    echo "  (checkout refresh script missing; skipping container checkout refresh)" >&2
+    [ -n "${GITHUB_ACTIONS:-}" ] && failed=$((failed + 1))
+  elif ! docker inspect hermes >/dev/null 2>&1; then
+    echo "  (hermes container not present; skipping container checkout refresh)"
+  else
+    CHECKOUT_READY=false
+    for _ in $(seq 1 15); do
+      if docker exec hermes true 2>/dev/null; then CHECKOUT_READY=true; break; fi
+      sleep 2
+    done
+    CHECKOUT_TARGET=$(git -C "$ROOT/modules/codex-router" rev-parse HEAD 2>/dev/null || true)
+    echo ""
+    echo "--- Hermes Codex Router Checkout ---"
+    CHECKOUT_OUTPUT=""
+    if [ "$CHECKOUT_READY" != true ]; then
+      echo -e "  ${RED}✗ hermes container did not become ready for the checkout refresh${NC}"
+      failed=$((failed + 1))
+    elif docker cp "$CHECKOUT_SCRIPT" hermes:/tmp/refresh-codex-router-checkout.sh \
+        && [ -n "$CHECKOUT_TARGET" ] \
+        && CHECKOUT_OUTPUT=$(docker exec -e CODEX_ROUTER_LOCK_WAIT_SECONDS=300 -u hermes hermes sh /tmp/refresh-codex-router-checkout.sh "$CHECKOUT_TARGET" 2>&1); then
+      printf '%s\n' "$CHECKOUT_OUTPUT"
+      # The success line comes from the script's own report, not from the exit
+      # code: four outcomes exit 0 without advancing anything, and reporting those
+      # as current is the failure this block exists to prevent.
+      if printf '%s' "$CHECKOUT_OUTPUT" | grep -q "is at "; then
+        echo -e "  ${GREEN}✓ hermes codex-router checkout is at this deploy's revision${NC}"
+      else
+        echo -e "  ${YELLOW}⏭ hermes codex-router checkout left alone${NC}"
+      fi
+    else
+      printf '%s\n' "$CHECKOUT_OUTPUT"
+      echo -e "  ${RED}✗ hermes codex-router checkout could not be advanced${NC}"
+      failed=$((failed + 1))
+    fi
+    docker exec hermes rm -f /tmp/refresh-codex-router-checkout.sh 2>/dev/null || true
   fi
 fi
 

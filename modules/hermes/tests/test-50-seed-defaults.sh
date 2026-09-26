@@ -408,6 +408,10 @@ model:
   default: stale
 fallback_providers:
   - provider: stale
+agent:
+  reasoning_effort: low
+  disabled_toolsets:
+    - user-owned
 memory:
   memory_enabled: true
   user_profile_enabled: true
@@ -424,8 +428,19 @@ import yaml
 config = yaml.safe_load(open(sys.argv[1], encoding="utf-8"))
 isolated = config["memory"]["memory_enabled"] is False and config["memory"]["user_profile_enabled"] is False
 preserved = config["approvals"]["mode"] == "custom-preserved"
-routed = config["model"] == {"provider": "custom:codex-router", "default": "auto-thinking"}
-print("pass" if isolated and preserved and routed and config["fallback_providers"] == [] else "fail")
+routed = config["model"] == {
+    "provider": "custom:codex-router",
+    "default": "commandcode/deepseek/deepseek-v4.1-flash",
+}
+escalating = config["fallback_providers"] == [
+    {"provider": "custom:codex-router", "model": "auto-thinking"}
+]
+# The stale profile carries reasoning_effort low; the baked profile pins high. The
+# effort must migrate, and the profile's own agent keys must survive it, or a
+# bumped effort stays on disk at its old value and the change never takes effect.
+effort = config["agent"]["reasoning_effort"] == "high"
+agent_preserved = config["agent"]["disabled_toolsets"] == ["user-owned"]
+print("pass" if isolated and preserved and routed and escalating and effort and agent_preserved else "fail")
 PY
 )
 [ "$migration_result" = "pass" ] && ok "existing reviewer profile migrates to isolated round routing" || nope "reviewer isolation fixture" "got: $migration_result"
@@ -436,6 +451,8 @@ model:
   default: stale
 fallback_providers:
   - provider: stale
+agent:
+  reasoning_effort: low
 memory:
 approvals:
   mode: custom-preserved
@@ -450,8 +467,15 @@ config = yaml.safe_load(open(sys.argv[1], encoding="utf-8"))
 memory = config.get("memory")
 isolated = isinstance(memory, dict) and memory.get("memory_enabled") is False and memory.get("user_profile_enabled") is False
 preserved = config["approvals"]["mode"] == "custom-preserved"
-routed = config["model"] == {"provider": "custom:codex-router", "default": "auto-thinking"}
-print("pass" if isolated and preserved and routed and config["fallback_providers"] == [] else "fail")
+routed = config["model"] == {
+    "provider": "custom:codex-router",
+    "default": "commandcode/deepseek/deepseek-v4.1-flash",
+}
+escalating = config["fallback_providers"] == [
+    {"provider": "custom:codex-router", "model": "auto-thinking"}
+]
+effort = config["agent"]["reasoning_effort"] == "high"
+print("pass" if isolated and preserved and routed and escalating and effort else "fail")
 PY
 )
 [ "$null_memory_status" -eq 0 ] && [ "$null_memory_result" = "pass" ] && ok "null reviewer memory migrates safely" || nope "null reviewer memory migration" "status=$null_memory_status result=$null_memory_result output=$null_memory_output"
@@ -683,90 +707,29 @@ PY
     || nope "compaction trigger derivation" "$derived_trigger"
 
 echo ""
-echo "=== opencode config seeding (merge, not clobber) ==="
+echo "=== opencode config seeding is retired ==="
 
-# The seed script must target BOTH runtime homes that opencode may read.
-opencode_paths=$(python3 - "$SEED_SCRIPT" <<'PY'
+# The image no longer installs the opencode CLI, so the seed script must not
+# write an opencode config into either runtime home and must not seed the
+# opencode log-triage agent. A leftover seed would recreate state for a runtime
+# that no longer exists.
+opencode_leftovers=$(python3 - "$SEED_SCRIPT" <<'PY'
 import sys
 with open(sys.argv[1]) as f:
     content = f.read()
-home = "/opt/data/home/.config/opencode/opencode.json" in content
-data = "/opt/data/.config/opencode/opencode.json" in content
-print("present" if home and data else "missing")
+markers = (
+    "PYOPENCODE",
+    "/opt/data/home/.config/opencode/opencode.json",
+    "/opt/data/.config/opencode/opencode.json",
+    "log-triage-worker.md",
+)
+found = [m for m in markers if m in content]
+print("clean" if not found else "found " + repr(found))
 PY
 )
-[ "$opencode_paths" = "present" ] && ok "seed targets /opt/data and /opt/data/home opencode configs" || nope "seed targets both homes" "got: $opencode_paths"
-
-# Extract the actual PYOPENCODE merge block and run it against temp fixtures.
-merge_block=$(python3 - "$SEED_SCRIPT" <<'PY'
-import re
-import sys
-with open(sys.argv[1]) as f:
-    content = f.read()
-m = re.search(r"<<'PYOPENCODE'\n(.*?)\nPYOPENCODE", content, re.DOTALL)
-print(m.group(1) if m else '')
-PY
-)
-[ -n "$merge_block" ] && ok "seed script has opencode merge block" || nope "seed script has opencode merge block" "PYOPENCODE block missing"
-
-# Use the shipped catalog as the fixture so the test cannot drift from the file
-# the image bakes to /opt/hermes-defaults/opencode/opencode.json.
-cp "$SCRIPT_DIR/../opencode/opencode.json" "$TMPDIR/canonical.json"
-
-mkdir -p "$TMPDIR/home/.config/opencode"
-cat > "$TMPDIR/home/.config/opencode/opencode.json" <<'EOF'
-{
-  "provider": {
-    "codex-router": {
-      "npm": "@ai-sdk/openai-compatible",
-      "options": {
-        "baseURL": "http://codex-router:4100/v1",
-        "apiKey": "local"
-      },
-      "models": {
-        "deepseek-pro": { "name": "DeepSeek Pro" }
-      }
-    }
-  },
-  "instructions": ["custom instruction from install-agents.sh"],
-  "plugin": ["some-plugin@1.0.0"]
-}
-EOF
-echo "rules" > "$TMPDIR/home/.config/opencode/AGENTS.md"
-
-echo "$merge_block" > "$TMPDIR/merge.py"
-python3 "$TMPDIR/merge.py" \
-    "$TMPDIR/canonical.json" \
-    "$TMPDIR/data/.config/opencode/opencode.json" \
-    "$TMPDIR/home/.config/opencode/opencode.json"
-
-data_model=$(python3 -c "
-import json
-print(json.load(open('$TMPDIR/data/.config/opencode/opencode.json')).get('model'))
-")
-[ "$data_model" = "codex-router/auto-thinking" ] && ok "fresh data-home seeded with auto-thinking default" || nope "data-home default" "got: $data_model"
-
-home_result=$(python3 -c "
-import json
-c = json.load(open('$TMPDIR/home/.config/opencode/opencode.json'))
-models = c.get('provider', {}).get('codex-router', {}).get('models', {})
-checks = {
-    'model_auto': c.get('model') == 'codex-router/auto-thinking',
-    'exact_models': set(models) == {'auto-thinking', 'gpt-5.6-terra'},
-    'no_stale': 'deepseek-pro' not in models,
-    'kept_instructions': c.get('instructions') == ['custom instruction from install-agents.sh'],
-    'kept_plugin': c.get('plugin') == ['some-plugin@1.0.0'],
-}
-print('pass' if all(checks.values()) else 'fail ' + repr(checks))
-")
-case "$home_result" in
-    pass) ok "HOME config merged: canonical model/models win, instructions/plugin preserved" ;;
-    *) nope "HOME config merged" "$home_result" ;;
-esac
-
-[ "$(cat "$TMPDIR/home/.config/opencode/AGENTS.md")" = "rules" ] \
-    && ok "seed leaves sibling files (AGENTS.md) untouched" \
-    || nope "sibling files untouched" "AGENTS.md was modified"
+[ "$opencode_leftovers" = "clean" ] \
+    && ok "seed script no longer writes opencode config or agents" \
+    || nope "opencode seeding retired" "$opencode_leftovers"
 
 echo ""
 echo "=== memory-triage cron seeding (survives reinstall) ==="

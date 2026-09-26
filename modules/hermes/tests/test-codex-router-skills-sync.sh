@@ -129,7 +129,10 @@ else
     nope "preserved an openclaw-owned sibling skill" "sibling was modified"
 fi
 
-echo "=== stale shadow and legacy backups are removed ==="
+echo "=== opencode shadow roots are left alone and legacy backups are removed ==="
+# The opencode CLI is gone, so nothing reads ~/.config/opencode/skills and the
+# sync must no longer treat those paths as shadow roots. Content there is
+# unrelated to this script and must survive untouched.
 mkdir -p "$PRIMARY/.config/opencode/skills/dev-loop" \
          "$SECONDARY/.config/opencode/skills/code-reviewer" \
          "$PRIMARY/.config/opencode/skills/user-skill"
@@ -146,12 +149,12 @@ printf 'stale\n' > "$SECONDARY/.agents/skills/code-reviewer.codex-router.bak"
 mkdir -p "$PRIMARY/skills/user-thing.codex-router.bak"
 printf 'user-owned\n' > "$PRIMARY/skills/user-thing.codex-router.bak/SKILL.md"
 run "$SOURCE" >/dev/null
-if [[ ! -e "$PRIMARY/.config/opencode/skills/dev-loop" \
-      && ! -e "$SECONDARY/.config/opencode/skills/code-reviewer" \
+if [[ -f "$PRIMARY/.config/opencode/skills/dev-loop/SKILL.md" \
+      && -f "$SECONDARY/.config/opencode/skills/code-reviewer/SKILL.md" \
       && -f "$PRIMARY/.config/opencode/skills/user-skill/SKILL.md" ]]; then
-    ok "removed stale canonical copies from the shadow roots, kept user skills"
+    ok "left the retired opencode config roots untouched"
 else
-    nope "removed stale canonical copies from the shadow roots, kept user skills" \
+    nope "left the retired opencode config roots untouched" \
         "$(find "$PRIMARY/.config/opencode/skills" "$SECONDARY/.config/opencode/skills" 2>/dev/null)"
 fi
 if [[ ! -e "$PRIMARY/skills/dev-loop.codex-router.bak" \

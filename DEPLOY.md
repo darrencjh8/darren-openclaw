@@ -125,7 +125,7 @@ Compose runs with project name `modules`, so the default container names are `mo
 
 Skills and profiles are baked into the Hermes image and seeded onto the data volume at boot:
 
-- `modules/hermes/Dockerfile` copies `config.yaml`, `SOUL.md.template`, `opencode/`, `skills/`, `scripts/`, and `profiles/` into `/opt/hermes-defaults/`, then installs `50-seed-defaults` as `/etc/cont-init.d/50-seed-defaults`.
+- `modules/hermes/Dockerfile` copies `config.yaml`, `SOUL.md.template`, `skills/`, `scripts/`, and `profiles/` into `/opt/hermes-defaults/`, then installs `50-seed-defaults` as `/etc/cont-init.d/50-seed-defaults`.
 - On boot, `modules/hermes/50-seed-defaults`:
   - merges `/opt/hermes-defaults/config.yaml` into `/opt/data/config.yaml` (baked keys win; top-level keys the baked config does not define are carried over),
   - seeds `SOUL.md` only if absent,
@@ -133,6 +133,7 @@ Skills and profiles are baked into the Hermes image and seeded onto the data vol
   - creates `/opt/data/memories/topics/INDEX.md`,
   - seeds each profile into `/opt/data/profiles/<name>/{config.yaml,SOUL.md,profile.yaml}` (only if absent), removes retired profiles (`static-analyst`, `qa-engineer`, `quality-assurance`), and registers each with `hermes profile create <name> --no-alias`.
 - `modules/hermes/scripts/sync-codex-router-skills.sh` reconciles codex-router's canonical skills (staged at `/opt/data/.codex-router-skills` by the deploy) into the managed roots `/opt/data/skills`, `/opt/data/.agents/skills`, and `/opt/data/home/.agents/skills`. A skill removed from the canonical source is removed from every root.
+- `modules/hermes/scripts/refresh-codex-router-checkout.sh` advances the container's own codex-router checkout at `/workspace/codex-router`, which is where dev-loop sessions execute the driver from (`codex/skills/dev-loop/scripts/loop.py`). The deploy runs it with the revision it checked out; the boot hook runs it with no target so it tracks `origin/main`. It skips a checkout that is dirty, on another branch, or absent, and exits non-zero when a clean checkout cannot reach the target. It never forces, so a checkout that diverged from `origin/main` (after a force-push, say) keeps failing every deploy; the checkout has to exist before it can be advanced (a session creates it by cloning; the script skips an absent path and the deploy says so), and the recovery is run in the hermes container as its `hermes` owner: `docker exec -u hermes hermes sh -c 'git -C /workspace/codex-router -c credential.helper="!gh auth git-credential" fetch origin main && git -C /workspace/codex-router reset --hard origin/main'` (the outer single quotes keep the `!` away from the interactive shell's history expansion, which would otherwise rewrite or refuse the helper) (the helper is required because the container's git has none and the remote is HTTPS, and the reset discards whatever the checkout holds — uncommitted changes and any local commit of its own).
 
 ## Adding a New Pluggable Module
 

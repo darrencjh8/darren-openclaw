@@ -9,9 +9,6 @@
 # Contract:
 #   * Managed roots: /opt/data/skills, /opt/data/.agents/skills and
 #     /opt/data/home/.agents/skills.
-#   * A stale canonical copy under ~/.config/opencode/skills would shadow the
-#     reconciled copy, so each managed skill is also removed from those shadow
-#     roots. Unrelated user skills there are left alone.
 #   * A skill removed from the canonical source is removed from every root, so
 #     a retired skill cannot linger.
 #   * The manifest installer records a directory hash of what it installed and
@@ -28,7 +25,7 @@
 #   reconcile, so the deploy's staged swap cannot race the boot hook.
 #
 # shellcheck shell=sh
-# shellcheck disable=SC2086  # TARGETS, SHADOWS and STATE_DIRS are intentional space-split lists
+# shellcheck disable=SC2086  # TARGETS and STATE_DIRS are intentional space-split lists
 
 set -eu
 
@@ -65,7 +62,6 @@ valid_name() {
 }
 
 TARGETS="$PRIMARY_HOME/skills $PRIMARY_HOME/.agents/skills $SECONDARY_HOME/.agents/skills"
-SHADOWS="$PRIMARY_HOME/.config/opencode/skills $SECONDARY_HOME/.config/opencode/skills"
 
 mkdir -p "$PRIMARY_HOME" "$SECONDARY_HOME"
 
@@ -280,9 +276,6 @@ if [ -f "$MANAGED_FILE" ]; then
             rm -rf "${target:?}/${previous:?}"
             rm -rf "${target:?}/${previous:?}.codex-router.bak"
         done
-        for shadow in $SHADOWS; do
-            rm -rf "${shadow:?}/${previous:?}"
-        done
     done < "$MANAGED_FILE"
 fi
 
@@ -325,14 +318,6 @@ for target in $TARGETS; do
         fi
     done < "$CURRENT"
 done
-
-while IFS= read -r name; do
-    [ -n "$name" ] || continue
-    valid_name "$name" || continue
-    for shadow in $SHADOWS; do
-        rm -rf "${shadow:?}/${name:?}"
-    done
-done < "$CURRENT"
 
 # Ownership is what makes the refreshed tree readable by the hermes daemon, so a
 # failure must not be swallowed like the lock bookkeeping above: report it and
