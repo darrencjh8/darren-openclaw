@@ -1,30 +1,32 @@
-// Measure how often the EXISTING account resolution settles a real bank-alert
-// email, and how often it refuses - the "not in the rule" rate that a decision
-// layer would be asked to cover.
+// Measure the account seam on real alert emails, read-only.
 //
-// Read-only. It reads the labelled corpus of production emails, the live memory
-// rules via `gh api`, and calls the shipped resolvers. It touches no budget, no
-// mailbox and no production service.
+// Two measurements, because round 5 established they are different questions:
 //
-// What it can and cannot say: the corpus records the human's payee for each
-// email, but NOT which account the transaction was booked to, so this reports
-// resolution and refusal RATES, never accuracy.
+//  1. Movement coverage. Does `parseBankMovement` recognise the alert at all?
+//     Measured at 0/69: the corpus is dominated by the UOB card shape
+//     ("A transaction of SGD 8.50 was made with your UOB Card ending 1234 ..."),
+//     which the parser does not cover. So `resolveMovementAccounts` never runs
+//     for these emails.
 //
-// The account list is rebuilt from the memory's own account facts, because the
-// live `/accounts` list needs the budget. Only name matching is exercised, so the
-// stand-in affects identity, not the matching rules.
+//  2. Name matching, which IS the seam. For each alert, which known accounts does
+//     it actually name, and when it names only part of one, does
+//     `matchAccountByName` place it or refuse? That refusal is the "not in the
+//     rule" case a decision layer would be asked to cover.
+//
+// No budget, no IMAP, no production service. The account list is rebuilt from the
+// memory's own account facts, because the live `/accounts` list needs the budget;
+// only name matching is exercised, so the stand-in affects identity, not rules.
+//
+// The corpus records the human's payee per email but NOT the account each
+// transaction was booked to, so this reports RATES, never accuracy.
 //
 // Usage: node tools/jev-account-poc.mjs [--out report.json] [--limit N]
 import { execFileSync } from "child_process";
 import { readFileSync, writeFileSync, readdirSync } from "fs";
 import { join } from "path";
 import { extractEmailContent } from "../src/extractors.js";
-import {
-    parseBankMovement,
-    identityMappingsFromFacts,
-    resolveMovementAccounts,
-} from "../src/bank-movement.js";
-import { accountAliases, matchAccountByName } from "../src/suffix-facts.js";
+import { parseBankMovement, identityMappingsFromFacts } from "../src/bank-movement.js";
+import { accountAliases, accountTokens, matchAccountByName, stopwords } from "../src/suffix-facts.js";
 
 const HOME = process.env.HOME;
 const CORPUS = join(HOME, ".local/state/expense-corpus");
@@ -36,6 +38,12 @@ function arg(name, fallback = null) {
     return i >= 0 && process.argv[i + 1] ? process.argv[i + 1] : fallback;
 }
 
+function tally(values) {
+    const out = {};
+    for (const v of values) out[v] = (out[v] || 0) + 1;
+    return out;
+}
+
 async function main() {
     const limit = Number(arg("--limit", "0"));
     const out = arg("--out");
@@ -43,7 +51,6 @@ async function main() {
         "gh", ["api", "-H", "Accept: application/vnd.github.raw+json", MEMORY_REPO], { encoding: "utf8" },
     );
 
-    // Account names and the fact lines the resolvers consume.
     const accountNames = [];
     for (const raw of memoryText.split("\n")) {
         const m = raw.trim().match(ACCOUNT_FACT);
@@ -54,14 +61,21 @@ async function main() {
     const aliases = accountAliases(facts, accounts);
     const mappings = identityMappingsFromFacts(facts, accounts);
 
+    // Distinctive words per account: "UOB Ladies Card" -> {uob, ladies}. A word
+    // every account shares ("card", "account") carries no identity.
+    const STOP = new Set(stopwords().map((w) => w.toLowerCase()));
+    const distinctive = accounts.map((account) => ({
+        name: account.name,
+        tokens: [...new Set(accountTokens(account.name))].filter((t) => !STOP.has(t)),
+    }));
+
     const review = JSON.parse(readFileSync(join(CORPUS, "review.json"), "utf8"));
     const files = readdirSync(join(CORPUS, "raw")).filter((f) => f.endsWith(".eml")).sort();
     const wanted = new Set(review.map((r) => r.id));
     const cases = files.filter((f) => wanted.has(f)).slice(0, limit > 0 ? limit : undefined);
 
-    console.log(`accounts from memory: ${accounts.length} -> ${accountNames.join(", ")}`);
-    console.log(`suffix mappings: ${mappings.suffix.size}, recipient mappings: ${mappings.recipient.size}, aliases: ${aliases.size}`);
-    console.log(`emails: ${cases.length}\n`);
+    console.log(`accounts from memory: ${accounts.length}`);
+    console.log(`suffix mappings: ${mappings.suffix.size}, recipient: ${mappings.recipient.size}, aliases: ${aliases.size}\n`);
 
     const rows = [];
     for (const file of cases) {
@@ -72,63 +86,72 @@ async function main() {
         } catch {
             text = "";
         }
+        const seen = new Set(accountTokens(text));
         const movement = text ? parseBankMovement(text) : null;
-        if (!movement) {
-            rows.push({ id: file, merchant: item.merchant || null, outcome: "no-movement", reason: text ? "not a bank movement" : "no text" });
-            continue;
+
+        // Every account whose distinctive words all appear in the alert.
+        const named = distinctive.filter((a) => a.tokens.length && a.tokens.every((t) => seen.has(t))).map((a) => a.name);
+        // The words that did appear, for the partial-name probe.
+        const partial = [...new Set(distinctive.flatMap((a) => a.tokens).filter((t) => seen.has(t)))];
+
+        let outcome;
+        let reason = null;
+        let placed = null;
+        if (named.length === 1) {
+            outcome = "names-one-account";
+            const match = matchAccountByName(named[0], accounts, aliases);
+            placed = match.matched ? match.name : null;
+            reason = match.matched ? null : match.reason || "refused";
+            if (!match.matched) outcome = "names-one-account-but-refused";
+        } else if (named.length > 1) {
+            outcome = "names-several-accounts";
+        } else {
+            outcome = "names-no-account";
         }
-        const resolved = resolveMovementAccounts(movement, accounts, [], mappings);
-        const source = resolved.source_account;
-        const destination = resolved.destination_account;
-        const landed = movement.direction === "incoming" ? destination || source : source || destination;
-        const written = (movement.own_account && movement.own_account.name) || "";
-        const byName = matchAccountByName(written, accounts, aliases);
+
+        // When the alert names no account outright, does the partial name it does
+        // give resolve, or does the resolver refuse it?
+        let partialResult = null;
+        if (outcome === "names-no-account" && partial.length) {
+            const match = matchAccountByName(partial.join(" "), accounts, aliases);
+            partialResult = match.matched ? `matched:${match.name || "?"}` : `refused:${match.reason || "?"}`;
+        }
+
         rows.push({
             id: file,
-            merchant: item.merchant || movement.counterparty?.name || null,
-            direction: movement.direction,
-            written_account: written,
-            own_bank: movement.own_account?.bank || null,
-            suffix: movement.own_account?.suffix || null,
-            outcome: landed ? "resolved" : "unresolved",
-            resolved_account: landed ? landed.name : null,
-            reason: landed ? null : byName.reason || "no account matched",
+            merchant: item.merchant || null,
+            movement: Boolean(movement),
+            named,
+            partial,
+            outcome,
+            placed,
+            reason,
+            partialResult,
         });
     }
 
-    const movements = rows.filter((r) => r.outcome !== "no-movement");
-    const resolved = movements.filter((r) => r.outcome === "resolved");
-    const unresolved = movements.filter((r) => r.outcome === "unresolved");
-    const reasons = {};
-    for (const r of unresolved) reasons[r.reason] = (reasons[r.reason] || 0) + 1;
-    const written = {};
-    for (const r of movements) written[r.written_account || "(none)"] = (written[r.written_account || "(none)"] || 0) + 1;
-
+    const outcomes = tally(rows.map((r) => r.outcome));
+    const partials = tally(rows.filter((r) => r.partialResult).map((r) => r.partialResult.replace(/:.+$/, "")));
+    const resolveOrRefuse = tally(rows.filter((r) => r.partialResult).map((r) => r.partialResult));
     const report = {
         generatedAt: new Date().toISOString(),
         accounts: accountNames,
-        suffixMappings: mappings.suffix.size,
-        recipientMappings: mappings.recipient.size,
-        aliases: aliases.size,
         emails: rows.length,
-        movements: movements.length,
-        noMovement: rows.length - movements.length,
-        resolved: resolved.length,
-        unresolved: unresolved.length,
-        unresolvedReasons: reasons,
-        writtenAccounts: written,
+        movementsParsed: rows.filter((r) => r.movement).length,
+        outcomes,
+        partialNameOutcomes: partials,
+        partialNameDetail: resolveOrRefuse,
         rows,
     };
 
-    console.log(`=== result ===`);
-    console.log(`emails read            : ${rows.length}`);
-    console.log(`parsed as a bank movement: ${movements.length} (${rows.length - movements.length} were not)`);
-    console.log(`account resolved       : ${resolved.length}/${movements.length}`);
-    console.log(`account unresolved     : ${unresolved.length}/${movements.length}  <- the "not in the rule" rate`);
-    console.log("\nunresolved reasons:");
-    for (const [reason, n] of Object.entries(reasons).sort((a, b) => b[1] - a[1])) console.log(`  ${n.toString().padStart(3)}  ${reason}`);
-    console.log("\nthe account written in the alert, as the resolver saw it:");
-    for (const [name, n] of Object.entries(written).sort((a, b) => b[1] - a[1]).slice(0, 12)) console.log(`  ${n.toString().padStart(3)}  ${name}`);
+    console.log("=== movement coverage ===");
+    console.log(`parsed as a bank movement: ${report.movementsParsed}/${rows.length}`);
+    console.log("\n=== does the alert name a known account? ===");
+    for (const [k, v] of Object.entries(outcomes).sort((a, b) => b[1] - a[1])) console.log(`  ${String(v).padStart(3)}  ${k}`);
+    console.log("\n=== when it names no account, what does the partial name it gives do? ===");
+    for (const [k, v] of Object.entries(partials).sort((a, b) => b[1] - a[1])) console.log(`  ${String(v).padStart(3)}  ${k}`);
+    console.log("\n  the distinct partial answers (top 10):");
+    for (const [k, v] of Object.entries(resolveOrRefuse).sort((a, b) => b[1] - a[1]).slice(0, 10)) console.log(`    ${String(v).padStart(3)}  ${k}`);
     if (out) {
         writeFileSync(out, JSON.stringify(report, null, 2));
         console.log(`\nreport written to ${out}`);

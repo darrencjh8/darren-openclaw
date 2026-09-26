@@ -94,6 +94,28 @@ account at all, and how often the resolver refuses the name it does see. The cor
 record of which account each transaction was actually booked to, so it remains a resolution and
 refusal rate, never an accuracy.
 
+**Measured on the 69 real alerts:**
+
+| | alerts |
+|---|---|
+| names one known account in full | 40 |
+| names no account in full | 27 |
+| names several accounts | 2 |
+
+Of the 27 that do not name an account in full, the resolver places 12 from the partial name they do
+give (8 `Citi Reward`, 2 `OCBC 90N`, 2 `HSBC Revolution`) and **refuses 14** — 9 `ambiguous`, 5
+`no account matches those words`.
+
+So about **14 of 69 alerts (20%) end in a name-matching refusal.** Three fifths of those are
+ambiguity between real accounts, which is exactly the shape a typed `choice` over the candidate
+accounts answers; two fifths are names no account carries at all, which no candidate list can fix.
+
+Caveat, and it works against this number: the account list here is rebuilt from memory's account
+facts and carries no card digits, while `accountMatches` keys on the digits in a live account name
+(`bank-movement.js:404`). With the live list some of those 14 would resolve by suffix, so this is an
+upper bound on the refusal rate — the opposite of the payee side, where the arms were an upper bound
+on opportunity.
+
 ### Account
 
 Entirely deterministic; no model makes the decision:
