@@ -231,6 +231,46 @@ not a trade. Median 724 ms.
 26 cases that today become `Misc` are resolved correctly with no errors at all, and the threshold is a
 real cut rather than a fitted one.
 
+### The live payee list, and the defect it exposed
+
+Read read-only from the production `actual-api` (which publishes `127.0.0.1:3000`, so it is reachable
+only on the host it runs on):
+
+| | |
+|---|---|
+| `Darren SGD` | 214 payees / 209 names |
+| `Darren MYR` | 145 payees / 143 names |
+| union | **301 names** |
+| truth payee present in the live lists | **50/51 = 98.0%**, and **25/26 = 96.2%** on the memory-miss path |
+| absent from both | `SHOPEE SINGAPORE MP` (1 case) |
+
+So raw coverage is essentially complete. But the shipped `payeeCandidates` ranks by token overlap with
+the merchant, breaks ties **alphabetically**, and caps at `jevMaxCandidates` (60). Against a 301-name
+list that is broken:
+
+| cap | all 51 cases | 26 memory-miss cases |
+|---|---|---|
+| 20 / 40 / **60** / 100 | **20/51 = 39%** | **17/26 = 65%** |
+| no cap (301 offered) | **50/51 = 98%** | 25/26 = 96% |
+
+Most merchants share no token with the payee name (`HAPPY HAWKER@289C COMP` vs `Food`), so almost
+every candidate scores 0 and the cap keeps the alphabetically-first 60. It drops `Food`, `Public
+Transport`, `Phone Bill`, `Shopee Wallet`, `Rent`, `Gym`, `Medicine`, `Insurance` and `Music` - which
+is to say almost every payee that means anything.
+
+**The arms could not see this.** Their candidate list was 54 names built from the corpus labels, so the
+cap never bit. Two consequences:
+
+1. The integration as shipped cannot be right on 61% of cases, because the answer is not offered.
+   Coverage is a precondition for accuracy, so this has to be fixed before the threshold means
+   anything.
+2. The fix needs a decision and a measurement, not a guess: offer the whole list (301 criteria is a
+   large question, and whether the model's accuracy holds at that width is unmeasured), or build the
+   shortlist from a real relevance signal instead of token overlap plus alphabetical order.
+
+The cleanest signal already in the module is `MemoryStore.search()`, which the plan called for and
+which this implementation replaced with token overlap. That was the mistake.
+
 ### The shipped path, on the same 51 cases
 
 `tools/jev-integration-replay.mjs` calls the real `src/jev.js` over the same corpus, with the payee
