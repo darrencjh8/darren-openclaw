@@ -175,8 +175,16 @@ describe("POST /transactions/link-transfer (#598)", () => {
         // the wrong one.
         seedPair({
             rows: [
-                { ...OUTGOING, category: "cat-groceries" },
-                { ...INCOMING, category: "cat-income" },
+                {
+                    ...OUTGOING,
+                    category: "cat-groceries",
+                    notes: "Statement: OUTGOING-REF",
+                },
+                {
+                    ...INCOMING,
+                    category: "cat-income",
+                    notes: "Statement: INCOMING-REF",
+                },
             ],
         });
         actual.updateTransaction
@@ -211,6 +219,8 @@ describe("POST /transactions/link-transfer (#598)", () => {
             payee: "p-misc",
             transfer_id: null,
             category: "cat-income",
+            notes: "Statement: INCOMING-REF",
+            schedule: null,
         });
         expect(res.status).toHaveBeenCalledWith(500);
     });
@@ -288,6 +298,8 @@ describe("POST /transactions/link-transfer (#598)", () => {
             payee: "p-misc",
             transfer_id: null,
             category: null,
+            notes: null,
+            schedule: null,
         });
         expect(res.status).toHaveBeenCalledWith(500);
         expect(res.json).toHaveBeenCalledWith(

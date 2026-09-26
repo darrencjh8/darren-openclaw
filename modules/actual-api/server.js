@@ -918,10 +918,16 @@ app.post("/transactions/link-transfer", async (req, res) => {
                         // category the compensation is meant to restore.
                         category: outgoing.category || null,
                     });
+                    // The engine's updateTransfer also copies the written row's
+                    // notes and schedule onto the counterpart, so restore those
+                    // too: without it a failed link leaves the incoming row
+                    // advertising the outgoing leg's statement reference.
                     await actual.updateTransaction(incoming.id, {
                         payee: incoming.payee || null,
                         transfer_id: incoming.transfer_id || null,
                         category: incoming.category || null,
+                        notes: incoming.notes ?? null,
+                        schedule: incoming.schedule ?? null,
                     });
                 } catch (rollbackError) {
                     throw new Error(
