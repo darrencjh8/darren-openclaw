@@ -116,6 +116,38 @@ facts and carries no card digits, while `accountMatches` keys on the digits in a
 upper bound on the refusal rate — the opposite of the payee side, where the arms were an upper bound
 on opportunity.
 
+**Account ground truth: attempted, and it does not support a decision here.** The budget's
+transactions carry both the account and, in their notes, the merchant that identifies the email:
+
+```json
+{"account":"0a2c6d08-...", "imported_payee":"Food", "date":"2026-09-26",
+ "notes":"Merchant: HAPPY HAWKER@289C COMP\n\nUOB card transaction alert, card ending 4605"}
+```
+
+Read read-only from the live budget (20,885 transactions across both budgets, 124 accounts):
+
+| | |
+|---|---|
+| labelled corpus rows | 57 |
+| transactions whose notes carry a merchant | **106 of 20,885** |
+| rows joined to a transaction by merchant | **15 of 57** |
+| of those, the alert also names the true account | **0 of 15** |
+| true accounts seen | `DBS Yuu Card` 9, `UOB Ladies Card` 3, `Citi Reward` 3 |
+
+Two things follow, and both close the account question rather than leaving it open:
+
+1. **The join is too sparse to evaluate anything.** 15 cases, and they are exactly the transactions
+   the module itself wrote notes for, so the sample is biased toward its own successes.
+2. **Where it does join, the alert names no account at all** — 0 of 15. The text says "UOB card
+   transaction alert, card ending 4605"; nothing in it names `UOB Ladies Card`. So the account is
+   placed by a suffix-to-account mapping, not by name matching, and the 20% name-refusal rate measured
+   above is largely beside the point for these cases.
+
+The account decision layer therefore cannot be evaluated with the data available, and the gate in this
+plan cannot be shown to hold for it. It stays unbuilt, which is the correct outcome rather than an
+unfinished one: building it would mean switching on an unmeasurable decision in the path that books
+transactions.
+
 ### Account
 
 Entirely deterministic; no model makes the decision:
