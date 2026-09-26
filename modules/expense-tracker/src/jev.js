@@ -57,6 +57,31 @@ export function payeeCandidates(payees, merchant, max = DEFAULT_MAX_CANDIDATES) 
         .map(([name]) => name);
 }
 
+/**
+ * True when `name`'s words are a strict subset of another offered payee's words.
+ *
+ * The live list contains a payee literally named `Grab` alongside `Grab Wallet`
+ * and `Grab Paylater`. Measured: for merchants whose truth was one of the specific
+ * two, the model answered the bare `Grab` at confidence 1.0 - every confident error
+ * on the memory-miss path, which held precision flat at 75% from a 0.90 threshold
+ * through 0.99. A name that generalises over another offered payee is not a
+ * decision this layer is willing to make.
+ *
+ * The trade is recall for precision: a merchant genuinely booked to the general
+ * payee also falls through. That is the same rule `resolvePayeeMatch` already
+ * applies to ambiguous payee names (issue #483).
+ */
+export function isGeneralName(name, candidates) {
+    const own = new Set(words(name));
+    if (!own.size) return false;
+    return (candidates || []).some((other) => {
+        if (other === name) return false;
+        const theirs = new Set(words(other));
+        if (theirs.size <= own.size) return false;
+        return [...own].every((word) => theirs.has(word));
+    });
+}
+
 /** Build the `choice` question: one criterion per offered payee, and nothing else. */
 export function buildPayeeQuestion(candidates) {
     const criteria = {};
@@ -120,6 +145,7 @@ export async function choosePayee({ merchant, payees, config = {}, fetchImpl = f
         // An answer outside the offered list is never trusted, and a missing or
         // low confidence leaves the decision to the caller.
         if (!candidates.includes(choice)) return null;
+        if (isGeneralName(choice, candidates)) return null;
         if (confidence === null || confidence < threshold) return null;
         return { payee: choice, confidence, candidates };
     } catch {

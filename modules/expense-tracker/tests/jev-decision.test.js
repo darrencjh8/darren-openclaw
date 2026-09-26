@@ -155,6 +155,33 @@ describe("choosePayee", () => {
     expect(await choosePayee({ merchant, payees: PAYEES, config: enabledConfig({ jevApiKey: "" }), fetchImpl: keyless })).toBeNull();
     expect(keyless).not.toHaveBeenCalled();
   });
+
+  // Measured against the live payee list: the model picked the bare payee "Grab"
+  // at confidence 1.0 for merchants whose truth was "Grab Wallet" or "Grab
+  // Paylater". That was every confident error on the memory-miss path, which is
+  // what made precision flat at 75% from a 0.90 threshold through 0.99.
+
+  it("refuses a general name when a more specific payee is also offered", async () => {
+    const payees = [{ name: "Grab" }, { name: "Grab Wallet" }, { name: "Grab Paylater" }];
+    expect(await choosePayee({
+      merchant: "GRAB RIDE 123", payees, config: enabledConfig(), fetchImpl: answer("Grab", 1),
+    })).toBeNull();
+  });
+
+  it("still resolves the specific payee from the same family", async () => {
+    const payees = [{ name: "Grab" }, { name: "Grab Wallet" }, { name: "Grab Paylater" }];
+    const decision = await choosePayee({
+      merchant: "GRAB RIDE 123", payees, config: enabledConfig(), fetchImpl: answer("Grab Wallet", 1),
+    });
+    expect(decision).toMatchObject({ payee: "Grab Wallet" });
+  });
+
+  it("does not refuse a name that shares no words with another candidate", async () => {
+    const decision = await choosePayee({
+      merchant, payees: PAYEES, config: enabledConfig(), fetchImpl: answer("Food", 0.99),
+    });
+    expect(decision).toMatchObject({ payee: "Food" });
+  });
 });
 
 // ─────────────────────────────────────────────────────────────────────────

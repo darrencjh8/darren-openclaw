@@ -320,7 +320,28 @@ someone accepts 75% on the record.
 One targeted repair is visible and unmeasured: refuse when the chosen name is a stem of several
 candidate payees (`Grab` against `Grab Wallet` and `Grab Paylater`), which is the same ambiguity rule
 `resolvePayeeMatch` already applies to payee names (issue #483). That would have refused all four
-errors, leaving 12 auto-resolutions at 12/12. It needs its own measurement before it counts.
+errors, leaving 12 auto-resolutions at 12/12.
+
+**Measured, with that guard in place** (live list, cap 255):
+
+| threshold | auto-resolved | precision |
+|---|---|---|
+| >= 0.80 | 14/26 | 93% |
+| >= 0.90 | 12/26 | **100%** |
+| >= 0.95 | 12/26 | **100%** |
+| >= 0.99 | 12/26 | **100%** |
+
+The guard refused exactly the four errors and nothing else, so confidence now separates a correct pick
+from an incorrect one and **the gate in this plan is met**: at 0.95 the layer auto-resolves 12 of the
+26 cases that are wrong today with no incorrect resolution, and the other 14 fall through unchanged.
+
+The cost is recall and it should be stated: a merchant genuinely booked to the general payee now falls
+through as well. No such case appears in this corpus - the Grab-family truths are `Grab Wallet` and
+`Grab Paylater`, never bare `Grab` - so that cost is unmeasured here and could be real in a budget
+where a general payee is used deliberately.
+
+Enabling it is still the operator's decision, not a conclusion of this POC. The layer remains off by
+default, and turning it on changes production behaviour.
 
 ### The shipped path, on the same 51 cases
 
