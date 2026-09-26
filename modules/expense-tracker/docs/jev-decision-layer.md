@@ -218,6 +218,24 @@ real cut rather than a fitted one.
    (`docs/design.md:163`), and `person-rules.json` is fetched but consumed by tests only. So the
    account seams stay unmeasured until the budget is read.
 
+### The counterfactual is written but not measured
+
+`tools/jev-baseline-web-llm.mjs` reproduces the removed Brave + LLM path, so the new mechanism can be
+compared against the one that was deleted for #587. It is verified up to the LLM call — the case set,
+the candidate list and the memory split all match this report exactly, and Brave returned snippets for
+every case tried — but it produced **no accuracy numbers**, because no LLM route was reachable:
+
+- the local router on `http://localhost:4100/v1` has no listener, and starting it needs docker;
+- the module `.env`'s `DEEPSEEK_API_KEY` answers `HTTP 401 authentication_error` directly against
+  `api.deepseek.com` for `deepseek-chat`, `deepseek-flash` and `deepseek-reasoner`.
+
+Its report file holds 3 rows and a `credentialFailure` marker and must not be read as a measurement.
+This does not weaken the result above, because the bar is `Misc`, not the deleted web path.
+
+That credential matters beyond this POC: `config.js:27` defaults `llmProvider` to `deepseek` and
+`config.js:36` falls back to the same key, so unless production overrides `LLM_PROVIDER`, every
+classifier and extractor call is failing. Worth checking independently of this change.
+
 ## Surgical integration, if the POC passes
 
 1. `src/jev.js` — one small client: question builder, envelope parser, timeout, and fall-through.
