@@ -170,6 +170,11 @@ services:
         environment:
             - HERMES_WRITE_SAFE_ROOT=/opt/data:/workspace:/tmp
             - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
+            # The dev-loop round adjudicator runs in this container and calls the
+            # Command Code API with this key directly, so the key has to reach
+            # Hermes and not only codex-router. HOME here is /root and there is no
+            # ~/.env, so the driver's file fallback cannot supply it either.
+            - COMMANDCODE_API_KEY=${COMMANDCODE_API_KEY}
             - GEMINI_API_KEY=${GEMINI_API_KEY}
             - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
             - TELEGRAM_ALLOWED_USERS=${TELEGRAM_ALLOWED_USERS}

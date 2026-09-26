@@ -57,6 +57,17 @@ class CodexRouterProviderEnvTests(unittest.TestCase):
             workflow,
         )
 
+    def test_hermes_service_forwards_the_commandcode_key(self):
+        config = yaml.safe_load(COMPOSE_FILE.read_text(encoding="utf-8"))
+        environment = config["services"]["hermes"]["environment"]
+
+        # The dev-loop round adjudicator runs inside this container and calls the
+        # Command Code API with this key directly, so it is not enough for the key
+        # to reach codex-router. The container's HOME is /root and its ~/.env does
+        # not exist, so the driver's file fallback never finds the key either: the
+        # environment variable is the only source that reaches it.
+        self.assertIn("COMMANDCODE_API_KEY=${COMMANDCODE_API_KEY}", environment)
+
     def test_deploy_script_treats_opencode_provider_keys_as_optional(self):
         script = DEPLOY_SCRIPT.read_text(encoding="utf-8")
 
