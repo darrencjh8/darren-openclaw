@@ -271,6 +271,57 @@ cap never bit. Two consequences:
 The cleanest signal already in the module is `MemoryStore.search()`, which the plan called for and
 which this implementation replaced with token overlap. That was the mistake.
 
+**The cap is fixed, and the fix made the result worse - which is the finding.**
+
+The provider refuses a choice question above **255 options** ("TypeSafe Choice questions support at
+most 255 options"), so 255 is the widest usable list and `DEFAULT_MAX_CANDIDATES` is now 255. Coverage
+at that width is 50/51, identical to offering everything, so the truncation costs nothing once the cap
+is at the real ceiling.
+
+Re-running the shipped path against the live list at cap 255:
+
+| | 54-name label list | **301-name live list** |
+|---|---|---|
+| overall correct | 39/51 | **26/51** |
+| memory-miss correct | 18/26 | **15/26** |
+| memory hits broken | 4/25 | **14/25** |
+| median latency | 710 ms | 785 ms |
+| miss-path precision at >= 0.90 / 0.95 / 0.99 | 82% / 100% / 100% | **75% / 75% / 75%** |
+
+**The gate in this plan is not met.** Precision is flat at 75% from 0.90 all the way to 0.99, so no
+threshold separates a correct pick from an incorrect one: at 0.95 it would auto-resolve 16 of the 26
+miss cases with 4 errors.
+
+The four errors are all the same shape, and every one is at confidence **1.0**:
+
+```text
+Grab -> Grab              truth Grab Wallet     conf 1
+Grab -> Grab              truth Grab Paylater   conf 1
+Grab -> Grab              truth Grab Wallet     conf 1
+Grab -> Grab              truth Grab Paylater   conf 1
+```
+
+The live list contains a payee literally named `Grab`, so the model picks the exact-name match with
+full confidence while the human's payee is the more specific `Grab Wallet` or `Grab Paylater`. The
+label-derived list had no bare `Grab`, which is exactly why the earlier arms looked clean. High
+confidence here means "the merchant equals a payee name", not "this is the right payee".
+
+**So the integration must not be enabled on this evidence.** The gate asks whether confidence
+separates correct picks from incorrect ones, and it does not.
+
+The arithmetic is more forgiving than that, and it should be stated honestly: every case on the miss
+path is already wrong today, so resolving 16 with 12 right and 4 wrong is a net gain of 12 and **no new
+errors** - the four are `Misc` either way. What the flat 75% denies is the thing the design was sold
+on: a confident answer that can be trusted. A pick recorded as confident while being wrong one time in
+four is not a control, and unlike the dev-loop's two-clean-rounds rule this design has no compensating
+mechanism behind it. So it stays off until either the ambiguity below is handled and measured, or
+someone accepts 75% on the record.
+
+One targeted repair is visible and unmeasured: refuse when the chosen name is a stem of several
+candidate payees (`Grab` against `Grab Wallet` and `Grab Paylater`), which is the same ambiguity rule
+`resolvePayeeMatch` already applies to payee names (issue #483). That would have refused all four
+errors, leaving 12 auto-resolutions at 12/12. It needs its own measurement before it counts.
+
 ### The shipped path, on the same 51 cases
 
 `tools/jev-integration-replay.mjs` calls the real `src/jev.js` over the same corpus, with the payee

@@ -85,15 +85,23 @@ async function main() {
         merchantToPayee.get(key).add(m[2].trim());
     }
 
-    // The payee universe is the one the earlier arms used, so the only thing that
-    // changes between them and this run is the code path and the input state.
-    const prior = JSON.parse(readFileSync(join(CORPUS, "jev-poc-report-upperbound.json"), "utf8"));
-    const corpusPayees = prior.rows.map((r) => r.truth).filter(Boolean);
-    const supplied = [...new Set([
-        ...[...merchantToPayee.values()].flatMap((s) => [...s]),
-        ...corpusPayees,
-        "Misc",
-    ])].map((name) => ({ name }));
+    // The payee universe: the real budget lists when asked for them, otherwise the
+    // label-derived set the earlier arms used.
+    const livePath = join(CORPUS, "live-payees.json");
+    let supplied;
+    if (arg("--live-payees")) {
+        const live = JSON.parse(readFileSync(livePath, "utf8"));
+        const names = [...new Set(Object.values(live).flat())];
+        supplied = names.map((name) => ({ name }));
+    } else {
+        const prior = JSON.parse(readFileSync(join(CORPUS, "jev-poc-report-upperbound.json"), "utf8"));
+        const corpusPayees = prior.rows.map((r) => r.truth).filter(Boolean);
+        supplied = [...new Set([
+            ...[...merchantToPayee.values()].flatMap((s) => [...s]),
+            ...corpusPayees,
+            "Misc",
+        ])].map((name) => ({ name }));
+    }
 
     const key = (process.env.COMMANDCODE_API_KEY || "").trim() || readEnvFile("COMMANDCODE_API_KEY");
     if (!key) throw new Error("COMMANDCODE_API_KEY is not available (environment or ~/.env)");
@@ -102,8 +110,8 @@ async function main() {
         jevEnabled: true,
         jevApiKey: key,
         jevThreshold: 0,             // keep every answer so the sweep is computed here
-        jevMaxCandidates: 60,
-        jevTimeoutMs: 15000,
+        jevMaxCandidates: Number(arg("--cap", "60")),
+        jevTimeoutMs: 20000,
     };
 
     const labelled = review.filter((r) => !r.skip && r.payee && r.merchant);

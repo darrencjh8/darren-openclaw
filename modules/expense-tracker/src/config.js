@@ -73,7 +73,7 @@ export class Config {
     this.jevModel = env.JEV_MODEL || "typesafe/jev";
     this.jevApiKey = env.JEV_API_KEY || env.COMMANDCODE_API_KEY || "";
     this.jevThreshold = Number(env.JEV_THRESHOLD || "0.95");
-    this.jevMaxCandidates = Number(env.JEV_MAX_CANDIDATES || "60");
+    this.jevMaxCandidates = Number(env.JEV_MAX_CANDIDATES || "255");
     this.jevTimeoutMs = Number(env.JEV_TIMEOUT_MS || "8000");
     this.logLevel = env.LOG_LEVEL || "INFO";
   }

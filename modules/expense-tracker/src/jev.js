@@ -17,7 +17,12 @@
 export const DEFAULT_ENDPOINT = "https://api.commandcode.ai/provider/v1/systemone";
 export const DEFAULT_MODEL = "typesafe/jev";
 export const DEFAULT_THRESHOLD = 0.95;
-export const DEFAULT_MAX_CANDIDATES = 60;
+// The provider refuses a choice question above 255 options ("TypeSafe Choice
+// questions support at most 255 options"), so 255 is the widest usable list, not a
+// tuning choice. Anything lower silently truncates: against the live 301-name
+// budget lists a cap of 60 kept the alphabetically-first 60 and offered the right
+// payee for only 20 of 51 cases, while 255 offers 50 of 51.
+export const DEFAULT_MAX_CANDIDATES = 255;
 export const DEFAULT_TIMEOUT_MS = 8000;
 
 const words = (value) =>
