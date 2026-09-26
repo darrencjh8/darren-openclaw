@@ -38,14 +38,35 @@ identically as `source: "web"` and both are then learned into memory.
 1. **memory** — `MemoryStore.search(merchant)`, then every hit must pass `factNamesMerchant` before
    its `maps to X payee` line is read (issue #471: a weakly similar neighbour once booked an AliPay
    charge to the neighbour's payee). Memory path budget 500 ms; a failure falls through.
-2. **web + LLM** — only when `BRAVE_SEARCH_API_KEY` is set: `_handle_search_web` then
-   `_classify_merchant`. 20 s `Promise.race`.
-3. **`Misc`** — `source: "fallback"`.
+2. **`Misc`** — `source: "fallback"`. **There is no web + LLM step any more.**
 
-Only a `web` resolution is learned back into memory. `insert_transaction` uses a different order —
-live `/payees` list, then memory, then `Misc` (`_validate_payee`, `src/tools.js:1154`) — and an
-ambiguous name **throws** `AMBIGUOUS_PAYEE` with the candidate IDs rather than picking by list order
-(issue #483).
+`_classify_merchant` and `_handle_search_web` still exist in `src/tools.js` but nothing in `src/` calls
+either: only `tests/resolve-merchant.test.js` does. The web path was removed from
+`_handle_resolve_merchant` by `558b78a` (#589) as the fix for #587, a High-severity incident in which
+Brave plus an LLM classifier answered `Petrol` for a clinic payment (`CFF UNITED PLT`, RM255) and the
+answer was immediately learned as `CFF UNITED PLT maps to Petrol payee`, misbooking every later
+charge. The code now says so in place:
+
+```js
+// An unverified web/LLM classification is not durable merchant evidence.
+// Returning or learning it caused a clinic payment to become a permanent
+// Petrol mapping (#587). Unknown merchants must remain Misc until confirmed.
+return { payee: "Misc", source: "fallback" };
+```
+
+So the chain a merchant actually travels today is **memory, then `Misc`**, and the fallback that a
+decision layer would replace is `Misc` itself. On the 26 cases in the POC where memory misses, the
+human's payee is never `Misc`, so today's outcome is wrong for **all 26**.
+
+This is also the argument for the change: the old mechanism was deleted because it had **no
+confidence** — a guess was neither thresholded nor gated before it became permanent memory. A typed
+`choice` carries `confidence` and `probabilities`, which is the control that was missing. Any
+reintroduction must therefore resolve only above a threshold and must not learn at all until that
+threshold is met.
+
+`insert_transaction` uses a different order — live `/payees` list, then memory, then `Misc`
+(`_validate_payee`) — and an ambiguous name **throws** `AMBIGUOUS_PAYEE` with the candidate IDs rather
+than picking by list order (issue #483).
 
 ### Account
 
@@ -66,13 +87,16 @@ Entirely deterministic; no model makes the decision:
 
 | # | seam | change | risk |
 |---|---|---|---|
-| 1 | `_classify_merchant` (`src/tools.js:1743`) | the prose pick becomes a `choice` over the same `payeeNames` | low: identical candidate set, membership check kept |
-| 2 | `_handle_resolve_merchant` (`src/tools.js:1712`), between the memory loop and the Brave block | a shortlist decision before spending a web + LLM call | medium: a new stage on the miss path |
+| 1 | the `return { payee: "Misc", source: "fallback" }` in `_handle_resolve_merchant` (`src/tools.js:1866`) | a typed `choice` over the live payee shortlist, resolved only above the confidence threshold, otherwise `Misc` exactly as today | medium: it reintroduces automatic resolution that #587 removed, so the threshold and the no-learn rule carry the safety |
+| 2 | the memory loop above it | **no change**: a memory hit must keep short-circuiting, and the decision must not be able to override one | none, and it must stay that way: even in arm C it broke 2 of 25 exact rules |
 | 3 | `resolvePayeeMatch` ambiguity (`src/tools.js:234`) | resolve above the threshold, keep today's refusal below it | medium: changes a refusal into a resolution |
 | 4 | `resolveFactAccount` ambiguity (`src/suffix-facts.js:235`, `:274`) and the account pick over the bank-filtered list | `noul` for "does this fact name this account?", `choice` over filtered account IDs | medium: accounts touch transfers |
 
-Nothing here replaces discovery: the answer must be one of the declared candidates, so a genuinely
-new merchant still needs the web + LLM step.
+`_classify_merchant` and `_handle_search_web` are **not** seams: they are dead code with no caller in
+`src/`. Building on them would resurrect the #587 mechanism. Deleting them is separate cleanup.
+
+Nothing here replaces discovery: the answer must be one of the declared candidates, so a genuinely new
+merchant still becomes `Misc`, exactly as today.
 
 ## The POC, and the rule that gates the integration
 
@@ -181,9 +205,13 @@ real cut rather than a fitted one.
 3. **Coverage is the one thing no arm can settle.** Arms B and C get 100% coverage only because their
    candidate list is built from the cases' own labels. The real candidate list is the live `/payees`
    list, and reading it once, read-only, is the next measurement.
-4. **The incumbent fallback is Brave + DeepSeek, not `Misc`,** and `BRAVE_SEARCH_API_KEY` is
-   configured. Beating `Misc` is not the same as beating the web + LLM path, so that comparison has to
-   be measured before any integration is written.
+4. **The incumbent is `Misc`, and what it is measured against is the removed web path.** Checked in
+   the current revision rather than assumed: `_handle_resolve_merchant` returns `Misc` directly and
+   the Brave + LLM branch is gone (#589 fixing #587), with `_classify_merchant` and
+   `_handle_search_web` left behind as dead code. So the bar is `Misc` — 0/26 on the miss path — and
+   arm C clears it at 13/26 with 100% precision. Measuring Brave + LLM anyway is still worth doing as
+   a **counterfactual**: it says whether the new mechanism beats the one that was deleted for being
+   unsafe, which is a different and weaker question than beating what runs today.
 5. **Accounts cannot be evaluated on this corpus.** It has no account ground truth: `review.json`
    carries `merchant`, `raw`, `payee` and `category` only. `friday-memory`'s `mappings.json` does hold
    an `accounts` map, but the module migrated it into `MEMORY.md` and no longer reads it
