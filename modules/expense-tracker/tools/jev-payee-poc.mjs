@@ -26,7 +26,7 @@ const PAYEE_QUESTION = "payee";
 const CATEGORY_QUESTION = "category";
 
 function parseArgs(argv) {
-    const out = { ...DEFAULTS, memoryFile: null, out: null, dryRun: false, payeesFromCorpus: false };
+    const out = { ...DEFAULTS, memoryFile: null, out: null, dryRun: false, payeesFromCorpus: false, noMisc: false };
     for (let i = 0; i < argv.length; i += 1) {
         const a = argv[i];
         const next = () => argv[++i];
@@ -37,6 +37,7 @@ function parseArgs(argv) {
         else if (a === "--delay") out.delay = Number(next());
         else if (a === "--dry-run") out.dryRun = true;
         else if (a === "--payees-from-corpus") out.payeesFromCorpus = true;
+        else if (a === "--no-misc") out.noMisc = true;
         else if (a === "--help") { console.log("see the header of this file"); process.exit(0); }
         else throw new Error(`unknown argument ${a}`);
     }
@@ -124,18 +125,22 @@ function memoryHit(merchantToPayee, merchant) {
     return [...hits.entries()].sort((a, b) => b[1] - a[1])[0][0];
 }
 
-function buildQuestions(candidates, categories) {
+function buildQuestions(candidates, categories, { noMisc = false } = {}) {
     const payeeCriteria = {};
     for (const c of candidates) payeeCriteria[c] = `the existing payee named ${c}`;
     const categoryCriteria = {};
     for (const c of categories) categoryCriteria[c] = `the existing category named ${c}`;
+    const payeeInstructions = noMisc
+        ? "Which existing payee should this transaction be booked to? Choose the payee that names this " +
+          "specific merchant, and prefer a specific merchant payee over a generic one. You must choose " +
+          "one of the offered payees, so lower your confidence when none of them clearly fits."
+        : "Which existing payee should this transaction be booked to? Choose the payee that names this " +
+          "specific merchant. Prefer a specific merchant payee over a generic one, and choose Misc only " +
+          "when no other payee could be right.";
     return {
         [PAYEE_QUESTION]: {
             type: "choice",
-            instructions:
-                "Which existing payee should this transaction be booked to? Choose the payee that names this " +
-                "specific merchant. Prefer a specific merchant payee over a generic one, and choose Misc only " +
-                "when no other payee could be right.",
+            instructions: payeeInstructions,
             criteria: payeeCriteria,
         },
         [CATEGORY_QUESTION]: {
@@ -215,7 +220,8 @@ async function main() {
     // anyway, as an upper bound on what a complete live payee list could buy.
     const known = [...payees];
     if (args.payeesFromCorpus) known.push(...cases.map((c) => c.payee));
-    const candidates = [...new Set([...known, "Misc"])].sort();
+    if (!args.noMisc) known.push("Misc");
+    const candidates = [...new Set(known)].sort();
     const categories = [...new Set([...memoryCategories, "Uncategorised"])].sort();
     const allowedPayees = new Set(candidates);
     const allowedCategories = new Set(categories);
@@ -223,7 +229,7 @@ async function main() {
     console.log(`cases=${cases.length} labelled of ${review.length}; memory facts=${merchantToPayee.size}`);
     console.log(`candidate payees=${candidates.length}; categories=${categories.length}`);
     if (args.dryRun) {
-        const questions = buildQuestions(candidates, categories);
+        const questions = buildQuestions(candidates, categories, { noMisc: args.noMisc });
         console.log("dry run: question shapes");
         console.log(JSON.stringify(questions[PAYEE_QUESTION], null, 2).slice(0, 400));
         return;
@@ -255,7 +261,7 @@ async function main() {
         try {
             const { payload, ms } = await askJev({
                 endpoint: args.endpoint, model: args.model, key, state,
-                questions: buildQuestions(candidates, categories),
+                questions: buildQuestions(candidates, categories, { noMisc: args.noMisc }),
             });
             const pick = readChoice(payload, PAYEE_QUESTION, allowedPayees);
             const pickCategory = readChoice(payload, CATEGORY_QUESTION, allowedCategories);
@@ -306,7 +312,7 @@ async function main() {
 
     const report = {
         generatedAt: new Date().toISOString(),
-        arm: args.payeesFromCorpus ? "corpus-candidates-upper-bound" : "memory-candidates",
+        arm: `${args.payeesFromCorpus ? "corpus-candidates-upper-bound" : "memory-candidates"}${args.noMisc ? "-no-misc" : ""}`,
         cases: rows.length,
         candidatePayees: candidates.length,
         memoryFacts: merchantToPayee.size,

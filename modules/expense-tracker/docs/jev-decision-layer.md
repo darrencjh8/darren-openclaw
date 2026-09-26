@@ -120,8 +120,8 @@ For each labelled case:
 
 ## Results of the first run
 
-51 labelled real cases, 0 errors, median 584 ms per call. Two arms, differing only in the candidate
-payee list.
+51 labelled real cases, 0 errors. Three arms, differing only in the candidate payee list and whether
+`Misc` is offered.
 
 **Arm A, candidates from memory alone** (47 payees, no labels used): coverage 54.9%. jev was correct
 20/51 overall, but on the 26 cases memory misses only **1/26**, and no threshold rescued it — at
@@ -142,39 +142,53 @@ to the miss path, which is the seam that would actually change:
 So the gate in this plan is met on the miss path given a complete candidate list: 12 of 26 cases that
 today become `Misc` are resolved correctly with no errors at all.
 
+**Arm C, arm B with `Misc` removed from the offered payees** (and the "choose Misc only when nothing
+else fits" sentence dropped from the instructions, since it would name a payee that is not offered).
+Measured, not projected: overall **41/51**, and on the 26 memory misses:
+
+| threshold | auto-resolved | precision |
+|---|---|---|
+| >= 0.90 | 16/26 | 94% |
+| >= 0.95 | 13/26 | **100%** |
+| >= 0.99 | 13/26 | **100%** |
+
+Removing the attractor also repaired four of the memory-hit overrides (19/25 went to 23/25), so it is
+not a trade. Median 724 ms.
+
+**The gate in this plan is therefore met on the miss path**, given a complete candidate list: 13 of the
+26 cases that today become `Misc` are resolved correctly with no errors at all, and the threshold is a
+real cut rather than a fitted one.
+
 ### What the remaining errors are
 
-- **`Misc` is an attractor.** 6 of the 26 miss answers were `Misc`, and the truth is never `Misc` on
-  that set, so every one was wrong. `Misc` must not be a resolvable answer; a `Misc` pick should fall
-  through to today's path instead. Re-scoring the same run with `Misc` excluded, which needs no new
-  calls:
-
-  | threshold | auto-resolved | precision |
-  |---|---|---|
-  | >= 0.90 | 17/26 | 88% |
-  | >= 0.95 | 13/26 | **100%** |
-  | >= 0.99 | 12/26 | 100% |
-
-  So the shape worth building is: run only where memory misses, do not offer `Misc`, and resolve at
-  `>= 0.95`. That resolves half the miss path with no errors and leaves the rest falling through
-  untouched.
+- **`Misc` was an attractor, and arm C is the fix.** In arm B, 6 of the 26 miss answers were `Misc`
+  and the truth is never `Misc` on that set, so every one was wrong. With `Misc` unoffered, precision
+  at `>= 0.95` went from 93% to **100%** at the same 13 cases, and the memory-hit damage fell from 6
+  broken rules to 2. The integration must not offer `Misc` as a resolvable pick; an unsure answer has
+  to fall through to today's path.
 - **`Grab` -> `Grab Wallet` when the truth was `Grab Paylater`** (twice, at 0.90 and 0.93) is genuine
   ambiguity between two similar payees; the human's choice there may itself be arbitrary, and no
   candidate list fixes it.
 - **`CHONG YING SIANG` -> `Misc` when the truth was `Medicine`** (four times) sat at 0.50-0.56, so the
   threshold catches all of them.
-- **Categories are not worth doing**: 25.5% either way, in both arms.
+- **Categories are not worth doing**: 25.5% in all three arms.
 
 ### Constraints this puts on any integration
 
-1. It may run **only where memory misses**, and must never override a memory hit. Asked to decide
-   every case it broke 6 of 25 exact rules, four of them toward `Misc`.
+1. It may run **only where memory misses**, and must never override a memory hit. Even in arm C it
+   still broke 2 of 25 exact rules, four fewer than arm B but not zero.
 2. `Misc` must be excluded as a resolvable pick, so an unsure answer falls through.
-3. **Coverage is the one thing arm B cannot settle.** The real candidate list is the live `/payees`
+3. **Coverage is the one thing no arm can settle.** Arms B and C get 100% coverage only because their
+   candidate list is built from the cases' own labels. The real candidate list is the live `/payees`
    list, and reading it once, read-only, is the next measurement.
 4. **The incumbent fallback is Brave + DeepSeek, not `Misc`,** and `BRAVE_SEARCH_API_KEY` is
    configured. Beating `Misc` is not the same as beating the web + LLM path, so that comparison has to
    be measured before any integration is written.
+5. **Accounts cannot be evaluated on this corpus.** It has no account ground truth: `review.json`
+   carries `merchant`, `raw`, `payee` and `category` only. `friday-memory`'s `mappings.json` does hold
+   an `accounts` map, but the module migrated it into `MEMORY.md` and no longer reads it
+   (`docs/design.md:163`), and `person-rules.json` is fetched but consumed by tests only. So the
+   account seams stay unmeasured until the budget is read.
 
 ## Surgical integration, if the POC passes
 
