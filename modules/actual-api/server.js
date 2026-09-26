@@ -793,12 +793,19 @@ app.post("/transactions/link-transfer", async (req, res) => {
         // section, so a concurrent budget switch cannot land the second write
         // in a different budget (#390, #506).
         const outcome = await withBudget(req, async () => {
+            // The route is given ids, not dates, so the read cannot be windowed on
+            // the legs' own day. It must still cover the day the legs are dated on:
+            // the bank alert's own day, which is the SINGAPORE calendar date. Pinning
+            // the end to the UTC date excluded any pair dated on that day while the
+            // clock was inside 00:00-08:00 SGT, so the route 404'd and left the pair
+            // unlinked for a third of the clock - including the #598 incident's own
+            // 00:36 SGT transfer (round-1 High). `readWindow` gives the same +/-1 day
+            // tolerance its sibling POST /transactions uses, anchored on the SGT day.
+            const window = readWindow(
+                new Date(Date.now() + 8 * 3600000).toISOString().slice(0, 10),
+            );
             const [rows, payees, accounts] = await Promise.all([
-                actual.getTransactions(
-                    undefined,
-                    "1970-01-01",
-                    new Date().toISOString().slice(0, 10),
-                ),
+                actual.getTransactions(undefined, window.start, window.end),
                 actual.getPayees(),
                 actual.getAccounts(),
             ]);

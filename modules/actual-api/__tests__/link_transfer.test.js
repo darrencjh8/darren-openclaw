@@ -113,6 +113,60 @@ describe("POST /transactions/link-transfer (#598)", () => {
         actual.getTransactions.mockResolvedValue(rows || [OUTGOING, INCOMING]);
     }
 
+    /**
+     * Seed the pair with a range-honouring read, the way the vendored library
+     * filters: `date >= startDate && date <= endDate`.
+     *
+     * The plain `seedPair` mock resolves every call with both rows regardless of
+     * the requested window, so it cannot see a route that asks for the wrong one
+     * (issue #598 round-1 High).
+     */
+    function seedRangeAwarePair() {
+        seedPair();
+        actual.getTransactions.mockImplementation((_accountId, startDate, endDate) =>
+            Promise.resolve(
+                [OUTGOING, INCOMING].filter(
+                    (row) => row.date >= startDate && row.date <= endDate,
+                ),
+            ),
+        );
+    }
+
+    test("links a pair dated on the Singapore date while the clock is before 08:00 SGT (#598 round-1 High)", async () => {
+        // The incident's own clock: the alerts arrived 2026-09-22T16:36Z, which is
+        // 2026-09-23 00:36 SGT, and both legs are dated 2026-09-23 (the SGT date).
+        // A read whose window ends at the UTC today excludes the pair, so the route
+        // answers 404 and the legs stay unlinked for a third of the clock.
+        jest.useFakeTimers().setSystemTime(new Date("2026-09-22T16:36:43.000Z"));
+        try {
+            seedRangeAwarePair();
+            const handler = findHandler("post", "/transactions/link-transfer");
+            const res = mockRes();
+
+            await handler(
+                mockReq({
+                    body: {
+                        budget_id: "test-budget",
+                        outgoing_id: OUTGOING.id,
+                        incoming_id: INCOMING.id,
+                    },
+                }),
+                res,
+            );
+
+            expect(actual.updateTransaction).toHaveBeenCalledTimes(2);
+            expect(res.json).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    status: "linked",
+                    outgoing_id: OUTGOING.id,
+                    incoming_id: INCOMING.id,
+                }),
+            );
+        } finally {
+            jest.useRealTimers();
+        }
+    });
+
     test("links both legs in place, with each transfer_id pointing at the other", async () => {
         seedPair();
         const handler = findHandler("post", "/transactions/link-transfer");
