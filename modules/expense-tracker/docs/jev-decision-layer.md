@@ -183,6 +183,26 @@ not a trade. Median 724 ms.
 26 cases that today become `Misc` are resolved correctly with no errors at all, and the threshold is a
 real cut rather than a fitted one.
 
+### The shipped path, on the same 51 cases
+
+`tools/jev-integration-replay.mjs` calls the real `src/jev.js` over the same corpus, with the payee
+universe the arms used and the merchant as the only state — because that is all
+`_handle_resolve_merchant` receives. The earlier harness also passed the raw bank descriptor, so its
+numbers are an upper bound on this input.
+
+| | arm C (harness, merchant + descriptor) | shipped `src/jev.js` (merchant only) |
+|---|---|---|
+| overall correct | 41/51 | 39/51 |
+| memory misses correct | 18/26 | 18/26 |
+| miss path >= 0.95 | 13 auto, 100% | **12 auto, 100%** |
+| memory hits broken | 2/25 | 4/25 |
+| median latency | 724 ms | 710 ms |
+
+So the artifact that would run reproduces the result: **12 of the 26 cases that today become `Misc`
+are resolved correctly with no errors**, and the other 14 fall through unchanged. It also confirms the
+constraint from the other direction — run over every case it broke 4 of the 25 memory hits, which is
+exactly why it is wired only after the memory loop finds nothing.
+
 ### What the remaining errors are
 
 - **`Misc` was an attractor, and arm C is the fix.** In arm B, 6 of the 26 miss answers were `Misc`
