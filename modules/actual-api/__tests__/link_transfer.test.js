@@ -167,6 +167,69 @@ describe("POST /transactions/link-transfer (#598)", () => {
         }
     });
 
+    test("compensates the first leg when the second link write fails", async () => {
+        seedPair({
+            rows: [
+                { ...OUTGOING, category_id: "cat-groceries" },
+                { ...INCOMING, category_id: "cat-income" },
+            ],
+        });
+        actual.updateTransaction
+            .mockResolvedValueOnce({})
+            .mockRejectedValueOnce(new Error("temporary Actual failure"))
+            .mockResolvedValueOnce({});
+        const handler = findHandler("post", "/transactions/link-transfer");
+        const res = mockRes();
+
+        await handler(
+            mockReq({
+                body: {
+                    budget_id: "test-budget",
+                    outgoing_id: OUTGOING.id,
+                    incoming_id: INCOMING.id,
+                },
+            }),
+            res,
+        );
+
+        expect(actual.updateTransaction).toHaveBeenCalledTimes(3);
+        expect(actual.updateTransaction).toHaveBeenLastCalledWith(OUTGOING.id, {
+            payee: "p-misc",
+            transfer_id: null,
+            category: "cat-groceries",
+        });
+        expect(res.status).toHaveBeenCalledWith(500);
+    });
+
+    test("reports compensation failure when the first-leg rollback cannot be written", async () => {
+        seedPair();
+        actual.updateTransaction
+            .mockResolvedValueOnce({})
+            .mockRejectedValueOnce(new Error("second write failed"))
+            .mockRejectedValueOnce(new Error("rollback failed"));
+        const handler = findHandler("post", "/transactions/link-transfer");
+        const res = mockRes();
+
+        await handler(
+            mockReq({
+                body: {
+                    budget_id: "test-budget",
+                    outgoing_id: OUTGOING.id,
+                    incoming_id: INCOMING.id,
+                },
+            }),
+            res,
+        );
+
+        expect(actual.updateTransaction).toHaveBeenCalledTimes(3);
+        expect(res.status).toHaveBeenCalledWith(500);
+        expect(res.json).toHaveBeenCalledWith(
+            expect.objectContaining({
+                error: expect.stringContaining("compensation failed"),
+            }),
+        );
+    });
+
     test("links both legs in place, with each transfer_id pointing at the other", async () => {
         seedPair();
         const handler = findHandler("post", "/transactions/link-transfer");

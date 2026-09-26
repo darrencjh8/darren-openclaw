@@ -874,7 +874,25 @@ app.post("/transactions/link-transfer", async (req, res) => {
                 category: null,
             };
             await actual.updateTransaction(outgoing.id, outgoingFields);
-            await actual.updateTransaction(incoming.id, incomingFields);
+            try {
+                await actual.updateTransaction(incoming.id, incomingFields);
+            } catch (error) {
+                // The public API has no atomic two-row update. Restore the first
+                // leg before surfacing the failed second write, so retries still
+                // see two ordinary rows instead of an unrecoverable half-pair.
+                try {
+                    await actual.updateTransaction(outgoing.id, {
+                        payee: outgoing.payee || null,
+                        transfer_id: outgoing.transfer_id || null,
+                        category: outgoing.category_id || null,
+                    });
+                } catch (rollbackError) {
+                    throw new Error(
+                        `Transfer link failed and compensation failed: ${rollbackError.message}`,
+                    );
+                }
+                throw error;
+            }
             return {
                 status: "linked",
                 outgoing_id: outgoing.id,
