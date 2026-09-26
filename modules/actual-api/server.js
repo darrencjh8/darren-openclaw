@@ -861,6 +861,26 @@ app.post("/transactions/link-transfer", async (req, res) => {
                     status: 400,
                 };
             }
+            // A leg that already points at a transfer account while carrying no
+            // transfer_id is a half-pair left by a failed link-back (the engine
+            // inserts the counterpart first and links it back second). Writing
+            // such a leg, or restoring its transfer payee, makes the engine's
+            // onUpdate call addTransfer and INSERT a third counterpart row, so
+            // refuse the pair up front instead of inventing a transaction.
+            const transferAcctIds = new Set(
+                (payees || [])
+                    .filter((payee) => payee.transfer_acct)
+                    .map((payee) => payee.id),
+            );
+            if (
+                (!outgoing.transfer_id && transferAcctIds.has(outgoing.payee)) ||
+                (!incoming.transfer_id && transferAcctIds.has(incoming.payee))
+            ) {
+                return {
+                    error: "A leg already points at a transfer account while unlinked",
+                    status: 400,
+                };
+            }
             // Cleared categories belong to an expense/income pair; a transfer
             // pair carries none, or the residual expense #598 is about stays.
             const outgoingFields = {

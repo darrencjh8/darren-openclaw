@@ -215,6 +215,88 @@ describe("POST /transactions/link-transfer (#598)", () => {
         expect(res.status).toHaveBeenCalledWith(500);
     });
 
+    test("refuses a leg that points at a transfer account while unlinked (#598 round-1 Medium)", async () => {
+        // The pre-state the engine's own addTransfer link-back can leave behind,
+        // and the state a failed compensation can leave: payee = the other
+        // account's TRANSFER payee, transfer_id = null. Writing that payee back
+        // (or linking it) makes the engine's onUpdate insert a THIRD counterpart
+        // row - proven on the real vendored engine, 2 rows -> 3, with the leg
+        // linked to the invented row. Fail closed instead.
+        seedPair({
+            rows: [
+                { ...OUTGOING, payee: "p-posb", transfer_id: null },
+                INCOMING,
+            ],
+        });
+        const handler = findHandler("post", "/transactions/link-transfer");
+        const res = mockRes();
+
+        await handler(
+            mockReq({
+                body: {
+                    budget_id: "test-budget",
+                    outgoing_id: OUTGOING.id,
+                    incoming_id: INCOMING.id,
+                },
+            }),
+            res,
+        );
+
+        // No write at all: the guard runs before the first leg is written.
+        expect(actual.updateTransaction).not.toHaveBeenCalled();
+        expect(res.status).toHaveBeenCalledWith(400);
+        expect(res.json).toHaveBeenCalledWith(
+            expect.objectContaining({
+                error: expect.stringContaining("transfer account"),
+            }),
+        );
+    });
+
+    test("reports compensation failure when the second leg's restore cannot be written", async () => {
+        // The other failure order: write 1, failed write 2, the outgoing restore
+        // succeeds, and the incoming restore fails. The incoming leg is then
+        // left carrying the outgoing account's transfer payee with a null
+        // transfer_id, which is exactly the shape the guard refuses on a later
+        // attempt, so pin the order and the surfaced error.
+        seedPair();
+        actual.updateTransaction
+            .mockResolvedValueOnce({})
+            .mockRejectedValueOnce(new Error("second write failed"))
+            .mockResolvedValueOnce({})
+            .mockRejectedValueOnce(new Error("second restore failed"));
+        const handler = findHandler("post", "/transactions/link-transfer");
+        const res = mockRes();
+
+        await handler(
+            mockReq({
+                body: {
+                    budget_id: "test-budget",
+                    outgoing_id: OUTGOING.id,
+                    incoming_id: INCOMING.id,
+                },
+            }),
+            res,
+        );
+
+        expect(actual.updateTransaction).toHaveBeenCalledTimes(4);
+        expect(actual.updateTransaction).toHaveBeenNthCalledWith(3, OUTGOING.id, {
+            payee: "p-misc",
+            transfer_id: null,
+            category: null,
+        });
+        expect(actual.updateTransaction).toHaveBeenNthCalledWith(4, INCOMING.id, {
+            payee: "p-misc",
+            transfer_id: null,
+            category: null,
+        });
+        expect(res.status).toHaveBeenCalledWith(500);
+        expect(res.json).toHaveBeenCalledWith(
+            expect.objectContaining({
+                error: expect.stringContaining("compensation failed"),
+            }),
+        );
+    });
+
     test("reports compensation failure when a compensation write cannot be written", async () => {
         seedPair();
         actual.updateTransaction
