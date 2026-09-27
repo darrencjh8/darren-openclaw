@@ -323,9 +323,11 @@ function normalizeIdentityName(value) {
  *   passes the Phase-1 sanitizer that strips an LLM-*injected* value of the
  *   flag; an LLM-extractor row that resolved internally therefore arrives
  *   marked and skips this check too (#623). The full Phase-1 LLM path does pass
- *   that sanitizer, so its rows arrive unmarked and are the ones that reach the
- *   gate — a row reaching this gate has not necessarily come from a
- *   deterministic parser.
+ *   that sanitizer, so its rows arrive unmarked and are among the rows that
+ *   reach the gate — a row reaching this gate has not necessarily come from a
+ *   deterministic parser. (It is not "only" such rows: the deterministic
+ *   parser also returns unmarked rows, e.g. its three `_hold_unresolved_transfer`
+ *   branches, which carry no flag and do reach this gate.)
  *
  * Skipping this ambiguity check is all the flag does: the caller's other four
  * refusals — no matching account, a closed account, a self target, and a
