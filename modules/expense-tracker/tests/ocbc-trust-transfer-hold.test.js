@@ -27,10 +27,13 @@
  *    resolves. This test pins that it resolves, and that the safety gate still
  *    refuses when the fact is absent.
  *
- * Bodies are the production bodies verbatim, minus the HTML wrapper. Amounts,
- * dates, times, reference numbers, suffixes, and product names are retained —
- * they are what resolution keys on. The account holder's given name is left as
- * the bank printed it; no statement password or credential appears.
+ * Bodies are the production bodies, with one caveat recorded at the `WRAPPED`
+ * constant below: the uid 968 constant is the whitespace-FLATTENED form of the
+ * bank's 80-column text/plain, and the wrap point inside it is reconstructed,
+ * not a byte-exact copy. Amounts, dates, times, reference numbers, suffixes,
+ * and product names are retained — they are what resolution keys on. The
+ * account holder's given name is left as the bank printed it; no statement
+ * password or credential appears.
  */
 import { describe, expect, it, vi } from "vitest";
 import { parseBankMovement } from "../src/bank-movement.js";
@@ -346,11 +349,11 @@ describe("transferDestinationIsAmbiguous", () => {
 // ── What `_structured_movement` actually guarantees (#623) ──────
 
 describe("_structured_movement is not a synonym for an internal resolution (#623)", () => {
-    // The #575 fix marked the `resolved.internal` branch structured. The gate's
-    // docstring then described the flag as set "for every internal resolution,
-    // whichever extractor produced the movement". That is not the whole rule:
-    // the flag is set on every deterministic resolution OUTCOME, internal or
-    // not, so it cannot be read as proof that an internal resolution happened.
+    // The #575 fix marked the `resolved.internal` branch structured. PR #624
+    // (branch `docs/ambiguity-gate-docstring`, unmerged at the time of writing)
+    // reworded the gate's docstring to describe the flag as set "for every
+    // internal resolution, whichever extractor produced the movement", and that
+    // reword...[truncated]
 
     const withoutTrustPayee = () =>
         payees.filter((p) => p.transfer_acct !== TRUST_BANK);
@@ -391,18 +394,20 @@ describe("_structured_movement is not a synonym for an internal resolution (#623
         });
 
         expect(phase1._structured_movement).toBe(true);
-        // Deliberately NOT claimed as load-bearing for this row: the outgoing
-        // external branch leaves payee_name empty, so Phase 2's payee-gated
-        // ambiguity check never sees it either way. What is wrong is the
-        // docstring's mechanism claim, not this row's outcome.
-        expect(phase1.payee_name).toBe("");
+        // The flag is NOT load-bearing for this row, and this test does not
+        // claim the row is booked correctly. With the payee removed, the uid 969
+        // leg falls to the deterministic external-payment branch, which leaves
+        // `payee_name` empty; orchestrator.js's Phase-2 transfer block is gated on
+        // a non-...[truncated]
     });
 });
 
 // ── The uid 968 body depends on the extractor flattening the wrap ──
 
 describe("uid 968 only parses because the extractor flattens the bank's wrap", () => {
-    // The real text/plain part is wrapped at ~80 columns, mid-counterparty:
+    // The bank's text/plain part wraps mid-counterparty. The exact column is
+    // not load-bearing (and not measurable here, the leading emoji has no
+    // fixed width); what matters is only that a newline lands inside the name:
     //   "...from OverseaChinese Banking Corporation\nLtd A/C ending 9001 on..."
     // The Trust branch's `(.+?)` cannot cross that newline, so the RAW body
     // does not parse. Production only ever sees the flattened form because
