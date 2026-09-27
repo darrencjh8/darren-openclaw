@@ -52,6 +52,11 @@ if [[ ${#COMPONENTS[@]} -eq 0 ]]; then
 fi
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+# The readiness budgets the health checks below derive from. The deploy must not
+# give up on the router before the container itself is allowed to give up; see
+# that file for the two gates it has to cover and why a false failure loops.
+# shellcheck source=modules/hermes/scripts/deploy-ready-budget.sh
+. "$ROOT/modules/hermes/scripts/deploy-ready-budget.sh"
 MODULES_DIR="$ROOT/modules"
 PT_DIR="$ROOT/modules/portfolio-tracker"
 ET_DIR="$ROOT/modules/expense-tracker"
@@ -942,7 +947,7 @@ health_ok() {
       return 0
     fi
     attempt=$((attempt + 1))
-    [ "$attempt" -lt "$max_attempts" ] && sleep 6
+    [ "$attempt" -lt "$max_attempts" ] && sleep "$HEALTH_RETRY_SLEEP"
   done
   echo -e "  ${RED}✗ $name (HTTP $code)${NC}"
   return 1
@@ -1089,7 +1094,7 @@ if should_deploy "portfolio-tracker" || should_deploy "all"; then
 fi
 
 if should_deploy "codex-router" || should_deploy "all"; then
-  health_ok "codex-router" "http://localhost:4100/health/liveliness" 30 || failed=$((failed + 1))
+  health_ok "codex-router" "http://localhost:4100/health/liveliness" "$ROUTER_READY_ATTEMPTS" || failed=$((failed + 1))
 fi
 
 # Pluggable module health checks (auto-discovered)
