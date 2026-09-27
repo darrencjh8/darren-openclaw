@@ -297,9 +297,39 @@ function normalizeIdentityName(value) {
         .toLocaleLowerCase("en");
 }
 
-function transferDestinationIsAmbiguous(name, destination, accounts) {
+/**
+ * True when the destination a transfer names cannot be pinned to exactly one
+ * open account.
+ *
+ * A bank NAME alone is a weak signal: "OverseaChinese Banking Corporation
+ * Ltd" matches both OCBC 360 and OCBC 90N, so the name is ambiguous even
+ * though the alert body also carries `A/C ending 9001`. When the caller
+ * passes suffix evidence that resolves to exactly one account, that stronger
+ * signal wins and the name is not ambiguous (issue #575). Suffix evidence
+ * that points somewhere OTHER than the candidate match is not evidence for
+ * it, so the name stays ambiguous, and with no evidence at all the original
+ * bank-name rule is unchanged.
+ *
+ * Exported for tests: this is the gate that held a correctly-resolved
+ * transfer pair in production on 2026-09-27.
+ */
+export function transferDestinationIsAmbiguous(
+    name,
+    destination,
+    accounts,
+    suffixEvidence = null,
+) {
+    // Callers pass the live account object; a bare id string is also accepted
+    // so the rule reads the same in tests as in the pipeline.
+    const destinationId =
+        typeof destination === "string" ? destination : destination?.id;
     const direct = matchAccountByName(name, accounts);
-    if (direct.matched && direct.id === destination.id) return false;
+    if (direct.matched && direct.id === destinationId) return false;
+    if (
+        suffixEvidence?.accountId &&
+        suffixEvidence.accountId === destinationId
+    )
+        return false;
     const bank = bankFromText(name);
     return bank && accounts.filter((account) =>
         !account.closed && bankFromText(account.name) === bank,
@@ -758,6 +788,18 @@ export class AgentOrchestrator {
                 reasoning: "Deterministic structured bank transfer",
                 notify_message: "",
                 _suffix_mappings: suffixMappings,
+                // This branch has already RESOLVED both legs against live
+                // accounts: `resolved.internal` is only set when the source
+                // and the destination were matched from the alert's own
+                // suffix/recipient evidence. Marking the row structured keeps
+                // the Phase-2 ambiguity gate below from re-deciding a settled
+                // destination from the BANK NAME instead of the suffix the
+                // body actually carries. Without this, "OverseaChinese Banking
+                // Corporation Ltd A/C ending 9001" was judged ambiguous purely
+                // because two open accounts carry an OCBC token, and a correct
+                // transfer pair was flipped to Misc and held (issue #575,
+                // production incident 2026-09-27).
+                _structured_movement: true,
                 _is_transfer: true,
                 _is_paynow: movement.is_paynow === true,
                 _transfer: {
@@ -1760,6 +1802,41 @@ export class AgentOrchestrator {
         }
     }
 
+    /**
+     * The strongest destination evidence available on a Phase-2 row, for the
+     * ambiguity gate in `transferDestinationIsAmbiguous`.
+     *
+     * A transfer alert carries the far account's masked suffix, and the stored
+     * suffix facts map that number to exactly one live account. When the alert's
+     * own text names a suffix that memory resolves, that is better evidence
+     * than the counterparty's BANK NAME — a name like "OverseaChinese Banking
+     * Corporation Ltd" matches every OCBC account the holder owns, while
+     * `A/C ending 9001` identifies one (issue #575).
+     *
+     * Returns `{ suffix, accountId }` only when a suffix written in the alert
+     * resolves to a single live account, and that account is the candidate the
+     * gate is testing. A suffix that resolves to a different account, or to
+     * several, is no evidence for this candidate and yields null, so the gate
+     * keeps its stricter bank-name behaviour.
+     */
+    _suffixEvidenceFor(output, candidate, searchTerm) {
+        const text = `${output?.raw_description || ""} ${output?.notes || ""} ${output?.merchant || ""} ${searchTerm || ""}`;
+        const digits = text.match(/\b\d{4,}\b/g);
+        if (!digits) return null;
+        const store = output?._suffix_mappings;
+        if (!(store instanceof Map) || store.size === 0) return null;
+        for (const suffix of digits) {
+            const mapped = store.get(suffix);
+            // `null` is a stored CONFLICT (one suffix, two accounts); it is not
+            // evidence either way and must not be read as an account.
+            if (mapped && typeof mapped === "object" && mapped.id) {
+                if (mapped.id === candidate?.id)
+                    return { suffix, accountId: mapped.id };
+            }
+        }
+        return null;
+    }
+
     async _resolvePhase2(phase1Output) {
         const output = {
             ...phase1Output,
@@ -1976,7 +2053,7 @@ export class AgentOrchestrator {
                     accountMatch.closed ||
                     accountMatch.id === output.account_id ||
                     await this._detectAccountType(accountMatch.name) === "credit card" ||
-                    (!output._structured_movement && transferDestinationIsAmbiguous(searchTerm, accountMatch, liveAccounts))
+                    (!output._structured_movement && transferDestinationIsAmbiguous(searchTerm, accountMatch, liveAccounts, this._suffixEvidenceFor(output, accountMatch, searchTerm)))
                 )) {
                     // A closed or card account, a self target, or a bank-only
                     // name with several own accounts cannot identify a transfer leg.
