@@ -1229,10 +1229,13 @@ export class AgentOrchestrator {
                 // field so untrusted Phase-1 output cannot persist a
                 // fabricated suffix→account fact, and cannot claim a row was
                 // structurally resolved when no parser resolved it:
-                // `_structured_movement` gates the Phase-2 transfer
-                // destination check and the schedule-collision check, so a
-                // forged value books a transfer that the destination checks
-                // would have refused.
+                // `_structured_movement` drives two Phase-2 checks with
+                // OPPOSITE polarity: it SKIPS the transfer-destination gate
+                // (`!output._structured_movement && transferDestinationIsAmbiguous(...)`),
+                // so a forged value books a transfer that gate would have
+                // refused; and it is REQUIRED to ENABLE the schedule-collision
+                // check, so a forged value only adds holds there. The material
+                // risk is the skipped destination gate.
                 delete output._suffix_mappings;
                 delete output.payee_id;
                 delete output._transfer;
