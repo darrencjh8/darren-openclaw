@@ -302,13 +302,12 @@ function normalizeIdentityName(value) {
  * open account.
  *
  * A bank NAME alone is a weak signal: "OverseaChinese Banking Corporation Ltd"
- * matches both OCBC 360 and OCBC 90N. The alert body does carry a stronger
- * signal in `A/C ending 9001`, but this gate is only reached by rows that have
- * NOT already been resolved from that suffix evidence, so there is nothing
- * here to compare it against.
- *
- * Exported for tests: this is the gate that held a correctly-resolved transfer
- * pair in production on 2026-09-27.
+ * matches both OCBC 360 and OCBC 90N, so the name alone is ambiguous. The alert
+ * body does carry a stronger signal in `A/C ending 9001`, but by the time this
+ * runs the deterministic parser has already resolved the legs from exactly
+ * that suffix evidence and marked the row `_structured_movement`, which skips
+ * this check. It is therefore reached only by rows with no such resolution, and
+ * for those the bank name is the best signal available — so it stays the rule.
  */
 export function transferDestinationIsAmbiguous(name, destination, accounts) {
     const direct = matchAccountByName(name, accounts);
@@ -771,17 +770,19 @@ export class AgentOrchestrator {
                 reasoning: "Deterministic structured bank transfer",
                 notify_message: "",
                 _suffix_mappings: suffixMappings,
-                // This branch has already RESOLVED both legs against live
-                // accounts: `resolved.internal` is only set when the source
-                // and the destination were matched from the alert's own
-                // suffix/recipient evidence. Marking the row structured keeps
-                // the Phase-2 ambiguity gate below from re-deciding a settled
-                // destination from the BANK NAME instead of the suffix the
-                // body actually carries. Without this, "OverseaChinese Banking
-                // Corporation Ltd A/C ending 9001" was judged ambiguous purely
-                // because two open accounts carry an OCBC token, and a correct
-                // transfer pair was flipped to Misc and held (issue #575,
-                // production incident 2026-09-27).
+                // Both legs were resolved against the holder's OWN live
+                // accounts: `resolved.internal` requires a source and a
+                // destination that are different accounts from
+                // `fetch_context`, plus a transfer payee for one of them
+                // (src/bank-movement.js). Marking the row structured keeps the
+                // Phase-2 ambiguity gate below from re-deciding that settled
+                // destination from the counterparty's BANK NAME, which matches
+                // every account the holder owns at that bank. "OverseaChinese
+                // Banking Corporation Ltd A/C ending 9001" was judged ambiguous
+                // purely because two open accounts carry an OCBC token, and a
+                // correct transfer pair was flipped to Misc and held (issue
+                // #575, production incident 2026-09-27). The other four checks
+                // in that gate are unaffected and still refuse.
                 _structured_movement: true,
                 _is_transfer: true,
                 _is_paynow: movement.is_paynow === true,
