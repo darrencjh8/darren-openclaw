@@ -164,16 +164,31 @@ that string is therefore destroyed or reinterpreted, and *which* way it fails de
 |---|---|---|
 | `print(f"  {leg}: …")` | string closes early | `bash -n` fails, script exit 2 |
 | `print(f'  {leg}: {r.get("status", "?")} …')` | `r.get(status, ?)` | `SyntaxError`, swallowed, silent |
-| `print(f'  {leg}: {r.get('status', '?')} …')` | `r.get('status, ?)` | runs, prints `pull: )` |
 
-All three were run against the shipped script with a stub `python3` capturing real `argv`. The
-middle row is the dangerous one: it raises a `SyntaxError`, but `portfolio-sync.sh:41` ends in
-`2>/dev/null || true`, so the script exits 0 having printed **nothing**. The change would delete a
-signal that works today and replace it with silence. `bash -n` does not catch it, because bash
-successfully splits the string; it never validates the Python.
+Both rows were confirmed by running the shipped script with a stub `python3` on `PATH` capturing
+real `argv`. The middle row is the dangerous one: it raises a `SyntaxError`, but
+`portfolio-sync.sh:41` ends in `2>/dev/null || true`, so the script exits 0 having printed
+**nothing**. The change would delete a signal that works today and replace it with silence.
+`bash -n` does not catch it, because bash successfully splits the string; it never validates the
+Python.
 
-So the program is read into a variable by a **quoted heredoc**, which performs no expansion and no
-quote removal, and then passed to Python as one argument:
+A third form — writing the dict keys single-quoted inside a single-quoted f-string — looks like
+the way out, and is worth ruling out explicitly, because it is not a quoting problem at all:
+
+```python
+print(f'  {leg}: {r.get('status', '?')} ({r.get('detail', '')})')
+```
+
+Those inner single quotes **close the f-string**. Nested same-quote expressions in f-strings are
+PEP 701, valid only from Python 3.12; the module container runs **3.11.2**, so the line is a
+`SyntaxError` there regardless of how bash handles the surrounding string. The identical line
+compiles on this host's 3.13.5, which is exactly how it can look correct in review and break in
+production. So the inline route needs a quoting form that is simultaneously legal Python on 3.11
+and intact after bash's quote removal, and that constraint is fragile in a way that reads as
+style.
+
+The program is therefore read into a variable by a **quoted heredoc**, which performs no expansion
+and no quote removal, and then passed to Python as one argument:
 
 ```bash
 read -r -d '' PARSE_PROG <<'PARSE_EOF' || true
@@ -189,7 +204,7 @@ echo "$BODY" | python3 -c "$PARSE_PROG" 2>/dev/null || true
 `read -d ''` returns non-zero at EOF, hence the `|| true`; the variable is assigned regardless.
 Verified end to end: the snippet reaches Python byte-identical (`r.get("status", "?")` intact),
 and the same block that printed nothing under `-c "` now prints `pull: error (Token HTTP 400)`.
-Note `python3 -c "$PARSE_PROG"` takes **no** trailing `-`: Python rejects it as a syntax error.
+The body is read on the program's own stdin, so no argv placeholder is needed.
 
 Two details that are easy to get wrong and are pinned by the test in step 5:
 
@@ -260,10 +275,17 @@ Two cases, because the two returns are genuinely different code and only one was
 2. `analysis` **absent** and `pull.status === "error"`. The rendered text must contain the pull
    error *and* the `lines` content. This is the `return [...onedriveErrs, ...lines]` path, and it is
    live whenever `taxonomyData` is falsy (`tools.js:1016-1022` gates `analysis` on it) — a pull
-   failure with no taxonomy to export, which is exactly the case where the user most needs to be
+   failure with no taxonomy to export, exactly the case where the user most needs to be
    told. Without this case a later refactor could drop `onedriveErrs` from that last line and
    every other planned test would still pass. Same defect shape as the round-2 `lines` finding: a
-   value produced in one place and consumed in another.
+   value produced in one place and consumed in another. This case asserts the branch's **exact**
+   output, not just that the error appears.
+
+**What the byte-identity claim actually rests on.** Not the ternary, which is only the spelling of
+the check. It is that the analysis branch returns `raw.analysis.message_body` *unmodified* when
+the error array is empty. A healthy run's text is therefore the analysis string and nothing else,
+and the only thing that could perturb it is an error line leaking in. That is why the condition is
+error-only rather than a concatenation.
 
 ### 5. `modules/hermes/tests/test-portfolio-sync-output.sh` + a CI step for it
 
@@ -278,9 +300,9 @@ test **runs the shipped script with a stubbed `curl`**, asserting on its stdout.
 re-execute the extracted program on its own: a test that reads the block off disk and feeds it to
 its own `python3 -c` skips bash's parse-time quote removal, which is the *only* step that mangles
 the text. Such a test passes on a script that prints nothing at all, because it never reproduces
-the defect it exists to catch — it certifies it. The stub must be on `PATH` as a `curl` that
-emits a fixed body, with the token path redirected to a real file, so the script runs unmodified
-otherwise.
+the defect it exists to catch — it certifies it. The stub is a `curl` placed first on `PATH` that
+emits a fixed body; the script reads no environment variable and has no token-path knob, so the
+stub alone determines what it sees. The script otherwise runs unmodified.
 
 The test feeds two bodies and asserts on stdout:
 
