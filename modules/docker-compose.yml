@@ -130,6 +130,12 @@ services:
             - OPENCODE_ZEN_API_KEY=${OPENCODE_ZEN_API_KEY:-}
             - OPENCODE_API_KEY=${OPENCODE_API_KEY:-}
             - CODEX_ROUTER_OPENCODE_ZEN_MODELS=${CODEX_ROUTER_OPENCODE_ZEN_MODELS:-space-bunny-free}
+            # Per-hop budget for the auto-thinking pool. The router's own default
+            # is 120, which is short for a reasoning model and sits below the
+            # opencode-free lane's 300s turn deadline, so a lower budget would
+            # always pre-empt the lane. Forwarded from the deploy workflow's
+            # environment; this default applies when it is not set there.
+            - CODEX_ROUTER_AUTO_THINKING_TIMEOUT_SECONDS=${CODEX_ROUTER_AUTO_THINKING_TIMEOUT_SECONDS:-300}
             # OpenCode free-tier sidecar, resolved on the compose network only.
             # The sidecar publishes no port, so this is reachable from the
             # internal network and nowhere else. An unset value or an
