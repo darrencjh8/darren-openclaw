@@ -422,10 +422,15 @@ describe("uid 968 only parses because the extractor flattens the bank's wrap", (
     // fixed width); what matters is only that a newline lands inside the name:
     //   "...from OverseaChinese Banking Corporation\nLtd A/C ending 9001 on..."
     // The Trust branch's `(.+?)` cannot cross that newline, so the RAW body
-    // does not parse. Production only ever sees the flattened form because
-    // `extractEmailContent` collapses `\s+` first. Pinned here so a change to
-    // that collapse fails loudly instead of quietly dropping this credit leg
-    // back onto the LLM path.
+    // does not parse. The IMAP path only ever sees the flattened form because
+    // `extractEmailContent` collapses `\s+` first — but that is NOT the only
+    // way in: `processText` (src/orchestrator.js) forwards `String(rawText)`
+    // with no extraction, and the extraction catch-fallback uses the raw MIME
+    // string. A wrapped body pasted to those paths does NOT parse today and
+    // falls through to the LLM; the next test pins that gap rather than
+    // pretending it does not exist. Pinned here so a change to the collapse
+    // fails loudly instead of quietly dropping this credit leg off the
+    // deterministic path.
     const WRAPPED =
         "💰❤️🎉 Sweet! You have received SGD 6.48 from OverseaChinese Banking Corporation\nLtd A/C ending 9001 on 27 Sep 2026 11:49 SGT. For more info, please contact us via Trust App.";
 
@@ -467,5 +472,55 @@ describe("uid 968 only parses because the extractor flattens the bank's wrap", (
                 suffix: "9001",
             },
         });
+    });
+
+    it("KNOWN GAP: the wrapped body does not survive processText, which skips extraction", async () => {
+        // `processText` -> `_processTextInternal` forwards `String(rawText)`
+        // straight to `_runPhase1` with no `extractEmailContent` call, so a
+        // wrapped alert pasted in (Telegram path) is NOT flattened. This test
+        // documents the resulting behaviour as a KNOWN GAP, not as correct: the
+        // deterministic parser returns null and the row falls through to the
+        // LLM extractor.
+        //
+        // This runs as a live assertion on purpose, so the gap cannot be
+        // forgotten. When it is fixed (flatten in _runPhase1, or make the Trust
+        // branch whitespace-tolerant) this test FAILS, which is the signal to
+        // invert the two expectations below and delete this comment. Do not
+        // delete the test itself without inverting it first.
+        const { AgentOrchestrator } = await import("../src/orchestrator.js");
+        const tools = {
+            executeTool: vi.fn(async (name) => {
+                if (name === "fetch_context")
+                    return { accounts, categories: [], payees };
+                if (name === "search_memory") return { results: facts };
+                return true;
+            }),
+            getPhase1ToolSchemas: vi.fn(() => []),
+            setEmailContext: vi.fn(),
+        };
+        const orch = new AgentOrchestrator(
+            {
+                primaryCurrency: "SGD",
+                secondaryCurrency: "MYR",
+                primaryBudgetFile: "budget-sgd",
+                secondaryBudgetFile: "budget-myr",
+                llmProvider: "deepseek",
+                llmApiKey: "test",
+                deepseekApiKey: "test",
+            },
+            tools,
+        );
+        // The LLM extractor fallback would be reached here; stub it so the
+        // assertion is about the deterministic parser only.
+        orch._llm.chat = vi.fn();
+
+        const phase1 = await orch._runPhase1(WRAPPED, {
+            senderBank: "Trust",
+            receivedAt: "2026-09-27T03:49:46.000Z",
+        });
+
+        // Documents the gap: no deterministic output, so the LLM took it.
+        expect(phase1).toBeNull();
+        expect(orch._llm.chat).toHaveBeenCalled();
     });
 });
