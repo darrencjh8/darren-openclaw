@@ -353,7 +353,10 @@ describe("_structured_movement is not a synonym for an internal resolution (#623
     // (branch `docs/ambiguity-gate-docstring`, unmerged at the time of writing)
     // reworded the gate's docstring to describe the flag as set "for every
     // internal resolution, whichever extractor produced the movement", and that
-    // reword...[truncated]
+    // rewording is wrong: the flag is set on every deterministic resolution
+    // OUTCOME, internal or not, so it cannot be read as proof that an internal
+    // resolution happened. The quote above names a claim made on that branch,
+    // not text that exists in this tree's src/orchestrator.js.
 
     const withoutTrustPayee = () =>
         payees.filter((p) => p.transfer_acct !== TRUST_BANK);
@@ -398,7 +401,16 @@ describe("_structured_movement is not a synonym for an internal resolution (#623
         // claim the row is booked correctly. With the payee removed, the uid 969
         // leg falls to the deterministic external-payment branch, which leaves
         // `payee_name` empty; orchestrator.js's Phase-2 transfer block is gated on
-        // a non-...[truncated]
+        // a non-empty payee, so the ambiguity gate is never reached either way.
+        //
+        // That leaves a DOUBLE-COUNT, which is the outcome issue #623 tracks: the
+        // uid 968 leg still reserves OCBC 360 -> Trust Bank (its own `internal`
+        // resolution is unaffected by the payee removed here), while this leg
+        // books a second -648 payment out of OCBC 360. The fixture removes a
+        // payee to isolate the flag semantics, not because that state is
+        // desirable. If you are reading this to change the payee list, do not
+        // read the double-count as the intended behaviour.
+        expect(phase1.payee_name).toBe("");
     });
 });
 
