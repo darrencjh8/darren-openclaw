@@ -201,9 +201,74 @@ grep -q 'health_ok' <<<"$deploy_src" \
     && ok "health_ok function exists" \
     || nope "health_ok function" "not found"
 
-grep -q 'health_ok "codex-router" "http://localhost:4100/health/liveliness" 30' <<<"$deploy_src" \
-    && ok "codex-router gets extended startup health budget" \
-    || nope "codex-router startup health budget" "expected 30 attempts"
+# The deploy health check must outlast the container's own readiness gate. The
+# entrypoint lets the router take 360s to answer /health/liveliness and the
+# supervisor allows a cold start 420s, so a deploy that gives up at 180s reports
+# a recovering router as a failed deploy -- and because the sync cron reads only
+# successful deploy runs, that false failure re-dispatches the router deployment
+# every five minutes. The budget is derived from the contract, so this compares
+# the numbers the deploy will actually use instead of the line that sets them.
+BUDGET_FILE="$SCRIPT_DIR/../scripts/deploy-ready-budget.sh"
+if [ ! -f "$BUDGET_FILE" ]; then
+    nope "the readiness budget contract exists" "missing $BUDGET_FILE"
+elif ! budget=$(bash -c "set -euo pipefail; . \"$BUDGET_FILE\"; printf '%s %s %s %s' \"\$ROUTER_READY_ATTEMPTS\" \"\$HEALTH_RETRY_SLEEP\" \"\$ROUTER_READY_SECONDS\" \"\$CONTAINER_READY_SECONDS\"" 2>&1); then
+    nope "the readiness budget contract loads" "$budget"
+else
+    ok "the readiness budget contract loads"
+    read -r attempts retry_sleep ready_seconds container_seconds <<<"$budget"
+    deploy_seconds=$(( attempts * retry_sleep ))
+    if [ "$deploy_seconds" -ge "$container_seconds" ]; then
+        ok "the deploy waits ${deploy_seconds}s, at least the container gate's ${container_seconds}s"
+    else
+        nope "the deploy waits at least as long as the container gate" "waiting ${deploy_seconds}s for a container allowed ${container_seconds}s"
+    fi
+    if [ "$deploy_seconds" -ge "$ready_seconds" ]; then
+        ok "the deploy waits ${deploy_seconds}s, at least the router's ${ready_seconds}s cold-start allowance"
+    else
+        nope "the deploy waits at least the router's cold-start allowance" "waiting ${deploy_seconds}s for a router allowed ${ready_seconds}s"
+    fi
+fi
+
+# The check must use the derived budget, not a literal that can drift.
+grep -q 'health_ok "codex-router" "http://localhost:4100/health/liveliness" "$ROUTER_READY_ATTEMPTS"' <<<"$deploy_src" \
+    && ok "the codex-router check uses the derived budget" \
+    || nope "the codex-router check uses the derived budget" "expected the ROUTER_READY_ATTEMPTS variable"
+
+# Behavioural: health_ok polls until the endpoint answers, and gives up when it never does.
+health_ok_src=$(sed -n '/^health_ok()/,/^}/p' "$DEPLOY_SCRIPT")
+probe_health_ok() {
+    CURL_CODE="$1" FUNC_SRC="$health_ok_src" ATTEMPTS="$2" bash -c '
+        set -uo pipefail
+        # The function prints through the script colour vars, so the probe
+        # provides them exactly as deploy.sh does.
+        RED="" GREEN="" NC=""
+        HEALTH_RETRY_SLEEP=0
+        curl() { printf "%s" "$CURL_CODE"; }
+        sleep() { :; }
+        eval "$FUNC_SRC"
+        if health_ok probe http://127.0.0.1:1/never "$ATTEMPTS" >/dev/null 2>&1; then
+            echo up
+        else
+            echo down
+        fi
+    '
+}
+if [ -z "$health_ok_src" ]; then
+    nope "health_ok is extractable for a behavioural check" "no function body found in $DEPLOY_SCRIPT"
+else
+    healthy=$(probe_health_ok 200 3) || healthy="probe exited $?"
+    dead=$(probe_health_ok 000 3) || dead="probe exited $?"
+    if [ "$healthy" = up ]; then
+        ok "health_ok reports an endpoint that answers as up"
+    else
+        nope "health_ok reports an endpoint that answers as up" "got: $healthy"
+    fi
+    if [ "$dead" = down ]; then
+        ok "health_ok gives up on an endpoint that never answers"
+    else
+        nope "health_ok gives up on an endpoint that never answers" "got: $dead"
+    fi
+fi
 
 # Auto-discovered module health checks must not fail deployments of unrelated components.
 grep -q 'should_deploy "${MODULE_NAME:-}" || continue' <<<"$deploy_src" \
