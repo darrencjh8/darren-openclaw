@@ -445,12 +445,16 @@ describe("uid 968 only parses because the extractor flattens the bank's wrap", (
     // fallbacks, so no branch of it hands back uncollapsed text.
     //
     // There is exactly one production entry that skips it: `processText` ->
-    // `_processTextInternal` (src/orchestrator.js) forwards `String(rawText)`
-    // straight to `_runPhase1` with no `extractEmailContent` call at all. A
-    // wrapped body pasted in there does NOT parse today and falls through to
-    // the LLM; the next test pins that gap rather than pretending it does not
-    // exist. Pinned here so a change to the collapse fails loudly instead of
-    // quietly dropping this credit leg off the deterministic path.
+    // `_processTextInternal` (src/orchestrator.js:457) forwards
+    // `String(rawText || "")` straight to `_runPhase1` with no
+    // `extractEmailContent` call at all. Its only production caller is
+    // `_handle_process_transaction` (src/tools.js:2272), the Telegram entry,
+    // which `.trim()`s the text but does not collapse the wrap either. So the
+    // surviving exposure is Telegram only: a wrapped body pasted in there does
+    // NOT parse today and falls through to the LLM; the next test pins that
+    // gap rather than pretending it does not exist. Pinned here so a change to
+    // the collapse fails loudly instead of quietly dropping this credit leg
+    // off the deterministic path.
     const WRAPPED =
         "💰❤️🎉 Sweet! You have received SGD 6.48 from OverseaChinese Banking Corporation\nLtd A/C ending 9001 on 27 Sep 2026 11:49 SGT. For more info, please contact us via Trust App.";
 
