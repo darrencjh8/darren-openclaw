@@ -4,11 +4,15 @@ import { it, expect, vi } from "vitest";
 // `_suffix_mappings`, `payee_id`, `_transfer`, `_is_transfer`,
 // `_hold_unresolved_paynow` and `_hold_unresolved_transfer` from LLM JSON —
 // but not `_structured_movement`. The Phase-1 output object is built with
-// `...llmOutput` (src/orchestrator.js:1215), so an untrusted value survived
-// into Phase 2, where `_structured_movement` is the switch that SKIPS the
-// transfer-destination ambiguity gate (:2010) and the schedule-collision
-// check (:2318). A forged value therefore books a transfer that the
-// destination checks would have refused.
+// `...llmOutput`, so an untrusted value survived into Phase 2, where
+// `_structured_movement` SKIPS the transfer-destination ambiguity gate
+// (`!output._structured_movement && transferDestinationIsAmbiguous(...)`).
+// A forged value therefore books a transfer that the gate would have refused.
+//
+// Note the flag's polarity is opposite at its other consumer: the
+// schedule-collision check REQUIRES it (`... && llmOutput._structured_movement
+// === true`), so there a forged value only adds holds. Only the skipped
+// destination gate is a wrong-booking risk, and that is what this test guards.
 //
 // The test asserts the invariant directly: whatever the LLM claims, the flag
 // must not survive the sanitizer. It is a sanitizer test, not a booking test,
