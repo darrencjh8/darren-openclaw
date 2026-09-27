@@ -349,19 +349,22 @@ describe("transferDestinationIsAmbiguous", () => {
 // ── What `_structured_movement` actually guarantees (#623) ──────
 
 describe("_structured_movement is not a synonym for an internal resolution (#623)", () => {
-    // The #575 fix marked the `resolved.internal` branch structured. PR #624
-    // originally reworded the gate's docstring (commit 2cd21ec) to describe the
-    // flag as set "for every internal resolution, whichever extractor produced
-    // the movement", and that rewording is wrong: the flag is set on every
-    // deterministic resolution OUTCOME, internal or not, so it cannot be read as
-    // proof that an internal resolution happened. PR #624's follow-up
-    // 05d3dbf has since replaced that wording, so the quoted text exists in
-    // NEITHER this tree's src/orchestrator.js NOR the current tip of the #624
-    // branch — it is quoted here to record the claim that was made and why it
-    // is wrong, not to point at live documentation.
+    // The #575 fix marked the `resolved.internal` branch structured. The flag
+    // has a property that is easy to get wrong: it is NOT proof that an
+    // internal resolution happened. It is set on three resolution outcomes in
+    // `_resolveMovementToOutput` — the internal transfer, the deterministic
+    // external payment, and the one-sided incoming deposit — and only the first
+    // of those is `resolved.internal`, so a row can arrive marked without both
+    // legs having resolved to the holder's own accounts.
     //
-    // What is pinned below is the underlying flag behaviour, which is true
-    // regardless of how the docstring reads.
+    // An earlier version of this comment argued that claim against PR #624's
+    // docstring, on the grounds that it said the flag is set "for every
+    // internal resolution, whichever extractor produced the movement". That
+    // was wrong twice over: no such sentence appears at 05d3dbf, and the
+    // wording it was aimed at came from 2cd21ec, which 05d3dbf replaced. The
+    // claim below is asserted on its own evidence instead, from the three flag
+    // sites, and stands on its own. PR #624's current docstring states the same
+    // thing and points back at this file.
 
     const withoutTrustPayee = () =>
         payees.filter((p) => p.transfer_acct !== TRUST_BANK);
@@ -395,27 +398,28 @@ describe("_structured_movement is not a synonym for an internal resolution (#623
     });
 
     it("marks that non-internal row structured anyway", async () => {
-        const { phase1 } = await orchestrate(OCBC_TRANSFER_REQUEST, {
+        const { phase1, phase2, calls } = await orchestrate(OCBC_TRANSFER_REQUEST, {
             senderBank: "OCBC",
             receivedAt: "2026-09-27T03:49:46.000Z",
             payees: withoutTrustPayee(),
         });
 
         expect(phase1._structured_movement).toBe(true);
-        // The flag is NOT load-bearing for this row, and this test does not
-        // claim the row is booked correctly. With the payee removed, the uid 969
-        // leg falls to the deterministic external-payment branch, which leaves
-        // `payee_name` empty; orchestrator.js's Phase-2 transfer block is gated on
-        // a non-empty payee, so the ambiguity gate is never reached either way.
-        //
-        // That leaves a DOUBLE-COUNT, which is the outcome issue #623 tracks: the
-        // uid 968 leg still reserves OCBC 360 -> Trust Bank (its own `internal`
-        // resolution is unaffected by the payee removed here), while this leg
-        // books a second -648 payment out of OCBC 360. The fixture removes a
-        // payee to isolate the flag semantics, not because that state is
-        // desirable. If you are reading this to change the payee list, do not
-        // read the double-count as the intended behaviour.
+        // This test runs ONLY the uid 969 body, so it cannot demonstrate a
+        // cross-leg double-count on its own; that needs both alerts in one
+        // scenario. What it does show is that the flag is not load-bearing for
+        // this row and that the row does NOT become a transfer: the external
+        // branch leaves `payee_name` empty, and Phase 2's transfer block is
+        // gated on a non-empty payee, so neither the ambiguity gate nor a
+        // `_transfer` reservation is ever reached for it.
+        const inserts = calls.filter((c) => c.name === "insert_transaction");
+        expect(inserts).toHaveLength(1);
+        // Still a plain payment out of the source account, not a transfer leg.
+        expect(inserts[0].args.amount_cents).toBe(-648);
+        expect(inserts[0].args.account_id).toBe(OCBC_360);
         expect(phase1.payee_name).toBe("");
+        expect(phase2._is_transfer).toBeFalsy();
+        expect(phase2._transfer).toBeFalsy();
     });
 });
 
@@ -480,18 +484,24 @@ describe("uid 968 only parses because the extractor flattens the bank's wrap", (
     });
 
     it("KNOWN GAP: the wrapped body does not survive processText, which skips extraction", async () => {
+        // Exercises the REAL entry point, `processText`, not `_runPhase1`
+        // directly. That matters: the claim under test is specifically that
         // `processText` -> `_processTextInternal` forwards `String(rawText)`
-        // straight to `_runPhase1` with no `extractEmailContent` call, so a
-        // wrapped alert pasted in (Telegram path) is NOT flattened. This test
-        // documents the resulting behaviour as a KNOWN GAP, not as correct: the
-        // deterministic parser returns null and the row falls through to the
-        // LLM extractor.
+        // straight through with no `extractEmailContent` call. Calling
+        // `_runPhase1` by hand cannot demonstrate that, because it bypasses
+        // the very step being blamed — and it lets the assertion pass even if
+        // `processText` starts extracting.
+        //
+        // The gap, stated plainly: a wrapped alert pasted in (the Telegram
+        // path) is NOT flattened, so the deterministic parser returns null and
+        // the row falls through to the LLM. That is a KNOWN GAP, not correct
+        // behaviour.
         //
         // This runs as a live assertion on purpose, so the gap cannot be
-        // forgotten. When it is fixed (flatten in _runPhase1, or make the Trust
-        // branch whitespace-tolerant) this test FAILS, which is the signal to
-        // invert the two expectations below and delete this comment. Do not
-        // delete the test itself without inverting it first.
+        // forgotten. When it is fixed (flatten in `_runPhase1`, or make the
+        // Trust branch whitespace-tolerant) this test FAILS, which is the
+        // signal to invert the expectations and delete this comment. Do not
+        // delete the test without inverting it first.
         const { AgentOrchestrator } = await import("../src/orchestrator.js");
         const tools = {
             executeTool: vi.fn(async (name) => {
@@ -515,17 +525,25 @@ describe("uid 968 only parses because the extractor flattens the bank's wrap", (
             },
             tools,
         );
-        // The LLM extractor fallback would be reached here; stub it so the
-        // assertion is about the deterministic parser only.
-        orch._llm.chat = vi.fn();
-
-        const phase1 = await orch._runPhase1(WRAPPED, {
-            senderBank: "Trust",
-            receivedAt: "2026-09-27T03:49:46.000Z",
+        // The LLM is reached either way; stub it so the assertions are about
+        // the deterministic path. The exact call count is not the point — an
+        // empty body makes `_parseJsonFromContent` return null, so Phase 1
+        // walks its whole retry budget (2 validation retries + the initial
+        // call, and the LLM-extractor fallback) before giving up. `toBeGreaterThan(0)`
+        // states the actual claim: the row reached the LLM instead of being
+        // parsed deterministically.
+        orch._llm.chat = vi.fn().mockResolvedValue({
+            choices: [{ message: { content: "" } }],
         });
 
-        // Documents the gap: no deterministic output, so the LLM took it.
-        expect(phase1).toBeNull();
-        expect(orch._llm.chat).toHaveBeenCalled();
+        const result = await orch.processText(WRAPPED);
+
+        // `processText` returns a notified/error result rather than a booking,
+        // because no deterministic output came back and the stubbed LLM
+        // produced nothing usable.
+        expect(result.action).toBe("notified");
+        expect(result.details).toMatch(/Couldn't understand/i);
+        // The gap: the LLM was reached instead of the deterministic parser.
+        expect(orch._llm.chat.mock.calls.length).toBeGreaterThan(0);
     });
 });
