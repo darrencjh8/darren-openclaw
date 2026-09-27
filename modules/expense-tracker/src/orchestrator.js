@@ -297,7 +297,19 @@ function normalizeIdentityName(value) {
         .toLocaleLowerCase("en");
 }
 
-function transferDestinationIsAmbiguous(name, destination, accounts) {
+/**
+ * True when the destination a transfer names cannot be pinned to exactly one
+ * open account.
+ *
+ * A bank NAME alone is a weak signal: "OverseaChinese Banking Corporation Ltd"
+ * matches both OCBC 360 and OCBC 90N, so the name alone is ambiguous. The alert
+ * body does carry a stronger signal in `A/C ending 9001`, but by the time this
+ * runs the deterministic parser has already resolved the legs from exactly
+ * that suffix evidence and marked the row `_structured_movement`, which skips
+ * this check. It is therefore reached only by rows with no such resolution, and
+ * for those the bank name is the best signal available — so it stays the rule.
+ */
+export function transferDestinationIsAmbiguous(name, destination, accounts) {
     const direct = matchAccountByName(name, accounts);
     if (direct.matched && direct.id === destination.id) return false;
     const bank = bankFromText(name);
@@ -758,6 +770,20 @@ export class AgentOrchestrator {
                 reasoning: "Deterministic structured bank transfer",
                 notify_message: "",
                 _suffix_mappings: suffixMappings,
+                // Both legs were resolved against the holder's OWN live
+                // accounts: `resolved.internal` requires a source and a
+                // destination that are different accounts from
+                // `fetch_context`, plus a transfer payee for one of them
+                // (src/bank-movement.js). Marking the row structured keeps the
+                // Phase-2 ambiguity gate below from re-deciding that settled
+                // destination from the counterparty's BANK NAME, which matches
+                // every account the holder owns at that bank. "OverseaChinese
+                // Banking Corporation Ltd A/C ending 9001" was judged ambiguous
+                // purely because two open accounts carry an OCBC token, and a
+                // correct transfer pair was flipped to Misc and held (issue
+                // #575, production incident 2026-09-27). The other four checks
+                // in that gate are unaffected and still refuse.
+                _structured_movement: true,
                 _is_transfer: true,
                 _is_paynow: movement.is_paynow === true,
                 _transfer: {
@@ -1201,11 +1227,20 @@ export class AgentOrchestrator {
                 // _suffix_mappings is set only by the deterministic
                 // movement / bill-payment parsers. Strip any LLM-injected
                 // field so untrusted Phase-1 output cannot persist a
-                // fabricated suffix→account fact.
+                // fabricated suffix→account fact, and cannot claim a row was
+                // structurally resolved when no parser resolved it:
+                // `_structured_movement` drives two Phase-2 checks with
+                // OPPOSITE polarity: it SKIPS the transfer-destination gate
+                // (`!output._structured_movement && transferDestinationIsAmbiguous(...)`),
+                // so a forged value books a transfer that gate would have
+                // refused; and it is REQUIRED to ENABLE the schedule-collision
+                // check, so a forged value only adds holds there. The material
+                // risk is the skipped destination gate.
                 delete output._suffix_mappings;
                 delete output.payee_id;
                 delete output._transfer;
                 delete output._is_transfer;
+                delete output._structured_movement;
                 delete output._hold_unresolved_paynow;
                 delete output._hold_unresolved_transfer;
 
