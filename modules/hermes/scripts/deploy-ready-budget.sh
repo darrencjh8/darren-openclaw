@@ -1,3 +1,4 @@
+# shellcheck shell=bash
 # Readiness budgets for the post-deploy health checks.
 #
 # The container is allowed longer to become ready than the deploy used to wait:
@@ -15,4 +16,5 @@
 CONTAINER_READY_SECONDS="${CONTAINER_READY_SECONDS:-360}"
 ROUTER_READY_SECONDS="${ROUTER_READY_SECONDS:-420}"
 HEALTH_RETRY_SLEEP="${HEALTH_RETRY_SLEEP:-6}"
+# shellcheck disable=SC2034  # read by modules/deploy.sh, which sources this file
 ROUTER_READY_ATTEMPTS=$(( ROUTER_READY_SECONDS / HEALTH_RETRY_SLEEP + 1 ))
