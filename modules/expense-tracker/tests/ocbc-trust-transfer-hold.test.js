@@ -11,8 +11,9 @@
  *    pair correctly — OCBC 360 is the counterparty (suffix 9001, which memory
  *    maps to OCBC 360), Trust Bank is the credited account (from the stored
  *    "Trust alert recipient maps to Trust Bank account" fact) — and emitted a
- *    ready `_transfer` reservation. Phase 2 then discarded it: the
- *    `resolved.internal` branch never sets `_structured_movement`, so the
+ *    ready `_transfer` reservation. Phase 2 then discarded it: back then the
+ *    `resolved.internal` branch did not set `_structured_movement` (the fix
+ *    added it), so the
  *    LLM-path ambiguity gate re-judged an already-decided destination from the
  *    BANK NAME ("OverseaChinese Banking Corporation Ltd" -> OCBC) rather than
  *    the account suffix the alert body actually carries. Two open OCBC-named
@@ -90,17 +91,19 @@ async function orchestrate(
         receivedAt,
         facts: factOverride = null,
         accounts: accountOverride = null,
+        payees: payeeOverride = null,
     } = {},
 ) {
     const { AgentOrchestrator } = await import("../src/orchestrator.js");
     const activeFacts = factOverride || facts;
     const activeAccounts = accountOverride || accounts;
+    const activePayees = payeeOverride || payees;
     const calls = [];
     const tools = {
         executeTool: vi.fn(async (name, args) => {
             calls.push({ name, args });
             if (name === "fetch_context")
-                return { accounts: activeAccounts, categories: [], payees };
+                return { accounts: activeAccounts, categories: [], payees: activePayees };
             if (name === "search_memory")
                 return { results: activeFacts };
             if (name === "check_duplicate") return false;
@@ -337,5 +340,109 @@ describe("transferDestinationIsAmbiguous", () => {
         expect(
             transferDestinationIsAmbiguous("OCBC 360", ocbc360, accounts),
         ).toBe(false);
+    });
+});
+
+// ── What `_structured_movement` actually guarantees (#623) ──────
+
+describe("_structured_movement is not a synonym for an internal resolution (#623)", () => {
+    // The #575 fix marked the `resolved.internal` branch structured. The gate's
+    // docstring then described the flag as set "for every internal resolution,
+    // whichever extractor produced the movement". That is not the whole rule:
+    // the flag is set on every deterministic resolution OUTCOME, internal or
+    // not, so it cannot be read as proof that an internal resolution happened.
+
+    const withoutTrustPayee = () =>
+        payees.filter((p) => p.transfer_acct !== TRUST_BANK);
+
+    it("resolves the uid 969 destination without a transfer payee, so it is not internal", async () => {
+        const { identityMappingsFromFacts, resolveMovementAccounts } =
+            await import("../src/bank-movement.js");
+        const movement = parseBankMovement(OCBC_TRANSFER_REQUEST, {
+            senderBank: "OCBC",
+            receivedAt: "2026-09-27T03:49:46.000Z",
+        });
+        const resolved = resolveMovementAccounts(
+            movement,
+            accounts,
+            withoutTrustPayee(),
+            identityMappingsFromFacts(facts, accounts),
+        );
+
+        // The destination is still one of the holder's own accounts...
+        expect(resolved.destination_account.id).toBe(TRUST_BANK);
+        // ...but `internal` also requires a transfer payee for that
+        // destination (src/bank-movement.js), so this resolution is not
+        // internal even though the destination was matched.
+        expect(resolved.internal).toBe(false);
+    });
+
+    it("marks that non-internal row structured anyway", async () => {
+        const { phase1 } = await orchestrate(OCBC_TRANSFER_REQUEST, {
+            senderBank: "OCBC",
+            receivedAt: "2026-09-27T03:49:46.000Z",
+            payees: withoutTrustPayee(),
+        });
+
+        expect(phase1._structured_movement).toBe(true);
+        // Deliberately NOT claimed as load-bearing for this row: the outgoing
+        // external branch leaves payee_name empty, so Phase 2's payee-gated
+        // ambiguity check never sees it either way. What is wrong is the
+        // docstring's mechanism claim, not this row's outcome.
+        expect(phase1.payee_name).toBe("");
+    });
+});
+
+// ── The uid 968 body depends on the extractor flattening the wrap ──
+
+describe("uid 968 only parses because the extractor flattens the bank's wrap", () => {
+    // The real text/plain part is wrapped at ~80 columns, mid-counterparty:
+    //   "...from OverseaChinese Banking Corporation\nLtd A/C ending 9001 on..."
+    // The Trust branch's `(.+?)` cannot cross that newline, so the RAW body
+    // does not parse. Production only ever sees the flattened form because
+    // `extractEmailContent` collapses `\s+` first. Pinned here so a change to
+    // that collapse fails loudly instead of quietly dropping this credit leg
+    // back onto the LLM path.
+    const WRAPPED =
+        "💰❤️🎉 Sweet! You have received SGD 6.48 from OverseaChinese Banking Corporation\nLtd A/C ending 9001 on 27 Sep 2026 11:49 SGT. For more info, please contact us via Trust App.";
+
+    it("returns null on the raw wrapped body", () => {
+        expect(
+            parseBankMovement(WRAPPED, {
+                senderBank: "Trust",
+                receivedAt: "2026-09-27T03:49:46.000Z",
+            }),
+        ).toBeNull();
+    });
+
+    it("parses once the extractor has collapsed the whitespace", async () => {
+        const { extractEmailContent } = await import("../src/extractors.js");
+        const raw = [
+            "From: Trust <from_us@trustbank.sg>",
+            "To: alerts@example.com",
+            "Subject: KACHING. You've got a transfer",
+            "Date: Sun, 27 Sep 2026 11:49:46 +0800",
+            "MIME-Version: 1.0",
+            'Content-Type: text/plain; charset="utf-8"',
+            "",
+            WRAPPED,
+        ].join("\r\n");
+
+        const text = await extractEmailContent(Buffer.from(raw, "utf8"));
+
+        expect(text).not.toContain("\n");
+        expect(
+            parseBankMovement(text, {
+                senderBank: "Trust",
+                receivedAt: "2026-09-27T03:49:46.000Z",
+            }),
+        ).toMatchObject({
+            direction: "incoming",
+            amount_cents: 648,
+            counterparty: {
+                name: "OverseaChinese Banking Corporation Ltd",
+                suffix: "9001",
+            },
+        });
     });
 });
