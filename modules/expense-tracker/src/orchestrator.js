@@ -303,11 +303,42 @@ function normalizeIdentityName(value) {
  *
  * A bank NAME alone is a weak signal: "OverseaChinese Banking Corporation Ltd"
  * matches both OCBC 360 and OCBC 90N, so the name alone is ambiguous. The alert
- * body does carry a stronger signal in `A/C ending 9001`, but by the time this
- * runs the deterministic parser has already resolved the legs from exactly
- * that suffix evidence and marked the row `_structured_movement`, which skips
- * this check. It is therefore reached only by rows with no such resolution, and
- * for those the bank name is the best signal available — so it stays the rule.
+ * body does carry a stronger signal in `A/C ending 9001`, and a row resolved
+ * from such evidence comes back marked `_structured_movement`, which makes the
+ * caller skip this ambiguity check. So the rows that reach this gate are the
+ * unresolved ones, and for those the bank name is the best signal available —
+ * so the rule stays as it is.
+ *
+ * Two properties of that flag are easy to get wrong when changing either side:
+ *
+ * - It is NOT proof that an internal resolution happened. It is set on three
+ *   resolution outcomes in `_resolveMovementToOutput` — the internal transfer,
+ *   the deterministic external payment, and the one-sided incoming deposit —
+ *   and only the first of those is `resolved.internal`, so a row can arrive
+ *   marked without both legs having resolved to the holder's own accounts.
+ *   Pinned by tests/ocbc-trust-transfer-hold.test.js (#623).
+ * - It is set by whichever extractor produced the movement, because the flag
+ *   lives in `_resolveMovementToOutput`. When the LLM-extractor path resolves a
+ *   movement it returns that output directly from `_runPhase1`, so it never
+ *   passes the Phase-1 sanitizer that strips an LLM-*injected* value of the
+ *   flag; an LLM-extractor row that resolved internally therefore arrives
+ *   marked and skips this check too (#623). The full Phase-1 LLM path does pass
+ *   that sanitizer, so its rows arrive unmarked — a row reaching this gate has
+ *   not necessarily come from a deterministic parser. Unmarked is necessary but
+ *   not sufficient to reach it: the gate sits inside a
+ *   `payee_name && payee_name !== "Misc"` block, so a row must also clear that
+ *   guard and have a transfer payee for the matched account. (In particular the
+ *   deterministic parser's three `_hold_unresolved_transfer` branches are NOT
+ *   counterexamples: they set `payee_name: "Misc"`, so they are excluded by that
+ *   guard before the gate is reached.)
+ *
+ * Skipping this ambiguity check is the flag's only effect HERE, and the caller's
+ * other four refusals — no matching account, a closed account, a self target,
+ * and a credit-card account — still apply regardless. The flag is not globally
+ * inert: elsewhere it is also REQUIRED to ENABLE the Phase-3 schedule-collision
+ * check (`scheduleCheckable` requires `_structured_movement === true`), so it
+ * has the opposite polarity there and a forged value only adds holds. Both
+ * effects are why the Phase-1 sanitizer strips a forged value (#623).
  */
 export function transferDestinationIsAmbiguous(name, destination, accounts) {
     const direct = matchAccountByName(name, accounts);
