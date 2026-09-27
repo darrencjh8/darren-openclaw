@@ -51,6 +51,17 @@ string rather than an alert anyone reads. Changing the exit contract is a separa
 alerting (delivery channel, cadence) that this defect does not require; it is recorded in issue
 #627. Declared here so the choice is auditable rather than made in passing.
 
+**Note on how this step was arrived at.** Three consecutive rounds each found a real defect in
+this one code block — round 2 cleared a variant, round 3 found a parse failure, round 4 found a
+silent runtime failure plus a test that certified it. Every one of those rounds inspected the
+block as text and reasoned about quoting. The lesson is recorded because it generalises past this
+plan: for a change that moves code across a language or process boundary, the reviewable unit is
+the boundary, and the only trustworthy check is executing the real thing. `bash -n` did not catch
+the silent failure, the snippet-as-text review did not catch it, and a test that re-executed the
+extracted block did not catch it either. What caught it was stubbing `python3` and reading the
+`argv` the shell actually handed it. Step 5's test is now written to that standard for the same
+reason.
+
 **Note on the plan-approval route.** The live dev-loop `policy.json` under the agent config
 directory (outside this repository; there is no `policy.json` in this worktree, and it is
 untracked here) sets `human_approval_allow_agent_authored_comment: true`
@@ -144,16 +155,41 @@ not print them. Extend that block with the same loop:
         print(f'  {leg}: {r.get("status", "?")} ({r.get("detail", "")})')
 ```
 
-**The quoting is load-bearing, and this snippet is inside a bash double-quoted
-string.** `portfolio-sync.sh:29` opens `python3 -c "`, and the whole Python program is one argument
-to it. The two existing `print` lines use single-quoted f-strings for exactly this reason, and the
-dict keys must be single-quoted to match. Writing the obvious `print(f"...")` closes the bash string
-at the first inner `"`, and the script then fails to *parse* — `bash -n` reports
-`syntax error near unexpected token '('` and the file exits 2. That is a parse-time failure in the
-body of the `portfolio-daily-sync` cron job (`deliver: local`, `no_agent: true`), so it kills the
-whole script rather than degrading one line. Round 2 reviewed a backslash-escaped variant and
-called this correct; the plan's own text, pasted verbatim, is a syntax error. Verified both ways:
-verbatim exits 2, the single-quoted form passes `bash -n` and prints `pull: error (Token HTTP 400)`.
+**The block must move out of the shell string, and this is a structural change, not a quoting
+one.** `portfolio-sync.sh:29` opens `python3 -c "`, so the Python program is a shell argument and
+bash performs quote removal on it before Python ever sees the text. Every quote character inside
+that string is therefore destroyed or reinterpreted, and *which* way it fails depends on the form:
+
+| form in the block | what Python actually receives | outcome |
+|---|---|---|
+| `print(f"  {leg}: …")` | string closes early | `bash -n` fails, script exit 2 |
+| `print(f'  {leg}: {r.get("status", "?")} …')` | `r.get(status, ?)` | `SyntaxError`, swallowed, silent |
+| `print(f'  {leg}: {r.get('status', '?')} …')` | `r.get('status, ?)` | runs, prints `pull: )` |
+
+All three were run against the shipped script with a stub `python3` capturing real `argv`. The
+middle row is the dangerous one: it raises a `SyntaxError`, but `portfolio-sync.sh:41` ends in
+`2>/dev/null || true`, so the script exits 0 having printed **nothing**. The change would delete a
+signal that works today and replace it with silence. `bash -n` does not catch it, because bash
+successfully splits the string; it never validates the Python.
+
+So the program is read into a variable by a **quoted heredoc**, which performs no expansion and no
+quote removal, and then passed to Python as one argument:
+
+```bash
+read -r -d '' PARSE_PROG <<'PARSE_EOF' || true
+import sys, json
+try:
+    … the existing block, unchanged, plus the two lines above …
+except Exception as e:
+    print(f'  (parse error: {e})')
+PARSE_EOF
+echo "$BODY" | python3 -c "$PARSE_PROG" 2>/dev/null || true
+```
+
+`read -d ''` returns non-zero at EOF, hence the `|| true`; the variable is assigned regardless.
+Verified end to end: the snippet reaches Python byte-identical (`r.get("status", "?")` intact),
+and the same block that printed nothing under `-c "` now prints `pull: error (Token HTTP 400)`.
+Note `python3 -c "$PARSE_PROG"` takes **no** trailing `-`: Python rejects it as a syntax error.
 
 Two details that are easy to get wrong and are pinned by the test in step 5:
 
@@ -215,11 +251,19 @@ truthy, and the dead-grant run *did* export a taxonomy (that is how `2026!B4` wa
 written from the stale file). Stale file present means taxonomy data present means
 analysis present means the early return fires.
 
-### 4. `mcp-server.test.js` — assert the error line survives the early return
+### 4. `mcp-server.test.js` — both return paths
 
-One case: a `portfolio_sync` result where `analysis.message_body` is present **and**
-`pull.status === "error"`. The assertion is that the rendered text still contains the pull
-error, which fails against the current early return.
+Two cases, because the two returns are genuinely different code and only one was covered:
+
+1. `analysis.message_body` present **and** `pull.status === "error"`. The rendered text must
+   contain the pull error. Fails against the current early return.
+2. `analysis` **absent** and `pull.status === "error"`. The rendered text must contain the pull
+   error *and* the `lines` content. This is the `return [...onedriveErrs, ...lines]` path, and it is
+   live whenever `taxonomyData` is falsy (`tools.js:1016-1022` gates `analysis` on it) — a pull
+   failure with no taxonomy to export, which is exactly the case where the user most needs to be
+   told. Without this case a later refactor could drop `onedriveErrs` from that last line and
+   every other planned test would still pass. Same defect shape as the round-2 `lines` finding: a
+   value produced in one place and consumed in another.
 
 ### 5. `modules/hermes/tests/test-portfolio-sync-output.sh` + a CI step for it
 
@@ -229,21 +273,26 @@ file, with no matrix. Adding a test therefore requires adding a step, and the st
 is `modules/hermes/tests/test-skills-backup-restore.sh`, which exists in the tree and is
 referenced by no workflow at all. So a new test file with no step guards nothing.
 
-The test extracts the parse block out of the shipped `portfolio-sync.sh` at runtime and
-executes it, rather than inlining a copy — a copy is a second source of truth and drifts
-the first time anyone edits the script, which is the exact regression this test exists to
-catch. It feeds that block two fixed inputs, a healthy body and a dead-grant body, and
-asserts `pull: ok (downloaded)` and `pull: error (Token HTTP 400)`. It asserts behaviour,
-not shell text, so rewording the log prefix does not break it.
+Extraction is by `python3 -c "$PARSE_PROG" 2>/dev/null || true` after the step-2 rewrite, and the
+test **runs the shipped script with a stubbed `curl`**, asserting on its stdout. It must not
+re-execute the extracted program on its own: a test that reads the block off disk and feeds it to
+its own `python3 -c` skips bash's parse-time quote removal, which is the *only* step that mangles
+the text. Such a test passes on a script that prints nothing at all, because it never reproduces
+the defect it exists to catch — it certifies it. The stub must be on `PATH` as a `curl` that
+emits a fixed body, with the token path redirected to a real file, so the script runs unmodified
+otherwise.
 
-Extraction is by `python3 -c "` … `" 2>/dev/null` delimiters, followed by unescaping `\"` →
-`"` before execution; the block must then run under `python3` unchanged. This ordering is
-load-bearing in the other direction too: because the block still contains `\"` until it is
-unescaped, a test that executes it verbatim raises a Python `SyntaxError` on a *correct*
-script, which reads as a quoting bug in the script and sends the implementer to fix the
-wrong file. The test also asserts the extracted block compiles before running it, so a
-quoting regression reports as a clear compile error rather than a downstream assertion
-failure.
+The test feeds two bodies and asserts on stdout:
+
+| body | expected stdout |
+|---|---|
+| healthy | `pull: ok (downloaded)`, and the existing `A: ok (delta=0)` line still present |
+| dead grant | `pull: error (Token HTTP 400)` |
+| no `pull` / `push` keys | `pull: ? ()` — the `or {}` default, not a parse error |
+
+The middle row is the RED case against the unmodified script, where the summary prints nothing.
+The third row is there because a leg absent from the body must not fall into the block's
+`except`, which would print `(parse error: …)` and hide every target line above it.
 
 `.github/workflows/test.yml` gains a named step beside line 137:
 
@@ -272,10 +321,12 @@ what prevents the fix being satisfied by always returning `error`.
 
 - RED: the corrected assertion fails at base — expected `{ status: "error" }`, received `{ status: "ok" }`.
 - GREEN: `npm test` fully green in `modules/portfolio-tracker`, plus the hermes shell test green.
-- `bash -n modules/hermes/scripts/portfolio-sync.sh` must pass before the GREEN claim. The step-2
-  change is inside a bash string, so a quoting slip is a whole-script parse failure rather than a
-  single bad line, and no assertion in the vitest suite would see it. CI shellchecks the file
-  (`test.yml:114-117`) but only after merge; this is the local gate that catches it first.
+- `bash -n modules/hermes/scripts/portfolio-sync.sh` must pass before the GREEN claim — but it is
+  **not sufficient on its own**, and the plan no longer leans on it. `bash -n` only checks that
+  bash can split the script; it never validates the Python, so it returns 0 on a block that makes
+  Python raise at runtime and the script swallow the error. The gate that actually catches this
+  class is step 5's test, which runs the script. Both are listed because the first is a one-second
+  check worth keeping, and the second is the one that has teeth.
 - Mutation control: the recorded command is replayed at the base commit in a throwaway worktree and must exit non-zero, so a fix that does not stop the reproduction fails closed.
 - The script change is verified hermetically by `modules/hermes/tests/test-portfolio-sync-output.sh` over two fixed bodies (healthy and dead-grant), asserting behaviour rather than shell text. No live-service call is part of validation.
 
