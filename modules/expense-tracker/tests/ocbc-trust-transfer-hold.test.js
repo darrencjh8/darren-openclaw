@@ -350,13 +350,18 @@ describe("transferDestinationIsAmbiguous", () => {
 
 describe("_structured_movement is not a synonym for an internal resolution (#623)", () => {
     // The #575 fix marked the `resolved.internal` branch structured. PR #624
-    // (branch `docs/ambiguity-gate-docstring`, unmerged at the time of writing)
-    // reworded the gate's docstring to describe the flag as set "for every
-    // internal resolution, whichever extractor produced the movement", and that
-    // rewording is wrong: the flag is set on every deterministic resolution
-    // OUTCOME, internal or not, so it cannot be read as proof that an internal
-    // resolution happened. The quote above names a claim made on that branch,
-    // not text that exists in this tree's src/orchestrator.js.
+    // originally reworded the gate's docstring (commit 2cd21ec) to describe the
+    // flag as set "for every internal resolution, whichever extractor produced
+    // the movement", and that rewording is wrong: the flag is set on every
+    // deterministic resolution OUTCOME, internal or not, so it cannot be read as
+    // proof that an internal resolution happened. PR #624's follow-up
+    // 05d3dbf has since replaced that wording, so the quoted text exists in
+    // NEITHER this tree's src/orchestrator.js NOR the current tip of the #624
+    // branch — it is quoted here to record the claim that was made and why it
+    // is wrong, not to point at live documentation.
+    //
+    // What is pinned below is the underlying flag behaviour, which is true
+    // regardless of how the docstring reads.
 
     const withoutTrustPayee = () =>
         payees.filter((p) => p.transfer_acct !== TRUST_BANK);
