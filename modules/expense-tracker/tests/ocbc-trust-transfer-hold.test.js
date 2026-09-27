@@ -11,9 +11,10 @@
  *    pair correctly — OCBC 360 is the counterparty (suffix 9001, which memory
  *    maps to OCBC 360), Trust Bank is the credited account (from the stored
  *    "Trust alert recipient maps to Trust Bank account" fact) — and emitted a
- *    ready `_transfer` reservation. Phase 2 then discarded it: the
- *    `resolved.internal` branch never sets `_structured_movement`, so the
- *    LLM-path ambiguity gate re-judged an already-decided destination from the
+ *    ready `_transfer` reservation. Phase 2 then discarded it: back then the
+ *    `resolved.internal` branch did not set `_structured_movement` (the fix
+ *    added it), so the LLM-path ambiguity gate re-judged an already-decided
+ *    destination from the
  *    BANK NAME ("OverseaChinese Banking Corporation Ltd" -> OCBC) rather than
  *    the account suffix the alert body actually carries. Two open OCBC-named
  *    accounts (OCBC 360, OCBC 90N) made that read as ambiguous, so the row was
@@ -26,10 +27,13 @@
  *    resolves. This test pins that it resolves, and that the safety gate still
  *    refuses when the fact is absent.
  *
- * Bodies are the production bodies verbatim, minus the HTML wrapper. Amounts,
- * dates, times, reference numbers, suffixes, and product names are retained —
- * they are what resolution keys on. The account holder's given name is left as
- * the bank printed it; no statement password or credential appears.
+ * Bodies are the production bodies, with one caveat recorded at the `WRAPPED`
+ * constant below: the uid 968 constant is the whitespace-FLATTENED form of the
+ * bank's 80-column text/plain, and the wrap point inside it is reconstructed,
+ * not a byte-exact copy. Amounts, dates, times, reference numbers, suffixes,
+ * and product names are retained — they are what resolution keys on. The
+ * account holder's given name is left as the bank printed it; no statement
+ * password or credential appears.
  */
 import { describe, expect, it, vi } from "vitest";
 import { parseBankMovement } from "../src/bank-movement.js";
@@ -90,17 +94,19 @@ async function orchestrate(
         receivedAt,
         facts: factOverride = null,
         accounts: accountOverride = null,
+        payees: payeeOverride = null,
     } = {},
 ) {
     const { AgentOrchestrator } = await import("../src/orchestrator.js");
     const activeFacts = factOverride || facts;
     const activeAccounts = accountOverride || accounts;
+    const activePayees = payeeOverride || payees;
     const calls = [];
     const tools = {
         executeTool: vi.fn(async (name, args) => {
             calls.push({ name, args });
             if (name === "fetch_context")
-                return { accounts: activeAccounts, categories: [], payees };
+                return { accounts: activeAccounts, categories: [], payees: activePayees };
             if (name === "search_memory")
                 return { results: activeFacts };
             if (name === "check_duplicate") return false;
@@ -337,5 +343,235 @@ describe("transferDestinationIsAmbiguous", () => {
         expect(
             transferDestinationIsAmbiguous("OCBC 360", ocbc360, accounts),
         ).toBe(false);
+    });
+});
+
+// ── What `_structured_movement` actually guarantees (#623) ──────
+
+describe("_structured_movement is not a synonym for an internal resolution (#623)", () => {
+    // The #575 fix marked the `resolved.internal` branch structured. The flag
+    // has a property that is easy to get wrong: it is NOT proof that an
+    // internal resolution happened. It is set on three resolution outcomes in
+    // `AgentOrchestrator._resolveMovementToOutput` (src/orchestrator.js:633) —
+    // the internal transfer, the deterministic external payment, and the
+    // one-sided incoming deposit — and only the first of those is
+    // `resolved.internal`, so a row can arrive marked without both legs having
+    // resolved to the holder's own accounts. The three branches that return
+    // `_hold_unresolved_transfer` and the trailing `return null` do NOT set it.
+    //
+    // An earlier version of this comment argued that claim against PR #624's
+    // docstring, on the grounds that it said the flag is set "for every
+    // internal resolution, whichever extractor produced the movement". That
+    // was wrong twice over: no such sentence appears at 05d3dbf, and the
+    // wording it was aimed at came from 2cd21ec, which 05d3dbf replaced. The
+    // claim below is asserted on its own evidence instead, from the three flag
+    // sites, and stands on its own. PR #624's current docstring states the same
+    // thing and points back at this file.
+
+    const withoutTrustPayee = () =>
+        payees.filter((p) => p.transfer_acct !== TRUST_BANK);
+
+    // The boundary this pins, which `bank-movement.test.js` does not: there the
+    // external branch is reached with the destination never resolving to an own
+    // account at all (it is a merchant), so nothing there separates "destination
+    // resolved" from "internal". Here the destination DOES resolve to one of the
+    // holder's own accounts and the row is still not internal.
+
+    it("resolves the uid 969 destination without a transfer payee, so it is not internal", async () => {
+        const { identityMappingsFromFacts, resolveMovementAccounts } =
+            await import("../src/bank-movement.js");
+        const movement = parseBankMovement(OCBC_TRANSFER_REQUEST, {
+            senderBank: "OCBC",
+            receivedAt: "2026-09-27T03:49:46.000Z",
+        });
+        const resolved = resolveMovementAccounts(
+            movement,
+            accounts,
+            withoutTrustPayee(),
+            identityMappingsFromFacts(facts, accounts),
+        );
+
+        // The destination is still one of the holder's own accounts...
+        expect(resolved.destination_account.id).toBe(TRUST_BANK);
+        // ...but `internal` also requires a transfer payee for that
+        // destination (src/bank-movement.js:578), so this resolution is not
+        // internal even though the destination was matched.
+        expect(resolved.internal).toBe(false);
+    });
+
+    it("marks that non-internal row structured anyway", async () => {
+        const { phase1, phase2, calls } = await orchestrate(OCBC_TRANSFER_REQUEST, {
+            senderBank: "OCBC",
+            receivedAt: "2026-09-27T03:49:46.000Z",
+            payees: withoutTrustPayee(),
+        });
+
+        expect(phase1._structured_movement).toBe(true);
+        // This test runs ONLY the uid 969 body, so it cannot demonstrate a
+        // cross-leg double-count on its own; that needs both alerts in one
+        // scenario. What it does show is that the flag is not load-bearing for
+        // this row and that the row does NOT become a transfer: the external
+        // branch leaves `payee_name` empty, and Phase 2's transfer block is
+        // gated on a non-empty payee, so neither the ambiguity gate nor a
+        // `_transfer` reservation is ever reached for it.
+        //
+        // With the uid 968 credit leg run alongside this one, that produces a
+        // DOUBLE-COUNT: the credit leg reserves the pair and books +648, while
+        // this leg books a second -648 out of the same OCBC 360. Tracked as
+        // #629, not #623 (which is the unrelated opposite-polarity flag
+        // defect). #629 carries the evidence and the acceptance criteria.
+        const inserts = calls.filter((c) => c.name === "insert_transaction");
+        expect(inserts).toHaveLength(1);
+        // Still a plain payment out of the source account, not a transfer leg.
+        expect(inserts[0].args.amount_cents).toBe(-648);
+        expect(inserts[0].args.account_id).toBe(OCBC_360);
+        expect(phase1.payee_name).toBe("");
+        expect(phase2._is_transfer).toBeFalsy();
+        expect(phase2._transfer).toBeFalsy();
+    });
+});
+
+// ── The uid 968 body depends on the extractor flattening the wrap ──
+
+describe("uid 968 only parses because the extractor flattens the bank's wrap", () => {
+    // The bank's text/plain part wraps mid-counterparty. The exact column is
+    // not load-bearing (and not measurable here, the leading emoji has no
+    // fixed width); what matters is only that a newline lands inside the name:
+    //   "...from OverseaChinese Banking Corporation\nLtd A/C ending 9001 on..."
+    // The Trust branch's `(.+?)` cannot cross that newline, so the RAW body
+    // does not parse. The IMAP path only ever sees the flattened form because
+    // `extractEmailContent` collapses `\s+` — and it does so on EVERY return
+    // path in that function, including all three of its internal catch
+    // fallbacks, so no branch of it hands back uncollapsed text.
+    //
+    // There is exactly one production entry that skips it: `processText` ->
+    // `_processTextInternal` (src/orchestrator.js:457) forwards
+    // `String(rawText || "")` straight to `_runPhase1` with no
+    // `extractEmailContent` call at all. Its only production caller is
+    // `_handle_process_transaction` (src/tools.js:2272), the Telegram entry,
+    // which `.trim()`s the text but does not collapse the wrap either. So the
+    // surviving exposure is Telegram only: a wrapped body pasted in there does
+    // NOT parse today and falls through to the LLM; the next test pins that
+    // gap rather than pretending it does not exist. Pinned here so a change to
+    // the collapse fails loudly instead of quietly dropping this credit leg
+    // off the deterministic path.
+    const WRAPPED =
+        "💰❤️🎉 Sweet! You have received SGD 6.48 from OverseaChinese Banking Corporation\nLtd A/C ending 9001 on 27 Sep 2026 11:49 SGT. For more info, please contact us via Trust App.";
+
+    it("returns null on the raw wrapped body", () => {
+        expect(
+            parseBankMovement(WRAPPED, {
+                senderBank: "Trust",
+                receivedAt: "2026-09-27T03:49:46.000Z",
+            }),
+        ).toBeNull();
+    });
+
+    it("parses once the extractor has collapsed the whitespace", async () => {
+        const { extractEmailContent } = await import("../src/extractors.js");
+        const raw = [
+            "From: Trust <from_us@trustbank.sg>",
+            "To: alerts@example.com",
+            "Subject: KACHING. You've got a transfer",
+            "Date: Sun, 27 Sep 2026 11:49:46 +0800",
+            "MIME-Version: 1.0",
+            'Content-Type: text/plain; charset="utf-8"',
+            "",
+            WRAPPED,
+        ].join("\r\n");
+
+        const text = await extractEmailContent(Buffer.from(raw, "utf8"));
+
+        expect(text).not.toContain("\n");
+        expect(
+            parseBankMovement(text, {
+                senderBank: "Trust",
+                receivedAt: "2026-09-27T03:49:46.000Z",
+            }),
+        ).toMatchObject({
+            direction: "incoming",
+            amount_cents: 648,
+            counterparty: {
+                name: "OverseaChinese Banking Corporation Ltd",
+                suffix: "9001",
+            },
+        });
+    });
+
+    it("KNOWN GAP: the wrapped body does not survive processText, which skips extraction", async () => {
+        // Exercises the REAL entry point, `processText`, not `_runPhase1`
+        // directly. That matters: the claim under test is specifically that
+        // `processText` -> `_processTextInternal` forwards `String(rawText)`
+        // straight through with no `extractEmailContent` call. Calling
+        // `_runPhase1` by hand cannot demonstrate that, because it bypasses
+        // the very step being blamed — and it lets the assertion pass even if
+        // `processText` starts extracting.
+        //
+        // The gap, stated plainly: a wrapped alert pasted in (the Telegram
+        // path) is NOT flattened, so the deterministic parser returns null and
+        // the row falls through to the LLM. That is a KNOWN GAP, not correct
+        // behaviour.
+        //
+        // This runs as a live assertion on purpose, so the gap cannot be
+        // forgotten. When it is fixed (flatten in `_runPhase1`, or make the
+        // Trust branch whitespace-tolerant) this test FAILS, which is the
+        // signal to invert the expectations and delete this comment. Do not
+        // delete the test without inverting it first.
+        const { AgentOrchestrator } = await import("../src/orchestrator.js");
+        const tools = {
+            executeTool: vi.fn(async (name) => {
+                if (name === "fetch_context")
+                    return { accounts, categories: [], payees };
+                if (name === "search_memory") return { results: facts };
+                return true;
+            }),
+            getPhase1ToolSchemas: vi.fn(() => []),
+            setEmailContext: vi.fn(),
+        };
+        const orch = new AgentOrchestrator(
+            {
+                primaryCurrency: "SGD",
+                secondaryCurrency: "MYR",
+                primaryBudgetFile: "budget-sgd",
+                secondaryBudgetFile: "budget-myr",
+                llmProvider: "deepseek",
+                llmApiKey: "test",
+                deepseekApiKey: "test",
+            },
+            tools,
+        );
+        // The LLM is reached either way; stub it so the assertions are about
+        // the deterministic path. The exact call count is not the point — an
+        // empty body makes `_parseJsonFromContent` return null, so Phase 1
+        // walks its whole retry budget (2 validation retries + the initial
+        // call, and the LLM-extractor fallback) before giving up. `toBeGreaterThan(0)`
+        // states the actual claim: the row reached the LLM instead of being
+        // parsed deterministically.
+        orch._llm.chat = vi.fn().mockResolvedValue({
+            choices: [{ message: { content: "" } }],
+        });
+
+        // Assert the PARSER directly, not just the end result. Checking only
+        // `result.action` cannot tell this failure mode from any other reason
+        // Phase 1 gives up, so it would not reliably fail when the gap is
+        // fixed. `parseBankMovement` on the same string is the precise claim:
+        // today it returns null, and the day `_runPhase1` (or the Trust branch)
+        // starts flattening, this returns a movement and the test fails for the
+        // stated reason.
+        expect(
+            parseBankMovement(WRAPPED, {
+                senderBank: "Trust",
+                receivedAt: "2026-09-27T03:49:46.000Z",
+            }),
+        ).toBeNull();
+
+        // And the observable consequence at the entry point: no booking, the
+        // LLM reached instead. `processText` returns a notified result because
+        // nothing deterministic came back and the stubbed LLM produced nothing
+        // usable.
+        const result = await orch.processText(WRAPPED);
+        expect(result.action).toBe("notified");
+        expect(result.details).toMatch(/Couldn't understand/i);
+        expect(orch._llm.chat.mock.calls.length).toBeGreaterThan(0);
     });
 });
