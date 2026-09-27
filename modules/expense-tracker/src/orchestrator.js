@@ -323,15 +323,22 @@ function normalizeIdentityName(value) {
  *   passes the Phase-1 sanitizer that strips an LLM-*injected* value of the
  *   flag; an LLM-extractor row that resolved internally therefore arrives
  *   marked and skips this check too (#623). The full Phase-1 LLM path does pass
- *   that sanitizer, so its rows arrive unmarked and are among the rows that
- *   reach the gate — a row reaching this gate has not necessarily come from a
- *   deterministic parser. (It is not "only" such rows: the deterministic
- *   parser also returns unmarked rows, e.g. its three `_hold_unresolved_transfer`
- *   branches, which carry no flag and do reach this gate.)
+ *   that sanitizer, so its rows arrive unmarked — a row reaching this gate has
+ *   not necessarily come from a deterministic parser. Unmarked is necessary but
+ *   not sufficient to reach it: the gate sits inside a
+ *   `payee_name && payee_name !== "Misc"` block, so a row must also clear that
+ *   guard and have a transfer payee for the matched account. (In particular the
+ *   deterministic parser's three `_hold_unresolved_transfer` branches are NOT
+ *   counterexamples: they set `payee_name: "Misc"`, so they are excluded by that
+ *   guard before the gate is reached.)
  *
- * Skipping this ambiguity check is all the flag does: the caller's other four
- * refusals — no matching account, a closed account, a self target, and a
- * credit-card account — still apply regardless.
+ * Skipping this ambiguity check is the flag's only effect HERE, and the caller's
+ * other four refusals — no matching account, a closed account, a self target,
+ * and a credit-card account — still apply regardless. The flag is not globally
+ * inert: elsewhere it is also REQUIRED to ENABLE the Phase-3 schedule-collision
+ * check (`scheduleCheckable` requires `_structured_movement === true`), so it
+ * has the opposite polarity there and a forged value only adds holds. Both
+ * effects are why the Phase-1 sanitizer strips a forged value (#623).
  */
 export function transferDestinationIsAmbiguous(name, destination, accounts) {
     const direct = matchAccountByName(name, accounts);
