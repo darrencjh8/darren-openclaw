@@ -39,8 +39,9 @@ Yes. Round 1 established that `formatSyncResult()` (`mcp-server.js:15-43`) reads
 discards everything built before it. The corrected `pull` status would therefore never reach the
 user through `portfolio_sync` — the one surface a human reads, and the one through which this
 whole incident was reported. Fixing only the cron log would leave the user-visible symptom intact,
-so the round stays dirty unless this is either fixed or declared out loud. It is fixed: an
-error-only line is pushed above the early return, so healthy output is unchanged.
+so the round stays dirty unless this is either fixed or declared out loud. It is fixed: the error
+line is prepended to the *returned* analysis string, so healthy output is unchanged. Round 2
+showed why the insertion point alone is not enough — see step 3.
 
 **5. Should `portfolio-sync.sh` exit non-zero when a leg fails?**
 
@@ -50,17 +51,19 @@ string rather than an alert anyone reads. Changing the exit contract is a separa
 alerting (delivery channel, cadence) that this defect does not require; it is recorded in issue
 #627. Declared here so the choice is auditable rather than made in passing.
 
-**Note on the plan-approval route.** `policy.json` sets `human_approval_allow_agent_authored_comment: true`
+**Note on the plan-approval route.** The live dev-loop `policy.json` under the agent config
+directory (outside this repository; there is no `policy.json` in this worktree, and it is
+untracked here) sets `human_approval_allow_agent_authored_comment: true`
 and `human_approval_allow_self: true`, so the approval comment may be posted by the agent against
 the driver account. It is recorded as an agent-authored / self-attested approval so the bypass
 stays visible in the audit trail.
 
 ## Change scaffold
 
-- **Files to be changed:** `modules/portfolio-tracker/src/java_bridge.js`, `modules/portfolio-tracker/src/mcp-server.js`, `modules/portfolio-tracker/tests/java_bridge.test.js`, `modules/portfolio-tracker/tests/mcp-server.test.js`, `modules/hermes/scripts/portfolio-sync.sh`, plus a new `modules/hermes/tests/test-portfolio-sync-output.sh`. (These are the files this change will touch, not the files that differ base..HEAD — at the plan commit the only difference is this plan file.)
+- **Files to be changed:** `modules/portfolio-tracker/src/java_bridge.js`, `modules/portfolio-tracker/src/mcp-server.js`, `modules/portfolio-tracker/tests/java_bridge.test.js`, `modules/portfolio-tracker/tests/mcp-server.test.js`, `modules/hermes/scripts/portfolio-sync.sh`, `.github/workflows/test.yml`, plus a new `modules/hermes/tests/test-portfolio-sync-output.sh`. (These are the files this change will touch, not the files that differ base..HEAD — at the plan commit the only difference is this plan file.)
 - **Repository test command:** `cd modules/portfolio-tracker && npm ci && npm test` (package.json `"test": "vitest run"`). `npm ci` is required because a fresh worktree has no `node_modules`; a bare `npx vitest run` would fetch a floating vitest instead of the pinned dependency.
-- **Test files in scope:** `modules/portfolio-tracker/tests/java_bridge.test.js` (existing `describe("pull")` block, lines 343-367), `modules/portfolio-tracker/tests/mcp-server.test.js`, and the new `modules/hermes/tests/test-portfolio-sync-output.sh`.
-- **CI caveat:** the `portfolio-tracker` job in `.github/workflows/test.yml:42-44` carries `continue-on-error: true` ("needs IBKR keys + running services, fixing separately"). That suite is therefore a **local** gate for this change, not a CI gate — CI will stay green even if the corrected assertion regresses. The new hermes shell test *is* wired into CI (`.github/workflows/test.yml:119-137`) and is therefore enforced there.
+- **Test files in scope:** `modules/portfolio-tracker/tests/java_bridge.test.js` (existing `describe("pull")` block, lines 343-366), `modules/portfolio-tracker/tests/mcp-server.test.js`, and the new `modules/hermes/tests/test-portfolio-sync-output.sh`.
+- **CI caveat:** the `portfolio-tracker` job in `.github/workflows/test.yml:42-44` carries `continue-on-error: true` ("needs IBKR keys + running services, fixing separately"). That suite is therefore a **local** gate for this change, not a CI gate — CI will stay green even if the corrected assertion regresses. The new hermes shell test is the CI-enforced one, but only once step 5 adds its step to `test.yml`; that edit is part of this change, not something the repo already does.
 - **Spec in scope:** `specs/003-portfolio-tracker/spec.md` — "Taxonomy Export" (line ~372) documents that the taxonomy is written to Sheets. It does not specify pull-failure behaviour, so this change adds behaviour the spec does not yet describe.
 - **Tracked issue:** #627.
 
@@ -116,7 +119,8 @@ the boundary." That is asserted in **three** places, so all three are fixed:
 Fixing only (1) would leave the cron output identical, because the script does not print the
 `pull` key. Fixing only (2) would print `status: "ok"` for a failed pull. Fixing (1) and (2)
 still leaves the interactive surface blind. All three are one-or-two-line changes at the
-correct layer; no deeper refactor is warranted.
+correct layer; no deeper refactor is warranted. Fixing (3) is a change to the *return shape*,
+not an insertion above the early return — see step 3 for why that distinction is the whole fix.
 
 ## Implementation
 
@@ -143,22 +147,47 @@ for leg in ('pull', 'push'):
 Failures become visible in the job output without changing the script's exit code or the
 `deliver: local` contract, so no alerting change is implied.
 
-### 3. `mcp-server.js` — surface the status before the early return
+### 3. `mcp-server.js` — surface the status *in the returned string*
 
-In `formatSyncResult()`, above the `raw.analysis.message_body` early return, so the
-authoritative analysis block cannot suppress it:
+The OneDrive error lines go in their own array, `onedriveErrs`, kept separate from `lines`.
+That separation is load-bearing, not cosmetic: `lines` holds the sync summary and the
+target errors, and the existing test at `mcp-server.test.js:275` asserts a healthy run
+contains no sync header. Prepending `lines` to the analysis body would reintroduce it.
 
 ```js
+const onedriveErrs = [];
 for (const leg of ["pull", "push"]) {
     const r = raw[leg];
     if (r && r.status === "error") {
-        lines.push(`⚠️ OneDrive ${leg}: ${r.detail || "failed"}`);
+        onedriveErrs.push(`⚠️ OneDrive ${leg}: ${r.detail || "failed"}`);
     }
 }
 ```
 
-Only errors are printed, so a healthy run's output is unchanged. `mcp-server.test.js` gains a
-case asserting the line survives when `analysis.message_body` is present.
+and the return becomes a **shape change**, not an insertion point:
+
+```js
+if (raw.analysis?.message_body) {
+    return onedriveErrs.length
+        ? [...onedriveErrs, raw.analysis.message_body].join("\n")
+        : raw.analysis.message_body;
+}
+return [...onedriveErrs, ...lines].join("\n");
+```
+
+**Why the shape, and why not just "above the early return".** Round 2 proved the obvious
+version is a no-op. The current function returns `raw.analysis.message_body` and never
+joins `lines`, so a push into `lines` is discarded. Both the current function and that
+variant were run on a dead-grant input; the outputs were byte-identical and neither
+mentioned the failure. Only the return shape above survives, and the error-only condition
+is what keeps a healthy run byte-identical (verified: healthy output is unchanged and
+carries no sync header).
+
+`analysis` is present in exactly the incident scenario, so the early return is on the
+path for this bug: `_computeSyncAll()` builds `analysis` only when `taxonomyData` is
+truthy, and the dead-grant run *did* export a taxonomy (that is how `2026!B4` was
+written from the stale file). Stale file present means taxonomy data present means
+analysis present means the early return fires.
 
 ### 4. `mcp-server.test.js` — assert the error line survives the early return
 
@@ -166,14 +195,27 @@ One case: a `portfolio_sync` result where `analysis.message_body` is present **a
 `pull.status === "error"`. The assertion is that the rendered text still contains the pull
 error, which fails against the current early return.
 
-### 5. `modules/hermes/tests/test-portfolio-sync-output.sh` — new regression test
+### 5. `modules/hermes/tests/test-portfolio-sync-output.sh` + a CI step for it
 
-The repo already wires `modules/hermes/tests/test-*.sh` into CI (`.github/workflows/test.yml:119-137`),
-so the shell half gets a real gate instead of prose. The test feeds the real one-line Python
-extractor (copied out of the script, so it cannot drift from the shipped logic) two fixed inputs —
-a healthy body and a dead-grant body — and asserts `pull: ok (downloaded)` and
-`pull: error (Token HTTP 400)` respectively. It asserts behaviour, not shell text, so rewording
-the log prefix does not break it.
+CI does **not** glob the hermes shell tests: `.github/workflows/test.yml:118-137` enumerates
+nine explicit `- name:` / `run: bash modules/hermes/tests/test-<name>.sh` pairs, one per
+file, with no matrix. Adding a test therefore requires adding a step, and the standing proof
+is `modules/hermes/tests/test-skills-backup-restore.sh`, which exists in the tree and is
+referenced by no workflow at all. So a new test file with no step guards nothing.
+
+The test extracts the parse block out of the shipped `portfolio-sync.sh` at runtime and
+executes it, rather than inlining a copy — a copy is a second source of truth and drifts
+the first time anyone edits the script, which is the exact regression this test exists to
+catch. It feeds that block two fixed inputs, a healthy body and a dead-grant body, and
+asserts `pull: ok (downloaded)` and `pull: error (Token HTTP 400)`. It asserts behaviour,
+not shell text, so rewording the log prefix does not break it.
+
+`.github/workflows/test.yml` gains a named step beside line 137:
+
+```yaml
+- name: Test portfolio-sync output
+  run: bash modules/hermes/tests/test-portfolio-sync-output.sh
+```
 
 ### 6. `java_bridge.test.js` — correct the assertion and add the RED case
 
@@ -187,15 +229,16 @@ it("returns detail when pull returns error info", async () => {
 });
 ```
 
-It is changed to expect `status: "error"`, which is the RED case. A sibling case asserts a
-successful pull still reports `ok` / `downloaded`.
+It is changed to expect `status: "error"`, which is the RED case. The existing sibling case at
+`java_bridge.test.js:344-349` already pins `ok` / `downloaded` and is left unchanged; it is
+what prevents the fix being satisfied by always returning `error`.
 
 ## Validation
 
 - RED: the corrected assertion fails at base — expected `{ status: "error" }`, received `{ status: "ok" }`.
 - GREEN: `npm test` fully green in `modules/portfolio-tracker`, plus the hermes shell test green.
 - Mutation control: the recorded command is replayed at the base commit in a throwaway worktree and must exit non-zero, so a fix that does not stop the reproduction fails closed.
-- The script change is verified by reading the `pull` / `push` keys out of a real `pp-sync-all` response body, not by asserting on shell text.
+- The script change is verified hermetically by `modules/hermes/tests/test-portfolio-sync-output.sh` over two fixed bodies (healthy and dead-grant), asserting behaviour rather than shell text. No live-service call is part of validation.
 
 ## Out of scope
 
