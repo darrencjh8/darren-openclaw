@@ -204,37 +204,62 @@ describe("uid 968 Trust inbound transfer credits Trust Bank as a transfer", () =
         expect(insert.args.amount_cents).toBe(648);
     });
 
-    it("still refuses a Trust credit whose counterparty is a closed account", async () => {
-        // The control on the fix: marking the internal-transfer branch as
+    it("still refuses a destination the row is already booked on", async () => {
+        // The control on the fix. Marking the internal-transfer branch as
         // structured exempts it from the AMBIGUITY check only. Every other
-        // guard in that gate must still fire, so a credit from a counterparty
-        // that resolves to a CLOSED account is still held rather than booked
-        // as a transfer to a dead account.
-        const closedAccount = {
-            id: "closed-trust-invest",
-            name: "Trust Invest",
-            closed: true,
+        // guard must still fire, and a row must never become a transfer ONTO
+        // the account it already sits on.
+        //
+        // Driven directly against `_resolvePhase2` with a hand-built row
+        // because the deterministic parser cannot produce this shape: it
+        // refuses a closed counterparty upstream, and it never books a
+        // transfer whose far leg equals the booked account.
+        const { AgentOrchestrator } = await import("../src/orchestrator.js");
+        const tools = {
+            executeTool: vi.fn(async (name) => {
+                if (name === "fetch_context")
+                    return { accounts, categories: [], payees };
+                if (name === "search_memory") return { results: [] };
+                return true;
+            }),
+            getPhase1ToolSchemas: vi.fn(() => []),
+            setEmailContext: vi.fn(),
         };
-        const { phase2 } = await orchestrate(
-            `💰❤️🎉 Sweet! You have received SGD 20.00 from Darren Trust A/C ending 6445 on 27 Sep 2026 09:00 SGT.`,
+        const orch = new AgentOrchestrator(
             {
-                senderBank: "Trust",
-                receivedAt: "2026-09-27T01:00:00.000Z",
-                accounts: [...accounts, closedAccount],
-                facts: [
-                    ...facts,
-                    {
-                        text: "Account ending 6445 belongs to Trust Invest",
-                        score: 1,
-                    },
-                ],
+                primaryCurrency: "SGD",
+                secondaryCurrency: "MYR",
+                primaryBudgetFile: "b",
+                secondaryBudgetFile: "m",
+                llmProvider: "deepseek",
+                llmApiKey: "x",
+                deepseekApiKey: "x",
             },
+            tools,
         );
+        orch._llm.chat = vi.fn();
 
-        // Either the parser refuses the closed leg outright, or the gate holds
-        // it. It must never come back as a booked transfer.
-        expect(phase2?._hold_unresolved_transfer || phase2 === null).toBeTruthy();
-        expect(phase2?._is_transfer).toBeFalsy();
+        // Booked on OCBC 360, and the payee names OCBC 360: a self-target.
+        const phase2 = await orch._resolvePhase2({
+            merchant: "OCBC 360",
+            amount_cents: -648,
+            date: "2026-09-27",
+            currency: "SGD",
+            account_id: OCBC_360,
+            account_name: "OCBC 360",
+            budget_id: "b",
+            action: "insert",
+            payee_name: "OCBC 360",
+            raw_description: "Transfer to OCBC 360",
+            notes: "",
+            category_id: null,
+            reasoning: "",
+            notify_message: "",
+        });
+
+        expect(phase2._hold_unresolved_transfer).toBe(true);
+        expect(phase2.payee_name).toBe("Misc");
+        expect(phase2._transfer).toBeFalsy();
     });
 });
 
@@ -282,49 +307,22 @@ describe("uid 969 OCBC transfer request books once 310980 is known", () => {
 
 // ── The unit-level gate (#575) ──────────────────────────────────
 
-describe("transferDestinationIsAmbiguous suffix-awareness", () => {
-    it("is not ambiguous when the alert suffix names exactly one open account", async () => {
-        const { transferDestinationIsAmbiguous } = await import(
-            "../src/orchestrator.js"
-        );
+// ── The gate itself keeps its bank-name rule ────────────────────
 
-        // Bank name alone would be ambiguous: two open OCBC-named accounts.
-        const name = "OverseaChinese Banking Corporation Ltd";
-        // ...but the alert body carries "A/C ending 9001", which memory maps to
-        // OCBC 360 alone.
-        expect(
-            transferDestinationIsAmbiguous(name, OCBC_360, accounts, {
-                suffix: "9001",
-                accountId: OCBC_360,
-            }),
-        ).toBe(false);
-    });
-
-    it("stays ambiguous with no suffix evidence and several same-bank accounts", async () => {
+describe("transferDestinationIsAmbiguous", () => {
+    it("stays ambiguous when a bank name matches several open accounts", async () => {
+        // The rule the fix deliberately does NOT weaken. "OverseaChinese
+        // Banking Corporation Ltd" matches both OCBC 360 and OCBC 90N, and
+        // this gate is only reached by rows that were never resolved from
+        // suffix evidence, so the name alone stays ambiguous.
         const { transferDestinationIsAmbiguous } = await import(
             "../src/orchestrator.js"
         );
         expect(
             transferDestinationIsAmbiguous(
                 "OverseaChinese Banking Corporation Ltd",
-                OCBC_360,
+                accounts.find((a) => a.id === OCBC_360),
                 accounts,
-                null,
-            ),
-        ).toBe(true);
-    });
-
-    it("stays ambiguous when the suffix maps to a different account than the match", async () => {
-        const { transferDestinationIsAmbiguous } = await import(
-            "../src/orchestrator.js"
-        );
-        expect(
-            transferDestinationIsAmbiguous(
-                "OverseaChinese Banking Corporation Ltd",
-                OCBC_360,
-                accounts,
-                // The suffix resolves to OCBC 90N, not the match.
-                { suffix: "9999", accountId: OCBC_90N },
             ),
         ).toBe(true);
     });
@@ -333,14 +331,11 @@ describe("transferDestinationIsAmbiguous suffix-awareness", () => {
         const { transferDestinationIsAmbiguous } = await import(
             "../src/orchestrator.js"
         );
-        // The pre-existing direct-match rule must survive the change.
+        // The pre-existing direct-match rule must survive the change. The gate
+        // takes the live account OBJECT, not a bare id.
+        const ocbc360 = accounts.find((a) => a.id === OCBC_360);
         expect(
-            transferDestinationIsAmbiguous(
-                "OCBC 360",
-                OCBC_360,
-                accounts,
-                null,
-            ),
+            transferDestinationIsAmbiguous("OCBC 360", ocbc360, accounts),
         ).toBe(false);
     });
 });
