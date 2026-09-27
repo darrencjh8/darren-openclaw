@@ -304,14 +304,32 @@ function normalizeIdentityName(value) {
  * A bank NAME alone is a weak signal: "OverseaChinese Banking Corporation Ltd"
  * matches both OCBC 360 and OCBC 90N, so the name alone is ambiguous. The alert
  * body does carry a stronger signal in `A/C ending 9001`, and a row resolved
- * from such evidence is marked `_structured_movement`, which skips this check.
+ * from such evidence comes back marked `_structured_movement`, which makes the
+ * caller skip this ambiguity check. So the rows that reach this gate are the
+ * unresolved ones, and for those the bank name is the best signal available —
+ * so the rule stays as it is.
  *
- * So this gate is reached by rows with no such resolution. It is NOT reached
- * ONLY by those: LLM-extractor rows can also arrive marked
- * `_structured_movement` (see #623), because the flag is set in
- * `_resolveMovementToOutput` for every internal resolution, whichever extractor
- * produced the movement. For rows that did resolve, the bank name is a
- * deliberately weaker fallback, so the rule stays as it is.
+ * Two properties of that flag are easy to get wrong when changing either side:
+ *
+ * - It is NOT proof that an internal resolution happened. It is set on three
+ *   resolution outcomes in `_resolveMovementToOutput` — the internal transfer,
+ *   the deterministic external payment, and the one-sided incoming deposit —
+ *   and only the first of those is `resolved.internal`, so a row can arrive
+ *   marked without both legs having resolved to the holder's own accounts.
+ *   Pinned by tests/ocbc-trust-transfer-hold.test.js (#623).
+ * - It is set by whichever extractor produced the movement, because the flag
+ *   lives in `_resolveMovementToOutput`. When the LLM-extractor path resolves a
+ *   movement it returns that output directly from `_runPhase1`, so it never
+ *   passes the Phase-1 sanitizer that strips an LLM-*injected* value of the
+ *   flag; an LLM-extractor row that resolved internally therefore arrives
+ *   marked and skips this check too (#623). The full Phase-1 LLM path does pass
+ *   that sanitizer, so its rows arrive unmarked and are the ones that reach the
+ *   gate — a row reaching this gate has not necessarily come from a
+ *   deterministic parser.
+ *
+ * Skipping this ambiguity check is all the flag does: the caller's other four
+ * refusals — no matching account, a closed account, a self target, and a
+ * credit-card account — still apply regardless.
  */
 export function transferDestinationIsAmbiguous(name, destination, accounts) {
     const direct = matchAccountByName(name, accounts);
