@@ -355,6 +355,12 @@ describe("_structured_movement is not a synonym for an internal resolution (#623
     const withoutTrustPayee = () =>
         payees.filter((p) => p.transfer_acct !== TRUST_BANK);
 
+    // The boundary this pins, which `bank-movement.test.js` does not: there the
+    // external branch is reached with the destination never resolving to an own
+    // account at all (it is a merchant), so nothing there separates "destination
+    // resolved" from "internal". Here the destination DOES resolve to one of the
+    // holder's own accounts and the row is still not internal.
+
     it("resolves the uid 969 destination without a transfer payee, so it is not internal", async () => {
         const { identityMappingsFromFacts, resolveMovementAccounts } =
             await import("../src/bank-movement.js");
