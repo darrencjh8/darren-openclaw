@@ -303,11 +303,15 @@ function normalizeIdentityName(value) {
  *
  * A bank NAME alone is a weak signal: "OverseaChinese Banking Corporation Ltd"
  * matches both OCBC 360 and OCBC 90N, so the name alone is ambiguous. The alert
- * body does carry a stronger signal in `A/C ending 9001`, but by the time this
- * runs the deterministic parser has already resolved the legs from exactly
- * that suffix evidence and marked the row `_structured_movement`, which skips
- * this check. It is therefore reached only by rows with no such resolution, and
- * for those the bank name is the best signal available — so it stays the rule.
+ * body does carry a stronger signal in `A/C ending 9001`, and a row resolved
+ * from such evidence is marked `_structured_movement`, which skips this check.
+ *
+ * So this gate is reached by rows with no such resolution. It is NOT reached
+ * ONLY by those: LLM-extractor rows can also arrive marked
+ * `_structured_movement` (see #623), because the flag is set in
+ * `_resolveMovementToOutput` for every internal resolution, whichever extractor
+ * produced the movement. For rows that did resolve, the bank name is a
+ * deliberately weaker fallback, so the rule stays as it is.
  */
 export function transferDestinationIsAmbiguous(name, destination, accounts) {
     const direct = matchAccountByName(name, accounts);
