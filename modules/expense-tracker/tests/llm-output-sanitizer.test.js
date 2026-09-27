@@ -30,9 +30,7 @@ const ARGS = {
 };
 
 async function phase1WithExtraFields(extra) {
-    const { AgentOrchestrator } = await import(
-        "/workspace/issue-ocbc-trust-transfer/modules/expense-tracker/src/orchestrator.js"
-    );
+    const { AgentOrchestrator } = await import("../src/orchestrator.js");
     const accounts = [
         { id: "ocbc-360", name: "OCBC 360", closed: false },
         { id: "ocbc-90n", name: "OCBC 90N", closed: false },
