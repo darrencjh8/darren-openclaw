@@ -136,16 +136,42 @@ return {
 ### 2. `portfolio-sync.sh` — print the round-trip status
 
 The `pull` and `push` objects are already in the response body; the existing parse block just does
-not print them. Extend that block:
+not print them. Extend that block with the same loop:
 
 ```python
-for leg in ('pull', 'push'):
-    r = data.get(leg) or {}
-    print(f"  {leg}: {r.get('status', '?')} ({r.get('detail', '')})")
+    for leg in ('pull', 'push'):
+        r = data.get(leg) or {}
+        print(f'  {leg}: {r.get("status", "?")} ({r.get("detail", "")})')
 ```
+
+**The quoting is load-bearing, and this snippet is inside a bash double-quoted
+string.** `portfolio-sync.sh:29` opens `python3 -c "`, and the whole Python program is one argument
+to it. The two existing `print` lines use single-quoted f-strings for exactly this reason, and the
+dict keys must be single-quoted to match. Writing the obvious `print(f"...")` closes the bash string
+at the first inner `"`, and the script then fails to *parse* — `bash -n` reports
+`syntax error near unexpected token '('` and the file exits 2. That is a parse-time failure in the
+body of the `portfolio-daily-sync` cron job (`deliver: local`, `no_agent: true`), so it kills the
+whole script rather than degrading one line. Round 2 reviewed a backslash-escaped variant and
+called this correct; the plan's own text, pasted verbatim, is a syntax error. Verified both ways:
+verbatim exits 2, the single-quoted form passes `bash -n` and prints `pull: error (Token HTTP 400)`.
+
+Two details that are easy to get wrong and are pinned by the test in step 5:
+
+- `data.get(leg) or {}` rather than `data.get(leg, {})`. The response can be partial — a leg that
+  never ran is absent, and `data.get(leg, {})` returns `None` for an explicit JSON `null`, so
+  `r.get(...)` would raise. `or {}` makes the absent case render as `pull: ? ()` instead of
+  collapsing into the block's `except`, which prints `(parse error: ...)` and hides every target
+  line above it.
+- The defaults `'?'` and `''` are load-bearing for the same reason: a leg present but missing
+  `status` must not raise.
 
 Failures become visible in the job output without changing the script's exit code or the
 `deliver: local` contract, so no alerting change is implied.
+
+**Ordering: step 2 must land, and be `bash -n`-clean, before step 5.** Step 5's test extracts and
+executes this very block, so it inherits any parse error here and cannot go green until step 2 is
+correct. The rest of the ordering is already stated in step 1: the bridge fix has to precede steps 2
+and 3, or both would report `status: "ok"` for a failed pull.
 
 ### 3. `mcp-server.js` — surface the status *in the returned string*
 
@@ -198,7 +224,7 @@ error, which fails against the current early return.
 ### 5. `modules/hermes/tests/test-portfolio-sync-output.sh` + a CI step for it
 
 CI does **not** glob the hermes shell tests: `.github/workflows/test.yml:118-137` enumerates
-nine explicit `- name:` / `run: bash modules/hermes/tests/test-<name>.sh` pairs, one per
+**ten** explicit `- name:` / `run: bash modules/hermes/tests/test-<name>.sh` pairs, one per
 file, with no matrix. Adding a test therefore requires adding a step, and the standing proof
 is `modules/hermes/tests/test-skills-backup-restore.sh`, which exists in the tree and is
 referenced by no workflow at all. So a new test file with no step guards nothing.
@@ -209,6 +235,15 @@ the first time anyone edits the script, which is the exact regression this test 
 catch. It feeds that block two fixed inputs, a healthy body and a dead-grant body, and
 asserts `pull: ok (downloaded)` and `pull: error (Token HTTP 400)`. It asserts behaviour,
 not shell text, so rewording the log prefix does not break it.
+
+Extraction is by `python3 -c "` … `" 2>/dev/null` delimiters, followed by unescaping `\"` →
+`"` before execution; the block must then run under `python3` unchanged. This ordering is
+load-bearing in the other direction too: because the block still contains `\"` until it is
+unescaped, a test that executes it verbatim raises a Python `SyntaxError` on a *correct*
+script, which reads as a quoting bug in the script and sends the implementer to fix the
+wrong file. The test also asserts the extracted block compiles before running it, so a
+quoting regression reports as a clear compile error rather than a downstream assertion
+failure.
 
 `.github/workflows/test.yml` gains a named step beside line 137:
 
@@ -237,6 +272,10 @@ what prevents the fix being satisfied by always returning `error`.
 
 - RED: the corrected assertion fails at base — expected `{ status: "error" }`, received `{ status: "ok" }`.
 - GREEN: `npm test` fully green in `modules/portfolio-tracker`, plus the hermes shell test green.
+- `bash -n modules/hermes/scripts/portfolio-sync.sh` must pass before the GREEN claim. The step-2
+  change is inside a bash string, so a quoting slip is a whole-script parse failure rather than a
+  single bad line, and no assertion in the vitest suite would see it. CI shellchecks the file
+  (`test.yml:114-117`) but only after merge; this is the local gate that catches it first.
 - Mutation control: the recorded command is replayed at the base commit in a throwaway worktree and must exit non-zero, so a fix that does not stop the reproduction fails closed.
 - The script change is verified hermetically by `modules/hermes/tests/test-portfolio-sync-output.sh` over two fixed bodies (healthy and dead-grant), asserting behaviour rather than shell text. No live-service call is part of validation.
 
