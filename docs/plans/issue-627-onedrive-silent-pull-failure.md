@@ -510,17 +510,39 @@ what prevents the fix being satisfied by always returning `error`.
   Python raise at runtime and the script swallow the error. The gate that actually catches this
   class is step 5's test, which runs the script. Both are listed because the first is a one-second
   check worth keeping, and the second is the one that has teeth.
-- Mutation control: `modules/hermes/tests/repro-627-base-symptom.sh`. This file was **not** tracked
-  at the time of plan round 3, which raised that as High: the plan asserted it was tracked and
-  reasoned at length about the driver replaying it inside its own base worktree, but a file absent
-  from the tree cannot be walked up from by anything. It is **tracked as part of this plan's
-  change**, not as a pre-existing artifact. It resolves the repo root by walking up from
-  `BASH_SOURCE`, so the same tracked file works both in this checkout and in the driver's base
-  worktree. It POSTs nothing and calls no live service — every run uses a stub `curl` on `PATH`.
-  Recorded result: 4 of its 5 checks fail at base `f04cc08`; at the branch HEAD exactly one still
-  fails — `failed-status` — because that check is R1, which is not yet landed (see R1's status
-  line). It goes green only when R1 lands, which is the coupling this control exists to prove.
-- `shellcheck modules/hermes/scripts/portfolio-sync.sh modules/hermes/tests/test-portfolio-sync-output.sh modules/hermes/tests/repro-627-base-symptom.sh` must pass; CI runs the first of these at `.github/workflows/test.yml:117`.
+- Mutation control: `/opt/data/mut-controls/repro-627-base-symptom.sh` — **outside the checkout, and
+  that placement is forced, not chosen.** Recorded command:
+  `REPO_ROOT=$(git rev-parse --show-toplevel) bash /opt/data/mut-controls/repro-627-base-symptom.sh`.
+  It honours `REPO_ROOT` when set and otherwise walks up from `BASH_SOURCE`. It POSTs nothing and
+  calls no live service — every run uses a stub `curl` on `PATH`. Recorded result: **4 of its 5 checks
+  fail at base `f04cc08`, exit 1**; at the branch HEAD exactly one still fails — `failed-status` —
+  because that check is R1, which is not yet landed (see R1's status line). It goes green only when
+  R1 lands, which is the coupling this control exists to prove.
+
+  **Why it cannot be in-tree.** Plan round 3 raised as High that this script was described as
+  tracked when it was not, and the obvious fix — track it — is *impossible* here, because three
+  driver rules are jointly unsatisfiable:
+
+  1. `loop.py repro` refuses with *"reproduction evidence must be recorded before the plan gate
+     opens"*, so the repro must be recorded **before** `PLAN_REVIEWING`;
+  2. `loop.py repro` runs the command in a **fresh worktree checked out at `base_sha`**
+     (`loop.py:3641-3652`), where anything untracked or uncommitted is simply absent;
+  3. `loop.py guard-staged` refuses every commit outside `APPROVED_OR_LATER_PHASES` =
+     `{PLAN_APPROVED, TESTS_VALID, REVIEWING, REVIEW_VALID, CI_RUNNING, MERGE_READY}`
+     (`loop.py:2062-2064`). `REPRODUCED` is not in that set.
+
+  So a reproduction script can never be present in the base worktree, no matter how it is
+  committed. Verified by simulation: at base, the in-tree path gives `No such file or directory`.
+
+  **The cost, stated plainly: this control is not reproducible from a fresh clone.** That is a real
+  loss and it is why the plan does not pretend otherwise. Anyone re-running it needs the script, so
+  the five checks are named here and can be rewritten from this plan if the file is lost:
+  `dead-grant` (a revoked OneDrive grant is reported as a success — the reported bug),
+  `failed-status` (a failed `portfolio_status` fetch is reported — R1),
+  `failed-taxonomy-export` (a Sheets 401 is reported), `expired-flex-token` (an IBKR 1012 is
+  reported), and `healthy-run-stays-clean` (a healthy run prints no warning — the no-regression
+  half, and the one that would catch an over-broad fix).
+- `shellcheck modules/hermes/scripts/portfolio-sync.sh modules/hermes/tests/test-portfolio-sync-output.sh` must pass; CI runs the first of these at `.github/workflows/test.yml:117`. The reproduction script is outside the checkout, so it is linted with `shellcheck /opt/data/mut-controls/repro-627-base-symptom.sh` rather than being in CI's reach.
 - The script change is verified hermetically by `modules/hermes/tests/test-portfolio-sync-output.sh` over fixed stub bodies, asserting behaviour rather than shell text. No live-service call is part of validation.
 
 ## Out of scope
