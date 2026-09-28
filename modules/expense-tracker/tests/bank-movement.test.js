@@ -358,6 +358,82 @@ Time : 10:00 AM SGT`,
 
     expect(movement).toBeNull();
   });
+
+  // ── SC "Confirmation Advice for FAST Transaction" (uid 977, 2026-09-28) ──
+  //
+  // Production incident: a S$1,275.00 transfer from SC Bonus Saver (******6445)
+  // to DBS Account (******5750) was booked by neither side. The receiving bank's
+  // alert (DBS uid 976) names the sender as a PERSON, not an account, so
+  // `resolveMovementAccounts` fell back to `source = own` and both legs landed
+  // on DBS Account — `internal` false, row held. Forwarding the SC advice
+  // (uid 977) supplied the missing source account, but the body still did not
+  // parse: this SC layout had no branch in `parseBankMovement` at all, so it
+  // returned null and the whole alert fell through to the LLM extractor.
+  //
+  // The fixture is the real forwarded body, PII-redacted the way the repo does
+  // it elsewhere (suffixes kept, names/addresses shortened) — see the header of
+  // tests/ocbc-trust-transfer-hold.test.js.
+  const SC_FAST_ADVICE = `Regards, Darren Chong Jin Heng ---------- Forwarded message --------- From: <OnlineBanking.SG@sc.com> Date: Mon, Sep 28, 2026, 10:08 AM Subject: Confirmation Advice for FAST Transaction To: <CHONGJINHENG@gmail.com> Dear Valued Customer, Your FAST transaction has been successful, transaction details below: Transaction reference: SG26050200693178180005 From account: ******6445 To account: ******5750 Amount: 1,275.00 Currency: SGD Transaction due date: 28/09/2026 10:08:02 Transaction type: FAST Payee Name: Darren DBS Payee Bank: Transaction message: Please call Client Contact Centre for enquiries. Thank you for using Standard Chartered Online Banking. Yours Sincerely, Transaction Banking Consumer Banking`;
+
+  it("parses the SC FAST advice and resolves both legs of the transfer", () => {
+    const movement = parseBankMovement(SC_FAST_ADVICE, {
+      senderBank: "SC",
+      receivedAt: "2026-09-28T03:14:27.000Z",
+    });
+
+    // Without this branch the SC advice returns null and the pair is never
+    // linked: the DBS side holds and the SC side books unlinked via the LLM.
+    expect(movement).not.toBeNull();
+    expect(movement.direction).toBe("outgoing");
+    // baseMovement() signs the amount from the direction, so an outgoing leg is
+    // stored negative. The test pins the sign the parser actually produces.
+    expect(movement.amount_cents).toBe(-127500);
+    expect(movement.currency).toBe("SGD");
+    // The masked source and destination, NOT the forwarding header's "From:".
+    expect(movement.own_account.suffix).toBe("6445");
+    expect(movement.counterparty.suffix).toBe("5750");
+    // The transaction reference is the real one, not the "Transaction
+    // reference:" label captured with the greeting.
+    expect(movement.reference_number).toBe("SG26050200693178180005");
+    // 2026-09-28 10:08 SGT, from "Transaction due date". Minute precision is the
+    // module's convention: every other bank alert resolves to :00 seconds too,
+    // because isoDateTime() parses hour and minute only.
+    expect(movement.occurred_at).toBe("2026-09-28T10:08:00+08:00");
+  });
+
+  it("resolves the SC advice to the pair's two distinct own accounts", () => {
+    const movement = parseBankMovement(SC_FAST_ADVICE, {
+      senderBank: "SC",
+      receivedAt: "2026-09-28T03:14:27.000Z",
+    });
+    const scAccounts = [
+      { id: "sc-bonus-saver", name: "SC Bonus Saver", closed: false },
+      { id: "dbs-account", name: "DBS Account", closed: false },
+    ];
+    const scPayees = [
+      { id: "p-sc", name: "SC Bonus Saver", transfer_acct: "sc-bonus-saver" },
+      { id: "p-dbs", name: "DBS Account", transfer_acct: "dbs-account" },
+    ];
+    const scFacts = [
+      { text: "Account ending 6445 belongs to SC Bonus Saver", score: 1 },
+      { text: "Account ending 5750 belongs to DBS Account", score: 1 },
+    ];
+
+    const resolved = resolveMovementAccounts(
+      movement,
+      scAccounts,
+      scPayees,
+      identityMappingsFromFacts(scFacts, scAccounts),
+    );
+
+    // The whole point of the branch: the source is the OTHER own account, not
+    // the destination. This is what the DBS alert could not express, and it is
+    // what makes `internal` true so the transfer pair links.
+    expect(resolved.source_account.name).toBe("SC Bonus Saver");
+    expect(resolved.destination_account.name).toBe("DBS Account");
+    expect(resolved.source_account.id).not.toBe(resolved.destination_account.id);
+    expect(resolved.internal).toBe(true);
+  });
 });
 
 describe("identityMappingsFromFacts", () => {

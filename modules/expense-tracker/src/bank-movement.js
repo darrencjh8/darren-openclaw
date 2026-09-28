@@ -368,6 +368,65 @@ export function parseBankMovement(text, { senderBank = null, receivedAt } = {}) 
     });
   }
 
+  // SC "Confirmation Advice for FAST Transaction" (uid 977, 2026-09-28):
+  //   "From account: ******6445
+  //    To account: ******5750
+  //    Amount: 1,275.00
+  //    Currency: SGD
+  //    Transaction due date: 28/09/2026 10:08:02
+  //    Transaction type: FAST"
+  // SC states the currency and the amount on SEPARATE labels, so the
+  // `Amount : <CCY> <n>` guard below never matches and the whole alert used to
+  // fall through to the LLM extractor. That is not cosmetic: this is the only
+  // alert that names the SOURCE account of an own-account transfer, and a
+  // receiving-bank alert never can (it names the sender as a person). Losing it
+  // means the pair cannot link — the receiving side holds and this side books
+  // unlinked, so the transfer is booked twice or not at all (#633).
+  //
+  // It also has to survive being FORWARDED, which is how a user gets it into
+  // the tracker's own mailbox when the sending bank does not alert it. A
+  // forwarded copy carries a `From: <OnlineBanking.SG@sc.com>` header that
+  // would otherwise win the `From` label, so this branch reads the explicit
+  // "From account" / "To account" labels directly rather than via `field()`.
+  const scFast = body
+    .replace(/\s+/g, " ")
+    .match(
+      /(?:^|\n)\s*From account\s*:\s*([^\n]+?)\s+(?=(?:^|\n)\s*To account\s*:)/i,
+    )
+    || body
+        .replace(/\s+/g, " ")
+        .match(/From account\s*:\s*(\*+\d+)\s+To account\s*:\s*(\*+\d+)/i);
+  if (scFast) {
+    const flattened = body.replace(/\s+/g, " ");
+    const fromValue = scFast[1] || "";
+    const toValue = scFast[2] || "";
+    const amountText = flattened.match(/Amount\s*:\s*([\d,.]+)/i)?.[1] || "";
+    const currencyText =
+        flattened.match(/Currency\s*:\s*(SGD|MYR)/i)?.[1] || senderBank;
+    const dueText = flattened.match(
+      /Transaction due date\s*:\s*([\d/]+\s+[\d:]+)/i,
+    )?.[1];
+    const scReference =
+      flattened.match(
+        /Transaction reference\s*:\s*(SG\d+)/i,
+      )?.[1] || reference;
+
+    const ownAccount = namedAccount(fromValue, senderBank);
+    const destination = namedAccount(toValue, bankFromText(toValue));
+    // Same refusal as the generic branch below: a "To account" with no
+    // resolvable digits is not an account, so decline rather than fabricate.
+    if (!destination?.suffix || !amountText || !ownAccount?.suffix) return null;
+    return baseMovement({
+      direction: "outgoing",
+      amount: amountText,
+      currency: currencyText,
+      occurredAt: isoDateTime(dueText, dueText, receivedAt),
+      ownAccount,
+      counterparty: destination,
+      reference: scReference,
+    });
+  }
+
   const currencyAmount = body.match(/Amount\s*:\s*(SGD|MYR)\s*([\d,.]+)/i);
   if (!currencyAmount) return null;
   const [, currency, amount] = currencyAmount;
