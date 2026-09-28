@@ -220,12 +220,26 @@ payloads:
 **Change — JS surface.** `formatSyncResult` reports `raw.portfolio_status.error` as its own line,
 prefixed **`⚠️ Portfolio status: `** — a distinct prefix from the shell's bare
 `portfolio_status: error (…)` and from every other leg's JS prefix, because this leg is a
-*dependency* failure rather than a pull or export failure. It must sit **before** the `pre` join so
-the early return cannot suppress it, and it must fire only on `.error`, so a healthy
-`portfolio_status` (a full status object) prints nothing.
+*dependency* failure rather than a pull or export failure.
 
-**Change — test.** `tests/leg-coverage.test.js` drops `portfolio_status` from `NOT_LEGS`, adds it to
-`REQUIRED`, **and adds its entry to the `failing` fixture map**:
+Its exact position: **push it onto `legErrs`** (`mcp-server.js:62`), alongside the other legs'
+warnings, and fire only on `.error`:
+
+```js
+const ps = raw.portfolio_status;
+if (ps && ps.error) {
+    legErrs.push(`⚠️ Portfolio status: ${ps.error}`);
+}
+```
+
+`legErrs` is joined into `pre` *before* the early return, which is what makes the placement safe —
+this plan's step 3 exists because that join was missing, and step 3's re-application is a measured
+destruction, so do not relocate this into the analysis branch or after the return. A healthy
+`portfolio_status` is a full status object with no `.error` key, so the guard keeps it silent; a
+full-suite run must gain no new line.
+
+**Change — test (JS surface).** `tests/leg-coverage.test.js` drops `portfolio_status` from
+`NOT_LEGS`, adds it to `REQUIRED`, **and adds its entry to the `failing` fixture map**:
 
 ```js
 failing.portfolio_status = { error: "Budget service unreachable" };
@@ -235,8 +249,38 @@ That last clause is not optional. `leg-coverage.test.js` iterates `for (const le
 looks each leg up in `failing`; without an entry there, `failing[leg]` is `undefined`, the renderer
 is handed a *healthy* payload, and the test fails with the misleading
 `must not render byte-identical to a healthy run: expected 'BODY' not to be 'BODY'`. Verified by
-applying the previous wording to a sandbox: red. The fixture must be the producer's real shape
-(`{error: msg}`), for the reason the paragraph above gives.
+removing the line: the exact predicted message appears.
+
+**Change — test (shell surface).** `modules/hermes/tests/test-portfolio-sync-output.sh` gains a
+`failed-status` case feeding a body whose only failure is
+`portfolio_status: {error: "Portfolio.app unreachable"}`, asserting the rendered line is exactly:
+
+```
+  portfolio_status: error (Portfolio.app unreachable)
+```
+
+**Without this the shell half of R1 is unpinned by any committed test.** Plan round 2 raised that as
+High, and it is right: `leg-coverage.test.js` imports `formatSyncResult` and never reads
+`portfolio-sync.sh` (this plan says so at R2), and the shipped shell test had **zero**
+`portfolio_status` references before this change. So the shell branch would be covered only by the
+out-of-tree mutation control, which by this plan's own admission is not reproducible from a clone.
+The fixture is the producer's real shape, for the reason the paragraph above gives.
+
+**These two test changes are what discharge the mutation control.** Round 2 raised as Critical that
+R1 as previously specified left the control red while the Validation section claimed the control
+"goes green when R1 lands", and that the sentence explaining the one expected failure stays true
+after R1 lands — so it is not a diagnostic and cannot tell an implementer whether R1 is incomplete
+or the control is wrong. So, explicitly:
+
+- **The gate for the shell half of R1 is
+  `REPO_ROOT=$(git rev-parse --show-toplevel) bash /opt/data/mut-controls/repro-627-base-symptom.sh`,
+  and the acceptance criterion is that it exits 0** — `REPRO FAILURES: 0`, with all five checks
+  passing. At HEAD before R1 it exits 1 with `failed-status` the only failure.
+- **After R1 lands, `failed-status` is not a "pending item".** It is the control's regression test
+  for R1. If it fails after R1, R1 is wrong. The Validation section no longer describes it as
+  known-pending.
+- R1 is complete only when all three hold: the shell test case passes, the control exits 0, and
+  `leg-coverage.test.js` is green.
 
 **Status: NOT landed. The work is written and verified but is not in any commit, and this plan is
 the record of it, not a claim that it shipped.** An earlier revision of this line said "implemented,
@@ -282,6 +326,34 @@ discharge the job R2 exists to do, and the sibling test must, for every leg:
 
 Assertion 1 alone is what R2 was originally specified as, and it would have passed the broken R1.
 Assertion 2 is what makes it a guard on the defect class this issue is actually about.
+
+**Assertion 2 has exactly one acceptable implementation: drive the shipped script with a stub
+`curl` on `PATH`, reusing the pattern `modules/hermes/tests/test-portfolio-sync-output.sh` already
+uses.** Plan round 2 raised that offering "the shipped script *or* a faithful extraction" was not
+implementable — the plan spends two rounds arguing that extraction is the hazard to avoid, because
+it bypasses bash's parse-time quote removal and can pass on a script that prints nothing, and then
+reintroduces it as an option. Pick one: **drive the script.** There is no second option, and a test
+that extracts the parse block is not an acceptable substitute for this change.
+
+**The six failing fixtures, as literals.** Round 2 also raised that "each leg's real failing
+fixture" was not recoverable from the plan, and that the wrong choice produces a *green* test
+silently. Here they are, and two carry traps:
+
+| leg | failing payload | rendered line it must produce | trap |
+|---|---|---|---|
+| `pull` | `{"status": "error", "detail": "OneDrive grant revoked: invalid_grant"}` | `pull: error (OneDrive grant revoked: invalid_grant)` | — |
+| `push` | `{"status": "error", "detail": "upload rejected"}` | `push: error (upload rejected)` | — |
+| `flex_pull` | `{"success": false, "error": "IBKR Flex error 1012: Token has expired"}` | `flex_pull: error (IBKR Flex error 1012: Token has expired)` | **Must NOT carry `skipped: true` or `error: "Not configured"`.** The shipped skip guard (`portfolio-sync.sh`) tests both and `continue`s, so the leg renders *no line at all* and a test that only asserts "an error line exists" would still pass. |
+| `flex_import` | `{"status": "ok", "items_skipped": 4, "trades_imported": 0, "dividends_imported": 0, "other_imported": 0, "errors": []}` | `flex_import: error (nothing imported - all 4 items skipped)` | **Status is hardcoded `"ok"`**, so a fixture or assertion keyed on `status` is dead code. Use the total-drop form, or one with a populated `errors[]`. |
+| `taxonomy_export` | `{"status": "error", "detail": "Google Sheets API: 401"}` | `taxonomy_export: error (Google Sheets API: 401)` | Do **not** use `status: "skipped"` — that is configuration absence, not a failure, and is correctly silent. |
+| `portfolio_status` | `{"error": "Portfolio.app unreachable"}` | `portfolio_status: error (Portfolio.app unreachable)` | No `status` key at all; a generic `{"status": "error"}` fixture proves nothing. |
+
+**The assertion for each leg is that the rendered line starts with `<leg>: error`** — not merely
+that the leg appears. That is the assertion that fails on `? (...)`, which is the whole point.
+
+And the negative half, which is what would catch an over-broad fix: a **healthy** body — all legs
+carrying their normal success shapes, no errors anywhere — must render **no** `error` line for any
+leg. Without it, a parser that printed `error` unconditionally would pass every row above.
 
 **And it must run in CI, or landing it changes nothing.** `leg-coverage.test.js` was, at the time
 of round 3, executed by no gating job — `grep -c leg-coverage .github/workflows/test.yml` was 0.
@@ -503,7 +575,9 @@ Two cases, because the two returns are genuinely different code and only one was
    contain the pull error. Fails against the current early return.
 2. `analysis` **absent** and `pull.status === "error"`. The rendered text must contain the pull
    error *and* the `lines` content. This is the `return [...onedriveErrs, ...lines]` path, and it is
-   live whenever `taxonomyData` is falsy (`tools.js:1016-1022` gates `analysis` on it) — a pull
+   live whenever `taxonomyData` is falsy — the gate is `if (taxonomyData)` at `tools.js:1032`, which
+  is what leaves `analysis` as `null` (`tools.js:1030`) and hands `formatSyncResult` an empty body
+  (built at `:1058`, returned at `:1086`) — a pull
    failure with no taxonomy to export, exactly the case where the user most needs to be
    told. Without this case a later refactor could drop `onedriveErrs` from that last line and
    every other planned test would still pass. Same defect shape as the round-2 `lines` finding: a
@@ -549,9 +623,16 @@ legs pass unchanged on a parser that renders every other leg as `? ()`, which is
 High finding above describes. The `failed-status` row is the R1 check, and `expired-flex-token` is
 the row that would catch the uniform-read regression.
 
+**This table is the TARGET state, not a description of the shipped test.** Round 2 raised the
+present-tense framing as misleading, and it is: this step's CI wiring is already landed, so a reader
+taking "already wired" at face value would conclude every row below already exists. Seven of the
+eight rows are present in the shipped `test-portfolio-sync-output.sh` today. The `failed-status` row
+is **not**, and is added by R1 — see R1's "Change — test (shell surface)". Treat the table as the
+list of cases the test must cover, and check it off against the file rather than assuming.
+
 | body | expected stdout |
 |---|---|
-| healthy | `pull: ok (downloaded)`, and the existing `A: ok (delta=0)` line still present |
+| healthy | `pull: ok (downloaded)`, and the existing `Deposit Account: updated (delta=0)` line still present |
 | dead grant | `pull: error (Token HTTP 400)` |
 | no `pull` / `push` keys | `pull: ? ()` — the `or {}` default, not a parse error |
 | expired IBKR flex token | `flex_pull: error (IBKR Flex error 1012: Token has expired)` — and **not** `flex_pull: ? ()` |
@@ -606,8 +687,14 @@ what prevents the fix being satisfied by always returning `error`.
   It honours `REPO_ROOT` when set and otherwise walks up from `BASH_SOURCE`. It POSTs nothing and
   calls no live service — every run uses a stub `curl` on `PATH`. Recorded result: **4 of its 5 checks
   fail at base `f04cc08`, exit 1**; at the branch HEAD exactly one still fails — `failed-status` —
-  because that check is R1, which is not yet landed (see R1's status line). It goes green only when
-  R1 lands, which is the coupling this control exists to prove.
+  which is R1, not yet landed (see R1's status line).
+
+  **After R1 lands, `failed-status` stops being a pending item and becomes the control's regression
+  test for R1: the control must then exit 0 with `REPRO FAILURES: 0`.** An earlier revision of this
+  paragraph called the check "not yet landed" without saying what happens afterwards, so a reader
+  could not tell a not-yet-complete R1 from a wrong control — and round 1's Critical was exactly that
+  confusion. R1 names this control as the gate that discharges its shell half; the criterion is exit
+  0, not "fewer failures than before".
 
   **Why it cannot be in-tree.** Plan round 3 raised as High that this script was described as
   tracked when it was not, and the obvious fix — track it — is *impossible* here, because three
