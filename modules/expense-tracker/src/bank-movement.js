@@ -58,6 +58,8 @@ function receivedParts(receivedAt) {
   return { year: Number(pick("year")), month: Number(pick("month")), day: Number(pick("day")) };
 }
 
+const MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
 const MONTHS = {
   jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6,
   jul: 7, aug: 8, sep: 9, oct: 10, nov: 11, dec: 12,
@@ -397,25 +399,40 @@ export function parseBankMovement(text, { senderBank = null, receivedAt } = {}) 
   const scFast = scFlat.match(
     /From account\s*:\s*(\*+\d+)\s+To account\s*:\s*(\*+\d+)/i,
   );
-  if (scFast) {
-    const flattened = scFlat;
+  // Gated on the bank, not just the label layout. "From account" / "To account"
+  // is a generic FAST vocabulary: an inbound advice in the same shape would
+  // otherwise be booked outgoing from the recipient's account, inverting the
+  // direction and the leg pairing. Refuse anything this branch cannot vouch for
+  // and let the owning bank's own branch handle it.
+  if (scFast && senderBank === "SC") {
     const [, fromValue, toValue] = scFast;
-    const amountText = flattened.match(/Amount\s*:\s*([\d,.]+)/i)?.[1] || "";
-    const currencyText =
-        flattened.match(/Currency\s*:\s*(SGD|MYR)/i)?.[1] || senderBank;
-    const dueText = flattened.match(
-      /Transaction due date\s*:\s*([\d/]+\s+[\d:]+)/i,
-    )?.[1];
+    const amountText = scFlat.match(/Amount\s*:\s*([\d,.]+)/i)?.[1] || "";
+    // No fallback. Every other branch takes its currency from an explicit
+    // (SGD|MYR) match and refuses when that is absent; substituting the sending
+    // bank here would be the one place a record can be written with
+    // `currency: "SC"`, which `baseMovement` only truthiness-checks.
+    const currencyText = scFlat.match(/Currency\s*:\s*(SGD|MYR)/i)?.[1] || "";
+    // "Transaction due date" is dd/mm/yyyy hh:mm:ss, but `isoDateTime` only
+    // reads an `28 Sep`-style date (plus a bare time). Passing the raw string to
+    // both arguments therefore looked right and silently used the *received*
+    // date, which is wrong precisely when it matters: a forwarded advice filed
+    // days later would date the transfer to the forwarding date. Normalise the
+    // day and month into the form `isoDateTime` actually parses.
+    const dueRaw = scFlat.match(
+      /Transaction due date\s*:\s*(\d{1,2})\/(\d{1,2})\/(\d{4})\s+([\d:]+)/i,
+    );
+    const dueText = dueRaw
+      ? `${dueRaw[1]} ${MONTH_NAMES[Number(dueRaw[2]) - 1]} ${dueRaw[3]} ${dueRaw[4]}`
+      : "";
     const scReference =
-      flattened.match(
-        /Transaction reference\s*:\s*(SG\d+)/i,
-      )?.[1] || reference;
+      scFlat.match(/Transaction reference\s*:\s*(SG\d+)/i)?.[1] || reference;
 
     const ownAccount = namedAccount(fromValue, senderBank);
     const destination = namedAccount(toValue, bankFromText(toValue));
-    // Same refusal as the generic branch below: a "To account" with no
-    // resolvable digits is not an account, so decline rather than fabricate.
+    // The regex already requires digits in both captures, so these guards are
+    // defence in depth: decline rather than fabricate a partial movement.
     if (!destination?.suffix || !amountText || !ownAccount?.suffix) return null;
+    if (!currencyText || !dueRaw) return null;
     return baseMovement({
       direction: "outgoing",
       amount: amountText,

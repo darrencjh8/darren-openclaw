@@ -439,10 +439,49 @@ Time : 10:00 AM SGT`,
   // first, but it matched against a string already flattened by
   // `.replace(/\s+/g, " ")`, where a newline can never survive — so that
   // alternative was unreachable and the branch worked only via its fallback.
-  // These pin both accepted layouts, which is the behaviour worth locking in.
-  // They do NOT, and provably cannot, detect the dead alternative itself: it is
-  // behaviourally inert, so a mutation test that reinstates it still passes.
-  // Removing it is a simplification, not a behaviour fix.
+  // The two-layout test pins the behaviour that is real. It does NOT, and
+  // provably cannot, detect the dead alternative itself: it is behaviourally
+  // inert, so a mutation test that reinstates it still passes. Removing it is a
+  // simplification, not a behaviour fix.
+  //
+  // Review round 1 found three further defects this branch did not refuse.
+  // Each test below reproduces the defect's exact observable failure, verified
+  // by probe before the fix and gone after it.
+  it("uses the transaction's own due date, not the received date, for a forwarded advice", () => {
+    // Pre-fix this returned 2026-10-01: `isoDateTime` cannot read the dd/mm/yyyy
+    // label, so it fell back to the receipt date, and the original test passed
+    // anyway only because the fixture was received the same day.
+    const movement = parseBankMovement(SC_FAST_ADVICE, {
+      senderBank: "SC",
+      receivedAt: "2026-10-01T09:00:00.000Z",
+    });
+    expect(movement).not.toBeNull();
+    expect(movement.occurred_at).toBe("2026-09-28T10:08:00+08:00");
+  });
+
+  it("refuses the advice outright when the currency label is absent", () => {
+    // Pre-fix this booked a record with `currency: "SC"`, the only path in the
+    // file where a bank name can be written as a currency.
+    const withoutCurrency = SC_FAST_ADVICE.replace(/ Currency: SGD/, "");
+    expect(parseBankMovement(withoutCurrency, {
+      senderBank: "SC",
+      receivedAt: "2026-09-28T03:14:27.000Z",
+    })).toBeNull();
+  });
+
+  it("does not claim a non-SC alert that happens to use the same label layout", () => {
+    // "From account" / "To account" is generic FAST vocabulary. Pre-fix an
+    // inbound advice in that shape was booked OUTGOING from the recipient's
+    // account, inverting the direction and the leg pairing.
+    const otherBank = SC_FAST_ADVICE
+        .replace(/Standard Chartered/g, "Some Bank")
+        .replace(/FAST transaction has been successful/g, "credit received");
+    expect(parseBankMovement(otherBank, {
+      senderBank: "DBS",
+      receivedAt: "2026-09-28T03:14:27.000Z",
+    })).toBeNull();
+  });
+
   it("parses the SC advice whether the body is line-separated or flattened", () => {
     const lineSeparated = SC_FAST_ADVICE.replace(/ Forwarded message/, "\nForwarded message")
         .replace(/ Transaction reference/, "\nTransaction reference")
