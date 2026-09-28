@@ -70,9 +70,11 @@ look for:
   merge; it is not a warning. The config allowlists `@example.com` and
   `@test.com` plus everything under `tests/` and `__tests__/`, so a fixture
   there will not trip it — a real address elsewhere will.
-- `modules/expense-tracker/db.sqlite` and `modules/expense-tracker/metadata.json`
-  are never committed: the first holds transaction hashes, the second holds
-  Actual Budget IDs, a user UUID, and encryption keys.
+- `modules/expense-tracker/data/dedup.db` and `.../data/statement.db` hold
+  transaction hashes and statement state, and `modules/expense-tracker/metadata.json`
+  holds Actual Budget IDs, a user UUID, and encryption keys. The root
+  `.gitignore` covers them (`*.db`, `data/`, `**/metadata.json`), so they must
+  never be committed or pasted into an issue.
 
 ## Where the knowledge lives
 
