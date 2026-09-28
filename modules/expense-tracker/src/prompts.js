@@ -45,7 +45,7 @@ RULES:
    when the account is not obvious, extract the shortest discriminative evidence
    from the email — card/account number, masked digits, "ending XXXX",
    instrument labels, merchant/context terms — and query memory with ONLY that
-   short phrase (e.g. "3255", "card ending 3255", "9001", "BUS/MRT account").
+   short phrase (e.g. "7111", "card ending 7111", "6600", "BUS/MRT account").
    NEVER query with the whole email text. Use returned facts as evidence, then
    match the named account to live accounts. If memory is empty or ambiguous,
    fall back to the signals in rule 4.
@@ -53,7 +53,7 @@ RULES:
    The account bank MUST match the email sender domain. NEVER cross banks.
    Use ALL available signals:
    - Email From domain (e.g., @dbs.com → ONLY DBS accounts, @ocbc.com → ONLY OCBC accounts)
-   - Subject line (e.g., card number or "Card ending 3255")
+   - Subject line (e.g., card number or "Card ending 7111")
    - Card type in alert (credit/debit helps narrow to the right account)
    - Merchant name in body as a contextual clue
    If no open account matches the sender bank, leave account_id blank.

@@ -33,7 +33,7 @@ A deposit was made in your account. Here are the details:
 
 Time of deposit: 9:31 AM
 Amount: SGD 3,006.00
-Account that money was deposited in: (-869001)
+Account that money was deposited in: (-166600)
 Reference: from ACCOUNT HOLDER
 `;
 
@@ -44,8 +44,8 @@ As you instructed, we have made the following transfer:
 
 Transfer Date: 18 Sep 2026 5.04AM
 Amount: MYR 62.00
-From your account: OCBC 360 ACCOUNT ******9223
-To payee: ACCOUNT HOLDER (********3461)
+From your account: OCBC 360 ACCOUNT ******2444
+To payee: ACCOUNT HOLDER (********2333)
 Reference number: REDACTED
 `;
 
@@ -197,7 +197,7 @@ describe("one-sided OCBC deposit with a Reference sender (#584)", () => {
             direction: "incoming",
             amount_cents: 300600,
             currency: "SGD",
-            own_account: { bank: "OCBC", suffix: "869001" },
+            own_account: { bank: "OCBC", suffix: "166600" },
             counterparty: { name: "ACCOUNT HOLDER", bank: null, suffix: null },
         });
     });
@@ -208,7 +208,7 @@ describe("one-sided OCBC deposit with a Reference sender (#584)", () => {
 A deposit was made in your account.
 Time of deposit : 11:59 PM
 Amount : SGD 0.20
-Account that money was deposited in : (-869001)
+Account that money was deposited in : (-166600)
 Reference :
 `,
             { senderBank: "OCBC", receivedAt: "2026-09-02T00:05:00+08:00" },
@@ -305,8 +305,8 @@ describe("hold behaviour for person-name movements (#584 / #585)", () => {
             // masked trailing digits cannot name an account, and the movement is
             // not determinable — which is the next case.
             extraFacts: [
-                "Account ending 9223 belongs to OCBC 360",
-                "Account ending 3461 belongs to Ryt Bank",
+                "Account ending 2444 belongs to OCBC 360",
+                "Account ending 2333 belongs to Ryt Bank",
             ],
         });
 
@@ -385,7 +385,7 @@ describe("hold behaviour for person-name movements (#584 / #585)", () => {
 
     it("holds the RM200 own-name debit even when the live legal-name fact carries a password suffix (#592)", async () => {
         // Production fact shape stores the statement-password mnemonic after an
-        // arrow: `Legal name: Chong Jin Heng -> CHON (statement password)`. The
+        // arrow: `Legal name: <holder> -> <MNEMONIC> (statement password)`. The
         // old capture read the whole tail, so the holder name never matched and
         // the RM200 was booked as spending instead of being held.
         const { phase2, result, calls, llm } = await orchestrate(
@@ -453,8 +453,8 @@ We refer to your FAST Interbank Funds Transfer transaction dated 21 Sep. We are 
 
 Date & Time: 21 Sep 00:29 (SGT)
 Amount: SGD55.89
-From: POSB Cashback A/C ending 4380
-To: ACCOUNT HOLDER SC A/C ending 6445
+From: POSB Cashback A/C ending 5500
+To: ACCOUNT HOLDER SC A/C ending 2555
 `;
     const DBS_FAST_3100 = `Transaction Ref: 17899220094587466504
 
@@ -464,8 +464,8 @@ We refer to your FAST Interbank Funds Transfer transaction dated 21 Sep. We are 
 
 Date & Time: 21 Sep 00:33 (SGT)
 Amount: SGD31.00
-From: My Account A/C ending 5750
-To: ACCOUNT HOLDER SC A/C ending 6445
+From: My Account A/C ending 7222
+To: ACCOUNT HOLDER SC A/C ending 2555
 `;
 
     it("holds the DBS FAST transfer when its source suffix is unknown, instead of booking a phantom expense (#592)", async () => {
@@ -474,8 +474,8 @@ To: ACCOUNT HOLDER SC A/C ending 6445
             receivedAt: "2026-09-20T16:29:52.000Z",
             accounts: scAccounts,
             payees: scTransferPayees,
-            // Live memory knows the destination 6445 but not the source 4380.
-            extraFacts: ["Account ending 6445 belongs to SC Bonus Saver"],
+            // Live memory knows the destination 2555 but not the source 5500.
+            extraFacts: ["Account ending 2555 belongs to SC Bonus Saver"],
         });
 
         expect(llm).not.toHaveBeenCalled();
@@ -497,10 +497,10 @@ To: ACCOUNT HOLDER SC A/C ending 6445
             receivedAt: "2026-09-20T16:33:34.000Z",
             accounts: scAccounts,
             payees: scTransferPayees,
-            // Live memory: destination 6445 and source 5750 both known.
+            // Live memory: destination 2555 and source 7222 both known.
             extraFacts: [
-                "Account ending 6445 belongs to SC Bonus Saver",
-                "Account ending 5750 belongs to DBS Account",
+                "Account ending 2555 belongs to SC Bonus Saver",
+                "Account ending 7222 belongs to DBS Account",
             ],
         });
 
@@ -789,7 +789,7 @@ describe("due schedule collision (#586)", () => {
 A deposit was made in your account.
 Time of deposit : 9:31 AM
 Amount : SGD 3,006.00
-Account that money was deposited in : (-869001)
+Account that money was deposited in : (-166600)
 Reference :
 `;
 

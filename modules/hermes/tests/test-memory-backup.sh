@@ -73,7 +73,7 @@ topic_clone="$TMPDIR/memories-backup"
 mkdir -p "$topic_src/topics" "$topic_clone/.git" "$TMPDIR/stubbin"
 printf 'core fact\n' > "$topic_src/MEMORY.md"
 printf 'user fact\n' > "$topic_src/USER.md"
-printf 'card 4605 -> Delta Extra\n' > "$topic_src/topics/accounts.md"
+printf 'card 1888 -> Delta Extra\n' > "$topic_src/topics/accounts.md"
 printf 'NTUC FairPrice -> Groceries\n' > "$topic_src/topics/expenses.md"
 
 # Stub git so the copy loop runs without a real repository or network access.
@@ -94,7 +94,7 @@ PATH="$TMPDIR/stubbin:$PATH" \
     || nope "topics copied" "accounts.md missing from $topic_clone/topics"
 [ -f "$topic_clone/topics/expenses.md" ] && ok "topics/expenses.md copied" \
     || nope "topics copied" "expenses.md missing from $topic_clone/topics"
-grep -q "card 4605" "$topic_clone/topics/accounts.md" 2>/dev/null \
+grep -q "card 1888" "$topic_clone/topics/accounts.md" 2>/dev/null \
     && ok "topic file content preserved" \
     || nope "topic content" "content not preserved"
 [ -f "$topic_clone/MEMORY.md" ] && ok "MEMORY.md still copied" \

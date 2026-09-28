@@ -97,7 +97,7 @@ it("strips the other LLM-injectable internal flags too", async () => {
     const out = await phase1WithExtraFields({
         _transfer: { budget_id: "b", source_account_id: "trust-bank" },
         _is_transfer: true,
-        _suffix_mappings: [{ suffix: "9001", accountName: "OCBC 360" }],
+        _suffix_mappings: [{ suffix: "6600", accountName: "OCBC 360" }],
         _hold_unresolved_transfer: true,
         _hold_unresolved_paynow: true,
         payee_id: "p-forged",
