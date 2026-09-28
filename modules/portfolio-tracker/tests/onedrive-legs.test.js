@@ -1,5 +1,5 @@
 /**
- * Regression tests for the two Medium findings from dev-loop code review round 2.
+ * Regression tests for the Medium findings from dev-loop code review rounds 2 and 3.
  *
  * M1 — the IBKR flex legs are silent. The sync payload carries four remote legs
  * (pull, flex_pull, flex_import, push) but only pull and push were rendered, so an
@@ -10,6 +10,15 @@
  * { error, sync_targets } before the payload is assembled, so formatSyncResult got
  * no pull/push keys at all and rendered the empty string. A coincident AB outage
  * plus a dead OneDrive grant made the #627 fix invisible again.
+ *
+ * M3 — the flex_import branch keyed on status === "error", but the only producer
+ * (PpClient.importIbkr) sets status:"ok" unconditionally and reports per-item
+ * failures in a separate errors[] list. The branch was dead code, so an import
+ * that dropped every trade rendered as a clean sync.
+ *
+ * M4 — the flex_pull branch reported "Not configured" (flex tokens unset, the
+ * config.js default) as a failing leg on every run, which trains the operator to
+ * ignore the very signal M1 exists to make visible.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { formatSyncResult } from "../src/mcp-server.js";
@@ -62,19 +71,92 @@ describe("M1 — IBKR flex legs are surfaced", () => {
         expect(formatSyncResult(raw)).toBe("📊 2026-07-12\n\nLiquid SGD 100,000");
     });
 
-    it("treats a present flex_import that imported nothing as a failure, not silence", () => {
-        // trades_imported is necessarily 0 when the pull failed, so the existing
-        // header branch (which requires > 0) can never fire on the failing path.
-        // The leg itself is present and did not succeed, so it must be reported.
+    it("reports the real PpClient shape where every item failed to import", () => {
+        // PpClient.importIbkr (PpClient.java) sets status:"ok" UNCONDITIONALLY and
+        // puts per-item failures in errors[]. So the shape below is the only one a
+        // dropped import can produce: the previous status === "error" branch was
+        // dead code, and this rendered as a completely clean sync while every trade
+        // and dividend for the period was dropped.
         const raw = {
             summary: "Synced 1/1 accounts",
             pull: { status: "ok", detail: "downloaded" },
             flex_pull: { success: true },
-            flex_import: { status: "error", detail: "import threw", trades_imported: 0, dividends_imported: 0 },
+            flex_import: {
+                status: "ok",
+                trades_imported: 0,
+                dividends_imported: 0,
+                other_imported: 0,
+                securities_created: 0,
+                items_skipped: 0,
+                errors: ["Failed to insert item: CONID mismatch"],
+            },
             push: { status: "ok", detail: "uploaded" },
+            analysis: { message_body: "📊 2026-07-12\n\nLiquid SGD 100,000" },
         };
         const out = formatSyncResult(raw);
-        expect(out).toContain("IBKR import: import threw");
+        expect(out).toContain("IBKR import:");
+        expect(out).toContain("Failed to insert item: CONID mismatch");
+    });
+
+    it("still reports a status:'error' flex_import", () => {
+        // Kept as a defensive case: if the producer ever does set an error status,
+        // that leg must not be reported as clean.
+        const raw = {
+            summary: "Synced 1/1 accounts",
+            pull: { status: "ok", detail: "downloaded" },
+            flex_pull: { success: true },
+            flex_import: { status: "error", detail: "import threw" },
+            push: { status: "ok", detail: "uploaded" },
+        };
+        expect(formatSyncResult(raw)).toContain("IBKR import: import threw");
+    });
+
+    it("leaves a clean flex_import with an empty errors list out of the failure lines", () => {
+        const raw = {
+            summary: "Synced 1/1 accounts",
+            pull: { status: "ok", detail: "downloaded" },
+            flex_pull: { success: true },
+            flex_import: {
+                status: "ok",
+                trades_imported: 2,
+                dividends_imported: 0,
+                other_imported: 0,
+                errors: [],
+            },
+            push: { status: "ok", detail: "uploaded" },
+            analysis: { message_body: "BODY" },
+        };
+        expect(formatSyncResult(raw)).not.toContain("IBKR import:");
+    });
+});
+
+describe("M3/M4 — a skipped or unconfigured flex integration is not a failure", () => {
+    it("does not report the not-configured sentinel as a failing flex_pull", () => {
+        // config.js defaults both flex tokens to "", so "not configured" is the
+        // steady state of a deployment that does not use IBKR flex. Reporting it
+        // on every run put a warning on every healthy sync, which trains the
+        // operator to ignore the line M1 exists to make visible.
+        const raw = {
+            summary: "HEALTHY",
+            pull: { status: "ok", detail: "downloaded" },
+            flex_pull: { success: false, skipped: true, error: "Not configured" },
+            flex_import: null,
+            push: { status: "ok", detail: "uploaded" },
+            analysis: { message_body: "BODY" },
+        };
+        expect(formatSyncResult(raw)).toBe("BODY");
+    });
+
+    it("still reports a real flex_pull failure", () => {
+        // The other side of the boundary: a genuine remote failure keeps its line.
+        const raw = {
+            summary: "HEALTHY",
+            pull: { status: "ok", detail: "downloaded" },
+            flex_pull: { success: false, error: "IBKR Flex error 1012: Token has expired" },
+            push: { status: "ok", detail: "uploaded" },
+            analysis: { message_body: "BODY" },
+        };
+        expect(formatSyncResult(raw)).toContain("IBKR flex: IBKR Flex error 1012");
     });
 });
 

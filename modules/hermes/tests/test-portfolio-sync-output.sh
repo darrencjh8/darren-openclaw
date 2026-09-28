@@ -113,6 +113,45 @@ check "aborted sync does not print a parse error" "$AB_ABORT" "" "parse error"
 check "explicit null status renders the placeholder" "$NULL_STATUS" "pull: ? (x)"
 check "explicit null status never prints None" "$NULL_STATUS" "" "pull: None"
 
+# Review round 3, M3: PpClient.importIbkr always sets status:"ok" and reports
+# per-item failures in a separate errors[] list, so a dropped import is an "ok"
+# with a populated list. Printing it as ok loses every trade for the period.
+FLEX_IMPORT_DROPPED='{"sync_targets":[{"name":"Warchest","status":"updated","delta":0}],
+  "pull":{"status":"ok","detail":"downloaded"},
+  "push":{"status":"ok","detail":"uploaded"},
+  "flex_import":{"status":"ok","trades_imported":0,"dividends_imported":0,
+    "other_imported":0,"securities_created":0,"items_skipped":0,
+    "errors":["Failed to insert item: CONID mismatch"]}}'
+check "dropped flex import is reported" "$FLEX_IMPORT_DROPPED" "flex_import: error (1 item failed to import - Failed to insert item: CONID mismatch)"
+check "dropped flex import is never reported as ok" "$FLEX_IMPORT_DROPPED" "" "flex_import: ok"
+check "dropped flex import keeps the target lines" "$FLEX_IMPORT_DROPPED" "Warchest: updated (delta=0)"
+
+FLEX_IMPORT_CLEAN='{"sync_targets":[{"name":"Warchest","status":"updated","delta":0}],
+  "pull":{"status":"ok","detail":"downloaded"},
+  "push":{"status":"ok","detail":"uploaded"},
+  "flex_import":{"status":"ok","trades_imported":2,"dividends_imported":0,
+    "other_imported":0,"securities_created":0,"items_skipped":0,
+    "errors":[]}}'
+check "clean flex import stays a success" "$FLEX_IMPORT_CLEAN" "flex_import: ok ()"
+check "clean flex import is not reported as an error" "$FLEX_IMPORT_CLEAN" "" "flex_import: error"
+
+# Review round 3, M4: "not configured" is the steady state of a deployment that
+# does not use IBKR flex (config.js defaults both tokens to ""). It must not be
+# logged as a failing leg on every run, or the operator stops reading the line.
+FLEX_UNCONFIGURED='{"sync_targets":[{"name":"Warchest","status":"updated","delta":0}],
+  "pull":{"status":"ok","detail":"downloaded"},
+  "push":{"status":"ok","detail":"uploaded"},
+  "flex_pull":{"success":false,"skipped":true,"error":"Not configured"}}'
+check "skipped flex pull is not logged as an error" "$FLEX_UNCONFIGURED" "" "flex_pull: error"
+check "skipped flex pull is not logged as not configured" "$FLEX_UNCONFIGURED" "" "Not configured"
+check "skipped flex pull keeps the healthy pull line" "$FLEX_UNCONFIGURED" "pull: ok (downloaded)"
+
+# A pre-`skipped` payload carrying only the sentinel string must behave the same,
+# so both surfaces agree regardless of which produced the body.
+FLEX_UNCONFIGURED_LEGACY='{"sync_targets":[],"pull":{"status":"ok","detail":"downloaded"},
+  "flex_pull":{"success":false,"error":"Not configured"}}'
+check "legacy unconfigured sentinel is not logged as an error" "$FLEX_UNCONFIGURED_LEGACY" "" "flex_pull: error"
+
 if [ "$FAILURES" -ne 0 ]; then
     echo "FAIL: $FAILURES check(s) failed" >&2
     exit 1

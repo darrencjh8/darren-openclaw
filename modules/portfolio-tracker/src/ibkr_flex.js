@@ -15,6 +15,16 @@ const IBKR_SEND_URL =
 const USER_AGENT = "Node.js/24";
 
 /**
+ * The error string `pullFlexXml` returns when the integration is not configured.
+ *
+ * Both reporting surfaces key off this exact value to tell "this deployment
+ * does not use IBKR flex" apart from "the flex call failed", so the MCP
+ * renderer and the shell parser can agree. Changing the wording means changing
+ * every consumer.
+ */
+export const NOT_CONFIGURED_ERROR = "Not configured";
+
+/**
  * Check if the IBKR Flex response XML indicates a failure.
  * @param {string} xml - Raw XML response from IBKR
  * @returns {{isFail: boolean, errorCode?: string, errorMessage?: string}|null}
@@ -46,7 +56,15 @@ export async function pullFlexXml() {
                 reason: "IBKR_FLEX_TOKEN or IBKR_FLEX_QUERY_ID not set",
             }),
         );
-        return { success: false, error: "Not configured" };
+        // `skipped` separates configuration absence from a remote failure.
+        // Without it every consumer sees success:false and reports a failing
+        // leg on every run, which trains the operator to ignore the line that
+        // #627 exists to make trustworthy. See NOT_CONFIGURED_ERROR.
+        return {
+            success: false,
+            skipped: true,
+            error: NOT_CONFIGURED_ERROR,
+        };
     }
 
     try {

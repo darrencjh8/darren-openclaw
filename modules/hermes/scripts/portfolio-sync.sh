@@ -59,10 +59,24 @@ try:
             continue
         status = r.get('status') or r.get('success')
         detail = r.get('detail') or r.get('error') or ''
+        # A flex leg this deployment never configured is not a failure. The MCP
+        # surface skips it via the `skipped` flag set by pullFlexXml; match that
+        # here, and also accept the bare error string so both surfaces agree.
+        if r.get('skipped') or detail == 'Not configured':
+            continue
         if leg.startswith('flex') and status is True:
             status = 'ok'
         elif leg.startswith('flex') and status is False:
             status = 'error'
+        # PpClient.importIbkr always sets status:"ok" and reports per-item
+        # failures in a separate errors[] list, so a dropped import looks like a
+        # success here unless the list itself is surfaced.
+        item_errors = r.get('errors') or []
+        if leg == 'flex_import' and item_errors:
+            n = len(item_errors)
+            print(f'  {leg}: error ({n} item{"" if n == 1 else "s"} failed to import - '
+                  f'{"; ".join(str(e) for e in item_errors)})')
+            continue
         print(f'  {leg}: {status if status is not None else "?"} ({detail})')
 except Exception as e:
     print(f'  (parse error: {e})')

@@ -11,6 +11,7 @@ import { z } from "zod";
 import { existsSync } from "fs";
 import { pullFromOneDrive, pushToOneDrive } from "./onedrive.js";
 import { getAuthUrl, exchangeCodeForToken } from "./onedrive_oauth.js";
+import { NOT_CONFIGURED_ERROR } from "./ibkr_flex.js";
 
 export function formatSyncResult(raw) {
     const lines = [];
@@ -19,8 +20,20 @@ export function formatSyncResult(raw) {
     const parts = [];
     if (raw.summary) parts.push(raw.summary);
     const fi = raw.flex_import;
-    if (fi && (fi.trades_imported > 0 || fi.dividends_imported > 0)) {
-        parts.push(`IBKR: ${fi.trades_imported || 0} trades, ${fi.dividends_imported || 0} dividends`);
+    // other_imported is a real success the header used to hide: a statement
+    // carrying only corporate actions imported fine but printed no IBKR line.
+    if (
+        fi &&
+        (fi.trades_imported > 0 ||
+            fi.dividends_imported > 0 ||
+            fi.other_imported > 0)
+    ) {
+        const bits = [];
+        if (fi.trades_imported > 0) bits.push(`${fi.trades_imported} trades`);
+        if (fi.dividends_imported > 0)
+            bits.push(`${fi.dividends_imported} dividends`);
+        if (fi.other_imported > 0) bits.push(`${fi.other_imported} other`);
+        parts.push(`IBKR: ${bits.join(", ")}`);
     }
     if (parts.length > 0) {
         lines.push(`🔄 ${parts.join(" · ")}`);
@@ -54,12 +67,33 @@ export function formatSyncResult(raw) {
         }
     }
     const flexPull = raw.flex_pull;
-    if (flexPull && flexPull.success === false) {
+    // `skipped` is how pullFlexXml marks "this deployment has no IBKR flex
+    // configured" (ibkr_flex.js). That is configuration absence, not a remote
+    // failure: reporting it on every run would put a warning on every healthy
+    // sync, and an operator who sees that every day stops reading the line
+    // that #627 exists to make trustworthy. The error-string fallback keeps
+    // this working for a payload produced before the `skipped` flag existed.
+    if (flexPull && flexPull.success === false && !flexPull.skipped &&
+        flexPull.error !== NOT_CONFIGURED_ERROR) {
         legErrs.push(`⚠️ IBKR flex: ${flexPull.error || "failed"}`);
     }
     const flexImport = raw.flex_import;
-    if (flexImport && flexImport.status === "error") {
-        legErrs.push(`⚠️ IBKR import: ${flexImport.detail || flexImport.error || "failed"}`);
+    // PpClient.importIbkr sets status:"ok" unconditionally (PpClient.java) and
+    // reports per-item failures in a separate errors[] list, so status is never
+    // "error" in practice. Keying only on status made this branch dead code and
+    // a real import failure entirely silent: every trade for the period was
+    // dropped while both surfaces reported a clean sync.
+    if (flexImport) {
+        const detail = flexImport.detail || flexImport.error;
+        if (flexImport.status === "error" || detail) {
+            legErrs.push(`⚠️ IBKR import: ${detail || "failed"}`);
+        } else if (Array.isArray(flexImport.errors) && flexImport.errors.length > 0) {
+            const n = flexImport.errors.length;
+            legErrs.push(
+                `⚠️ IBKR import: ${n} item${n === 1 ? "" : "s"} failed to import — ` +
+                    `${flexImport.errors.join("; ")}`,
+            );
+        }
     }
 
     // The sync aborted before it assembled a payload (an Actual Budget outage
