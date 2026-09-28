@@ -143,6 +143,9 @@ FLEX_UNCONFIGURED='{"sync_targets":[{"name":"Warchest","status":"updated","delta
   "push":{"status":"ok","detail":"uploaded"},
   "flex_pull":{"success":false,"skipped":true,"error":"Not configured"}}'
 check "skipped flex pull is not logged as an error" "$FLEX_UNCONFIGURED" "" "flex_pull: error"
+# Also assert the leg line is gone entirely, not merely free of the word "error":
+# without the skip guard it renders as "flex_pull: skipped (...)".
+check "skipped flex pull renders no leg line at all" "$FLEX_UNCONFIGURED" "" "flex_pull:"
 check "skipped flex pull is not logged as not configured" "$FLEX_UNCONFIGURED" "" "Not configured"
 check "skipped flex pull keeps the healthy pull line" "$FLEX_UNCONFIGURED" "pull: ok (downloaded)"
 
@@ -234,10 +237,13 @@ TAX_PARTIAL='{"sync_targets":[],
 check "a partial Sheets export is reported" "$TAX_PARTIAL" "taxonomy_export: error (2 cells failed to write - No cell mapping for SG; No cell mapping for US)"
 
 # A configuration gap is not a failed write, so it must not warn on every run.
+# Asserting only that the word "error" is absent is too weak: without the skip
+# guard the leg still renders, just as "skipped". The line must be gone entirely.
 TAX_SKIPPED='{"sync_targets":[],
   "pull":{"status":"ok","detail":"downloaded"},
   "taxonomy_export":{"status":"skipped","reason":"no GOOGLE_SHEET_ID"}}'
 check "a skipped Sheets export is not an error" "$TAX_SKIPPED" "" "taxonomy_export: error"
+check "a skipped Sheets export renders no leg line at all" "$TAX_SKIPPED" "" "taxonomy_export:"
 check "a skipped Sheets export keeps the healthy pull line" "$TAX_SKIPPED" "pull: ok (downloaded)"
 
 TAX_OK='{"sync_targets":[],
