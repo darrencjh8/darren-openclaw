@@ -78,10 +78,12 @@ look for:
 - `modules/expense-tracker/data/dedup.db` and `.../data/statement.db` hold
   transaction hashes and statement state, and `modules/expense-tracker/metadata.json`
   holds Actual Budget IDs, a user UUID, and encryption keys. The root
-  `.gitignore` covers them: `data/` matches at any depth, so the exact path
-  above is ignored even though it is not under the repository root, alongside
-  `*.db` and `**/metadata.json`. They must never be committed or pasted into an
-  issue.
+  `.gitignore` covers all three: `data/` at `.gitignore:13` is unanchored, so it
+  matches `modules/expense-tracker/data/` at any depth, and `*.db` (`:12`) and
+  `**/metadata.json` (`:39`) catch the rest. Verify with
+  `git check-ignore -v <path>` rather than assuming. Treat the ignore rules as a
+  safety net against an accidental commit, not as a substitute for keeping these
+  out of the working tree, and never paste them into an issue.
 - `.gitleaks.toml` adds **five** custom PII rules — `email-address`,
   `private-key-header`, `openai-api-key`, `slack-webhook`, and
   `generic-api-key-assignment` — and their exceptions are **per rule, not

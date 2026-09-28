@@ -137,15 +137,18 @@ How they map to the REST names:
 | `portfolio_onedrive_auth_url` / `portfolio_onedrive_auth_complete` | the device-auth pair |
 | `portfolio_search_memory` / `portfolio_learn_fact` | the tracker's memory tools |
 
-### portfolio-tracker — REST-only tools
+### portfolio-tracker — REST tools (all 22)
 
-All **twenty-two** of these, exactly — the two surfaces are completely disjoint
-at the *name* level, with no tool registered on both. They do still meet
-underneath: six MCP tools dispatch into the same `registry` these routes call
-(`mcp-server.js:223, 255, 266, 280, 291, 298`), so the MCP surface reaches
-handlers in `src/tools.js` — it just does so under a different tool name. One
-name in the list below is reachable from both: `insert_pp_transaction`, which
-MCP serves as `portfolio_insert_transaction` (`mcp-server.js:223`).
+All **twenty-two** of these, exactly. The two surfaces share no **name**: none of
+the 12 MCP tool names is also a REST route name. They do share six
+**handlers** — every name the six dispatch sites pass to
+`registry.executeTool` (`mcp-server.js:223, 255, 266, 280, 291, 298`) is
+itself one of the 22 routes below: `insert_pp_transaction`, `fetch_pp_portfolio`,
+`query_pp_security`, `query_pp_taxonomies`, `search_memory`, and `learn_fact`.
+So six of the names listed here are reachable through MCP too, just under a
+different tool name — `insert_pp_transaction` as `portfolio_insert_transaction`,
+`fetch_pp_portfolio` as `portfolio_get_all`, and so on. See the mapping table
+above.
 `parse_ibkr_flex_query` · `extract_pdf_text` · `extract_email_content` ·
 `fetch_pp_accounts` · `fetch_pp_securities` · `fetch_pp_portfolio` ·
 `query_pp_security` · `query_pp_taxonomies` · `insert_pp_transaction` ·
