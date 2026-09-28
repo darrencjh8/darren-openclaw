@@ -57,6 +57,22 @@ jobs:
                   node-version: 22
             - run: npm ci
             - run: npx vitest run tests/onedrive-legs.test.js tests/mcp-server.test.js tests/java_bridge.test.js tests/ci-gating.test.js
+    # The guard test for the job above also runs in the full suite, so deleting the
+    # gating job's test command cannot make the guard disappear with it: the full
+    # job is non-gating, but it still reports, so the next person's CI log shows
+    # the guard failing even when nothing runs it in a blocking position.
+    portfolio-tracker-ci-guard:
+        runs-on: ubuntu-latest
+        defaults:
+            run:
+                working-directory: modules/portfolio-tracker
+        steps:
+            - uses: actions/checkout@v4
+            - uses: actions/setup-node@v4
+              with:
+                  node-version: 22
+            - run: npm ci
+            - run: npx vitest run tests/ci-gating.test.js
 
     portfolio-tracker:
         runs-on: ubuntu-latest

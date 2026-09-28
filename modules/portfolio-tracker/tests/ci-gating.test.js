@@ -96,4 +96,17 @@ describe("CI enforces the #627 renderer contract", () => {
             /continue-on-error:\s*true/,
         );
     });
+
+    it("also runs this guard from a second job", () => {
+        // Self-reference guard. This file's only job is to assert that CI runs the
+        // renderer tests in a blocking position, so deleting that job's test
+        // command would otherwise delete the only thing that notices. Running the
+        // guard from a second job means the guard keeps reporting even when the
+        // gating job stops naming it.
+        const all = jobs(workflow);
+        const runners = Object.entries(all).filter(([, body]) =>
+            body.some((l) => l.includes("ci-gating.test.js")),
+        );
+        expect(runners.length).toBeGreaterThanOrEqual(2);
+    });
 });
