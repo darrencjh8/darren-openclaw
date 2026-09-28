@@ -35,12 +35,21 @@ The two trackers expose **two different tool surfaces**, and they are not the
 same set. This distinction is the one most easily got wrong, so it is stated
 first:
 
-- **REST** — every tool at `POST /tools/<name>` (underscores become hyphens in
-  the path). This is the widest surface.
+- **REST** — the HTTP tool endpoints on `/tools/*`. **This is the widest surface**,
+  but the path is *not* uniform across the two trackers, so never derive a URL
+  from a tool name. `expense-tracker` builds it mechanically from the tool name
+  with underscores turned into hyphens (`/tools/fetch-context`). `portfolio-tracker`
+  uses a hand-written table, and 10 of its 22 routes have a path that shares no
+  resemblance to the tool they call — `/tools/ibkr-import-xml` runs
+  `parse_ibkr_flex_query`, `/tools/pp-accounts` runs `fetch_pp_accounts`,
+  `/tools/gs-update-sheet` runs `update_google_sheet`. Read the table in
+  `modules/portfolio-tracker/src/index.js` before calling one.
 - **MCP** — a smaller, separately registered set at `/mcp`. **This is what the
   agent actually calls** when Hermes connects the trackers as MCP servers, so
   it is the surface that matters when you are reasoning about what Friday can
-  do in a chat turn.
+  do in a chat turn. It is not a separate implementation: each registered tool
+  dispatches into the same internal registry the HTTP routes use, so the two
+  surfaces are different *entry points*, not different back ends.
 
 Where the two differ, both are listed below. `fetch_context` is the case to
 remember: it **is** on the MCP surface, so Hermes can call it from a chat turn,
@@ -124,6 +133,9 @@ How they map to the REST names:
 
 ### portfolio-tracker — REST-only tools
 
+All **twenty-two** of these, exactly — the two surfaces are completely disjoint
+here, with no tool registered on both, so nothing in `src/tools.js` is reachable
+through MCP.
 `parse_ibkr_flex_query` · `extract_pdf_text` · `extract_email_content` ·
 `fetch_pp_accounts` · `fetch_pp_securities` · `fetch_pp_portfolio` ·
 `query_pp_security` · `query_pp_taxonomies` · `insert_pp_transaction` ·
@@ -131,6 +143,8 @@ How they map to the REST names:
 `ask_user_confirmation` · `log_decision` · `notify_user` · `learn_mapping` ·
 `learn_fact` · `search_memory` · `get_pp_status` · `pp-pull` · `pp-push` ·
 `pp-sync-all`
+
+## Portfolio terms
 
 - **pp-cli** — the Java CLI in `modules/portfolio-tracker/pp-cli/` that performs
   every Portfolio Performance write, built against the Portfolio Performance
@@ -148,10 +162,10 @@ How they map to the REST names:
 
 | Term | Meaning |
 |---|---|
-| **`actual-api`** | Node.js on `:3000`. A thin authenticated proxy in front of the Actual Budget server, so the trackers never hold that server's credentials directly. |
+| **`actual-api`** | Node.js on `:3000`. A proxy in front of the Actual Budget server that holds the connection credentials so the trackers do not each need them. Note it is **not** a pure credential boundary: compose also passes `ACTUAL_BUDGET_PASSWORD` straight into `expense-tracker`, `portfolio-tracker`, and `actual-api` itself (`docker-compose.yml:27,61,83`). |
 | **pluggable module** | A module under `modules/` that declares itself in `modules/<name>/module.env` (`MODULE_NAME`, `MODULE_REQUIRED_VARS`). `deploy.sh` discovers these automatically, so adding one needs no change to the deploy script. `ktmb-booking` is retired and skipped. |
 | **`module.env`** | The discovery manifest for a pluggable module. Absent, the module is invisible to the deploy. |
-| **`guardEnv` / env validation** | The pre-flight in `deploy.sh` that fails the run when a required variable is missing, before anything is built or restarted. |
+| **`guardEnv` / env validation** | Two different pre-flight checks, and it matters which is which. `deploy.sh` validates declared variables with `check_var` (`deploy.sh:83`) before anything is built or restarted. `portfolio-tracker/src/index.js:22` has its own `guardEnv()` that runs at process start and exits if `DEEPSEEK_API_KEY` and friends are missing. |
 | **self-hosted runner** | The machine GitHub Actions runs the deploy on; it holds the workspace and the Docker daemon. |
 | **quick command** | A shortcut defined in `modules/hermes/config.yaml` that curls a tracker's REST endpoint directly, e.g. `portfolio-sync`. |
 | **webhook platform** | The Hermes platform on `:8644` that receives `notify_user` calls from the trackers and relays them to the chat channel. |
