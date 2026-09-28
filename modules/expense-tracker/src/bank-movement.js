@@ -389,18 +389,17 @@ export function parseBankMovement(text, { senderBank = null, receivedAt } = {}) 
   // header that would otherwise win the `From` label, so this branch reads the
   // explicit "From account" / "To account" labels directly rather than via
   // `field()`.
-  const scFast = body
-    .replace(/\s+/g, " ")
-    .match(
-      /(?:^|\n)\s*From account\s*:\s*([^\n]+?)\s+(?=(?:^|\n)\s*To account\s*:)/i,
-    )
-    || body
-        .replace(/\s+/g, " ")
-        .match(/From account\s*:\s*(\*+\d+)\s+To account\s*:\s*(\*+\d+)/i);
+  // Read on the flattened copy so the labels are matched the same way whether
+  // the body arrived line-separated or already collapsed to one line. The
+  // masked-digit form is required deliberately: a "To account" with no
+  // resolvable digits is refused below rather than fabricated.
+  const scFlat = body.replace(/\s+/g, " ");
+  const scFast = scFlat.match(
+    /From account\s*:\s*(\*+\d+)\s+To account\s*:\s*(\*+\d+)/i,
+  );
   if (scFast) {
-    const flattened = body.replace(/\s+/g, " ");
-    const fromValue = scFast[1] || "";
-    const toValue = scFast[2] || "";
+    const flattened = scFlat;
+    const [, fromValue, toValue] = scFast;
     const amountText = flattened.match(/Amount\s*:\s*([\d,.]+)/i)?.[1] || "";
     const currencyText =
         flattened.match(/Currency\s*:\s*(SGD|MYR)/i)?.[1] || senderBank;

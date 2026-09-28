@@ -434,6 +434,34 @@ Time : 10:00 AM SGT`,
     expect(resolved.source_account.id).not.toBe(resolved.destination_account.id);
     expect(resolved.internal).toBe(true);
   });
+
+  // The first cut of this branch tried a `(?:^|\n)`-anchored alternative
+  // first, but it matched against a string already flattened by
+  // `.replace(/\s+/g, " ")`, where a newline can never survive — so that
+  // alternative was unreachable and the branch worked only via its fallback.
+  // These pin both accepted layouts, which is the behaviour worth locking in.
+  // They do NOT, and provably cannot, detect the dead alternative itself: it is
+  // behaviourally inert, so a mutation test that reinstates it still passes.
+  // Removing it is a simplification, not a behaviour fix.
+  it("parses the SC advice whether the body is line-separated or flattened", () => {
+    const lineSeparated = SC_FAST_ADVICE.replace(/ Forwarded message/, "\nForwarded message")
+        .replace(/ Transaction reference/, "\nTransaction reference")
+        .replace(/ From account/, "\nFrom account")
+        .replace(/ To account/, "\nTo account")
+        .replace(/ Amount/, "\nAmount")
+        .replace(/ Currency/, "\nCurrency")
+        .replace(/ Transaction due date/, "\nTransaction due date");
+
+    for (const body of [SC_FAST_ADVICE, lineSeparated]) {
+      const movement = parseBankMovement(body, {
+        senderBank: "SC",
+        receivedAt: "2026-09-28T03:14:27.000Z",
+      });
+      expect(movement).not.toBeNull();
+      expect(movement.own_account.suffix).toBe("6445");
+      expect(movement.counterparty.suffix).toBe("5750");
+    }
+  });
 });
 
 describe("identityMappingsFromFacts", () => {
