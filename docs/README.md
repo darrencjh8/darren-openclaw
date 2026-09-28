@@ -15,8 +15,9 @@ here.
 
 ## Specifications
 
-Feature specs live in [specs/](../specs/), one directory per feature, in Spec-Kit
-layout (`spec.md`, `plan.md`, `tasks.md`).
+Feature specs live in [specs/](../specs/), one directory per feature. Most follow
+the Spec-Kit layout (`spec.md`, `plan.md`, `tasks.md`); the smaller ones carry
+only the files they need.
 
 | Spec | Feature |
 |---|---|

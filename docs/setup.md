@@ -1,6 +1,6 @@
 # Setup
 
-For full detail see [DEPLOY.md](DEPLOY.md) and [SETUP.md](SETUP.md).
+For full detail see [DEPLOY.md](../DEPLOY.md) and [SETUP.md](../SETUP.md).
 
 Prerequisites:
 
