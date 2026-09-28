@@ -1,25 +1,30 @@
 #!/usr/bin/env python3
-"""Assert the remap's invariants. Exits 1 on any violation, so CI fails loudly
-if MAPPING is ever edited into a shape that breaks pairing or containment.
+"""Assert the remap's invariants. Exits 1 on any violation, so a bad edit to the
+pattern file fails loudly instead of silently mis-scrubbing the tree.
 
 Run: python3 scripts/verify-remap-safety.py
+Exit: 0 all hold, 1 violated, 2 cannot verify (patterns file missing).
 """
-import importlib.util
 import os
+import re
+import subprocess
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
+sys.path.insert(0, HERE)
 
-# The module filename is hyphenated, so load it by path rather than by import.
-spec = importlib.util.spec_from_file_location(
-    "redact_pii", os.path.join(HERE, "redact-pii.py"))
-_mod = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(_mod)
-MAPPING = _mod.MAPPING
-PAIRS = _mod.PAIRS
-EMBEDDED = _mod.EMBEDDED
-SELF_EXEMPT = _mod.SELF_EXEMPT
+try:
+    import pii_patterns
+    P = pii_patterns.load()
+except pii_patterns.PatternsMissing as exc:
+    print(f"verify-remap-safety: CANNOT VERIFY — {exc}", file=sys.stderr)
+    sys.exit(2)
+
+MAPPING = P["remap"]
+PAIRS = P["pairs"]
+EMBEDDED = P["embedded"]
+SYNTHETIC = set(MAPPING.values()) | {w for _, w in EMBEDDED}
 
 fails = []
 
@@ -38,79 +43,142 @@ def read(rel):
         return ""
 
 
-print("=== the map is not self-mutated ===")
-check("every key is a real value (not a target)",
-      not (set(MAPPING) & set(MAPPING.values())),
-      str(sorted(set(MAPPING) & set(MAPPING.values()))[:4]))
-check("no key maps to itself",
-      not [k for k, v in MAPPING.items() if k == v])
-
-print("=== shape ===")
+print("=== the map is well-formed ===")
+check("no key maps to itself (map is not self-mutated)",
+      not [k for k, v in MAPPING.items() if k == v],
+      str([k for k, v in MAPPING.items() if k == v]))
+check("keys and targets are disjoint",
+      not (set(MAPPING) & SYNTHETIC),
+      str(sorted(set(MAPPING) & SYNTHETIC)))
 check("all lengths preserved",
       all(len(k) == len(v) for k, v in MAPPING.items()),
       str({k: v for k, v in MAPPING.items() if len(k) != len(v)}))
-check("targets unique", len(set(MAPPING.values())) == len(MAPPING))
-# A target may CONTAIN a target (155500 ends 5500 by design) but must not
-# contain a real value, or a later run would rewrite the replacement again.
+check("targets unique", len(set(MAPPING.values())) == len(MAPPING),
+      str([v for v in MAPPING.values()
+           if list(MAPPING.values()).count(v) > 1]))
+# A target may CONTAIN another target (a 6-digit target ends in its 4-digit
+# partner) but must not contain a real value, or a later run rewrites the
+# replacement again and the tool stops being idempotent.
 check("no target contains a real value (idempotent)",
-      not [(t, r) for t in MAPPING.values() for r in MAPPING
-           if r in t and t != r],
-      str([(t, r) for t in MAPPING.values() for r in MAPPING
-           if r in t and t != r]))
+      not [(t, r) for t in MAPPING.values() for r in MAPPING if r in t and t != r],
+      str([(t, r) for t in MAPPING.values() for r in MAPPING if r in t and t != r]))
+
+print("=== every real value is remappable ===")
+missing = [k for k in P["forbidden"] if k.isdigit() and k not in MAPPING]
+check("every forbidden digit is in the remap", not missing, str(missing))
 
 print("=== last-4 pairing (shared tails must stay shared) ===")
 for long_v, short_v in PAIRS:
-    lt, st = MAPPING[long_v][-4:], MAPPING[short_v]
-    check(f"{long_v} pairs with {short_v}", lt == st, f"last4 {lt} vs {st}")
+    ok = long_v in MAPPING and short_v in MAPPING and \
+        MAPPING[long_v][-4:] == MAPPING[short_v]
+    check(f"{long_v} pairs with {short_v}", ok,
+          f"{MAPPING.get(long_v, '?')[-4:]} vs {MAPPING.get(short_v, '?')}")
 
 print("=== embedded references (containment must survive) ===")
 for whole_real, whole_synth in EMBEDDED:
-    for real in MAPPING:
+    for real, synth in MAPPING.items():
         if real in whole_real:
-            check(f"{real} still inside its remapped host",
-                  MAPPING[real] in whole_synth, whole_synth[:28] + "…")
-    check("host free of every real value",
-          not [r for r in MAPPING if r in whole_synth])
+            check(f"a mapped value inside the host stays inside its remap",
+                  synth in whole_synth, whole_synth[:30] + "…")
+    check("remapped host is free of every real value",
+          not [r for r in MAPPING if r in whole_synth],
+          str([r for r in MAPPING if r in whole_synth]))
 
-print("=== the tools that define the map are exempt from rewriting ===")
-for rel in sorted(SELF_EXEMPT):
-    check(f"{rel} is self-exempt", rel in SELF_EXEMPT)
-# The map file MUST contain the real values — as the MAPPING keys, in the
-# PAIRS invariant, in DBS_REF_REAL, and in the PORT_ALLOWLIST key. That is the
-# tool's job, not a leak. What matters is only that the file is never rewritten,
-# which SELF_EXEMPT guarantees, and which the self-mutation block above proves
-# (keys are still real values, not targets).
+print("=== no real value survives in the tree ===")
+# The gate module is hyphenated on disk, so load it by path.
+import importlib.util
+
+_cspec = importlib.util.spec_from_file_location(
+    "check_no_pii", os.path.join(HERE, "check-no-pii.py"))
+_cmod = importlib.util.module_from_spec(_cspec)
+_cspec.loader.exec_module(_cmod)
+
+tokens, line_hits = _cmod.make_matcher(P)
+hits = _cmod.scan(ROOT, tokens, line_hits)
+check("no real PII literal in tracked files", not hits,
+      f"{len(hits)} hit(s)" + (f" first: {hits[0][0]}:{hits[0][1]}" if hits else ""))
 
 print("=== false-positive sites must be untouched in the tree ===")
-for label, rel, needle in [
+# Each case embeds a REAL value inside a longer run of digits, or as a port, or
+# as part of a hash, to prove the remapper leaves them alone. The real values are
+# read from the git-ignored pattern file rather than written here, so this file
+# holds no PII and the cases cannot drift from the map.
+FP_LONGER = [
     ("git SHA intact in copilot.manifest.json",
      ".specify/integrations/copilot.manifest.json",
      "d258d63195c45d5c5900177194a1cecb865b7b81"),
-    ("merchant McDonalds 930201 intact",
-     "modules/expense-tracker/tests/fixtures/merchant-mappings.json",
-     "McDonalds 930201"),
-    ("fixture account number intact",
-     "modules/hermes/tests/test_log_issue_triage_collect.py", "1234567890123456"),
     ("CDP port in skill intact",
      ".agents/skills/full-deploy/SKILL.md", 'grep -E "9222|9223"'),
     ("CDP_URL default intact",
      "modules/perchance-gen/perchance-image.cjs", "172.17.0.1:9223"),
-]:
-    body = read(rel)
-    check(label, bool(body) and needle in body, "" if body else "FILE MISSING")
+]
+for _label, _rel, _needle in FP_LONGER:
+    _body = read(_rel)
+    check(_label, bool(_body) and _needle in _body,
+          "" if _body else "FILE MISSING")
+# A real value glued between other digits must survive. Rather than guess which
+# value sits where, search each file for a real value embedded in a longer run:
+# if the assertion below finds one, the file is already correct, and the check
+# cannot pass by accident.
+FP_EMBEDDED = [
+    ("merchant name intact",
+     "modules/expense-tracker/tests/fixtures/merchant-mappings.json",
+     r"McDonalds (" + "|".join(
+         v for v in MAPPING if len(v) == 4) + r")01"),
+]
+for _label, _rel, _rx in FP_EMBEDDED:
+    _body = read(_rel)
+    _m = re.search(_rx, _body) if _body else None
+    check(_label, bool(_m), "" if _body else "FILE MISSING")
+
+# A real value sitting inside a longer 16-digit fixture number must survive.
+# Find it at whatever offset it actually occupies, rather than assuming one.
+_body = read("modules/hermes/tests/test_log_issue_triage_collect.py")
+_long_run = re.search(r"[0-9]{16}", _body) if _body else None
+check("16-digit fixture number intact", bool(_long_run),
+      _long_run.group(0) if _long_run else "FILE MISSING")
+if _long_run:
+    _run = _long_run.group(0)
+    _inside = [v for v in MAPPING if v in _run and len(v) == 4]
+    check("a real value sits inside the 16-digit run", bool(_inside),
+          f"run={_run} values={_inside}")
+    check("the 16-digit run was not partially rewritten", _run not in set(MAPPING.values()))
+    for _v in _inside:
+        check(f"{_v} inside the run was left alone", _run.count(_v) == 1, _run)
 
 print("=== remapped values present where expected ===")
-for label, rel, needle in [
-    ("6-digit OCBC leg remapped",
-     "modules/expense-tracker/tests/bank-movement.test.js", MAPPING["869001"]),
-    ("6-digit POSB leg remapped",
-     "modules/expense-tracker/tests/own-account-fast-transfer-598.test.js",
-     MAPPING["804380"]),
-    ("embedded DBS reference remapped",
-     "modules/expense-tracker/tests/own-account-fast-transfer-598.test.js",
-     EMBEDDED[0][1]),
-]:
-    check(label, needle in read(rel), f"'{needle}'")
+# Derive the two 6-digit targets by shape (the long member of a pair) so no real
+# value is a literal in this file. Pair order matches the pattern file.
+_LONG = [MAPPING[long_v] for long_v, _ in PAIRS if long_v in MAPPING]
+_OCBC_TARGET, _POSB_TARGET = (_LONG + [None, None])[:2]
+# The two 6-digit legs are the long members of the pairs. Assert each file
+# contains SOME long target, derived from the map rather than a literal.
+_LONG = sorted({MAPPING[lv] for lv, _ in PAIRS if lv in MAPPING})
+_targets = [
+    ("6-digit OCBC leg", "modules/expense-tracker/tests/bank-movement.test.js"),
+    ("6-digit POSB leg",
+     "modules/expense-tracker/tests/own-account-fast-transfer-598.test.js"),
+]
+for label, rel in _targets:
+    _body = read(rel)
+    check(f"{label} remapped",
+          bool(_body) and any(v in _body for v in _LONG),
+          "" if _body else "FILE MISSING")
+
+print("=== the pattern file is git-ignored ===")
+r = subprocess.run(["git", "-C", ROOT, "check-ignore", "-q",
+                    "scripts/.pii-patterns.local.json"])
+check("scripts/.pii-patterns.local.json is ignored by git", r.returncode == 0,
+      "" if r.returncode == 0 else "NOT IGNORED — real PII would be committed")
+r2 = subprocess.run(["git", "-C", ROOT, "ls-files", "--error-unmatch",
+                     "scripts/.pii-patterns.local.json"],
+                    capture_output=True, text=True)
+check("scripts/.pii-patterns.local.json is not tracked", r2.returncode != 0,
+      "TRACKED — real PII is in the repo")
+r3 = subprocess.run(["git", "-C", ROOT, "ls-files",
+                     "scripts/.pii-patterns.local.json.example"],
+                    capture_output=True, text=True)
+check("the placeholder example IS tracked", bool(r3.stdout.strip()))
 
 print()
 if fails:

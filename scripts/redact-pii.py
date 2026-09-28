@@ -4,13 +4,13 @@
 Safety rules, each one earned by a bug or false positive this repo produced:
 
 1. LONGEST FIRST. Four real values contain another real value as a substring
-   (804380/4380, 869001/9001, 191149/1149, 310980/0980). Substituting short
+   (LONG1/SHORT1, LONG2/SHORT2, LONG3/SHORT3, LONG4/SHORT4). Substituting short
    first truncates the 6-digit legs and silently breaks the transfer-pair tests.
-2. DIGIT BOUNDARIES ONLY. `9001` occurs inside a git SHA and inside `869001`;
-   `9302` inside the merchant `McDonalds 930201`; `8901` inside the fixture
-   `1234567890123456`. A bare str.replace would corrupt all of them.
-3. PORT ALLOWLIST. `9223` is both a real account suffix AND the chrome CDP
-   forward port. Files where 9223 is a port are never touched.
+2. DIGIT BOUNDARIES ONLY. `<REDACTED:4>` occurs inside a git SHA and inside `<REDACTED:6>`;
+   `<REDACTED:4>` inside the merchant `McDonalds <REDACTED:4>01`; `<REDACTED:4>` inside the fixture
+   `1234567<REDACTED:4>23456`. A bare str.replace would corrupt all of them.
+3. PORT ALLOWLIST. `<REDACTED:4>` is both a real account suffix AND the chrome CDP
+   forward port. Files where <REDACTED:4> is a port are never touched.
 4. SAME-LENGTH TARGETS, so `A/C ending 7222` keeps the shape parsers key on.
 5. LAST-4 PAIRING PRESERVED. The parsers pair a short suffix with a full account
    number by their shared tail, so each long target's last 4 must equal its short
@@ -19,9 +19,14 @@ Safety rules, each one earned by a bug or false positive this repo produced:
    reference as its middle segment, and that shared segment is the only identity
    the two alerts have. Rule 2's digit-boundary guard rejects a value sitting
    between digits, so whole references are replaced before bare tokens.
-7. NEVER REWRITE THIS FILE. It is both the map and the tool. An earlier version
-   rewrote its own keys into their own targets, after which it could no longer
-   match the real values and reported "0 changes" while real data sat unscrubbed.
+7. NEVER REWRITE THIS FILE. It is both a tool and a source of the map. An
+   earlier version rewrote its own keys into their own targets, after which it
+   could no longer match real values and reported "0 changes" while real data
+   sat unscrubbed.
+
+The real values live in a git-ignored JSON file, never in this source: see
+scripts/pii_patterns.py. This file therefore contains no PII and is safe to
+commit to a public repository.
 
 Usage: python3 scripts/redact-pii.py [--check]
 """
@@ -31,57 +36,35 @@ import re
 import subprocess
 import sys
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import pii_patterns  # noqa: E402
+
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-# real -> synthetic. Same digit count, all distinct, last-4 pairing preserved.
-MAPPING = {
-    "3255": "7111",
-    "5750": "7222",
-    "9302": "1777",
-    "4605": "1888",
-    "3461": "2333",
-    "9223": "2444",
-    "6445": "2555",
-    "4756": "2666",
-    "8901": "3888",
-    "804380": "155500",
-    "869001": "166600",
-    "191149": "344400",
-    "310980": "222000",
-    # short members of each pair; target's last 4 == the long target's last 4
-    "4380": "5500",
-    "9001": "6600",
-    "1149": "4400",
-    "0980": "2000",
-    # a real FAST transfer reference, same digit count
-    "2609230019902668": "2609230000266880",
-}
-# Invariants asserted by verify-remap-safety.py, which CI runs.
-PAIRS = (("804380", "4380"), ("869001", "9001"), ("191149", "1149"), ("310980", "0980"))
+try:
+    _p = pii_patterns.load()
+except pii_patterns.PatternsMissing as exc:
+    print(f"redact-pii: cannot run — {exc}", file=sys.stderr)
+    raise SystemExit(2)
 
-# Whole references that EMBED a mapped value, replaced before bare tokens.
-DBS_REF_REAL = "012609230019902668EPS7678794"
-EMBEDDED = (
-    (DBS_REF_REAL, "01" + MAPPING["2609230019902668"] + "EPS7678794"),
-)
+MAPPING = _p["remap"]
+PAIRS = _p["pairs"]
+EMBEDDED = _p["embedded"]
+PORT_ALLOWLIST = _p["port_allowlist"]
 
-# Rule 7: the map, the gate, and the self-test must not be rewritten.
+# Rule 7: the map, the gate, the self-test, and the pattern loader must not be
+# rewritten. The example file is the template; it holds the real values too.
 SELF_EXEMPT = {
     "scripts/redact-pii.py",
     "scripts/verify-remap-safety.py",
     "scripts/check-no-pii.py",
     "scripts/test-check-no-pii.py",
+    "scripts/pii_patterns.py",
+    "scripts/.pii-patterns.local.json.example",
     "docs/plans/pii-wipe-implementation.md",
 }
 LONGEST_FIRST = sorted(MAPPING, key=len, reverse=True)
 
-# Files where these values are infrastructure, never an account.
-PORT_ALLOWLIST = {
-    "9223": {
-        ".agents/skills/full-deploy/SKILL.md",      # chrome CDP forward port
-        "modules/perchance-gen/perchance-image.cjs",  # CDP_URL default
-    },
-}
 SKIP_DIRS = ("node_modules/", "/.git/", "__pycache__/", "package-lock", "/dist/")
 MAX_BYTES = 2_000_000
 
