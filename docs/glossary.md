@@ -42,9 +42,9 @@ first:
   it is the surface that matters when you are reasoning about what Friday can
   do in a chat turn.
 
-Where the two differ, both are listed below. `fetch_context` is MCP-only in
-practice: it is reachable as an MCP tool and is used inside `fetch_context`
-tool calls, but it is not part of the plain REST registry.
+Where the two differ, both are listed below. `fetch_context` is the clearest
+case: it is a real MCP tool, but it is **not** in the REST registry, so it is
+listed in the MCP surface below and absent from the REST-only list.
 
 ### expense-tracker — MCP surface (24 tools)
 
