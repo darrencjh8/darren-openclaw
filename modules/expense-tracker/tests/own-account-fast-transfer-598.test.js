@@ -9,8 +9,8 @@
  * reference numbers, suffixes, and product names are retained — they are what
  * resolution keys on, and they are not secret.
  *
- * The load-bearing detail is the reference: the OCBC ref `2609230019902668`
- * appears inside the DBS ref `012609230019902668EPS7678794` as its middle
+ * The load-bearing detail is the reference: the OCBC ref `2609230000266880`
+ * appears inside the DBS ref `012609230000266880EPS7678794` as its middle
  * segment, which is the only identity the two alerts share.
  */
 import { describe, expect, it, vi } from "vitest";
@@ -28,11 +28,11 @@ Time of Transfer   : 12.36 AM SGT
 Amount             : SGD 1000.00
 From your account  : 360 Account (-166600)
 To account         : Darren POSB (-155500) at DBS BANK LTD
-Reference number   : 2609230019902668
+Reference number   : 2609230000266880
 `;
 
 /** Email uid 942 — DBS "digibank Alerts - You've received a transfer". */
-const DBS_RECEIVED_TRANSFER = `Transaction Ref: 012609230019902668EPS7678794
+const DBS_RECEIVED_TRANSFER = `Transaction Ref: 012609230000266880EPS7678794
 
 Dear Customer,
 
@@ -60,12 +60,12 @@ describe("DBS received-transfer sentence (#598)", () => {
             counterparty: { name: "ACCOUNT HOLDER", suffix: null },
         });
         // The reference is what ties this leg to the OCBC request.
-        expect(movement.reference_number).toBe("012609230019902668EPS7678794");
+        expect(movement.reference_number).toBe("012609230000266880EPS7678794");
     });
 
     it("reads the bare `ending 5500` form without a masked or bracketed suffix", () => {
         const movement = parseBankMovement(
-            `Transaction Ref: 012609230019902668EPS7678794
+            `Transaction Ref: 012609230000266880EPS7678794
 
 You have received SGD 42.50 via FAST transfer on 1 Oct 2026 09:15 SGT.
 From: SOMEONE ELSE
@@ -112,7 +112,7 @@ describe("OCBC transfer-request destination resolution (#598)", () => {
             amount_cents: -100000,
             own_account: { bank: "OCBC", suffix: "166600" },
             counterparty: { name: "Darren POSB", bank: "DBS", suffix: "155500" },
-            reference_number: "2609230019902668",
+            reference_number: "2609230000266880",
         });
     });
 });
@@ -203,7 +203,7 @@ describe("the two legs become one transfer pair (#598)", () => {
         // No merchant lookup ran for the person name, and no expense was booked.
         expect(calls.some((c) => c.name === "insert_transaction")).toBe(false);
         // The reference still ties this leg to the OCBC request.
-        expect(phase2.notes).toBe("Statement: 012609230019902668EPS7678794");
+        expect(phase2.notes).toBe("Statement: 012609230000266880EPS7678794");
     });
 
     it("books the uid 943 OCBC request as the outgoing half of the same transfer", async () => {

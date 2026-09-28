@@ -6,7 +6,7 @@ q: Add the settle-based AC-3 proof to CI now? | assumption: No. It is slow and t
 
 ## Goal
 
-One own-account FAST transfer (OCBC 360 → POSB Cashback, SGD 1,000.00, 2026-09-23, ref `2609230019902668`) must book as a single transfer pair instead of two unclassified `Misc` rows, and the two legs must link both ways once both exist.
+One own-account FAST transfer (OCBC 360 → POSB Cashback, SGD 1,000.00, 2026-09-23, ref `2609230000266880`) must book as a single transfer pair instead of two unclassified `Misc` rows, and the two legs must link both ways once both exist.
 
 ## Status of this change
 
