@@ -11,6 +11,7 @@ graph TB
         PT["portfolio-tracker<br/>Node.js — :8081<br/>REST /tools/* + MCP /mcp"]
         ACT["actual-api<br/>Node.js — :3000"]
         ROUTER["codex-router<br/>:4100 — /v1"]
+        SIDE["opencode-sidecar<br/>node:22-slim<br/>no published port — :18788 internal only"]
     end
 
     USER -->|"Telegram Bot API"| HERMES
@@ -25,6 +26,7 @@ graph TB
     PT -->|"REST"| ACT
     ET -->|"LLM via LLM_BASE_URL"| ROUTER
     PT -->|"LLM"| ROUTER
+    ROUTER -->|"CODEX_ROUTER_OPENCODE_FREE_URL"| SIDE
 
     MAIL["Bank / broker email<br/>IMAP :993"]
     MAIL -->|"IMAP IDLE"| ET
@@ -44,6 +46,8 @@ graph TB
 
 `codex-router` is **not** part of this repository. It is a separate repository (`darrencjh8/codex-router`) that CI checks out into `modules/codex-router` at deploy time, and `modules/docker-compose.yml` builds it from that path. The directory does not exist in a plain clone of this repo until the deploy workflow populates it.
 
+`opencode-sidecar` is the fifth of the six compose services: a `node:22-slim` container that runs `opencode serve` on port `18788` to back the keyless `opencode-free/` lane. It publishes no port, has no healthcheck, and is reached only by `codex-router` over the compose network through `CODEX_ROUTER_OPENCODE_FREE_URL` (default `http://opencode-sidecar:18788`). It is not listed in the health-check table in [operations.md](operations.md) because it has no `/health` endpoint.
+
 ## How it works
 
 ### Expense tracking
@@ -54,7 +58,7 @@ graph TB
 4. **Card suffix facts.** A fact such as `Card ending 3255 belongs to Epsilon Nova Card` maps the number in an alert to an account and overrides an LLM pick. Facts are managed with `search_facts`, `learn_fact`, `update_fact`, and `cleanup_facts`.
 5. **Actual Budget.** Transactions are written through `actual-api` (`ACTUAL_BUDGET_URL=http://actual-api:3000`), which syncs to the Actual Budget server.
 6. **Notifications.** `notify_user` posts to the Hermes webhook (`NOTIFY_URL`), which the `webhook` platform in `modules/hermes/config.yaml` relays to the home Telegram channel.
-7. **From chat.** Hermes calls the expense-tracker MCP tools directly — for example `fetch_accounts`, `check_duplicate`, `insert_transaction`, `resolve_merchant`, and `fetch_context` (MCP-only).
+7. **From chat.** Hermes calls the expense-tracker MCP tools directly — for example `insert_transaction`, `resolve_merchant`, `update_transaction`, and `fetch_context`. Read-only lookups like `fetch_accounts` and `check_duplicate` are **not** on the MCP surface; they are REST-only, so they are reached over HTTP rather than as tools. See [glossary.md](glossary.md#tool-surfaces-rest-vs-mcp) for both lists.
 
 ### Portfolio tracking
 

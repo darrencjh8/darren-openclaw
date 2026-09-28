@@ -31,6 +31,7 @@ Other workflows:
 - `.github/workflows/deploy-signal.yml` — deploys `modules/signal-cli/` when that directory changes.
 - `.github/workflows/sync-codex-router.yml` — every five minutes, compares `codex-router` `main` against the last deployed revision and triggers a deploy when they differ.
 - `.github/workflows/recover-codex-router-auth.yml` — manual recovery for a codex-router account slot.
+- `.github/workflows/codex-router-ci.yml` — runs the separate `darrencjh8/codex-router` unit suite against a named, reviewed commit SHA. It fires on `workflow_dispatch` with a `router_ref` input, or on a `codex-router-ci` `repository_dispatch` from that repository, and is how a router change is verified before this repo adopts it.
 - `.github/workflows/secrets-scan.yml` and `.gitleaks.toml` — secret scanning.
 
 ## Ports
@@ -43,5 +44,12 @@ Other workflows:
 | codex-router | `0.0.0.0:4100` | 4100 | OpenAI-compatible `/v1`, `/health/liveliness` |
 | hermes | `8642`, `9119`, `8644` | same | Hermes gateway ports; the webhook platform listens on 8644 |
 | signal-cli (optional) | `127.0.0.1:8084` | 8080 | signal-cli daemon HTTP |
+| opencode-sidecar | none | 18788 | `opencode serve` for the keyless `opencode-free/` lane; internal to the compose network only |
 
-All services except `codex-router` publish to `127.0.0.1` only. `codex-router` binds `0.0.0.0:4100` so the `hermes_shared` network and external clients can reach it.
+Most services publish to `127.0.0.1` only — `expense-tracker`,
+`portfolio-tracker`, `actual-api`, and `signal-cli`. The exceptions are
+`codex-router` (`0.0.0.0:4100`, so the `hermes_shared` network and external
+clients can reach it) and `hermes`, whose gateway ports `8642`, `9119`, and
+`8644` are published without a host-IP prefix and therefore bind all interfaces.
+`opencode-sidecar` publishes nothing at all, so it is reachable only from a
+container on the same network.
