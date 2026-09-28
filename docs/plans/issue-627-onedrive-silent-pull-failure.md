@@ -107,14 +107,15 @@ export then queries whatever stale `Portfolio.portfolio` is on disk and writes i
 {"event":"pp-push","result":{"status":"error","detail":"Token HTTP 400"}}
 ```
 
-One minute apart, same underlying failure. `2026!B4` was written as `83,915.93` from a frozen
-file in which `Loan` read `-6,344.22` instead of the real `-26,344.22` — an exact 20,000
-shortfall that pushed the cell ~20k above its true value.
+One minute apart, same underlying failure. The cash-total cell was written from a frozen file in
+which the loan balance was materially understated — a round-figure shortfall, consistent with a
+tranche drawn or restructured after that copy was last written. The loan was always summed; it was
+summed from an out-of-date balance. The whole bug is a correct formula over stale inputs.
 
-The daily job `portfolio-daily-sync` (`aee1c123bb29`, `0 12 * * *`) runs `no_agent: true` with
-`deliver: local`, so nothing alerted. Its output prints only `sync_targets`, and those three
-Actual Budget-fed accounts reported `delta=0` precisely *because* the round trip was broken — a
-healthy run and a broken run printed the same thing.
+The daily job `portfolio-daily-sync` runs `no_agent: true` with `deliver: local`, so nothing
+alerted. Its output prints only `sync_targets`, and those three Actual Budget-fed accounts
+reported `delta=0` precisely *because* the round trip was broken — a healthy run and a broken run
+printed the same thing.
 
 ## Root cause, not symptom
 
