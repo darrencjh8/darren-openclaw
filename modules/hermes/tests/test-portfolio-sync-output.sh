@@ -66,6 +66,15 @@ HEALTHY='{"sync_targets":[{"name":"Deposit Account","status":"updated","delta":0
 DEAD_GRANT='{"sync_targets":[{"name":"Deposit Account","status":"unchanged","delta":0}],"pull":{"status":"error","detail":"Token HTTP 400"},"push":{"status":"error","detail":"Token HTTP 400"}}'
 NO_LEG_KEYS='{"sync_targets":[{"name":"Deposit Account","status":"unchanged","delta":0}]}'
 NULL_LEG='{"sync_targets":[{"name":"Deposit Account","status":"unchanged","delta":0}],"pull":null,"push":{"status":"ok","detail":"uploaded"}}'
+# Review round 2, M1: the payload carries four remote legs but only pull and push
+# were rendered, so an expired IBKR token produced a log identical to a healthy run.
+FLEX_DEAD='{"sync_targets":[{"name":"Warchest","status":"updated","delta":0}],"pull":{"status":"ok","detail":"downloaded"},"flex_pull":{"success":false,"error":"IBKR Flex error 1012: Token has expired"},"flex_import":null,"push":{"status":"ok","detail":"uploaded"}}'
+# Review round 2, M2: the AB budget fetch throws, so the payload is never assembled
+# and the legs are absent entirely. The abort reason must still reach the log.
+AB_ABORT='{"error":"Budget SGD Budget: HTTP 500: boom","sync_targets":[{"name":"Warchest","status":"skipped","delta":0,"error":"OneDrive not synced"}]}'
+# Review round 2, M1: an explicit null status must render the placeholder, not the
+# Python repr `None`, which reads as a parsing artifact rather than a missing value.
+NULL_STATUS='{"sync_targets":[{"name":"Deposit Account","status":"unchanged","delta":0}],"pull":{"status":null,"detail":"x"},"push":{"status":"ok","detail":"uploaded"}}'
 
 # A failed round trip must be visible rather than silent.
 check "dead grant reports the failed pull" "$DEAD_GRANT" "pull: error (Token HTTP 400)"
@@ -88,6 +97,21 @@ check "explicit null leg keeps the target lines" "$NULL_LEG" "Deposit Account: u
 # A parse failure must never masquerade as a clean run.
 check "dead grant does not print a parse error" "$DEAD_GRANT" "" "parse error"
 check "absent keys do not print a parse error" "$NO_LEG_KEYS" "" "parse error"
+
+# Review round 2, M1: a dead IBKR flex leg must be visible. This is the same defect
+# class as #627 one leg over, and it reproduced on a healthy OneDrive grant.
+check "dead flex pull is reported" "$FLEX_DEAD" "flex_pull: error (IBKR Flex error 1012: Token has expired)"
+check "dead flex pull keeps the target lines" "$FLEX_DEAD" "Warchest: updated (delta=0)"
+check "dead flex pull does not print a parse error" "$FLEX_DEAD" "" "parse error"
+
+# Review round 2, M2: when the AB fetch aborts the sync the legs are absent, so the
+# only signal left is the abort reason. It must not vanish.
+check "aborted sync reports the reason" "$AB_ABORT" "error: Budget SGD Budget: HTTP 500: boom"
+check "aborted sync does not print a parse error" "$AB_ABORT" "" "parse error"
+
+# Review round 2, L4: an explicit null status renders the placeholder, not `None`.
+check "explicit null status renders the placeholder" "$NULL_STATUS" "pull: ? (x)"
+check "explicit null status never prints None" "$NULL_STATUS" "" "pull: None"
 
 if [ "$FAILURES" -ne 0 ]; then
     echo "FAIL: $FAILURES check(s) failed" >&2

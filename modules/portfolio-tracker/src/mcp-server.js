@@ -32,32 +32,59 @@ export function formatSyncResult(raw) {
         lines.push(`⚠️ ${e.name || e.account_id}: ${e.error || e.result?.error || "unknown"}`);
     }
 
-    // OneDrive round-trip failures. A dead grant reaches here as
+    // Remote round-trip failures. A dead OneDrive grant reaches here as
     // { status: "error" }, and reporting that round trip as a success is the
     // defect this guards: the sheet is then written from a stale local file.
+    //
+    // The IBKR flex legs are read here too. They failed silently for the same
+    // reason: the header branch below only fires when trades_imported > 0, and
+    // that is necessarily 0 on the path where the pull itself failed, so the
+    // failing leg was the one case the header could never report. flex_pull and
+    // flex_import are separate tokens with separate expiry, so either can fail
+    // while the OneDrive grant is healthy.
+    //
     // Kept out of `lines` deliberately — `lines` carries the sync header, and
     // the analysis body below already includes its own, so prepending it would
     // duplicate the header the tests pin.
-    const onedriveErrs = [];
+    const legErrs = [];
     for (const leg of ["pull", "push"]) {
         const r = raw[leg];
         if (r && r.status === "error") {
-            onedriveErrs.push(`⚠️ OneDrive ${leg}: ${r.detail || "failed"}`);
+            legErrs.push(`⚠️ OneDrive ${leg}: ${r.detail || "failed"}`);
         }
     }
+    const flexPull = raw.flex_pull;
+    if (flexPull && flexPull.success === false) {
+        legErrs.push(`⚠️ IBKR flex: ${flexPull.error || "failed"}`);
+    }
+    const flexImport = raw.flex_import;
+    if (flexImport && flexImport.status === "error") {
+        legErrs.push(`⚠️ IBKR import: ${flexImport.detail || flexImport.error || "failed"}`);
+    }
+
+    // The sync aborted before it assembled a payload (an Actual Budget outage
+    // throws out of fetchBudget). Without this the operator got the empty string
+    // and the aborting error was lost, which is what let a dead grant look clean
+    // during an AB outage.
+    const abortErrs = [];
+    if (raw.error) {
+        abortErrs.push(`❌ Sync aborted: ${raw.error}`);
+    }
+
+    const pre = [...legErrs, ...abortErrs];
 
     // Pre-computed analysis block (the authoritative portfolio display)
     // Return it directly — analysis.message_body already includes its own sync header.
-    // The OneDrive error lines are still prepended, because this early return is
+    // The error lines are still prepended, because this early return is
     // the normal path after a taxonomy export and would otherwise hide them.
     if (raw.analysis?.message_body) {
-        return onedriveErrs.length
-            ? [...onedriveErrs, raw.analysis.message_body].join("\n")
+        return pre.length
+            ? [...pre, raw.analysis.message_body].join("\n")
             : raw.analysis.message_body;
     }
 
     // Fallback: no analysis available, show bare sync status
-    return [...onedriveErrs, ...lines].join("\n");
+    return [...pre, ...lines].join("\n");
 }
 
 function createTools(server, registry) {

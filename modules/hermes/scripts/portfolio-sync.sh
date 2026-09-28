@@ -36,15 +36,34 @@ read -r -d '' PARSE_PROG <<'PARSE_EOF' || true
 import sys, json
 try:
     data = json.load(sys.stdin)
+    # The sync can abort before it assembles a payload (an Actual Budget outage
+    # throws out of fetchBudget). Report that reason first: without it the log
+    # showed only placeholders and the aborting cause was lost entirely.
+    if data.get('error'):
+        print(f'  error: {data["error"]}')
     targets = data.get('sync_targets', [])
     for t in targets:
         name = t.get('name', '?')
         status = t.get('status', '?')
         delta = t.get('delta', 0)
         print(f'  {name}: {status} (delta={delta})')
-    for leg in ('pull', 'push'):
-        r = data.get(leg) or {}
-        print(f'  {leg}: {r.get("status", "?")} ({r.get("detail", "")})')
+        if t.get('error'):
+            print(f'    {t["error"]}')
+    # Every remote leg, not just pull/push: the IBKR flex legs fail silently
+    # the same way and on their own token expiry. `or '?'` and `or ''` cover an
+    # explicit null as well as a missing key, so a null never prints `None`.
+    for leg in ('pull', 'push', 'flex_pull', 'flex_import'):
+        r = data.get(leg)
+        if not isinstance(r, dict):
+            print(f'  {leg}: ? ()')
+            continue
+        status = r.get('status') or r.get('success')
+        detail = r.get('detail') or r.get('error') or ''
+        if leg.startswith('flex') and status is True:
+            status = 'ok'
+        elif leg.startswith('flex') and status is False:
+            status = 'error'
+        print(f'  {leg}: {status if status is not None else "?"} ({detail})')
 except Exception as e:
     print(f'  (parse error: {e})')
 PARSE_EOF
