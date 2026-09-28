@@ -441,8 +441,25 @@ export function parseBankMovement(text, { senderBank = null, receivedAt } = {}) 
     const scReference =
       scFlat.match(/Transaction reference\s*:\s*(SG\d+)/i)?.[1] || reference;
 
-    const ownAccount = namedAccount(fromValue, senderBank);
-    const destination = namedAccount(toValue, bankFromText(toValue));
+    // The gate above has already established that Standard Chartered sent this,
+    // so name the accounts from the advice itself rather than from
+    // `senderBank`. `senderBank` is the outer `From:` header, which on the
+    // forwarded path this branch now serves is the FORWARDER: forwarding from
+    // an OCBC address would otherwise label SC account 6445 as OCBC. The
+    // masked values carry no bank name, so `bankFromText` cannot recover it
+    // from "******6445" — only the fallback decides.
+    const ownAccount = namedAccount(fromValue, "SC");
+    // "Payee Bank: DBS" names the RECIPIENT's bank and is the only statement of
+    // it in the advice; `bankFromText("******5750")` can only ever return null,
+    // so read the label instead of discarding the evidence. The value is
+    // delimited by the next known label, because the real advice leaves this
+    // field EMPTY ("Payee Bank: Transaction message:") and a bank name must not
+    // be allowed to run into the following field's text.
+    const destinationBank =
+      scFlat.match(
+        /Payee Bank\s*:\s*([A-Za-z][A-Za-z .]*?)\s+Transaction message\s*:/i,
+      )?.[1]?.trim() || bankFromText(toValue);
+    const destination = namedAccount(toValue, destinationBank);
     // The regex already requires digits in both captures, so these guards are
     // defence in depth: decline rather than fabricate a partial movement.
     if (!destination?.suffix || !amountText || !ownAccount?.suffix) return null;

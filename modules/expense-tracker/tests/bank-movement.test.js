@@ -482,10 +482,51 @@ Time : 10:00 AM SGT`,
     expect(movement).not.toBeNull();
     expect(movement.direction).toBe("outgoing");
     expect(movement.own_account.suffix).toBe("6445");
+    expect(movement.own_account.bank).toBe("SC");
     expect(movement.counterparty.suffix).toBe("5750");
     expect(movement.occurred_at).toBe("2026-09-28T10:08:00+08:00");
     expect(movement.currency).toBe("SGD");
     expect(movement.amount_cents).toBe(-127500);
+  });
+
+  // Round 3 found the forwarded path still attributed the account to the
+  // FORWARDER: the gate proved Standard Chartered sent the advice, and the code
+  // then threw that away and used `senderBank` (the outer From: header) as the
+  // fallback bank. Forwarding from an OCBC address labelled SC account 6445 as
+  // OCBC. The masked value carries no bank name, so only the fallback decided.
+  it("attributes the own account to SC, not the forwarding address, on every header", () => {
+    for (const senderBank of [null, "OCBC", "UOB", "DBS"]) {
+      const movement = parseBankMovement(SC_FAST_ADVICE, {
+        senderBank,
+        receivedAt: "2026-10-01T09:00:00.000Z",
+      });
+      expect(movement, `senderBank=${senderBank}`).not.toBeNull();
+      expect(movement.own_account.bank, `senderBank=${senderBank}`).toBe("SC");
+    }
+  });
+
+  // "Payee Bank:" is the advice's only statement of the recipient's bank, and
+  // `bankFromText("******5750")` can only ever return null. The real advice
+  // leaves the field empty, so this pins that a populated one is read AND that
+  // the empty case does not run the bank name into the next field.
+  it("reads the recipient bank from the Payee Bank label when the advice states it", () => {
+    const withPayeeBank = SC_FAST_ADVICE.replace("Payee Bank:", "Payee Bank: DBS");
+    const movement = parseBankMovement(withPayeeBank, {
+      senderBank: "UOB",
+      receivedAt: "2026-09-28T03:14:27.000Z",
+    });
+    expect(movement).not.toBeNull();
+    expect(movement.counterparty.bank).toBe("DBS");
+  });
+
+  it("leaves the recipient bank unset when the advice leaves Payee Bank empty", () => {
+    expect(SC_FAST_ADVICE).toMatch(/Payee Bank:\s+Transaction message:/);
+    const movement = parseBankMovement(SC_FAST_ADVICE, {
+      senderBank: "SC",
+      receivedAt: "2026-09-28T03:14:27.000Z",
+    });
+    expect(movement).not.toBeNull();
+    expect(movement.counterparty.bank).toBeNull();
   });
 
   it("does not claim a non-SC alert that happens to use the same label layout", () => {
