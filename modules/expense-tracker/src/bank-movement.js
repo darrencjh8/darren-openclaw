@@ -385,9 +385,10 @@ export function parseBankMovement(text, { senderBank = null, receivedAt } = {}) 
   //
   // It also has to survive being FORWARDED, which is how a user gets it into
   // the tracker's own mailbox when the sending bank does not alert it. A
-  // forwarded copy carries a `From: <OnlineBanking.SG@sc.com>` header that
-  // would otherwise win the `From` label, so this branch reads the explicit
-  // "From account" / "To account" labels directly rather than via `field()`.
+  // forwarded copy carries a `From: <the bank's online-banking sender>`
+  // header that would otherwise win the `From` label, so this branch reads the
+  // explicit "From account" / "To account" labels directly rather than via
+  // `field()`.
   const scFast = body
     .replace(/\s+/g, " ")
     .match(
