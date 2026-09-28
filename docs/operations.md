@@ -46,4 +46,10 @@ Other workflows:
 | signal-cli (optional) | `127.0.0.1:8084` | 8080 | signal-cli daemon HTTP |
 | opencode-sidecar | none | 18788 | `opencode serve` for the keyless `opencode-free/` lane; internal to the compose network only |
 
-All services except `codex-router` publish to `127.0.0.1` only. `codex-router` binds `0.0.0.0:4100` so the `hermes_shared` network and external clients can reach it. `opencode-sidecar` publishes nothing at all, so it is reachable only from a container on the same network.
+Most services publish to `127.0.0.1` only — `expense-tracker`,
+`portfolio-tracker`, `actual-api`, and `signal-cli`. The exceptions are
+`codex-router` (`0.0.0.0:4100`, so the `hermes_shared` network and external
+clients can reach it) and `hermes`, whose gateway ports `8642`, `9119`, and
+`8644` are published without a host-IP prefix and therefore bind all interfaces.
+`opencode-sidecar` publishes nothing at all, so it is reachable only from a
+container on the same network.

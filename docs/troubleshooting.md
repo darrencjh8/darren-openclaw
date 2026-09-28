@@ -13,11 +13,12 @@ anything, so a missing variable fails the run without touching production.
 - **"N variable(s) missing or empty."** The message names the variable above it.
   In GitHub Actions the value comes from repository secrets; locally it comes from
   the module's `.env` file. `COMMANDCODE_API_KEY` is the one most often missing
-  and it is **required**, not optional: five of the six Hermes auxiliary slots
+  and it is **required**, not optional: six of the seven Hermes auxiliary slots
   pin `commandcode/*` as their primary model, and without the key the router never
   publishes it, which breaks compression, vision, `web_extract`,
   `kanban_decomposer`, `triage_specifier`, and `profile_describer` outright
-  rather than degrading them.
+  rather than degrading them. The seventh slot, `approval`, is unaffected
+  because it pins `auto-thinking` instead.
 - **"Module .env not found at …"** A pluggable module declares its required
   variables in `modules/<name>/module.env`; outside GitHub Actions those
   variables are read from that module's `.env`. Locally the file is simply
@@ -73,12 +74,18 @@ look for:
   holds Actual Budget IDs, a user UUID, and encryption keys. The root
   `.gitignore` covers them (`*.db`, `data/`, `**/metadata.json`), so they must
   never be committed or pasted into an issue.
-- `.gitleaks.toml` adds two custom PII rules and their exceptions are **per
-  rule, not global**. `email-address` allowlists the `@example.com` and
-  `@test.com` regexes and the `tests/` and `__tests__/` paths, so a fixture there
-  will not trip it — a real address anywhere else will. `private-key-header`
-  allowlists only `tests/`, so a `__tests__/` fixture with a private-key header
-  does trip it. Nothing else in the config is allowlisted.
+- `.gitleaks.toml` adds **five** custom PII rules — `email-address`,
+  `private-key-header`, `openai-api-key`, `slack-webhook`, and
+  `generic-api-key-assignment` — and their exceptions are **per rule, not
+  global**. `email-address` allowlists the `@example.com` and `@test.com` regexes
+  and the `tests/` and `__tests__/` paths, so a fixture there will not trip it — a
+  real address anywhere else will. `private-key-header` allowlists only `tests/`,
+  so a `__tests__/` fixture with a private-key header does trip it.
+  `generic-api-key-assignment` is scoped by *path* to `.env.example`,
+  `.template`, `.sample`, `config.example`, and `.config.sample`, and its regexes
+  whitelist only obvious placeholders — so in every other file that rule never
+  examines the line at all. A separate global `[allowlist]` at the top of the
+  file covers lockfiles.
 
 ## Where the knowledge lives
 

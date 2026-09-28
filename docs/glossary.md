@@ -15,7 +15,7 @@ agent calls, so they are written exactly as they appear in code.
 | **LiteLLM** | The proxy library the `codex-router` service runs on, which multiplexes several provider accounts behind one OpenAI-compatible endpoint. |
 | **codex-router** | A **separate repository**, `darrencjh8/codex-router`, checked out into `modules/codex-router` at deploy time. It is not part of this repository and is absent from a plain clone. |
 | **opencode** | An agent CLI. `opencode-sidecar` runs `opencode serve` in a container to provide the keyless `opencode-free/` model lane. |
-| **MCP** | Model Context Protocol. Both trackers expose a Streamable HTTP MCP server at `/mcp` alongside their REST `/tools/*` endpoints. **The two surfaces are not interchangeable** — portfolio-tracker publishes 22 REST tools but only 12 MCP tools with wholly different, `portfolio_`-prefixed names, and expense-tracker has `search_facts` and `compact_facts` on MCP only. See [the tool surfaces below](#tool-surfaces-rest-vs-mcp) before calling a tool by name. |
+| **MCP** | Model Context Protocol. Both trackers expose a Streamable HTTP MCP server at `/mcp` alongside their REST `/tools/*` endpoints. **The two surfaces are not interchangeable** — portfolio-tracker publishes 22 REST tools but only 12 MCP tools with wholly different, `portfolio_`-prefixed names, and expense-tracker's read-only lookups are REST-only. Each tracker also has a third surface its own code drives — the orchestrator's internal LLM calls — which is on neither. See [the tool surfaces below](#tool-surfaces-rest-vs-mcp) before calling a tool by name. |
 | **Spec-Kit** | The scaffolding in `.specify/` that produces the `specs/NNN-name/` layout: `spec.md`, `plan.md`, `tasks.md`. |
 
 ## Email pipeline
@@ -42,9 +42,10 @@ first:
   it is the surface that matters when you are reasoning about what Friday can
   do in a chat turn.
 
-Where the two differ, both are listed below. `fetch_context` is the clearest
-case: it is a real MCP tool, but it is **not** in the REST registry, so it is
-listed in the MCP surface below and absent from the REST-only list.
+Where the two differ, both are listed below. `fetch_context` is the case to
+remember: it **is** on the MCP surface, so Hermes can call it from a chat turn,
+but it has no HTTP route — and it doubles as an input to the orchestrator's own
+Phase 1 LLM call, which is a third, separate surface.
 
 ### expense-tracker — MCP surface (24 tools)
 
@@ -61,18 +62,31 @@ This is the set Hermes calls.
 
 ### expense-tracker — REST-only tools
 
-Present at `/tools/*` but **not** on the MCP surface, so the agent reaches them
-through the REST endpoint or a quick command rather than as an MCP tool:
-`fetch_accounts` · `fetch_categories` · `fetch_payees` · `fetch_schedules` ·
-`check_duplicate` · `check_statement_duplicate` · `check_schedule_collision` ·
-`record_statement` · `fetch_statement_history` · `submit_decision` ·
-`log_decision` · `notify_user`
+On the HTTP surface at `POST /tools/<name>` but **not** registered on the MCP
+server, so Hermes cannot call them as tools — reach them over REST or through a
+quick command instead. These ten, exactly:
 
-`search_facts` and `compact_facts` exist **only** on the MCP surface, so they
-are missing from the REST list by design rather than by accident. The reverse also
-happens: the REST registry has a `search_memory` tool that the MCP surface
-exposes under the name `search_facts` instead, so a name from one surface will
-not necessarily resolve on the other.
+`check_duplicate` · `check_statement_duplicate` · `fetch_accounts` ·
+`fetch_categories` · `fetch_payees` · `fetch_statement_history` ·
+`log_decision` · `notify_user` · `record_statement` · `search_memory`
+
+Six more are MCP-only, with no HTTP route at all: `fetch_context`,
+`list_inbox_emails`, `process_transaction`, `read_inbox_email`, `search_facts`,
+and `compact_facts`.
+
+`search_memory` and `search_facts` are **not** two names for one tool — they are
+separate registrations with separate handlers, and only the first is on the REST
+surface. A name taken from one surface will not necessarily resolve on the other,
+which is why the two lists above are the authority rather than the tool names in
+`src/tools.js`.
+
+A third surface exists and is easy to mistake for either of these: the
+orchestrator's own LLM calls. `getPhase1ToolSchemas()` hands the internal model a
+set built from `fetch_context` and `search_memory`, and the statement pipeline
+likewise calls handlers such as `fetch_schedules`, `check_schedule_collision`,
+and `submit_decision` which are **neither** an HTTP route nor an MCP tool. They
+are reachable only by the code that drives them, so an agent will not find them
+on any surface it can call.
 
 `reconcile_transaction` clears Actual Budget transactions (`cleared=true`, with
 an optional statement reference appended to the notes); `unclear_transaction`

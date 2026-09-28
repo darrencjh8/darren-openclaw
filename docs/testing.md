@@ -1,8 +1,12 @@
 # Testing
 
-`.github/workflows/test.yml` (`Unit Tests`) is the gate: it runs on every pull
-request, and `deploy.yml` also invokes it for non-push events before deploying.
-Every job below is a real job in that workflow — keep this page in step with it.
+`.github/workflows/test.yml` (`Unit Tests`) is the gate. It triggers on
+`pull_request` **targeting `main`** — not on PRs aimed at other branches — and
+`deploy.yml` also calls it via `workflow_call` before deploying on non-push
+events, gating on that result not being a `failure`. Every job below is a real job
+in that workflow — keep this page in step with it. One job is
+`continue-on-error`, so "CI is green" is not the same as "every suite passed"; the
+table says which.
 
 ## The jobs
 
@@ -10,7 +14,7 @@ Every job below is a real job in that workflow — keep this page in step with i
 |---|---|---|---|
 | `expense-tracker` | `modules/expense-tracker` | `npm test` (`vitest run`) | `poppler-utils`, `qpdf` (apt) |
 | `actual-api` | `modules/actual-api` | `npm test` (`jest`) | — |
-| `portfolio-tracker` | `modules/portfolio-tracker` | `npm test` (`vitest run`) | — |
+| `portfolio-tracker` | `modules/portfolio-tracker` | `npm test` (`vitest run`) | — (job is `continue-on-error`: it needs IBKR keys and live services, so a red result does **not** block the merge — read it, but do not report it as blocking) |
 | `pp-cli` | `modules/portfolio-tracker/pp-cli` | `mvn test` | the Portfolio Performance model JAR, installed to the local Maven repo first |
 | `compose-config` | repo root | `docker compose config` on each compose file | Docker Compose |
 | `hermes-scripts` | repo root | `shellcheck`, then ten `modules/hermes/tests/*.sh` scripts, then three `unittest` modules | `shellcheck` (apt), PyYAML |
