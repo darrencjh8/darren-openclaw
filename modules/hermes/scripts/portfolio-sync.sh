@@ -52,9 +52,11 @@ try:
     # Every remote leg, not just pull/push: the IBKR flex legs fail silently
     # the same way and on their own token expiry. `or '?'` and `or ''` cover an
     # explicit null as well as a missing key, so a null never prints `None`.
-    for leg in ('pull', 'push', 'flex_pull', 'flex_import'):
+    for leg in ('pull', 'push', 'flex_pull', 'flex_import', 'taxonomy_export'):
         r = data.get(leg)
         if not isinstance(r, dict):
+            # Absent, or an explicit null: render the placeholder. For
+            # taxonomy_export this means the deployment does not export taxonomies.
             print(f'  {leg}: ? ()')
             continue
         status = r.get('status') or r.get('success')
@@ -64,6 +66,11 @@ try:
         # here, and also accept the bare error string so both surfaces agree.
         if r.get('skipped') or detail == 'Not configured':
             continue
+        # taxonomy_export reports "skipped" per configuration gap, which is
+        # configuration absence rather than a failed write, so it must not warn
+        # on every run. Its "partial" shape carries the real problem in errors[].
+        if leg == 'taxonomy_export' and status == 'skipped':
+            continue
         if leg.startswith('flex') and status is True:
             status = 'ok'
         elif leg.startswith('flex') and status is False:
@@ -72,9 +79,14 @@ try:
         # failures in a separate errors[] list, so a dropped import looks like a
         # success here unless the list itself is surfaced.
         item_errors = r.get('errors') or []
-        if leg == 'flex_import' and item_errors:
+        if leg in ('flex_import', 'taxonomy_export') and item_errors:
+            # flex_import: PpClient always sets status:"ok" and reports per-item
+            # failures in errors[]. taxonomy_export: status "partial" carries the
+            # per-cell failures there. Both render as an error, not a success.
             n = len(item_errors)
-            print(f'  {leg}: error ({n} item{"" if n == 1 else "s"} failed to import - '
+            noun = 'cell' if leg == 'taxonomy_export' else 'item'
+            verb = 'to write' if leg == 'taxonomy_export' else 'to import'
+            print(f'  {leg}: error ({n} {noun}{"" if n == 1 else "s"} failed {verb} - '
                   f'{"; ".join(str(e) for e in item_errors)})')
             continue
         # The silent-drop route: PpClient skips items at four sites that never

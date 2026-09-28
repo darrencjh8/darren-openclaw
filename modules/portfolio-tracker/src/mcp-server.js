@@ -115,6 +115,25 @@ export function formatSyncResult(raw) {
         }
     }
 
+    // taxonomy_export is a fifth remote leg in the same payload (tools.js returns
+    // it alongside the other four) and it is the leg whose whole job is writing
+    // the sheet the operator reads. It has three failure shapes: status "error"
+    // when queryTaxonomies throws, "partial" with an errors[] list when cells fail
+    // or a classification has no mapping, and "skipped" per configuration gap.
+    // "skipped" is configuration absence, so it must not warn on every run.
+    const tax = raw.taxonomy_export;
+    if (tax) {
+        if (tax.status === "error") {
+            legErrs.push(`⚠️ Sheets export: ${tax.detail || tax.error || "failed"}`);
+        } else if (tax.status === "partial") {
+            const errs = Array.isArray(tax.errors) ? tax.errors : [];
+            legErrs.push(
+                `⚠️ Sheets export: ${errs.length} cell${errs.length === 1 ? "" : "s"} failed — ` +
+                    `${errs.join("; ") || "partial write"}`,
+            );
+        }
+    }
+
     // The sync aborted before it assembled a payload (an Actual Budget outage
     // throws out of fetchBudget). Without this the operator got the empty string
     // and the aborting error was lost, which is what let a dead grant look clean

@@ -1,2 +1,0 @@
-#!/bin/bash
-printf '%s\n%s' "$STUB_BODY" "${STUB_CODE:-200}"

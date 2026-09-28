@@ -215,6 +215,37 @@ fi
 # be the identical string. The check above proves the behaviour end to end; this
 # one names the drift directly, so a reword says which side moved.
 PARSER_SENTINEL="$(sed -n "s/.*detail == '\([^']*\)':.*/\1/p" "$SYNC_SCRIPT" | head -1)"
+# Review round 4, M1: taxonomy_export is a fifth remote leg in the same payload
+# (tools.js returns it alongside the other four) and it is the leg whose job is
+# writing the sheet the operator reads. It has three shapes: error, partial with
+# an errors[] list, and skipped for a configuration gap.
+TAX_ERROR='{"sync_targets":[{"name":"Warchest","status":"updated","delta":0}],
+  "pull":{"status":"ok","detail":"downloaded"},
+  "push":{"status":"ok","detail":"uploaded"},
+  "taxonomy_export":{"status":"error","detail":"Google Sheets API: 401 UNAUTHENTICATED"}}'
+check "a failed Sheets export is reported" "$TAX_ERROR" "taxonomy_export: error (Google Sheets API: 401 UNAUTHENTICATED)"
+check "a failed Sheets export is never reported as ok" "$TAX_ERROR" "" "taxonomy_export: ok"
+check "a failed Sheets export keeps the target lines" "$TAX_ERROR" "Warchest: updated (delta=0)"
+
+TAX_PARTIAL='{"sync_targets":[],
+  "pull":{"status":"ok","detail":"downloaded"},
+  "taxonomy_export":{"status":"partial","cells_written":[],
+    "errors":["No cell mapping for SG","No cell mapping for US"]}}'
+check "a partial Sheets export is reported" "$TAX_PARTIAL" "taxonomy_export: error (2 cells failed to write - No cell mapping for SG; No cell mapping for US)"
+
+# A configuration gap is not a failed write, so it must not warn on every run.
+TAX_SKIPPED='{"sync_targets":[],
+  "pull":{"status":"ok","detail":"downloaded"},
+  "taxonomy_export":{"status":"skipped","reason":"no GOOGLE_SHEET_ID"}}'
+check "a skipped Sheets export is not an error" "$TAX_SKIPPED" "" "taxonomy_export: error"
+check "a skipped Sheets export keeps the healthy pull line" "$TAX_SKIPPED" "pull: ok (downloaded)"
+
+TAX_OK='{"sync_targets":[],
+  "pull":{"status":"ok","detail":"downloaded"},
+  "taxonomy_export":{"status":"completed","cells_written":42}}'
+check "a completed Sheets export is not an error" "$TAX_OK" "" "taxonomy_export: error"
+check "a completed Sheets export renders its status" "$TAX_OK" "taxonomy_export: completed ()"
+
 if [ -n "$SENTINEL_FROM_JS" ] && [ "$PARSER_SENTINEL" != "$SENTINEL_FROM_JS" ]; then
     echo "FAIL: the shell parser matches on '$PARSER_SENTINEL' but NOT_CONFIGURED_ERROR is '$SENTINEL_FROM_JS'" >&2
     echo "      the M4 not-configured guard would silently stop working" >&2

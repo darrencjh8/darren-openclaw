@@ -121,4 +121,44 @@ describe("CI enforces the #627 renderer contract", () => {
         );
         expect(runners.length).toBeGreaterThanOrEqual(2);
     });
+
+    it("does not let either renderer job be skipped by an if: condition", () => {
+        // Review round 4, Medium 2 (M17/M21). Every assertion above reads text,
+        // and a job carrying `if: false` keeps every line that text checks look
+        // for while GitHub skips the job and reports success. needs.test.result
+        // then stays green, so the deploy gate never blocks.
+        //
+        // A condition that only ever evaluates true is fine, so this pins the
+        // defeating shape rather than banning `if:` outright.
+        const all = jobs(workflow);
+        for (const name of ["portfolio-tracker-unit", "portfolio-tracker-ci-guard"]) {
+            const body = all[name] ?? [];
+            const disabling = body.filter(
+                (l) => /^\s*(-\s+)?if:\s*(false|""|'')\s*$/.test(l),
+            );
+            expect(disabling, `${name} must not be skippable`).toEqual([]);
+        }
+    });
+
+    it("does not let the second guard job be softened either", () => {
+        // M22: the job that exists to make the guard un-deletable could itself be
+        // made non-blocking, one level down from the hole the second job closed.
+        const all = jobs(workflow);
+        expect(all["portfolio-tracker-ci-guard"]?.join("\n")).not.toMatch(
+            /continue-on-error:\s*true/,
+        );
+    });
+
+    it("pins the far end of the gate in deploy.yml", () => {
+        // M18, and the one that actually removes a deploy block. The guard's own
+        // comment claimed deploy.yml gates on `needs.test.result != 'failure'`,
+        // but nothing read deploy.yml, so repointing that comparison to
+        // 'cancelled' left every assertion here passing while a failed test run
+        // stopped blocking a deploy. A comment is not a contract.
+        const deploy = readFileSync(
+            resolve(here, "../../../.github/workflows/deploy.yml"),
+            "utf8",
+        );
+        expect(deploy).toMatch(/needs\.test\.result\s*!=\s*'failure'/);
+    });
 });
