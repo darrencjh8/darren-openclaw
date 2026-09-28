@@ -83,11 +83,14 @@ Six more are MCP-only, with no HTTP route at all: `fetch_context`,
 `list_inbox_emails`, `process_transaction`, `read_inbox_email`, `search_facts`,
 and `compact_facts`.
 
-`search_memory` and `search_facts` are **not** two names for one tool — they are
-separate registrations with separate handlers, and only the first is on the REST
-surface. A name taken from one surface will not necessarily resolve on the other,
-which is why the two lists above are the authority rather than the tool names in
-`src/tools.js`.
+`search_memory` and `search_facts` are two names for **one** implementation: the
+MCP tool dispatches straight into the `search_memory` handler
+(`mcp-server.js:207`), and `search_facts` has no entry of its own in
+`src/tools.js`. They differ only in surface — the registry name is on the REST
+side, the MCP name is not. That is exactly the trap the two lists above exist to
+prevent, which is why the lists are the authority rather than the tool names in
+`src/tools.js`: a name taken from one surface will not necessarily resolve on
+the other.
 
 A third surface exists and is easy to mistake for either of these: the
 orchestrator's own LLM calls. `getPhase1ToolSchemas()` hands the internal model a
@@ -170,7 +173,7 @@ through MCP.
 | **quick command** | A shortcut defined in `modules/hermes/config.yaml` that curls a tracker's REST endpoint directly, e.g. `portfolio-sync`. |
 | **webhook platform** | The Hermes platform on `:8644` that receives `notify_user` calls from the trackers and relays them to the chat channel. |
 | **s6** | The init system inside the Hermes container. `s6-svstat` on `gateway-default` is how the gateway's health is checked, since the dashboard is disabled and has no port. |
-| **`50-seed-defaults`** | The container's init script. On every boot it seeds config, `SOUL.md`, cron jobs, skills, and scripts. Cron fields marked *managed* are reconciled every boot; the rest apply only to a fresh install. |
+| **`50-seed-defaults`** | The container's init script. On every boot it seeds config, `SOUL.md`, cron jobs, skills, and scripts. For cron it keeps two dicts: `MANAGED` (behaviour-defining fields such as `prompt` and `skills`) is reconciled in place on every boot, while `DEFAULTS` (schedule, enabled flag) is minted once at creation and then left alone, so a dashboard change to the time is not reverted on the next boot. The split is per job rather than uniform — `log-issue-triage` also reconciles `deliver`. |
 
 ## Repositories
 
