@@ -266,6 +266,37 @@ High, and it is right: `leg-coverage.test.js` imports `formatSyncResult` and nev
 out-of-tree mutation control, which by this plan's own admission is not reproducible from a clone.
 The fixture is the producer's real shape, for the reason the paragraph above gives.
 
+**Change — test (JS surface, second return path).** `mcp-server.js` has **two** returns —
+`return [...pre, ...lines]` (analysis present) and `return [...pre, ...lines].join("\n")` at
+`mcp-server.js:159` (analysis absent) — and `analysis` is null whenever `taxonomyData` is falsy, so
+the second is a real production path, not a theoretical one. R1's `legErrs` push is correct on both,
+but only one of them is pinned by a committed test: `mcp-server.test.js:309` covers
+`surfaces a failed OneDrive pull when there is no analysis`, and no test does the same for
+`portfolio_status`.
+
+So R1 must add that sibling case, asserting the warning survives the fallback return **and** that the
+sync summary and target lines still render alongside it — mirroring the existing case exactly:
+
+```js
+it("surfaces a failed Portfolio status fetch when there is no analysis", () => {
+    const raw = {
+        summary: "Synced 1/2 accounts",
+        portfolio_status: { error: "Portfolio.app unreachable" },
+        sync_targets: [{ name: "Deposit Account", status: "error", error: "timeout" }],
+    };
+    const out = formatSyncResult(raw);
+    expect(out).toContain("⚠️ Portfolio status: Portfolio.app unreachable");
+    expect(out).toContain("🔄 Synced 1/2 accounts");
+    expect(out).toContain("⚠️ Deposit Account: timeout");
+});
+```
+
+Plan round 3 raised the absence of this as its one Medium, and the mutation proves it: dropping the
+new warning from *only* the fallback return leaves all 55 tests in the four CI-gated suites green.
+Every other leg's fallback rendering *is* pinned — broadly dropping `pre` from that return turns six
+tests red — so `portfolio_status` would be the one leg in the file quietly violating the convention
+the rest of it follows.
+
 **These two test changes are what discharge the mutation control.** Round 2 raised as Critical that
 R1 as previously specified left the control red while the Validation section claimed the control
 "goes green when R1 lands", and that the sentence explaining the one expected failure stays true
