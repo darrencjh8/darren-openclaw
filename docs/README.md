@@ -12,6 +12,9 @@ here.
 | [repository-layout.md](repository-layout.md) | Every directory and what belongs in it, plus the modules that are present but not deployed. |
 | [setup.md](setup.md) | Clone, per-module `.env`, and the `deploy.sh` / `build.sh` entry points. |
 | [operations.md](operations.md) | Health endpoints, the CI/CD deploy flow, the other workflows, and the published ports. |
+| [testing.md](testing.md) | The CI jobs, how to run each suite locally, and the fixture policy. |
+| [troubleshooting.md](troubleshooting.md) | The failures you will actually hit, and where each answer lives. |
+| [glossary.md](glossary.md) | The domain terms, tool names, and acronyms used across these pages. |
 
 ## Specifications
 

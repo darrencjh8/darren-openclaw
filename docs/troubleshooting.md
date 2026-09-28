@@ -1,0 +1,85 @@
+# Troubleshooting
+
+Failure modes an agent or operator will actually hit, and where the answer is.
+Production is never fixed by hand: diagnose from logs and the status endpoints,
+then ship a fix through a pull request so CI/CD applies it. See
+[operations.md](operations.md) for the deploy flow and the health endpoints.
+
+## The deploy fails before anything starts
+
+`modules/deploy.sh` validates configuration before it builds or restarts
+anything, so a missing variable fails the run without touching production.
+
+- **"N variable(s) missing or empty."** The message names the variable above it.
+  In GitHub Actions the value comes from repository secrets; locally it comes from
+  the module's `.env` file. `COMMANDCODE_API_KEY` is the one most often missing
+  and it is **required**, not optional: six Hermes auxiliary slots pin
+  `commandcode/*` as their primary model, and without the key the router never
+  publishes it, which breaks compression, vision, `web_extract`,
+  `kanban_decomposer`, `triage_specifier`, and `profile_describer` outright
+  rather than degrading them.
+- **"Module .env not found at …"** A pluggable module declares its required
+  variables in `modules/<name>/module.env`; outside GitHub Actions those
+  variables are read from that module's `.env`. Locally the file is simply
+  absent, which is different from the value being empty.
+- **"OneDrive authorization is required to sync the Portfolio file."** The
+  refresh token under `modules/onedrive-sync/config/onedrive/` is missing or
+  unreadable. It is runtime state and is never committed.
+
+## The deploy completes but a service is not healthy
+
+`deploy.sh` runs the checks in [operations.md](operations.md) after
+`compose up` and exits non-zero if any fails, printing "N service(s) not
+healthy". Read `docker-compose logs` for that service. Notes that change what to
+look for:
+
+- **codex-router** is checked on `/health/liveliness` and is retried against a
+  readiness budget, because the router starts before its account proxies are
+  up. A single early failure is expected; exhausting the budget is not.
+- **hermes** has no HTTP health port (`HERMES_DASHBOARD=0`), so the check is
+  `s6-svstat` on the `gateway-default` service. A failure here is a gateway
+  process problem, not an HTTP one.
+- **Only the components just deployed are health-checked.** A retired module
+  cannot answer, which is why a partial deploy never trips on it.
+- After the HTTP checks the script runs `hermes mcp test` for both trackers, and
+  only for the ones just deployed. A service can be healthy on `/health` and
+  still have a broken MCP connection, which is what that catches — but note the
+  asymmetry: a failure there prints "failed (retry later)" in yellow and does
+  **not** fail the deploy. A green deploy with a yellow MCP line means the
+  connection is broken, not that everything is fine.
+
+## A documented change did not reach production
+
+- **Merged to `main` but nothing changed?** Check what the deploy detected. The
+  workflow maps changed paths onto components by prefix (`modules/hermes/`,
+  `modules/actual-api/`, and so on). If no prefix matches, `COMPONENTS` is empty
+  and the step falls back to `all` — so a change outside those directories
+  rebuilds and redeploys the whole stack rather than nothing. A change to
+  `modules/docker-compose.yml`, `modules/deploy.sh`, or a root `Dockerfile` also
+  forces a full deploy.
+- **`modules/codex-router` does not exist in your clone.** It is not part of
+  this repository. CI checks `darrencjh8/codex-router` out into that path at
+  deploy time; a plain clone has no such directory and that is expected.
+- **The router is behind.** `sync-codex-router.yml` runs every five minutes and
+  deploys when `codex-router`'s `main` differs from the last deployed revision,
+  so a router merge lands on its own schedule, not with whatever else you merged.
+
+## Secrets and PII
+
+- `secrets-scan.yml` and `.gitleaks.toml` run on every push. A hit blocks the
+  merge; it is not a warning. The config allowlists `@example.com` and
+  `@test.com` plus everything under `tests/` and `__tests__/`, so a fixture
+  there will not trip it — a real address elsewhere will.
+- `modules/expense-tracker/db.sqlite` and `modules/expense-tracker/metadata.json`
+  are never committed: the first holds transaction hashes, the second holds
+  Actual Budget IDs, a user UUID, and encryption keys.
+
+## Where the knowledge lives
+
+| Symptom | Read |
+|---|---|
+| an email was booked wrongly | [architecture.md](architecture.md), expense-tracking pipeline |
+| a portfolio import is wrong | [architecture.md](architecture.md), portfolio-tracking pipeline |
+| a spec and the code disagree | [docs/expense-tracker/](expense-tracker/), and the `specs/` table in [docs/README.md](README.md) |
+| a test fails for an environmental reason | [testing.md](testing.md) |
+| the deploy did the wrong thing | [operations.md](operations.md) |
