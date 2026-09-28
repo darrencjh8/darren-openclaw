@@ -14,9 +14,13 @@ vi.mock("../src/onedrive_oauth.js", () => ({
         .mockReturnValue("https://login.microsoftonline.com/..."),
     exchangeCodeForToken: vi.fn(),
 }));
-vi.mock("../src/ibkr_flex.js", () => ({
-    pullFlexXml: vi.fn(),
-}));
+vi.mock("../src/ibkr_flex.js", async () => {
+    const actual = await vi.importActual("../src/ibkr_flex.js");
+    // Keep the real NOT_CONFIGURED_ERROR: formatSyncResult imports it to tell an
+    // unconfigured flex integration from a real failure. A bare { pullFlexXml }
+    // mock leaves that undefined and the guard silently stops matching.
+    return { ...actual, pullFlexXml: vi.fn() };
+});
 vi.mock("fs", async () => {
     const actual = await vi.importActual("fs");
     return { ...actual, existsSync: vi.fn(() => true) };

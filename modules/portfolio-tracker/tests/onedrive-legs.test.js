@@ -20,7 +20,7 @@
  * config.js default) as a failing leg on every run, which trains the operator to
  * ignore the very signal M1 exists to make visible.
  */
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { formatSyncResult } from "../src/mcp-server.js";
 import { ToolRegistry } from "../src/tools.js";
 
@@ -157,6 +157,119 @@ describe("M3/M4 — a skipped or unconfigured flex integration is not a failure"
             analysis: { message_body: "BODY" },
         };
         expect(formatSyncResult(raw)).toContain("IBKR flex: IBKR Flex error 1012");
+    });
+});
+
+// The guard above is only trustworthy if the producer actually emits `skipped`.
+// Without this, deleting that line from pullFlexXml leaves every other test green
+// while an unconfigured deployment starts logging a failing leg again.
+describe("M4 — pullFlexXml marks the not-configured case as skipped", () => {
+    const saved = {};
+    afterEach(() => {
+        for (const k of ["IBKR_FLEX_TOKEN", "IBKR_FLEX_QUERY_ID"]) {
+            if (saved[k] === undefined) delete process.env[k];
+            else process.env[k] = saved[k];
+        }
+    });
+
+    it("returns skipped:true, not a plain failure, when the tokens are unset", async () => {
+        saved.IBKR_FLEX_TOKEN = process.env.IBKR_FLEX_TOKEN;
+        saved.IBKR_FLEX_QUERY_ID = process.env.IBKR_FLEX_QUERY_ID;
+        delete process.env.IBKR_FLEX_TOKEN;
+        delete process.env.IBKR_FLEX_QUERY_ID;
+
+        const { pullFlexXml, NOT_CONFIGURED_ERROR } = await import("../src/ibkr_flex.js");
+        const res = await pullFlexXml();
+        expect(res.success).toBe(false);
+        expect(res.skipped).toBe(true);
+        expect(res.error).toBe(NOT_CONFIGURED_ERROR);
+
+        // And the renderer stays quiet on exactly what the producer returned.
+        const out = formatSyncResult({
+            summary: "HEALTHY",
+            pull: { status: "ok", detail: "downloaded" },
+            flex_pull: res,
+            push: { status: "ok", detail: "uploaded" },
+            analysis: { message_body: "BODY" },
+        });
+        expect(out).toBe("BODY");
+    });
+
+    it("does not mark a configured integration as skipped", async () => {
+        saved.IBKR_FLEX_TOKEN = process.env.IBKR_FLEX_TOKEN;
+        saved.IBKR_FLEX_QUERY_ID = process.env.IBKR_FLEX_QUERY_ID;
+        process.env.IBKR_FLEX_TOKEN = "tkn";
+        process.env.IBKR_FLEX_QUERY_ID = "qid";
+        const { pullFlexXml } = await import("../src/ibkr_flex.js");
+        // fetch is stubbed to fail, so this exercises the real failure path rather
+        // than the configuration path; the point is only that `skipped` is absent.
+        const origFetch = globalThis.fetch;
+        globalThis.fetch = async () => {
+            throw new Error("network down");
+        };
+        try {
+            const res = await pullFlexXml();
+            expect(res.success).toBe(false);
+            expect(res.skipped).toBeUndefined();
+        } finally {
+            globalThis.fetch = origFetch;
+        }
+    });
+});
+
+describe("L7 — an other_imported-only success is still reported", () => {
+    it("prints the IBKR line for corporate actions with no trades or dividends", () => {
+        // PpClient emits other_imported for corporate actions. A statement
+        // carrying only those imported fine, but the header only looked at trades
+        // and dividends, so the sync summary claimed nothing was imported.
+        // No `analysis` key: on the analysis path the renderer returns the analysis
+        // body, which carries its own header, so the IBKR line belongs to the
+        // no-analysis surface this pins.
+        const raw = {
+            summary: "Synced 1/1 accounts",
+            pull: { status: "ok", detail: "downloaded" },
+            flex_pull: { success: true },
+            flex_import: {
+                status: "ok",
+                trades_imported: 0,
+                dividends_imported: 0,
+                other_imported: 4,
+                errors: [],
+            },
+            push: { status: "ok", detail: "uploaded" },
+        };
+        const out = formatSyncResult(raw);
+        expect(out).toContain("IBKR: 4 other");
+        expect(out).not.toContain("0 trades");
+        expect(out).not.toContain("0 dividends");
+    });
+
+    it("still prints a trades-and-dividends success", () => {
+        const raw = {
+            summary: "Synced 1/1 accounts",
+            flex_import: {
+                status: "ok",
+                trades_imported: 3,
+                dividends_imported: 1,
+                other_imported: 0,
+                errors: [],
+            },
+        };
+        expect(formatSyncResult(raw)).toContain("IBKR: 3 trades, 1 dividends");
+    });
+
+    it("prints nothing for an import that brought nothing in", () => {
+        const raw = {
+            summary: "Synced 1/1 accounts",
+            flex_import: {
+                status: "ok",
+                trades_imported: 0,
+                dividends_imported: 0,
+                other_imported: 0,
+                errors: [],
+            },
+        };
+        expect(formatSyncResult(raw)).not.toContain("IBKR:");
     });
 });
 
