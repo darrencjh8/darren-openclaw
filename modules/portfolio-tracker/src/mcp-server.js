@@ -93,6 +93,25 @@ export function formatSyncResult(raw) {
                 `⚠️ IBKR import: ${n} item${n === 1 ? "" : "s"} failed to import — ` +
                     `${flexImport.errors.join("; ")}`,
             );
+        } else {
+            // The silent-drop route. PpClient counts an item as skipped at four
+            // sites that never touch errors[]: an unmapped account, a null
+            // portfolio, a null account key, or an item type this build does not
+            // handle (PpClient.java). So {0 imported, N skipped, errors: []} is
+            // the dominant failure mode, and it rendered byte-identical to a
+            // healthy run on both surfaces - the #627 defect class by a second
+            // path. Only flag it when nothing at all came in: a statement with
+            // items legitimately skipped alongside a real import is normal.
+            const imported =
+                (flexImport.trades_imported || 0) +
+                (flexImport.dividends_imported || 0) +
+                (flexImport.other_imported || 0);
+            const skipped = flexImport.items_skipped || 0;
+            if (imported === 0 && skipped > 0) {
+                legErrs.push(
+                    `⚠️ IBKR import: nothing imported — all ${skipped} item${skipped === 1 ? "" : "s"} skipped`,
+                );
+            }
         }
     }
 

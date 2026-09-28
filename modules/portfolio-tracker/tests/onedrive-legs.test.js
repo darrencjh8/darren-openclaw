@@ -130,6 +130,78 @@ describe("M1 — IBKR flex legs are surfaced", () => {
     });
 });
 
+describe("M1 — a total silent drop is reported, a partial skip is not", () => {
+    // PpClient.importIbkr counts an item as skipped at four sites that never touch
+    // errors[] (PpClient.java): an unmapped account, a null portfolio, a null
+    // account key, or an unhandled item type. So a statement where everything was
+    // skipped carries errors:[] and used to render byte-identical to a healthy run.
+    const skipped = (items_skipped, imported = {}) => ({
+        status: "ok",
+        trades_imported: 0,
+        dividends_imported: 0,
+        other_imported: 0,
+        securities_created: 0,
+        items_skipped,
+        errors: [],
+        ...imported,
+    });
+
+    it("flags a statement where nothing was imported and everything was skipped", () => {
+        const raw = {
+            summary: "Synced 1/1 accounts",
+            pull: { status: "ok", detail: "downloaded" },
+            flex_pull: { success: true },
+            flex_import: skipped(37),
+            push: { status: "ok", detail: "uploaded" },
+            analysis: { message_body: "BODY" },
+        };
+        const out = formatSyncResult(raw);
+        expect(out).toContain("IBKR import: nothing imported");
+        expect(out).toContain("37 items skipped");
+    });
+
+    it("uses the singular for a single skipped item", () => {
+        const raw = {
+            summary: "Synced 1/1 accounts",
+            flex_import: skipped(1),
+        };
+        expect(formatSyncResult(raw)).toContain("all 1 item skipped");
+    });
+
+    it("leaves a partial skip alongside a real import as a success", () => {
+        // Skipping some items next to a genuine import is normal: duplicates and
+        // already-held positions. Flagging that would be a false alarm.
+        const raw = {
+            summary: "Synced 1/1 accounts",
+            pull: { status: "ok", detail: "downloaded" },
+            flex_pull: { success: true },
+            flex_import: skipped(5, { trades_imported: 2 }),
+            push: { status: "ok", detail: "uploaded" },
+            analysis: { message_body: "BODY" },
+        };
+        expect(formatSyncResult(raw)).not.toContain("IBKR import:");
+    });
+
+    it("leaves an empty statement alone", () => {
+        // Nothing imported and nothing skipped is an empty statement, not a drop.
+        const raw = {
+            summary: "Synced 1/1 accounts",
+            flex_import: skipped(0),
+        };
+        expect(formatSyncResult(raw)).not.toContain("IBKR import:");
+    });
+
+    it("prefers the errors[] line over the skipped line when both apply", () => {
+        const raw = {
+            summary: "Synced 1/1 accounts",
+            flex_import: { ...skipped(4), errors: ["Failed to insert item: CONID"] },
+        };
+        const out = formatSyncResult(raw);
+        expect(out).toContain("1 item failed to import");
+        expect(out).not.toContain("nothing imported");
+    });
+});
+
 describe("M3/M4 — a skipped or unconfigured flex integration is not a failure", () => {
     it("does not report the not-configured sentinel as a failing flex_pull", () => {
         // config.js defaults both flex tokens to "", so "not configured" is the

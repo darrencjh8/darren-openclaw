@@ -39,6 +39,25 @@ jobs:
             - run: npm ci
             - run: npm test
 
+    # The full portfolio-tracker suite needs IBKR keys and live services, so it
+    # stays non-gating (see the job below). These renderer tests need neither, and
+    # they are the ones that guard the #627 sync-reporting contract: formatSyncResult
+    # and PpJavaBridge.pull. Running them here means a break in that contract fails
+    # the `test` workflow, which deploy.yml gates on, instead of hiding behind a
+    # continue-on-error job.
+    portfolio-tracker-unit:
+        runs-on: ubuntu-latest
+        defaults:
+            run:
+                working-directory: modules/portfolio-tracker
+        steps:
+            - uses: actions/checkout@v4
+            - uses: actions/setup-node@v4
+              with:
+                  node-version: 22
+            - run: npm ci
+            - run: npx vitest run tests/onedrive-legs.test.js tests/mcp-server.test.js tests/java_bridge.test.js tests/ci-gating.test.js
+
     portfolio-tracker:
         runs-on: ubuntu-latest
         continue-on-error: true # needs IBKR keys + running services, fixing separately

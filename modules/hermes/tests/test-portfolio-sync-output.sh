@@ -152,6 +152,65 @@ FLEX_UNCONFIGURED_LEGACY='{"sync_targets":[],"pull":{"status":"ok","detail":"dow
   "flex_pull":{"success":false,"error":"Not configured"}}'
 check "legacy unconfigured sentinel is not logged as an error" "$FLEX_UNCONFIGURED_LEGACY" "" "flex_pull: error"
 
+# Review round 3, M1: PpClient skips items at four sites that never touch errors[]
+# (unmapped account, null portfolio, null account key, unhandled item type), so
+# {0 imported, N skipped, errors: []} is the dominant drop mode. It rendered
+# byte-identical to a healthy run on both surfaces.
+FLEX_IMPORT_ALL_SKIPPED='{"sync_targets":[{"name":"Warchest","status":"updated","delta":0}],
+  "pull":{"status":"ok","detail":"downloaded"},
+  "push":{"status":"ok","detail":"uploaded"},
+  "flex_import":{"status":"ok","trades_imported":0,"dividends_imported":0,
+    "other_imported":0,"securities_created":0,"items_skipped":37,"errors":[]}}'
+check "a total drop is reported" "$FLEX_IMPORT_ALL_SKIPPED" "flex_import: error (nothing imported - all 37 items skipped)"
+check "a total drop is never reported as ok" "$FLEX_IMPORT_ALL_SKIPPED" "" "flex_import: ok"
+check "a total drop keeps the target lines" "$FLEX_IMPORT_ALL_SKIPPED" "Warchest: updated (delta=0)"
+
+# The other side of the boundary: skipping some items alongside a real import is
+# normal (duplicates, already-held positions) and must stay a success.
+FLEX_IMPORT_PARTIAL_SKIP='{"sync_targets":[],
+  "pull":{"status":"ok","detail":"downloaded"},
+  "flex_import":{"status":"ok","trades_imported":2,"dividends_imported":0,
+    "other_imported":0,"securities_created":0,"items_skipped":5,"errors":[]}}'
+check "a partial skip alongside a real import stays a success" "$FLEX_IMPORT_PARTIAL_SKIP" "flex_import: ok ()"
+check "a partial skip is not reported as an error" "$FLEX_IMPORT_PARTIAL_SKIP" "" "flex_import: error"
+
+# Nothing skipped and nothing imported is a no-op statement, not a failure.
+FLEX_IMPORT_EMPTY='{"sync_targets":[],
+  "flex_import":{"status":"ok","trades_imported":0,"dividends_imported":0,
+    "other_imported":0,"securities_created":0,"items_skipped":0,"errors":[]}}'
+check "an empty statement is not a total drop" "$FLEX_IMPORT_EMPTY" "flex_import: ok ()"
+check "an empty statement is not reported as an error" "$FLEX_IMPORT_EMPTY" "" "flex_import: error"
+
+# Review round 3, M2: the shell parser retypes the sentinel literal because bash
+# cannot import it, so nothing tied the two sides together. Rewording
+# NOT_CONFIGURED_ERROR left all 67 vitest tests and this file green, because both
+# test files import the real constant while the check above compares a literal to
+# a literal. The one line that closes it: this file is the JS side's view of the
+# same string, so assert the JS constant equals the literal the parser matches on.
+# If the wording ever changes, this fails instead of the M4 regression going green.
+SENTINEL_FROM_JS="$(cd "$REPO_ROOT/modules/portfolio-tracker" && node --input-type=module -e '
+    import { NOT_CONFIGURED_ERROR } from "./src/ibkr_flex.js";
+    process.stdout.write(NOT_CONFIGURED_ERROR);
+')"
+check "the shell sentinel and the JS constant are the same string" \
+    "{\"sync_targets\":[],\"flex_pull\":{\"success\":false,\"error\":\"$SENTINEL_FROM_JS\"}}" \
+    "pull: ? ()" "flex_pull: error"
+
+# The direct form of the same check: the parser's literal and the JS constant must
+# be the identical string. The check above proves the behaviour end to end; this
+# one names the drift directly, so a reword says which side moved.
+PARSER_SENTINEL="$(sed -n "s/.*detail == '\\([^']*\\)':.*/\\1/p" "$SYNC_SCRIPT" | head -1)"
+if [ "$PARSER_SENTINEL" != "$SENTINEL_FROM_JS" ]; then
+    echo "FAIL: the shell parser matches on '$PARSER_SENTINEL' but NOT_CONFIGURED_ERROR is '$SENTINEL_FROM_JS'" >&2
+    echo "      the M4 not-configured guard would silently stop working" >&2
+    FAILURES=$((FAILURES + 1))
+fi
+
+if [ -z "$SENTINEL_FROM_JS" ]; then
+    echo "FAIL: could not read NOT_CONFIGURED_ERROR from the JS module" >&2
+    FAILURES=$((FAILURES + 1))
+fi
+
 if [ "$FAILURES" -ne 0 ]; then
     echo "FAIL: $FAILURES check(s) failed" >&2
     exit 1

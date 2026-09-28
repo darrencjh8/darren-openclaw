@@ -77,6 +77,20 @@ try:
             print(f'  {leg}: error ({n} item{"" if n == 1 else "s"} failed to import - '
                   f'{"; ".join(str(e) for e in item_errors)})')
             continue
+        # The silent-drop route: PpClient skips items at four sites that never
+        # touch errors[] (PpClient.java), so {0 imported, N skipped, errors: []}
+        # rendered byte-identical to a healthy run. Only flag a total drop, since
+        # skipping some items alongside a real import is normal.
+        if leg == 'flex_import' and not item_errors:
+            # Parenthesised, not backslash-continued: the heredoc is quoted so the
+            # backslash would reach Python as a literal continuation character.
+            imported = ((r.get('trades_imported') or 0)
+                        + (r.get('dividends_imported') or 0)
+                        + (r.get('other_imported') or 0))
+            skipped = r.get('items_skipped') or 0
+            if imported == 0 and skipped > 0:
+                print(f'  {leg}: error (nothing imported - all {skipped} item{"" if skipped == 1 else "s"} skipped)')
+                continue
         print(f'  {leg}: {status if status is not None else "?"} ({detail})')
 except Exception as e:
     print(f'  (parse error: {e})')
