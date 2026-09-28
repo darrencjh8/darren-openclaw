@@ -25,8 +25,14 @@ if [ "$HTTP_CODE" != "200" ]; then
     exit 1
 fi
 
-# Log a compact summary
-echo "$BODY" | python3 -c "
+# Log a compact summary.
+# The program is read by a QUOTED heredoc, so bash performs no expansion and no
+# quote removal on it, and it reaches python3 byte-identical. Passing the same
+# text through `python3 -c "..."` mangles every quote inside it: double-quoted
+# dict keys arrive as bare identifiers and raise SyntaxError, which the
+# `2>/dev/null || true` below swallows, so the script would exit 0 having
+# printed nothing at all. Keep the quoting out of bash's reach.
+read -r -d '' PARSE_PROG <<'PARSE_EOF' || true
 import sys, json
 try:
     data = json.load(sys.stdin)
@@ -36,8 +42,13 @@ try:
         status = t.get('status', '?')
         delta = t.get('delta', 0)
         print(f'  {name}: {status} (delta={delta})')
+    for leg in ('pull', 'push'):
+        r = data.get(leg) or {}
+        print(f'  {leg}: {r.get("status", "?")} ({r.get("detail", "")})')
 except Exception as e:
     print(f'  (parse error: {e})')
-" 2>/dev/null || true
+PARSE_EOF
+
+echo "$BODY" | python3 -c "$PARSE_PROG" 2>/dev/null || true
 
 log "sync complete"

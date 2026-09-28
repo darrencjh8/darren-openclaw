@@ -135,6 +135,8 @@ jobs:
               run: bash modules/hermes/tests/test-refresh-codex-router-checkout.sh
             - name: Test docker-compose hermes env vars
               run: bash modules/hermes/tests/test-docker-compose-env.sh
+            - name: Test portfolio-sync output
+              run: bash modules/hermes/tests/test-portfolio-sync-output.sh
             - name: Test Hermes Slack platform wiring
               run: python -m unittest modules.hermes.tests.test_slack_platform -v
             - name: Test Hermes log-issue triage

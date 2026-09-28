@@ -32,14 +32,32 @@ export function formatSyncResult(raw) {
         lines.push(`⚠️ ${e.name || e.account_id}: ${e.error || e.result?.error || "unknown"}`);
     }
 
+    // OneDrive round-trip failures. A dead grant reaches here as
+    // { status: "error" }, and reporting that round trip as a success is the
+    // defect this guards: the sheet is then written from a stale local file.
+    // Kept out of `lines` deliberately — `lines` carries the sync header, and
+    // the analysis body below already includes its own, so prepending it would
+    // duplicate the header the tests pin.
+    const onedriveErrs = [];
+    for (const leg of ["pull", "push"]) {
+        const r = raw[leg];
+        if (r && r.status === "error") {
+            onedriveErrs.push(`⚠️ OneDrive ${leg}: ${r.detail || "failed"}`);
+        }
+    }
+
     // Pre-computed analysis block (the authoritative portfolio display)
     // Return it directly — analysis.message_body already includes its own sync header.
+    // The OneDrive error lines are still prepended, because this early return is
+    // the normal path after a taxonomy export and would otherwise hide them.
     if (raw.analysis?.message_body) {
-        return raw.analysis.message_body;
+        return onedriveErrs.length
+            ? [...onedriveErrs, raw.analysis.message_body].join("\n")
+            : raw.analysis.message_body;
     }
 
     // Fallback: no analysis available, show bare sync status
-    return lines.join("\n");
+    return [...onedriveErrs, ...lines].join("\n");
 }
 
 function createTools(server, registry) {
