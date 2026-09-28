@@ -15,7 +15,7 @@ agent calls, so they are written exactly as they appear in code.
 | **LiteLLM** | The proxy library the `codex-router` service runs on, which multiplexes several provider accounts behind one OpenAI-compatible endpoint. |
 | **codex-router** | A **separate repository**, `darrencjh8/codex-router`, checked out into `modules/codex-router` at deploy time. It is not part of this repository and is absent from a plain clone. |
 | **opencode** | An agent CLI. `opencode-sidecar` runs `opencode serve` in a container to provide the keyless `opencode-free/` model lane. |
-| **MCP** | Model Context Protocol. Both trackers expose a Streamable HTTP MCP server at `/mcp` in addition to their REST `/tools/*` endpoints, so chat requests and the automated email workflow share one tool surface. |
+| **MCP** | Model Context Protocol. Both trackers expose a Streamable HTTP MCP server at `/mcp` alongside their REST `/tools/*` endpoints. **The two surfaces are not interchangeable** — portfolio-tracker publishes 22 REST tools but only 12 MCP tools with wholly different, `portfolio_`-prefixed names, and expense-tracker has `search_facts` and `compact_facts` on MCP only. See [the tool surfaces below](#tool-surfaces-rest-vs-mcp) before calling a tool by name. |
 | **Spec-Kit** | The scaffolding in `.specify/` that produces the `specs/NNN-name/` layout: `spec.md`, `plan.md`, `tasks.md`. |
 
 ## Email pipeline
@@ -69,7 +69,10 @@ through the REST endpoint or a quick command rather than as an MCP tool:
 `log_decision` · `notify_user`
 
 `search_facts` and `compact_facts` exist **only** on the MCP surface, so they
-are missing from the REST list by design rather than by accident.
+are missing from the REST list by design rather than by accident. The reverse also
+happens: the REST registry has a `search_memory` tool that the MCP surface
+exposes under the name `search_facts` instead, so a name from one surface will
+not necessarily resolve on the other.
 
 `reconcile_transaction` clears Actual Budget transactions (`cleared=true`, with
 an optional statement reference appended to the notes); `unclear_transaction`
@@ -109,9 +112,11 @@ How they map to the REST names:
 
 `parse_ibkr_flex_query` · `extract_pdf_text` · `extract_email_content` ·
 `fetch_pp_accounts` · `fetch_pp_securities` · `fetch_pp_portfolio` ·
+`query_pp_security` · `query_pp_taxonomies` · `insert_pp_transaction` ·
 `update_pp_balance` · `update_google_sheet` · `check_duplicate` ·
 `ask_user_confirmation` · `log_decision` · `notify_user` · `learn_mapping` ·
-`get_pp_status`
+`learn_fact` · `search_memory` · `get_pp_status` · `pp-pull` · `pp-push` ·
+`pp-sync-all`
 
 - **pp-cli** — the Java CLI in `modules/portfolio-tracker/pp-cli/` that performs
   every Portfolio Performance write, built against the Portfolio Performance
