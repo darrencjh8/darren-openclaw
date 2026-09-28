@@ -148,13 +148,28 @@ return {
 ### 2. `portfolio-sync.sh` — print the round-trip status
 
 The `pull` and `push` objects are already in the response body; the existing parse block just does
-not print them. Extend that block with the same loop:
+not print them. Extend that block with the same loop — **inside the quoted heredoc, not inside the
+`python3 -c "` string** (the hazard is spelled out immediately below, and the Critical round-4
+finding was this snippet being read as the code to write):
 
 ```python
-    for leg in ('pull', 'push'):
-        r = data.get(leg) or {}
-        print(f'  {leg}: {r.get("status", "?")} ({r.get("detail", "")})')
+# this text lives between `read -r -d '' PARSE_PROG <<'PARSE_EOF' || true`
+# and `PARSE_EOF`, and is handed to python as one argument: python3 -c "$PARSE_PROG".
+# Every remote leg goes in this tuple, not just the two below: pull, push,
+# flex_pull, flex_import, taxonomy_export, portfolio_status. A leg the operator
+# cannot see failing is the #627 defect, and enumerating only the legs one already
+# knew about is how this branch produced four rounds of it. tests/leg-coverage.test.js
+# pins this tuple against the payload the producer actually returns.
+for leg in ('pull', 'push', 'flex_pull', 'flex_import', 'taxonomy_export',
+            'portfolio_status'):
+    r = data.get(leg) or {}
+    print(f'  {leg}: {r.get("status", "?")} ({r.get("detail", "")})')
 ```
+
+Written here the way `python3 -c "` would deliver it — that is, with the double quotes stripped —
+this loop is a `SyntaxError` (`r.get(status, ?)`), and `2>/dev/null || true` would swallow it, so the
+script would exit 0 having printed nothing. Pasting the plain form above into that shell string is
+precisely the defect; the heredoc is the fix, not a style preference.
 
 **The block must move out of the shell string, and this is a structural change, not a quoting
 one.** `portfolio-sync.sh:29` opens `python3 -c "`, so the Python program is a shell argument and
