@@ -383,7 +383,8 @@ export function parseBankMovement(text, { senderBank = null, receivedAt } = {}) 
   // alert that names the SOURCE account of an own-account transfer, and a
   // receiving-bank alert never can (it names the sender as a person). Losing it
   // means the pair cannot link — the receiving side holds and this side books
-  // unlinked, so the transfer is booked twice or not at all (#633).
+  // unlinked, so the transfer is booked twice or not at all. That is the
+  // source-account-alert half of #598, tracked on its own at #641.
   //
   // It also has to survive being FORWARDED, which is how a user gets it into
   // the tracker's own mailbox when the sending bank does not alert it. A
