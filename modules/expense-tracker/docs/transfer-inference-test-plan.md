@@ -19,22 +19,22 @@ You’ve successfully made a bill payment.
 
 Date and Time: 01 Sep 01:05 (SGT)
 Amount: SGD 1299.29
-From: Vista (A/C ending 9302)
-To: UOB CREDIT CARDS (Ref ending 4605)
+From: Vista (A/C ending 1777)
+To: UOB CREDIT CARDS (Ref ending 1888)
 ```
 
 Expected normalized movement:
 
 ```text
-source: Epsilon Vista, suffix 9302
-destination: UOB CREDIT CARDS, suffix 4605
+source: Epsilon Vista, suffix 1777
+destination: UOB CREDIT CARDS, suffix 1888
 amount: -129929 cents
 currency: SGD
 time: 2026-09-01T01:05:00+08:00
 reference: 17881959177693481349
 ```
 
-If `UOB CREDIT CARDS` plus suffix `4605` resolves to an open Actual account, send an Actual transfer from `Epsilon Vista` to that account. If destination account identity is absent or ambiguous, do not guess a transfer; send it through review/normal fallback.
+If `UOB CREDIT CARDS` plus suffix `1888` resolves to an open Actual account, send an Actual transfer from `Epsilon Vista` to that account. If destination account identity is absent or ambiguous, do not guess a transfer; send it through review/normal fallback.
 
 The same generic flow must support these sanitized fixture variants:
 
@@ -60,8 +60,8 @@ OCBC outgoing alert:
 
 ```text
 Amount : SGD 14.25
-From your account : 111 Account (-869001)
-To account : Example Trust (-310980) at TRUST BANK SINGAPORE LIMITED
+From your account : 111 Account (-166600)
+To account : Example Trust (-222000) at TRUST BANK SINGAPORE LIMITED
 Date of Transfer : 01 Sep 2026
 Time of Transfer : 01.06 AM SGT
 Reference number : 2609010016652878
@@ -71,7 +71,7 @@ Trust incoming alert:
 
 ```text
 You have received SGD 14.25 from OverseaChinese Banking Corporation Ltd
-A/C ending 9001 on 01 Sep 2026 01:06 SGT.
+A/C ending 6600 on 01 Sep 2026 01:06 SGT.
 ```
 
 Expected result: one Actual transfer between `OCBC 111` and `Zeta Card`; the second alert is recorded as its counterpart and sends no second transaction to Actual.
@@ -83,7 +83,7 @@ The following PayNow transfer has been made to SIONG93 LLP using their
 Unique Entity Number (UEN) T20LL0428K289.
 
 Amount : SGD 7.30
-From your account : 111 Account (-869001)
+From your account : 111 Account (-166600)
 Description : T20LL0428K289QLW511452054
 ```
 
@@ -95,7 +95,7 @@ Expected result: ordinary outgoing expense from `OCBC 111`, with `SIONG93 LLP` a
 A deposit was made in your account.
 Time of deposit : 11:59 PM
 Amount : SGD 0.20
-Account that money was deposited in : (-869001)
+Account that money was deposited in : (-166600)
 Reference :
 ```
 
@@ -105,7 +105,7 @@ Expected normalized movement:
 direction: incoming
 amount: +20 cents
 currency: SGD
-own account: OCBC, suffix 869001
+own account: OCBC, suffix 166600
 counterparty: unknown
 reference: empty
 ```
@@ -125,11 +125,11 @@ Add a pure parser that emits normalized movement evidence when an alert has a su
   amount_cents: -1425 | 1425,
   currency: "SGD",
   occurred_at: "2026-09-01T01:06:00+08:00",
-  own_account: { bank: "OCBC", suffix: "869001" },
+  own_account: { bank: "OCBC", suffix: "166600" },
   counterparty: {
     name: "Example Trust",
     bank: "TRUST BANK SINGAPORE LIMITED",
-    suffix: "310980",
+    suffix: "222000",
   },
   reference_number: "2609010016652878",
   merchant_display_name: null,
@@ -150,10 +150,10 @@ Date of Payment:
 Date and Time:
 Time:
 Time of Payment:
-(A/C ending 5750)
-(Ref ending 3255)
-(-869001)
-A/C ending 9001
+(A/C ending 7222)
+(Ref ending 7111)
+(-166600)
+A/C ending 6600
 ```
 
 For a date without a year, derive the year in `Asia/Singapore` from the email received timestamp, with an explicit year-boundary test. Do not use container-local time. Time parsing accepts `01:05`, `01:05 AM`, `01:05 am`, and `01.05 AM` with an explicit timezone marker where present.
@@ -171,16 +171,16 @@ For every alert, fetch the live Actual account list and normalize each account n
 Supported verified registry facts, used only as deterministic fallback:
 
 ```text
-Account ending 869001 belongs to OCBC 111
-Trust Bank Singapore Limited account ending 310980 belongs to Zeta Card
+Account ending 166600 belongs to OCBC 111
+Trust Bank Singapore Limited account ending 222000 belongs to Zeta Card
 Trust Bank alert recipient maps to Zeta Card account
-DBS account ending 9302 belongs to Epsilon Vista
-UOB CREDIT CARDS account ending 4605 belongs to UOB Card
-CITI CREDIT CARDS account ending 4756 belongs to Citi Card
-OCBC Visa Card account ending 1149 belongs to OCBC Visa Card
+DBS account ending 1777 belongs to Epsilon Vista
+UOB CREDIT CARDS account ending 1888 belongs to UOB Card
+CITI CREDIT CARDS account ending 2666 belongs to Citi Card
+OCBC Visa Card account ending 4400 belongs to OCBC Visa Card
 ```
 
-For the DBS layout, resolve the source by verified DBS + suffix `9302`; do not require the live Actual account name to contain the literal string `DBS`. `Vista` and `Epsilon Vista` must be normalized equivalent account labels only after suffix and sender-bank validation. For destination cards, issuer plus suffix is identity evidence; labels such as `CITI CREDIT CARDS` and card product text are not enough without suffix mapping.
+For the DBS layout, resolve the source by verified DBS + suffix `1777`; do not require the live Actual account name to contain the literal string `DBS`. `Vista` and `Epsilon Vista` must be normalized equivalent account labels only after suffix and sender-bank validation. For destination cards, issuer plus suffix is identity evidence; labels such as `CITI CREDIT CARDS` and card product text are not enough without suffix mapping.
 
 Rules:
 
@@ -193,7 +193,7 @@ Rules:
 7. Multiple candidates are unresolved.
 8. Recipient display names such as `Example Trust` are not account identity.
 
-`9001` may resolve to account suffix `869001` only if it is the unique OCBC account with that last-four suffix. Do not persist a new alias based on one alert.
+`6600` may resolve to account suffix `166600` only if it is the unique OCBC account with that last-four suffix. Do not persist a new alias based on one alert.
 
 For a receiving-bank alert with no destination account number, use an explicit verified recipient-account mapping only. Sender domain alone is insufficient when multiple accounts at that bank exist.
 
@@ -426,14 +426,14 @@ PASS: Missing required account evidence returns null.
 
 ```text
 PASS: Previously unseen card account in live Actual context resolves without registry when account name contains matching bank + suffix.
-PASS: Full suffix `869001` resolves OCBC 111.
-PASS: `9001` resolves OCBC 111 only when it uniquely matches that bank's last four digits.
-PASS: `9001` is unresolved when two OCBC accounts match.
-PASS: Exact Trust Bank + `310980` resolves Zeta Card.
-PASS: Exact DBS + `9302` resolves Epsilon Vista even if live Actual name is `Vista`.
-PASS: Exact UOB CREDIT CARDS + `4605` resolves UOB Card only when configured and open.
-PASS: Exact CITI CREDIT CARDS + `4756` resolves Citi Card only when configured and open.
-PASS: Exact OCBC card issuer + last-four `1149` resolves its card only when configured and open.
+PASS: Full suffix `166600` resolves OCBC 111.
+PASS: `6600` resolves OCBC 111 only when it uniquely matches that bank's last four digits.
+PASS: `6600` is unresolved when two OCBC accounts match.
+PASS: Exact Trust Bank + `222000` resolves Zeta Card.
+PASS: Exact DBS + `1777` resolves Epsilon Vista even if live Actual name is `Vista`.
+PASS: Exact UOB CREDIT CARDS + `1888` resolves UOB Card only when configured and open.
+PASS: Exact CITI CREDIT CARDS + `2666` resolves Citi Card only when configured and open.
+PASS: Exact OCBC card issuer + last-four `4400` resolves its card only when configured and open.
 PASS: `Example Trust` display name alone does not resolve Zeta Card.
 PASS: Card known only by generic Actual name with no matching suffix remains unresolved until explicit verified registry mapping exists.
 PASS: Closed accounts do not resolve.
@@ -445,11 +445,11 @@ PASS: Cross-bank suffix matches do not resolve.
 ```text
 PASS: OCBC outgoing first creates one transfer command.
 PASS: Trust incoming second sends no Actual command and is marked counterpart-deduplicated.
-PASS: Trust incoming alert resolves source OCBC 9001 to OCBC 111 only through unique bank+suffx identity, never through a `maps to ... payee` memory fact.
-PASS: DBS bill payment from Vista (`9302`) to UOB CREDIT CARDS (`4605`) sends one transfer command when both accounts resolve.
-PASS: Same DBS bill payment with missing or ambiguous UOB `4605` mapping sends no transfer command and enters review/normal fallback.
-PASS: Epsilon Vista -> Citi Credit Cards sends one transfer command when Citi `4756` resolves uniquely.
-PASS: OCBC 111 -> OCBC Visa card sends one transfer command when card `1149` resolves uniquely.
+PASS: Trust incoming alert resolves source OCBC 6600 to OCBC 111 only through unique bank+suffx identity, never through a `maps to ... payee` memory fact.
+PASS: DBS bill payment from Vista (`1777`) to UOB CREDIT CARDS (`1888`) sends one transfer command when both accounts resolve.
+PASS: Same DBS bill payment with missing or ambiguous UOB `1888` mapping sends no transfer command and enters review/normal fallback.
+PASS: Epsilon Vista -> Citi Credit Cards sends one transfer command when Citi `2666` resolves uniquely.
+PASS: OCBC 111 -> OCBC Visa card sends one transfer command when card `4400` resolves uniquely.
 PASS: Either card payment with missing/ambiguous destination mapping sends no transfer command.
 PASS: One-sided OCBC deposit creates one ordinary positive transaction in OCBC 111 and sends no transfer payee.
 PASS: One-sided OCBC deposit with same amount/time as an internal transfer is not counterpart-deduplicated.

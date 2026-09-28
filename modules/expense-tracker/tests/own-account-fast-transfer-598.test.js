@@ -26,8 +26,8 @@ We have received your request to make the following transfer:
 Date of Transfer   : 23 Sep 2026
 Time of Transfer   : 12.36 AM SGT
 Amount             : SGD 1000.00
-From your account  : 360 Account (-869001)
-To account         : Darren POSB (-804380) at DBS BANK LTD
+From your account  : 360 Account (-166600)
+To account         : Darren POSB (-155500) at DBS BANK LTD
 Reference number   : 2609230019902668
 `;
 
@@ -38,7 +38,7 @@ Dear Customer,
 
 You have received SGD 1000.00 via FAST transfer on 23 Sep 2026 00:36  SGT.
 From: ACCOUNT HOLDER
-To: Your DBS/ POSB account ending 4380
+To: Your DBS/ POSB account ending 5500
 `;
 
 // ── Account 1: the DBS received-transfer sentence ───────────────
@@ -56,14 +56,14 @@ describe("DBS received-transfer sentence (#598)", () => {
             amount_cents: 100000,
             currency: "SGD",
             occurred_at: "2026-09-23T00:36:00+08:00",
-            own_account: { bank: "DBS", suffix: "4380" },
+            own_account: { bank: "DBS", suffix: "5500" },
             counterparty: { name: "ACCOUNT HOLDER", suffix: null },
         });
         // The reference is what ties this leg to the OCBC request.
         expect(movement.reference_number).toBe("012609230019902668EPS7678794");
     });
 
-    it("reads the bare `ending 4380` form without a masked or bracketed suffix", () => {
+    it("reads the bare `ending 5500` form without a masked or bracketed suffix", () => {
         const movement = parseBankMovement(
             `Transaction Ref: 012609230019902668EPS7678794
 
@@ -101,7 +101,7 @@ To: Your DBS/ POSB account ending 1234
 // ── Account 2: the OCBC destination resolves ────────────────────
 
 describe("OCBC transfer-request destination resolution (#598)", () => {
-    it("keeps the parenthesised (-804380) destination suffix", () => {
+    it("keeps the parenthesised (-155500) destination suffix", () => {
         const movement = parseBankMovement(OCBC_TRANSFER_REQUEST, {
             senderBank: "OCBC",
             receivedAt: "2026-09-22T16:36:43.000Z",
@@ -110,8 +110,8 @@ describe("OCBC transfer-request destination resolution (#598)", () => {
         expect(movement).toMatchObject({
             direction: "outgoing",
             amount_cents: -100000,
-            own_account: { bank: "OCBC", suffix: "869001" },
-            counterparty: { name: "Darren POSB", bank: "DBS", suffix: "804380" },
+            own_account: { bank: "OCBC", suffix: "166600" },
+            counterparty: { name: "Darren POSB", bank: "DBS", suffix: "155500" },
             reference_number: "2609230019902668",
         });
     });
@@ -135,11 +135,11 @@ describe("the two legs become one transfer pair (#598)", () => {
         { id: "p-posb", name: "POSB Cashback", transfer_acct: "posb-cashback" },
         { id: "p-sc", name: "SC Bonus Saver", transfer_acct: "sc-bonus" },
     ];
-    // 4380 is POSB Cashback's own suffix, learned from this very alert; the
+    // 5500 is POSB Cashback's own suffix, learned from this very alert; the
     // alias names the "Darren POSB" product the OCBC alert writes.
     const facts = [
-        { text: "Account ending 869001 belongs to OCBC 360", score: 1 },
-        { text: "Account ending 4380 belongs to POSB Cashback", score: 1 },
+        { text: "Account ending 166600 belongs to OCBC 360", score: 1 },
+        { text: "Account ending 5500 belongs to POSB Cashback", score: 1 },
         { text: "Darren POSB is a POSB Cashback account", score: 1 },
         { text: "Legal name: ACCOUNT HOLDER", score: 1 },
     ];
@@ -189,7 +189,7 @@ describe("the two legs become one transfer pair (#598)", () => {
             receivedAt: "2026-09-22T16:36:44.000Z",
         });
 
-        // Credited account is POSB Cashback (from the DBS "ending 4380" mask).
+        // Credited account is POSB Cashback (from the DBS "ending 5500" mask).
         expect(phase2.account_id).toBe("posb-cashback");
         expect(phase2.amount_cents).toBe(100000);
         // The DBS notice names only the SENDER'S NAME, never which of the
@@ -226,22 +226,22 @@ describe("the two legs become one transfer pair (#598)", () => {
         expect(phase2._hold_unresolved_transfer).toBeUndefined();
     });
 
-    it("learns the (-804380) destination mapping, so the next alert resolves without help", async () => {
+    it("learns the (-155500) destination mapping, so the next alert resolves without help", async () => {
         const { phase2 } = await orchestrate(OCBC_TRANSFER_REQUEST, {
             senderBank: "OCBC",
             receivedAt: "2026-09-22T16:36:43.000Z",
         });
 
-        // Only the DESTINATION suffix is new ground truth: 869001 is already a
-        // stored fact, so it is not re-learned, while 804380 is not.
+        // Only the DESTINATION suffix is new ground truth: 166600 is already a
+        // stored fact, so it is not re-learned, while 155500 is not.
         expect(phase2._suffix_mappings).toEqual([
-            { suffix: "804380", accountName: "POSB Cashback" },
+            { suffix: "155500", accountName: "POSB Cashback" },
         ]);
         // And the fact is written in the canonical grammar the readers parse.
         const learned = phase2._suffix_mappings.map(
             (m) => `Account ending ${m.suffix} belongs to ${m.accountName}`,
         );
-        expect(learned).toEqual(["Account ending 804380 belongs to POSB Cashback"]);
+        expect(learned).toEqual(["Account ending 155500 belongs to POSB Cashback"]);
     });
 
     it("holds the leg when the destination cannot be resolved into an own account", async () => {
@@ -257,7 +257,7 @@ describe("the two legs become one transfer pair (#598)", () => {
                 if (name === "search_memory")
                     return {
                         results: [
-                            { text: "Account ending 869001 belongs to OCBC 360", score: 1 },
+                            { text: "Account ending 166600 belongs to OCBC 360", score: 1 },
                             { text: "Legal name: ACCOUNT HOLDER", score: 1 },
                         ],
                     };
@@ -312,8 +312,8 @@ describe("books the pair and links the existing row on the far side (#598)", () 
         { id: "p-misc", name: "Misc", transfer_acct: null },
     ];
     const facts = [
-        { text: "Account ending 869001 belongs to OCBC 360", score: 1 },
-        { text: "Account ending 4380 belongs to POSB Cashback", score: 1 },
+        { text: "Account ending 166600 belongs to OCBC 360", score: 1 },
+        { text: "Account ending 5500 belongs to POSB Cashback", score: 1 },
         { text: "Darren POSB is a POSB Cashback account", score: 1 },
     ];
     // Both rows as Actual holds them in the incident.

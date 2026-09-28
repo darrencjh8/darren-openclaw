@@ -8,7 +8,7 @@
  * The two legs are ONE movement, and each has its own distinct cause:
  *
  * 1. uid 968 (the Trust credit). The deterministic parser resolved the whole
- *    pair correctly — OCBC 360 is the counterparty (suffix 9001, which memory
+ *    pair correctly — OCBC 360 is the counterparty (suffix 6600, which memory
  *    maps to OCBC 360), Trust Bank is the credited account (from the stored
  *    "Trust alert recipient maps to Trust Bank account" fact) — and emitted a
  *    ready `_transfer` reservation. Phase 2 then discarded it: back then the
@@ -21,9 +21,9 @@
  *    flipped to `Misc` + `_hold_unresolved_transfer` (issue #575).
  *
  * 2. uid 969 (the OCBC request). Held for a different and correct reason: the
- *    destination `Darren Trust (-310980)` had no stored suffix fact, so the
+ *    destination `Darren Trust (-222000)` had no stored suffix fact, so the
  *    destination account could not be verified as one of yours. The fact now
- *    exists (`Account ending 310980 belongs to Trust Bank`), so the leg
+ *    exists (`Account ending 222000 belongs to Trust Bank`), so the leg
  *    resolves. This test pins that it resolves, and that the safety gate still
  *    refuses when the fact is absent.
  *
@@ -41,7 +41,7 @@ import { parseBankMovement } from "../src/bank-movement.js";
 // ── Production bodies ───────────────────────────────────────────
 
 /** Email uid 968 — Trust "KACHING. You've got a transfer". */
-const TRUST_INBOUND_TRANSFER = `💰❤️🎉 Sweet! You have received SGD 6.48 from OverseaChinese Banking Corporation Ltd A/C ending 9001 on 27 Sep 2026 11:49 SGT. For more info, please contact us via Trust App.`;
+const TRUST_INBOUND_TRANSFER = `💰❤️🎉 Sweet! You have received SGD 6.48 from OverseaChinese Banking Corporation Ltd A/C ending 6600 on 27 Sep 2026 11:49 SGT. For more info, please contact us via Trust App.`;
 
 /** Email uid 969 — OCBC "We have processed your funds transfer request". */
 const OCBC_TRANSFER_REQUEST = `Dear Valued Customer
@@ -51,8 +51,8 @@ We have received your request to make the following transfer:
 Date of Transfer   : 27 Sep 2026
 Time of Transfer   : 11.49 AM SGT
 Amount             : SGD 6.48
-From your account  : 360 Account (-869001)
-To account         : Darren Trust (-310980) at TRUST BANK SINGAPORE LIMITED
+From your account  : 360 Account (-166600)
+To account         : Darren Trust (-222000) at TRUST BANK SINGAPORE LIMITED
 Reference number   : 2609270010559562
 `;
 
@@ -79,9 +79,9 @@ const payees = [
 
 /** The stored facts that made this pair resolvable on 2026-09-27. */
 const facts = [
-    { text: "Account ending 869001 belongs to OCBC 360", score: 1 },
-    { text: "Account ending 9001 belongs to OCBC 360", score: 1 },
-    { text: "Account ending 310980 belongs to Trust Bank", score: 1 },
+    { text: "Account ending 166600 belongs to OCBC 360", score: 1 },
+    { text: "Account ending 6600 belongs to OCBC 360", score: 1 },
+    { text: "Account ending 222000 belongs to Trust Bank", score: 1 },
     { text: "Trust alert recipient maps to Trust Bank account", score: 1 },
     { text: "OCBC 360 is a bank account", score: 1 },
     { text: "Trust Bank is a bank account", score: 1 },
@@ -174,7 +174,7 @@ describe("uid 968 Trust inbound transfer credits Trust Bank as a transfer", () =
             counterparty: {
                 name: "OverseaChinese Banking Corporation Ltd",
                 bank: "OCBC",
-                suffix: "9001",
+                suffix: "6600",
             },
             recipient_bank: "Trust",
         });
@@ -271,7 +271,7 @@ describe("uid 968 Trust inbound transfer credits Trust Bank as a transfer", () =
 
 // ── The OCBC request leg (uid 969) ──────────────────────────────
 
-describe("uid 969 OCBC transfer request books once 310980 is known", () => {
+describe("uid 969 OCBC transfer request books once 222000 is known", () => {
     it("resolves the destination and books the outgoing leg as a transfer", async () => {
         const { phase2, result } = await orchestrate(OCBC_TRANSFER_REQUEST, {
             senderBank: "OCBC",
@@ -296,13 +296,13 @@ describe("uid 969 OCBC transfer request books once 310980 is known", () => {
 
     it("still holds when the destination suffix has no fact", async () => {
         // Exactly the production state that produced the hold: drop the
-        // 310980 fact and the destination cannot be verified as the holder's
+        // 222000 fact and the destination cannot be verified as the holder's
         // own, so the row must still be held rather than guessed at.
         const { phase2 } = await orchestrate(OCBC_TRANSFER_REQUEST, {
             senderBank: "OCBC",
             receivedAt: "2026-09-27T03:49:46.000Z",
             facts: facts.filter(
-                (f) => !f.text.includes("310980"),
+                (f) => !f.text.includes("222000"),
             ),
         });
 
@@ -437,7 +437,7 @@ describe("uid 968 only parses because the extractor flattens the bank's wrap", (
     // The bank's text/plain part wraps mid-counterparty. The exact column is
     // not load-bearing (and not measurable here, the leading emoji has no
     // fixed width); what matters is only that a newline lands inside the name:
-    //   "...from OverseaChinese Banking Corporation\nLtd A/C ending 9001 on..."
+    //   "...from OverseaChinese Banking Corporation\nLtd A/C ending 6600 on..."
     // The Trust branch's `(.+?)` cannot cross that newline, so the RAW body
     // does not parse. The IMAP path only ever sees the flattened form because
     // `extractEmailContent` collapses `\s+` — and it does so on EVERY return
@@ -456,7 +456,7 @@ describe("uid 968 only parses because the extractor flattens the bank's wrap", (
     // the collapse fails loudly instead of quietly dropping this credit leg
     // off the deterministic path.
     const WRAPPED =
-        "💰❤️🎉 Sweet! You have received SGD 6.48 from OverseaChinese Banking Corporation\nLtd A/C ending 9001 on 27 Sep 2026 11:49 SGT. For more info, please contact us via Trust App.";
+        "💰❤️🎉 Sweet! You have received SGD 6.48 from OverseaChinese Banking Corporation\nLtd A/C ending 6600 on 27 Sep 2026 11:49 SGT. For more info, please contact us via Trust App.";
 
     it("returns null on the raw wrapped body", () => {
         expect(
@@ -493,7 +493,7 @@ describe("uid 968 only parses because the extractor flattens the bank's wrap", (
             amount_cents: 648,
             counterparty: {
                 name: "OverseaChinese Banking Corporation Ltd",
-                suffix: "9001",
+                suffix: "6600",
             },
         });
     });

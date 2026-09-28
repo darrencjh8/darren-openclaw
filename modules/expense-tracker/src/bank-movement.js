@@ -137,8 +137,8 @@ export function suffix(value) {
 }
 
 /**
- * Trailing account digits in a masked alert, e.g. "OCBC 360 ACCOUNT ******9223"
- * or "ACCOUNT HOLDER (********3461)". Bare 4-6 digit runs are deliberately not
+ * Trailing account digits in a masked alert, e.g. "OCBC 360 ACCOUNT ******2444"
+ * or "ACCOUNT HOLDER (********2333)". Bare 4-6 digit runs are deliberately not
  * matched: a reference number must never be read as an account.
  */
 function maskedSuffix(value) {
@@ -337,8 +337,8 @@ export function parseBankMovement(text, { senderBank = null, receivedAt } = {}) 
 
   // DBS inbound FAST transfer notice — no "Amount :" label.
   //   "You have received SGD 1000.00 via FAST transfer on 23 Sep 2026 00:36  SGT.
-  //    From: CHONG JIN HENG
-  //    To: Your DBS/ POSB account ending 4380"
+  //    From: <HOLDER NAME>
+  //    To: Your DBS/ POSB account ending 5500"
   // The credited account is named only by the "To:" mask, so that suffix is the
   // own account. Without this branch the body exits at the `Amount :` guard
   // below, the whole alert falls through to the LLM extractor, and one FAST
@@ -525,7 +525,7 @@ function resolveMappedAccount(evidence, mappings) {
     ).values(),
   ];
   // Dedup by account so two suffix aliases that resolve to the SAME account
-  // (e.g. Beta 360 as both 869001 and 9001) are not treated as ambiguous.
+  // (e.g. Beta 360 as both 166600 and 6600) are not treated as ambiguous.
   return unique.length === 1 ? unique[0] : null;
 }
 

@@ -10,7 +10,7 @@
  *
  * Data is production-derived and redacted: the account/payee IDs and the
  * suffixes below are the real shapes seen in the live `Darren SGD` budget
- * (Ryt Bank ...9223, OCBC 360 ..., Trust Card) with names kept as-is because
+ * (Ryt Bank ...2444, OCBC 360 ..., Trust Card) with names kept as-is because
  * they appear in the alerts' own text.
  */
 import { describe, it, expect } from "vitest";
@@ -30,7 +30,7 @@ const BUDGET = "test-budget";
 // Live-shaped accounts. `transfer_acct` on the payee below points at
 // CLOSED_ACCOUNT_ID, which is what a closed destination looks like.
 const RYT_ACCOUNT_ID = "83a6495d-5990-48c9-a9bd-6766f817dbe6"; // Ryt Bank (source)
-const SC_ACCOUNT_ID = "54708966-8017-4e9b-b151-c0eeda50be89"; // SC Bonus Saver ...6445
+const SC_ACCOUNT_ID = "54708966-8017-4e9b-b151-c0eeda50be89"; // SC Bonus Saver ...2555
 const CLOSED_ACCOUNT_ID = "closed-0000-0000-0000-000000000000";
 
 const LIVE_ACCOUNTS = [
