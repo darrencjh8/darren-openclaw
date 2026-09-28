@@ -399,12 +399,26 @@ export function parseBankMovement(text, { senderBank = null, receivedAt } = {}) 
   const scFast = scFlat.match(
     /From account\s*:\s*(\*+\d+)\s+To account\s*:\s*(\*+\d+)/i,
   );
-  // Gated on the bank, not just the label layout. "From account" / "To account"
-  // is a generic FAST vocabulary: an inbound advice in the same shape would
-  // otherwise be booked outgoing from the recipient's account, inverting the
-  // direction and the leg pairing. Refuse anything this branch cannot vouch for
-  // and let the owning bank's own branch handle it.
-  if (scFast && senderBank === "SC") {
+  // Gated on the SENDING BANK'S OWN SIGNATURE, not on `senderBank` and not on
+  // `bankFromText`.
+  //
+  // `senderBank` is `bankFromSender(from)` — the outer `From:` header, which
+  // for a forwarded advice is the forwarder, not Standard Chartered. That is
+  // exactly the case this branch exists for (the advice is normally forwarded
+  // by hand, because SC does not alert the tracker's own mailbox), so gating on
+  // it would refuse the alert the branch was written to parse.
+  //
+  // `bankFromText(body)` is no better: the real advice carries a
+  // "Payee Bank: DBS" line naming the RECIPIENT's bank, so it resolves to DBS
+  // and would refuse the genuine article. It also matches by alias order, so it
+  // answers "which bank is mentioned", not "which bank sent this".
+  //
+  // The closing line ("Thank you for using Standard Chartered Online Banking")
+  // is the sending bank's own words, present on every advice and retained
+  // verbatim through a forward. "From account" / "To account" is generic FAST
+  // vocabulary, so this is also what stops another bank's inbound advice in the
+  // same shape being booked outgoing from the recipient's account.
+  if (scFast && /Standard\s+Chartered\s+Online\s+Banking/i.test(scFlat)) {
     const [, fromValue, toValue] = scFast;
     const amountText = scFlat.match(/Amount\s*:\s*([\d,.]+)/i)?.[1] || "";
     // No fallback. Every other branch takes its currency from an explicit

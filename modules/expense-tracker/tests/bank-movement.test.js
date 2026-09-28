@@ -469,13 +469,37 @@ Time : 10:00 AM SGT`,
     })).toBeNull();
   });
 
+  // Round 2 caught that the previous gate was on `senderBank`, which production
+  // derives as `bankFromSender(from)` — the outer `From:` header. For a
+  // forwarded advice that is the forwarder, not SC, so the gate refused exactly
+  // the case this branch exists for. `senderBank` is null/unknown here, the
+  // value the production path would actually supply.
+  it("parses a FORWARDED advice whose From: header is not SC", () => {
+    const movement = parseBankMovement(SC_FAST_ADVICE, {
+      senderBank: null, // forwarder's own domain, not a bank in DOMAIN_BANK_MAP
+      receivedAt: "2026-10-01T09:00:00.000Z",
+    });
+    expect(movement).not.toBeNull();
+    expect(movement.direction).toBe("outgoing");
+    expect(movement.own_account.suffix).toBe("6445");
+    expect(movement.counterparty.suffix).toBe("5750");
+    expect(movement.occurred_at).toBe("2026-09-28T10:08:00+08:00");
+    expect(movement.currency).toBe("SGD");
+    expect(movement.amount_cents).toBe(-127500);
+  });
+
   it("does not claim a non-SC alert that happens to use the same label layout", () => {
     // "From account" / "To account" is generic FAST vocabulary. Pre-fix an
     // inbound advice in that shape was booked OUTGOING from the recipient's
     // account, inverting the direction and the leg pairing.
+    //
+    // Both the body signature AND the body mention of a bank are replaced, so
+    // this input satisfies neither possible gate -- it cannot pass merely
+    // because "DBS" is absent, and it cannot pass on a stale signature.
     const otherBank = SC_FAST_ADVICE
-        .replace(/Standard Chartered/g, "Some Bank")
-        .replace(/FAST transaction has been successful/g, "credit received");
+        .replace(/Standard Chartered Online Banking/g, "Some Bank Online Banking")
+        .replace(/Payee Bank:/g, "Counterparty Bank:");
+    expect(otherBank).not.toMatch(/Standard\s+Chartered/i);
     expect(parseBankMovement(otherBank, {
       senderBank: "DBS",
       receivedAt: "2026-09-28T03:14:27.000Z",
