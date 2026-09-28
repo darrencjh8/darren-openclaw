@@ -75,7 +75,18 @@ stays visible in the audit trail.
 - **Status against HEAD (this is load-bearing, not a status note).** At the plan commit, `base..HEAD` differs in **fifteen** files, not one. Steps 1, 2, 3 and 5 of this plan are **already implemented and committed** on `fix/portfolio-onedrive-silent-pull-failure` (HEAD `8c4ac66`). The `python3 -c "` string this plan quotes as the thing to escape no longer exists: `portfolio-sync.sh` now reads its parser from a quoted heredoc. The `mcp-server.js` early return this plan rewrites already assembles `legErrs`/`abortErrs` into `pre` and joins it with the analysis body. **Re-applying any step below to the current tree would delete shipped, tested visibility** — plan round 1 verified this by executing step 3 against HEAD, which rendered the healthy-looking string `"BODY"` for the expired-flex-token, flex-import-total-drop, Sheets-401 and Actual-Budget-abort payloads, where HEAD renders four distinct warning lines. That reproduction is `/tmp/mut/plan_r1_critical.mjs` (exit 1). The steps are kept below as the specification of the landed behaviour, not as instructions to re-run.
 - **Repository test command:** `cd modules/portfolio-tracker && npm ci && npm test` (package.json `"test": "vitest run"`). `npm ci` is required because a fresh worktree has no `node_modules`; a bare `npx vitest run` would fetch a floating vitest instead of the pinned dependency. The shell surface is gated separately by `bash modules/hermes/tests/test-portfolio-sync-output.sh` and linted by `shellcheck modules/hermes/scripts/portfolio-sync.sh modules/hermes/tests/test-portfolio-sync-output.sh`, which CI runs at `.github/workflows/test.yml:117`.
 - **Test files in scope:** `modules/portfolio-tracker/tests/java_bridge.test.js` (existing `describe("pull")` block, lines 343-366), `modules/portfolio-tracker/tests/mcp-server.test.js`, and the new `modules/hermes/tests/test-portfolio-sync-output.sh`.
-- **CI caveat:** the `portfolio-tracker` job in `.github/workflows/test.yml:42-44` carries `continue-on-error: true` ("needs IBKR keys + running services, fixing separately"). That suite is therefore a **local** gate for this change, not a CI gate — CI will stay green even if the corrected assertion regresses. The new hermes shell test is the CI-enforced one, but only once step 5 adds its step to `test.yml`; that edit is part of this change, not something the repo already does.
+- **CI caveat — an earlier revision of this line was false, and false in the reassuring
+  direction. Corrected at plan round 3.** It used to say: "the `portfolio-tracker` job at
+  `.github/workflows/test.yml:42-44` carries `continue-on-error: true` … That suite is therefore a
+  **local** gate for this change, not a CI gate — CI will stay green even if the corrected assertion
+  regresses." Both halves are wrong. The `continue-on-error: true` belongs to the **full** suite
+  job (`test.yml:79`), which needs IBKR keys and live services. The **gating** job is
+  `portfolio-tracker-unit` (`test.yml:59`), which sets no `continue-on-error`, and
+  `tests/ci-gating.test.js` asserts that. `tests/java_bridge.test.js` — the file holding this
+  change's RED/GREEN assertion — runs in that gating job; the comment block at `test.yml:39-46` says
+  so explicitly. So the correct statement is: **this work is enforced by CI**, and the old framing
+  understated the guard by precisely the amount a reader would use to justify skipping it. Do not
+  propagate it. (The hermes shell test is CI-enforced too, via the step 5 edit described there.)
 - **Spec in scope:** `specs/003-portfolio-tracker/spec.md` — "Taxonomy Export" (line ~372) documents that the taxonomy is written to Sheets. It does not specify pull-failure behaviour, so this change adds behaviour the spec does not yet describe.
 - **Tracked issue:** #627.
 
@@ -155,7 +166,17 @@ drops it from `NOT_LEGS` and adds it to `REQUIRED`, so the test now requires the
 permitting its absence. The failing shape is `{error: msg}` with **no `status` key at all** — a
 generic `status: "error"` fixture would not match what the producer emits and would prove nothing.
 
-**Status: implemented, committed `3d32fee` and the following commit, not yet through a code review round.** It is listed here, rather than merged quietly, precisely because it is unreviewed.
+**Status: NOT landed. The work is written and verified but is not in any commit, and this plan is
+the record of it, not a claim that it shipped.** An earlier revision of this line said "implemented,
+committed `3d32fee` and the following commit". That was false and plan round 3 raised it as
+Critical: `3d32fee` is the *taxonomy export* commit and contains no `portfolio_status` at all; the
+R1 work exists only in a stash. Do not read the rest of this plan as evidence that R1 shipped.
+
+**Implementer instruction:** R1 and R2 are the only outstanding work in this plan. Both are held
+out of the commit history on purpose — the pre-commit guard refuses implementation commits while
+the plan gate is open, so they cannot be committed before the plan is approved. Apply R1 and R2
+from the descriptions below, then run the Validation gates. Steps 1, 2, 3 and 5 are already landed
+and must **not** be re-applied.
 
 ### R2. The shell leg tuple needs a test that pins it
 
@@ -164,11 +185,28 @@ It never reads `portfolio-sync.sh`, so the shell tuple is pinned by hand-written
 `test-portfolio-sync-output.sh` only. That asymmetry is why the plan's step-2 comment could claim a
 pin that does not exist.
 
-**Change:** extend `leg-coverage.test.js` (or add a sibling) to assert the tuple in
-`portfolio-sync.sh` names every leg `REQUIRED` names, by reading the shipped script and comparing
-its leg list to the producer's payload keys. This closes the half of the surface that the JS-only
-test cannot see, and it is the test that would have caught R1 on the shell side at the same moment
-it caught it on the JS side.
+**Change:** a **new sibling** `tests/shell-leg-coverage.test.js` reads the shipped
+`portfolio-sync.sh` and compares its leg tuple to the producer's payload keys. (Not an extension of
+`leg-coverage.test.js`: that file imports `formatSyncResult` and is deliberately about the JS
+surface. Merging the two would make the shell assertion depend on the JS module loading.) This
+closes the half of the surface that the JS-only test cannot see, and it is the test that would have
+caught R1 on the shell side at the same moment it caught it on the JS side — plan round 3 verified
+that asymmetry empirically: landing R1 on the JS surface alone, leaving the shell tuple stale, left
+every committed test green.
+
+**Status: NOT landed**, same as R1, for the same reason. The file does not exist in the tree.
+
+**And it must run in CI, or landing it changes nothing.** `leg-coverage.test.js` was, at the time
+of round 3, executed by no gating job — `grep -c leg-coverage .github/workflows/test.yml` was 0.
+A guard nobody runs is not a guard. So this change carries with it the wiring:
+
+- add both `tests/leg-coverage.test.js` and `tests/shell-leg-coverage.test.js` to the
+  `npx vitest run` line in the **gating** `portfolio-tracker-unit` job (`test.yml:59`);
+- add the same two files to `RENDERER_TESTS` in `tests/ci-gating.test.js`, so the guard that
+  enforces the gate is itself covered by the gate.
+
+Verified: with the two files in `RENDERER_TESTS` but not yet in the workflow, `ci-gating.test.js`
+fails with `must run tests/shell-leg-coverage.test.js`. The guard binds.
 
 ## Implementation
 
@@ -188,13 +226,18 @@ not print them. Extend that block with the same loop — **inside the quoted her
 `python3 -c "` string** (the hazard is spelled out immediately below, and the Critical round-4
 finding was this snippet being read as the code to write):
 
-```python
-# this text lives between `read -r -d '' PARSE_PROG <<'PARSE_EOF' || true`
-# and `PARSE_EOF`, and is handed to python as one argument: python3 -c "$PARSE_PROG".
-# Every remote leg goes in this tuple, not just the ones previously known: pull, push,
-# flex_pull, flex_import, taxonomy_export, portfolio_status. A leg the operator
-# cannot see failing is the #627 defect, and enumerating only the legs one already
-# knew about is how this branch produced four rounds of it.
+> **The fenced block below is ILLUSTRATION, not code to run.** It is fenced as `text` and its first
+> line is not valid Python, so it cannot be pasted, cannot execute, and cannot exit 0. It is here
+> only to show the *shape of the defect*. The shipped parser does not do this — see the accessors
+> after the block. Plan round 3 raised this as Medium: at the time, the block was fenced `python`,
+> appeared **before** the warning, and was the step's only executable code. Executed verbatim it
+> printed `flex_pull: ? ()` and `portfolio_status: ? ()` for a body where the IBKR token had
+> expired — indistinguishable from an unconfigured deployment, i.e. #627 re-created one leg over on
+> the operator surface, from a paste of the plan. The warning is now **above** the block for that
+> reason.
+
+```text
+<<NOT RUNNABLE - ILLUSTRATION OF THE DEFECT>>
 for leg in ('pull', 'push', 'flex_pull', 'flex_import', 'taxonomy_export',
             'portfolio_status'):
     r = data.get(leg) or {}
@@ -206,11 +249,15 @@ snippet.** Only `pull` and `push` carry those keys. The producer writes a differ
 `flex_pull` is `{success, error, skipped}` (`ibkr_flex.js`), `flex_import` is `{status, errors[],
 items_skipped}` where `status` is hardcoded `"ok"` and failures live in `errors[]` (PpClient.java),
 `taxonomy_export` is `{status, detail, errors[]}` with a `partial` status, and `portfolio_status` is
-`{error}` with **no `status` key at all**. A uniform read renders four of the six as `? ()` on every
-run, so a healthy flex leg and an expired one print identically — the defect in a new place. Plan
-round 1 raised this as a High and it is correct: the shipped parser reads each leg with the accessor
-its producer actually writes, and `tests/leg-coverage.test.js` requires a failing shape for every
-leg in `REQUIRED`.
+`{error}` with **no `status` key at all**. So **any leg whose producer writes neither `status` nor
+`detail` renders as `? ()`** — and how many that is depends on the payload: on a full sync body it
+is two (`flex_pull`, `portfolio_status`), on a pull/push-only body it is four. (An earlier revision
+of this line said "four of the six on every run"; that was wrong and plan round 3 corrected it.) The
+consequence does not depend on the count: `? ()` for a *skipped or unconfigured* leg is
+**byte-identical** to `? ()` for a *failed* one, which is the defect in a new place. Plan round 1
+raised this as a High and it is correct: the shipped parser reads each leg with the accessor its
+producer actually writes, and `tests/leg-coverage.test.js` requires a failing shape for every leg
+in `REQUIRED`.
 
 Written here the way `python3 -c "` would deliver it — that is, with the double quotes stripped —
 this loop is a `SyntaxError` (`r.get(status, ?)`), and `2>/dev/null || true` would swallow it, so the
@@ -463,13 +510,16 @@ what prevents the fix being satisfied by always returning `error`.
   Python raise at runtime and the script swallow the error. The gate that actually catches this
   class is step 5's test, which runs the script. Both are listed because the first is a one-second
   check worth keeping, and the second is the one that has teeth.
-- Mutation control: `modules/hermes/tests/repro-627-base-symptom.sh` is **tracked in the repository**, not
-  left in `/tmp`. The driver replays it at the base commit inside its own worktree, so a path outside
-  the checkout is absent from that worktree and the control cannot run. It resolves the repo root by
-  walking up from `BASH_SOURCE`, so the same tracked file works in both worktrees. Recorded result: 4
-  of its 5 checks fail at base `f04cc08`, and at the current HEAD exactly one still fails —
-  `failed-status` — because that check is R1 above, which is landed on the branch but not yet
-  committed. The control therefore goes green only when R1 lands, which is the intended coupling.
+- Mutation control: `modules/hermes/tests/repro-627-base-symptom.sh`. This file was **not** tracked
+  at the time of plan round 3, which raised that as High: the plan asserted it was tracked and
+  reasoned at length about the driver replaying it inside its own base worktree, but a file absent
+  from the tree cannot be walked up from by anything. It is **tracked as part of this plan's
+  change**, not as a pre-existing artifact. It resolves the repo root by walking up from
+  `BASH_SOURCE`, so the same tracked file works both in this checkout and in the driver's base
+  worktree. It POSTs nothing and calls no live service — every run uses a stub `curl` on `PATH`.
+  Recorded result: 4 of its 5 checks fail at base `f04cc08`; at the branch HEAD exactly one still
+  fails — `failed-status` — because that check is R1, which is not yet landed (see R1's status
+  line). It goes green only when R1 lands, which is the coupling this control exists to prove.
 - `shellcheck modules/hermes/scripts/portfolio-sync.sh modules/hermes/tests/test-portfolio-sync-output.sh modules/hermes/tests/repro-627-base-symptom.sh` must pass; CI runs the first of these at `.github/workflows/test.yml:117`.
 - The script change is verified hermetically by `modules/hermes/tests/test-portfolio-sync-output.sh` over fixed stub bodies, asserting behaviour rather than shell text. No live-service call is part of validation.
 
