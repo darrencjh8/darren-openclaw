@@ -33,8 +33,8 @@
     "333333333": "own Trust account number",
     "0000000000000000": "own real transfer reference (16 digits, flagged anywhere)",
     "THIRD PARTY NAME": "third-party name",
-    "own@employer.example": "own employer email",
-    "own@personal.example": "own personal email"
+    "own-name-at-employer-DOT-invalid": "own employer email",
+    "own-name-at-personal-DOT-invalid": "own personal email"
   },
 
   "_remap_comment": "real -> synthetic. Same digit count as the real value, all targets distinct, last-4 pairing preserved. Fill the keys with the real values; the values below are placeholders of the right shape.",
