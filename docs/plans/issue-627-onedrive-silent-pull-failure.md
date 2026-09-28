@@ -71,8 +71,9 @@ stays visible in the audit trail.
 
 ## Change scaffold
 
-- **Files to be changed:** `modules/portfolio-tracker/src/java_bridge.js`, `modules/portfolio-tracker/src/mcp-server.js`, `modules/portfolio-tracker/tests/java_bridge.test.js`, `modules/portfolio-tracker/tests/mcp-server.test.js`, `modules/hermes/scripts/portfolio-sync.sh`, `.github/workflows/test.yml`, plus a new `modules/hermes/tests/test-portfolio-sync-output.sh`. (These are the files this change will touch, not the files that differ base..HEAD — at the plan commit the only difference is this plan file.)
-- **Repository test command:** `cd modules/portfolio-tracker && npm ci && npm test` (package.json `"test": "vitest run"`). `npm ci` is required because a fresh worktree has no `node_modules`; a bare `npx vitest run` would fetch a floating vitest instead of the pinned dependency.
+- **Files to be changed:** none that are not already changed. See "Status against HEAD" below: every step in this plan has already been implemented on this branch across five review rounds. What remains is the two residual items named there, and no step below is to be re-applied.
+- **Status against HEAD (this is load-bearing, not a status note).** At the plan commit, `base..HEAD` differs in **fifteen** files, not one. Steps 1, 2, 3 and 5 of this plan are **already implemented and committed** on `fix/portfolio-onedrive-silent-pull-failure` (HEAD `8c4ac66`). The `python3 -c "` string this plan quotes as the thing to escape no longer exists: `portfolio-sync.sh` now reads its parser from a quoted heredoc. The `mcp-server.js` early return this plan rewrites already assembles `legErrs`/`abortErrs` into `pre` and joins it with the analysis body. **Re-applying any step below to the current tree would delete shipped, tested visibility** — plan round 1 verified this by executing step 3 against HEAD, which rendered the healthy-looking string `"BODY"` for the expired-flex-token, flex-import-total-drop, Sheets-401 and Actual-Budget-abort payloads, where HEAD renders four distinct warning lines. That reproduction is `/tmp/mut/plan_r1_critical.mjs` (exit 1). The steps are kept below as the specification of the landed behaviour, not as instructions to re-run.
+- **Repository test command:** `cd modules/portfolio-tracker && npm ci && npm test` (package.json `"test": "vitest run"`). `npm ci` is required because a fresh worktree has no `node_modules`; a bare `npx vitest run` would fetch a floating vitest instead of the pinned dependency. The shell surface is gated separately by `bash modules/hermes/tests/test-portfolio-sync-output.sh` and linted by `shellcheck modules/hermes/scripts/portfolio-sync.sh modules/hermes/tests/test-portfolio-sync-output.sh`, which CI runs at `.github/workflows/test.yml:117`.
 - **Test files in scope:** `modules/portfolio-tracker/tests/java_bridge.test.js` (existing `describe("pull")` block, lines 343-366), `modules/portfolio-tracker/tests/mcp-server.test.js`, and the new `modules/hermes/tests/test-portfolio-sync-output.sh`.
 - **CI caveat:** the `portfolio-tracker` job in `.github/workflows/test.yml:42-44` carries `continue-on-error: true` ("needs IBKR keys + running services, fixing separately"). That suite is therefore a **local** gate for this change, not a CI gate — CI will stay green even if the corrected assertion regresses. The new hermes shell test is the CI-enforced one, but only once step 5 adds its step to `test.yml`; that edit is part of this change, not something the repo already does.
 - **Spec in scope:** `specs/003-portfolio-tracker/spec.md` — "Taxonomy Export" (line ~372) documents that the taxonomy is written to Sheets. It does not specify pull-failure behaviour, so this change adds behaviour the spec does not yet describe.
@@ -134,6 +135,41 @@ still leaves the interactive surface blind. All three are one-or-two-line change
 correct layer; no deeper refactor is warranted. Fixing (3) is a change to the *return shape*,
 not an insertion above the early return — see step 3 for why that distinction is the whole fix.
 
+## Status against HEAD
+
+Everything in "Implementation" below is **already landed** on `fix/portfolio-onedrive-silent-pull-failure` at HEAD `8c4ac66`. It is kept as the specification of the landed behaviour and is **not** an instruction to re-apply. Plan round 1 found, and this plan now states, that re-applying it would delete shipped visibility.
+
+Two items are genuinely outstanding. They are the whole of the remaining work.
+
+### R1. `portfolio_status` is a sixth remote leg that neither surface reported
+
+`tools.js:1025` stores a failed Portfolio.app status fetch as `{error: e.message}` and no
+consumer reads it — `_buildAnalysis` takes `taxonomyData`, not the status — so the only trace was a
+`console.warn` that never reaches the daily log. This is the same defect class as #627: a leg the
+operator cannot see failing. Plan round 4 named it in passing; the structural leg test I had written
+excluded it on a hand-wave ("not an operator surface") that turned out to be wrong.
+
+**Change:** `mcp-server.js` `formatSyncResult` reports `raw.portfolio_status.error`; the shell leg
+loop in `portfolio-sync.sh` adds `portfolio_status` to its tuple with the same rule. `tests/leg-coverage.test.js`
+drops it from `NOT_LEGS` and adds it to `REQUIRED`, so the test now requires the leg rather than
+permitting its absence. The failing shape is `{error: msg}` with **no `status` key at all** — a
+generic `status: "error"` fixture would not match what the producer emits and would prove nothing.
+
+**Status: implemented, committed `3d32fee` and the following commit, not yet through a code review round.** It is listed here, rather than merged quietly, precisely because it is unreviewed.
+
+### R2. The shell leg tuple needs a test that pins it
+
+`tests/leg-coverage.test.js` imports `formatSyncResult` and reads the payload literal in `tools.js`.
+It never reads `portfolio-sync.sh`, so the shell tuple is pinned by hand-written fixtures in
+`test-portfolio-sync-output.sh` only. That asymmetry is why the plan's step-2 comment could claim a
+pin that does not exist.
+
+**Change:** extend `leg-coverage.test.js` (or add a sibling) to assert the tuple in
+`portfolio-sync.sh` names every leg `REQUIRED` names, by reading the shipped script and comparing
+its leg list to the producer's payload keys. This closes the half of the surface that the JS-only
+test cannot see, and it is the test that would have caught R1 on the shell side at the same moment
+it caught it on the JS side.
+
 ## Implementation
 
 ### 1. `java_bridge.js` — derive the status
@@ -155,16 +191,26 @@ finding was this snippet being read as the code to write):
 ```python
 # this text lives between `read -r -d '' PARSE_PROG <<'PARSE_EOF' || true`
 # and `PARSE_EOF`, and is handed to python as one argument: python3 -c "$PARSE_PROG".
-# Every remote leg goes in this tuple, not just the two below: pull, push,
+# Every remote leg goes in this tuple, not just the ones previously known: pull, push,
 # flex_pull, flex_import, taxonomy_export, portfolio_status. A leg the operator
 # cannot see failing is the #627 defect, and enumerating only the legs one already
-# knew about is how this branch produced four rounds of it. tests/leg-coverage.test.js
-# pins this tuple against the payload the producer actually returns.
+# knew about is how this branch produced four rounds of it.
 for leg in ('pull', 'push', 'flex_pull', 'flex_import', 'taxonomy_export',
             'portfolio_status'):
     r = data.get(leg) or {}
     print(f'  {leg}: {r.get("status", "?")} ({r.get("detail", "")})')
 ```
+
+**The uniform `status`/`detail` read above is NOT what ships, and must not be taken from this
+snippet.** Only `pull` and `push` carry those keys. The producer writes a different shape per leg:
+`flex_pull` is `{success, error, skipped}` (`ibkr_flex.js`), `flex_import` is `{status, errors[],
+items_skipped}` where `status` is hardcoded `"ok"` and failures live in `errors[]` (PpClient.java),
+`taxonomy_export` is `{status, detail, errors[]}` with a `partial` status, and `portfolio_status` is
+`{error}` with **no `status` key at all**. A uniform read renders four of the six as `? ()` on every
+run, so a healthy flex leg and an expired one print identically — the defect in a new place. Plan
+round 1 raised this as a High and it is correct: the shipped parser reads each leg with the accessor
+its producer actually writes, and `tests/leg-coverage.test.js` requires a failing shape for every
+leg in `REQUIRED`.
 
 Written here the way `python3 -c "` would deliver it — that is, with the double quotes stripped —
 this loop is a `SyntaxError` (`r.get(status, ?)`), and `2>/dev/null || true` would swallow it, so the
@@ -178,8 +224,16 @@ that string is therefore destroyed or reinterpreted, and *which* way it fails de
 
 | form in the block | what Python actually receives | outcome |
 |---|---|---|
-| `print(f"  {leg}: …")` | string closes early | `bash -n` fails, script exit 2 |
-| `print(f'  {leg}: {r.get("status", "?")} …')` | `r.get(status, ?)` | `SyntaxError`, swallowed, silent |
+| `print(f"  {leg}: …")` | `print(f  {leg}: …)` — the f-string's own delimiter is stripped with the rest | `SyntaxError: invalid syntax`, swallowed, silent |
+| `print(f'  {leg}: {r.get("status", "?")} …')` | `print(f'  {leg}: {r.get(status, ?)} …')` — keys become bare names | `SyntaxError: f-string: expecting '=', or '!', or ':', or '}'`, swallowed, silent |
+
+**Both rows are swallowed, and neither is a `bash -n` failure.** An earlier draft of this table
+claimed the double-quoted form makes `bash -n` exit 2; that was wrong, and plan round 1 raised it as a
+Medium. Executed against bash's actual parse-time quote removal (`/tmp/mut/row1_check.sh`), both
+forms deliver text that Python rejects at parse time, and `portfolio-sync.sh` ends in
+`2>/dev/null || true`, so **both** exit 0 having printed nothing. `bash -n` returns 0 on both: bash
+successfully splits the string and never validates the Python inside it. A third row asserting
+`bash -n` catches this is what would have made an implementer trust a check that cannot fail.
 
 Both rows were confirmed by running the shipped script with a stub `python3` on `PATH` capturing
 real `argv`. The middle row is the dangerous one: it raises a `SyntaxError`, but
@@ -196,12 +250,16 @@ print(f'  {leg}: {r.get('status', '?')} ({r.get('detail', '')})')
 ```
 
 Those inner single quotes **close the f-string**. Nested same-quote expressions in f-strings are
-PEP 701, valid only from Python 3.12; the module container runs **3.11.2**, so the line is a
-`SyntaxError` there regardless of how bash handles the surrounding string. The identical line
-compiles on this host's 3.13.5, which is exactly how it can look correct in review and break in
-production. So the inline route needs a quoting form that is simultaneously legal Python on 3.11
-and intact after bash's quote removal, and that constraint is fragile in a way that reads as
-style.
+PEP 701, valid only from Python 3.12, so that line is a `SyntaxError` on any interpreter below 3.12
+regardless of how bash handles the surrounding string. The identical line compiles on a 3.13 host,
+which is exactly how it can look correct in review and break in production.
+
+**The interpreter version is not pinned anywhere in this repository.** `portfolio-sync.sh` runs in
+the `hermes` container, whose Dockerfile installs `python3` from apt with no version constraint, so
+the exact minor version is whatever the base image ships on the day it is built. Do not assume 3.11.2
+or 3.13.5; assert compatibility with the lowest version the base image can carry, which means
+avoiding PEP 701 constructs entirely. The quoted heredoc makes that question moot for this code,
+because the block contains no nested same-quote f-string expressions.
 
 The program is therefore read into a variable by a **quoted heredoc**, which performs no expansion
 and no quote removal, and then passed to Python as one argument:
@@ -235,12 +293,26 @@ Two details that are easy to get wrong and are pinned by the test in step 5:
 Failures become visible in the job output without changing the script's exit code or the
 `deliver: local` contract, so no alerting change is implied.
 
-**Ordering: step 2 must land, and be `bash -n`-clean, before step 5.** Step 5's test extracts and
-executes this very block, so it inherits any parse error here and cannot go green until step 2 is
-correct. The rest of the ordering is already stated in step 1: the bridge fix has to precede steps 2
+**Ordering: step 2 must land, and be `bash -n`-clean, before step 5.** Step 5's gate drives the
+shipped script with a stub `curl` on `PATH` and asserts on its stdout. It does **not** extract and
+execute the parse block in isolation: doing so bypasses bash's parse-time quote removal, the one step
+that mangles the program text, so such a test passes on a script that prints nothing and certifies
+the defect. The rest of the ordering is already stated in step 1: the bridge fix has to precede steps 2
 and 3, or both would report `status: "ok"` for a failed pull.
 
 ### 3. `mcp-server.js` — surface the status *in the returned string*
+
+**This step as written is superseded and must not be applied to the current tree.** It reads
+`["pull", "push"]` and joins only those errors, which contradicts step 2's own six-leg tuple: three
+legs would stay unreported on the interactive surface. Plan round 1 raised this as a High, and it is
+worse than an omission — executing this snippet against HEAD drops the IBKR flex, Sheets export,
+flex-import and abort lines that the current tree already prints (reproduced in
+`/tmp/mut/plan_r1_critical.mjs`). What ships instead is `legErrs` (one entry per failing remote leg,
+each read with the accessor its producer writes) plus `abortErrs`, joined as `pre` and prepended to
+the analysis body by the early return.
+
+The original reasoning is retained below because it is why the return is a shape change and not an
+insertion above the early return.
 
 The OneDrive error lines go in their own array, `onedriveErrs`, kept separate from `lines`.
 That separation is load-bearing, not cosmetic: `lines` holds the sync summary and the
@@ -320,17 +392,29 @@ the defect it exists to catch — it certifies it. The stub is a `curl` placed f
 emits a fixed body; the script reads no environment variable and has no token-path knob, so the
 stub alone determines what it sees. The script otherwise runs unmodified.
 
-The test feeds two bodies and asserts on stdout:
+The test feeds these bodies and asserts on stdout. **Every remote leg needs a failing fixture, not
+just the two that were known when this step was written** — three bodies that all use `status`/`detail`
+legs pass unchanged on a parser that renders every other leg as `? ()`, which is the exact defect the
+High finding above describes. The `failed-status` row is the R1 check, and `expired-flex-token` is
+the row that would catch the uniform-read regression.
 
 | body | expected stdout |
 |---|---|
 | healthy | `pull: ok (downloaded)`, and the existing `A: ok (delta=0)` line still present |
 | dead grant | `pull: error (Token HTTP 400)` |
 | no `pull` / `push` keys | `pull: ? ()` — the `or {}` default, not a parse error |
+| expired IBKR flex token | `flex_pull: error (IBKR Flex error 1012: Token has expired)` — and **not** `flex_pull: ? ()` |
+| flex import with a populated `errors[]` | the joined item errors, and **not** `flex_import: ? ()` |
+| Sheets export 401 | `taxonomy_export: error (Google Sheets API: 401)` |
+| failed Portfolio status fetch | `portfolio_status: error (Portfolio.app unreachable)` — a leg with no `status` key at all |
+| flex integration unconfigured | no `flex_pull` line whatsoever, not `flex_pull: error` and not a placeholder |
 
-The middle row is the RED case against the unmodified script, where the summary prints nothing.
-The third row is there because a leg absent from the body must not fall into the block's
-`except`, which would print `(parse error: …)` and hide every target line above it.
+The first three rows are the RED cases against the unmodified script, where the summary prints
+nothing. The `? ()` row is there because a leg absent from the body must not fall into the block's
+`except`, which would print `(parse error: …)` and hide every target line above it. The last row is
+the negative: asserting only that the word "error" is absent is too weak, because without the skip
+guard the leg still renders as `skipped ()`, so the assertion is that **no line is emitted**. That
+gap was found by mutation, not by review.
 
 `.github/workflows/test.yml` gains a named step beside line 137:
 
@@ -365,8 +449,15 @@ what prevents the fix being satisfied by always returning `error`.
   Python raise at runtime and the script swallow the error. The gate that actually catches this
   class is step 5's test, which runs the script. Both are listed because the first is a one-second
   check worth keeping, and the second is the one that has teeth.
-- Mutation control: the recorded command is replayed at the base commit in a throwaway worktree and must exit non-zero, so a fix that does not stop the reproduction fails closed.
-- The script change is verified hermetically by `modules/hermes/tests/test-portfolio-sync-output.sh` over two fixed bodies (healthy and dead-grant), asserting behaviour rather than shell text. No live-service call is part of validation.
+- Mutation control: `modules/hermes/tests/repro-627-base-symptom.sh` is **tracked in the repository**, not
+  left in `/tmp`. The driver replays it at the base commit inside its own worktree, so a path outside
+  the checkout is absent from that worktree and the control cannot run. It resolves the repo root by
+  walking up from `BASH_SOURCE`, so the same tracked file works in both worktrees. Recorded result: 4
+  of its 5 checks fail at base `f04cc08`, and at the current HEAD exactly one still fails —
+  `failed-status` — because that check is R1 above, which is landed on the branch but not yet
+  committed. The control therefore goes green only when R1 lands, which is the intended coupling.
+- `shellcheck modules/hermes/scripts/portfolio-sync.sh modules/hermes/tests/test-portfolio-sync-output.sh modules/hermes/tests/repro-627-base-symptom.sh` must pass; CI runs the first of these at `.github/workflows/test.yml:117`.
+- The script change is verified hermetically by `modules/hermes/tests/test-portfolio-sync-output.sh` over fixed stub bodies, asserting behaviour rather than shell text. No live-service call is part of validation.
 
 ## Out of scope
 
