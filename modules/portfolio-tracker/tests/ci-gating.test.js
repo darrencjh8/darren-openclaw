@@ -53,11 +53,23 @@ const RENDERER_TESTS = [
     "tests/java_bridge.test.js",
 ];
 
+/**
+ * A job "runs" a test only if a `- run:` step names it.
+ *
+ * Matching on a bare substring was wrong: a comment elsewhere in the file (the
+ * continue-on-error line in the full suite job) mentions the same filename, so a
+ * naive count credited a job that never executed it. That made the self-reference
+ * guard unsatisfiable in the wrong direction — it passed with only one real job.
+ */
+function runsTest(body, name) {
+    return body.some((l) => /^\s*-\s+run:/.test(l) && l.includes(name));
+}
+
 describe("CI enforces the #627 renderer contract", () => {
     it("has a job that runs the renderer tests", () => {
         const all = jobs(workflow);
         const runners = Object.entries(all).filter(([, body]) =>
-            body.some((l) => l.includes("tests/onedrive-legs.test.js")),
+            runsTest(body, "tests/onedrive-legs.test.js"),
         );
         expect(runners.length).toBeGreaterThan(0);
     });
@@ -65,7 +77,7 @@ describe("CI enforces the #627 renderer contract", () => {
     it("runs every renderer test file in that job", () => {
         const all = jobs(workflow);
         const [name, body] = Object.entries(all).find(([, b]) =>
-            b.some((l) => l.includes("tests/onedrive-legs.test.js")),
+            runsTest(b, "tests/onedrive-legs.test.js"),
         ) ?? ["", []];
         const runnable = body.join("\n");
         for (const t of RENDERER_TESTS) {
@@ -80,7 +92,7 @@ describe("CI enforces the #627 renderer contract", () => {
         // the renderer contract being enforced and being decorative.
         const all = jobs(workflow);
         const [, body] = Object.entries(all).find(([, b]) =>
-            b.some((l) => l.includes("tests/onedrive-legs.test.js")),
+            runsTest(b, "tests/onedrive-legs.test.js"),
         ) ?? ["", []];
         const nonGating = body.filter((l) => /continue-on-error:\s*true/.test(l));
         expect(nonGating).toEqual([]);
@@ -105,7 +117,7 @@ describe("CI enforces the #627 renderer contract", () => {
         // gating job stops naming it.
         const all = jobs(workflow);
         const runners = Object.entries(all).filter(([, body]) =>
-            body.some((l) => l.includes("ci-gating.test.js")),
+            runsTest(body, "tests/ci-gating.test.js"),
         );
         expect(runners.length).toBeGreaterThanOrEqual(2);
     });
