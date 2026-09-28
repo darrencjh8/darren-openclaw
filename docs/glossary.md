@@ -138,9 +138,11 @@ How they map to the REST names:
 
 All **twenty-two** of these, exactly — the two surfaces are completely disjoint
 at the *name* level, with no tool registered on both. They do still meet
-underneath: five MCP tools dispatch into the same `registry` these routes call
-(`mcp-server.js:255, 266, 280, 291, 298`), so the MCP surface reaches handlers
-in `src/tools.js` — it just does so under a different tool name.
+underneath: six MCP tools dispatch into the same `registry` these routes call
+(`mcp-server.js:223, 255, 266, 280, 291, 298`), so the MCP surface reaches
+handlers in `src/tools.js` — it just does so under a different tool name. One
+name in the list below is reachable from both: `insert_pp_transaction`, which
+MCP serves as `portfolio_insert_transaction` (`mcp-server.js:223`).
 `parse_ibkr_flex_query` · `extract_pdf_text` · `extract_email_content` ·
 `fetch_pp_accounts` · `fetch_pp_securities` · `fetch_pp_portfolio` ·
 `query_pp_security` · `query_pp_taxonomies` · `insert_pp_transaction` ·

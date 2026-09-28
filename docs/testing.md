@@ -63,7 +63,9 @@ the install step from the `pp-cli` job in `test.yml` rather than guessing it.
 
 ## Conventions
 
-- **JavaScript suites** are `vitest` (except `actual-api`, which is `jest`).
+- **JavaScript suites** are `vitest` (except `actual-api`, which is `jest`, and
+  `image-gen`, which has no test script at all and is run directly with
+  `node --test` — `npm test` there fails with `Missing script: "test"`).
   Fixtures are checked into `__tests__/` and `tests/`.
 - **Python suites** are stdlib `unittest`; no pytest, no third-party runner.
   Dependencies are limited to PyYAML, which is what parses the Hermes YAML.
