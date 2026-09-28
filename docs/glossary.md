@@ -38,9 +38,12 @@ first:
 - **REST** — the HTTP tool endpoints on `/tools/*`. **This is the widest surface**,
   but the path is *not* uniform across the two trackers, so never derive a URL
   from a tool name. `expense-tracker` builds it mechanically from the tool name
-  with underscores turned into hyphens (`/tools/fetch-context`). `portfolio-tracker`
-  uses a hand-written table, and 10 of its 22 routes have a path that shares no
-  resemblance to the tool they call — `/tools/ibkr-import-xml` runs
+  with underscores turned into hyphens (`fetch_context` → `/tools/fetch-context`)
+  — but only for tools in its route table, and that table is **not** the same set
+  as the MCP surface: `fetch_context` is MCP-only and has no such route.
+  `portfolio-tracker`
+  uses a hand-written table, and 10 of its 22 routes have a path that is not
+  just the tool name with hyphens — `/tools/ibkr-import-xml` runs
   `parse_ibkr_flex_query`, `/tools/pp-accounts` runs `fetch_pp_accounts`,
   `/tools/gs-update-sheet` runs `update_google_sheet`. Read the table in
   `modules/portfolio-tracker/src/index.js` before calling one.

@@ -25,7 +25,13 @@ anything, so a missing variable fails the run without touching production.
   absent, which is different from the value being empty.
 - **"OneDrive authorization is required to sync the Portfolio file."** The
   refresh token under `modules/onedrive-sync/config/onedrive/` is missing or
-  unreadable. It is runtime state and is never committed.
+  unreadable. It is runtime state and is never committed. This message only
+  appears on an **interactive** run: it sits inside the `NON_INTERACTIVE != true`
+  guard (`deploy.sh:797`), and CI always passes `--non-interactive`
+  (`deploy.yml:196,200`). A deploy that reaches CI without a token instead
+  prints the warning `"⚠ No refresh_token found. OneDrive is not initialized."`
+  (`deploy.sh:1144`) and carries on — it is yellow, not a failure, so it will
+  not stop a deploy or mark a step red. Neither path fails the run.
 
 ## The deploy completes but a service is not healthy
 
