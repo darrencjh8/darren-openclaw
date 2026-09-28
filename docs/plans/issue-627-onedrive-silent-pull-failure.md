@@ -358,5 +358,4 @@ what prevents the fix being satisfied by always returning `error`.
 - Not changing `_computeSyncAll()` to skip the taxonomy write when the pull fails (see #627).
 - Not adding alerting or changing `deliver` on the cron job.
 - Not touching `pullFromOneDrive` / `pushToOneDrive`; they already return `success: false` correctly. The bug is in the caller.
-- `taxonomy_export` was originally read as out of scope by omission. Review round 4 found it is a fifth remote leg in the same payload, and a failed Sheets write rendered byte-identical to a clean run, so it is now reported on both surfaces. `tests/leg-coverage.test.js` pins the renderer's leg set against the payload's own keys so the next leg cannot be missed the same way.
 - Not re-authenticating OneDrive in code; that is a user-side `/onedrive setup` action, already performed 2026-09-27.
