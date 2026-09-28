@@ -311,6 +311,13 @@ flex-import and abort lines that the current tree already prints (reproduced in
 each read with the accessor its producer writes) plus `abortErrs`, joined as `pre` and prepended to
 the analysis body by the early return.
 
+Plan round 2 then raised the sharper form of the same objection: that an *insertion above the early
+return* is a no-op, because the early return hands back `raw.analysis.message_body` and never joins
+the array. That is correct about the original wording, and the answer is the return shape below,
+which is what HEAD already implements. The sentence this plan used to get wrong — "pushed above the
+early return, so the authoritative analysis block cannot suppress it" — is gone; the analysis block
+*would* suppress it, and the fix is to change what is returned, not where a push lands.
+
 The original reasoning is retained below because it is why the return is a shape change and not an
 insertion above the early return.
 
@@ -382,6 +389,13 @@ CI does **not** glob the hermes shell tests: `.github/workflows/test.yml:118-137
 file, with no matrix. Adding a test therefore requires adding a step, and the standing proof
 is `modules/hermes/tests/test-skills-backup-restore.sh`, which exists in the tree and is
 referenced by no workflow at all. So a new test file with no step guards nothing.
+
+**This step is already wired on the branch.** `.github/workflows/test.yml` now carries
+`- name: Test portfolio-sync output` / `run: bash modules/hermes/tests/test-portfolio-sync-output.sh`
+inside the `hermes-scripts` job, which sets no `continue-on-error`, so the gate is binding. The
+enumeration problem above is the reason the step had to be added explicitly, not a reason it is
+still outstanding. `tests/ci-gating.test.js` pins both ends of that chain, so deleting the step
+or the deploy gate that consumes it fails a committed test.
 
 Extraction is by `python3 -c "$PARSE_PROG" 2>/dev/null || true` after the step-2 rewrite, and the
 test **runs the shipped script with a stubbed `curl`**, asserting on its stdout. It must not
