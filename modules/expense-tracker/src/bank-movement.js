@@ -58,6 +58,8 @@ function receivedParts(receivedAt) {
   return { year: Number(pick("year")), month: Number(pick("month")), day: Number(pick("day")) };
 }
 
+const MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
 const MONTHS = {
   jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6,
   jul: 7, aug: 8, sep: 9, oct: 10, nov: 11, dec: 12,
@@ -365,6 +367,111 @@ export function parseBankMovement(text, { senderBank = null, receivedAt } = {}) 
       ),
       reference,
       recipientBank: senderBank,
+    });
+  }
+
+  // SC "Confirmation Advice for FAST Transaction" (uid 977, 2026-09-28):
+  //   "From account: ******6445
+  //    To account: ******5750
+  //    Amount: 1,275.00
+  //    Currency: SGD
+  //    Transaction due date: 28/09/2026 10:08:02
+  //    Transaction type: FAST"
+  // SC states the currency and the amount on SEPARATE labels, so the
+  // `Amount : <CCY> <n>` guard below never matches and the whole alert used to
+  // fall through to the LLM extractor. That is not cosmetic: this is the only
+  // alert that names the SOURCE account of an own-account transfer, and a
+  // receiving-bank alert never can (it names the sender as a person). Losing it
+  // means the pair cannot link — the receiving side holds and this side books
+  // unlinked, so the transfer is booked twice or not at all (#633).
+  //
+  // It also has to survive being FORWARDED, which is how a user gets it into
+  // the tracker's own mailbox when the sending bank does not alert it. A
+  // forwarded copy carries a `From: <the bank's online-banking sender>`
+  // header that would otherwise win the `From` label, so this branch reads the
+  // explicit "From account" / "To account" labels directly rather than via
+  // `field()`.
+  // Read on the flattened copy so the labels are matched the same way whether
+  // the body arrived line-separated or already collapsed to one line. The
+  // masked-digit form is required deliberately: a "To account" with no
+  // resolvable digits is refused below rather than fabricated.
+  const scFlat = body.replace(/\s+/g, " ");
+  const scFast = scFlat.match(
+    /From account\s*:\s*(\*+\d+)\s+To account\s*:\s*(\*+\d+)/i,
+  );
+  // Gated on the SENDING BANK'S OWN SIGNATURE, not on `senderBank` and not on
+  // `bankFromText`.
+  //
+  // `senderBank` is `bankFromSender(from)` — the outer `From:` header, which
+  // for a forwarded advice is the forwarder, not Standard Chartered. That is
+  // exactly the case this branch exists for (the advice is normally forwarded
+  // by hand, because SC does not alert the tracker's own mailbox), so gating on
+  // it would refuse the alert the branch was written to parse.
+  //
+  // `bankFromText(body)` is no better: the real advice carries a
+  // "Payee Bank: DBS" line naming the RECIPIENT's bank, so it resolves to DBS
+  // and would refuse the genuine article. It also matches by alias order, so it
+  // answers "which bank is mentioned", not "which bank sent this".
+  //
+  // The closing line ("Thank you for using Standard Chartered Online Banking")
+  // is the sending bank's own words, present on every advice and retained
+  // verbatim through a forward. "From account" / "To account" is generic FAST
+  // vocabulary, so this is also what stops another bank's inbound advice in the
+  // same shape being booked outgoing from the recipient's account.
+  if (scFast && /Standard\s+Chartered\s+Online\s+Banking/i.test(scFlat)) {
+    const [, fromValue, toValue] = scFast;
+    const amountText = scFlat.match(/Amount\s*:\s*([\d,.]+)/i)?.[1] || "";
+    // No fallback. Every other branch takes its currency from an explicit
+    // (SGD|MYR) match and refuses when that is absent; substituting the sending
+    // bank here would be the one place a record can be written with
+    // `currency: "SC"`, which `baseMovement` only truthiness-checks.
+    const currencyText = scFlat.match(/Currency\s*:\s*(SGD|MYR)/i)?.[1] || "";
+    // "Transaction due date" is dd/mm/yyyy hh:mm:ss, but `isoDateTime` only
+    // reads an `28 Sep`-style date (plus a bare time). Passing the raw string to
+    // both arguments therefore looked right and silently used the *received*
+    // date, which is wrong precisely when it matters: a forwarded advice filed
+    // days later would date the transfer to the forwarding date. Normalise the
+    // day and month into the form `isoDateTime` actually parses.
+    const dueRaw = scFlat.match(
+      /Transaction due date\s*:\s*(\d{1,2})\/(\d{1,2})\/(\d{4})\s+([\d:]+)/i,
+    );
+    const dueText = dueRaw
+      ? `${dueRaw[1]} ${MONTH_NAMES[Number(dueRaw[2]) - 1]} ${dueRaw[3]} ${dueRaw[4]}`
+      : "";
+    const scReference =
+      scFlat.match(/Transaction reference\s*:\s*(SG\d+)/i)?.[1] || reference;
+
+    // The gate above has already established that Standard Chartered sent this,
+    // so name the accounts from the advice itself rather than from
+    // `senderBank`. `senderBank` is the outer `From:` header, which on the
+    // forwarded path this branch now serves is the FORWARDER: forwarding from
+    // an OCBC address would otherwise label SC account 6445 as OCBC. The
+    // masked values carry no bank name, so `bankFromText` cannot recover it
+    // from "******6445" — only the fallback decides.
+    const ownAccount = namedAccount(fromValue, "SC");
+    // "Payee Bank: DBS" names the RECIPIENT's bank and is the only statement of
+    // it in the advice; `bankFromText("******5750")` can only ever return null,
+    // so read the label instead of discarding the evidence. The value is
+    // delimited by the next known label, because the real advice leaves this
+    // field EMPTY ("Payee Bank: Transaction message:") and a bank name must not
+    // be allowed to run into the following field's text.
+    const destinationBank =
+      scFlat.match(
+        /Payee Bank\s*:\s*([A-Za-z][A-Za-z .]*?)\s+Transaction message\s*:/i,
+      )?.[1]?.trim() || bankFromText(toValue);
+    const destination = namedAccount(toValue, destinationBank);
+    // The regex already requires digits in both captures, so these guards are
+    // defence in depth: decline rather than fabricate a partial movement.
+    if (!destination?.suffix || !amountText || !ownAccount?.suffix) return null;
+    if (!currencyText || !dueRaw) return null;
+    return baseMovement({
+      direction: "outgoing",
+      amount: amountText,
+      currency: currencyText,
+      occurredAt: isoDateTime(dueText, dueText, receivedAt),
+      ownAccount,
+      counterparty: destination,
+      reference: scReference,
     });
   }
 

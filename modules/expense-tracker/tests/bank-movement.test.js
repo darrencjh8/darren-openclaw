@@ -358,6 +358,214 @@ Time : 10:00 AM SGT`,
 
     expect(movement).toBeNull();
   });
+
+  // ── SC "Confirmation Advice for FAST Transaction" (uid 977, 2026-09-28) ──
+  //
+  // Production incident: a S$1,275.00 transfer from SC Bonus Saver (******6445)
+  // to DBS Account (******5750) was booked by neither side. The receiving bank's
+  // alert (DBS uid 976) names the sender as a PERSON, not an account, so
+  // `resolveMovementAccounts` fell back to `source = own` and both legs landed
+  // on DBS Account — `internal` false, row held. Forwarding the SC advice
+  // (uid 977) supplied the missing source account, but the body still did not
+  // parse: this SC layout had no branch in `parseBankMovement` at all, so it
+  // returned null and the whole alert fell through to the LLM extractor.
+  //
+  // The fixture is the real forwarded body, PII-redacted the way the repo does
+  // it elsewhere (suffixes kept, names/addresses shortened) — see the header of
+  // tests/ocbc-trust-transfer-hold.test.js.
+  const SC_FAST_ADVICE = `Regards, Darren Chong Jin Heng ---------- Forwarded message --------- From: <OnlineBanking.SG@sc.com> Date: Mon, Sep 28, 2026, 10:08 AM Subject: Confirmation Advice for FAST Transaction To: <CHONGJINHENG@gmail.com> Dear Valued Customer, Your FAST transaction has been successful, transaction details below: Transaction reference: SG26050200693178180005 From account: ******6445 To account: ******5750 Amount: 1,275.00 Currency: SGD Transaction due date: 28/09/2026 10:08:02 Transaction type: FAST Payee Name: Darren DBS Payee Bank: Transaction message: Please call Client Contact Centre for enquiries. Thank you for using Standard Chartered Online Banking. Yours Sincerely, Transaction Banking Consumer Banking`;
+
+  it("parses the SC FAST advice and resolves both legs of the transfer", () => {
+    const movement = parseBankMovement(SC_FAST_ADVICE, {
+      senderBank: "SC",
+      receivedAt: "2026-09-28T03:14:27.000Z",
+    });
+
+    // Without this branch the SC advice returns null and the pair is never
+    // linked: the DBS side holds and the SC side books unlinked via the LLM.
+    expect(movement).not.toBeNull();
+    expect(movement.direction).toBe("outgoing");
+    // baseMovement() signs the amount from the direction, so an outgoing leg is
+    // stored negative. The test pins the sign the parser actually produces.
+    expect(movement.amount_cents).toBe(-127500);
+    expect(movement.currency).toBe("SGD");
+    // The masked source and destination, NOT the forwarding header's "From:".
+    expect(movement.own_account.suffix).toBe("6445");
+    expect(movement.counterparty.suffix).toBe("5750");
+    // The transaction reference is the real one, not the "Transaction
+    // reference:" label captured with the greeting.
+    expect(movement.reference_number).toBe("SG26050200693178180005");
+    // 2026-09-28 10:08 SGT, from "Transaction due date". Minute precision is the
+    // module's convention: every other bank alert resolves to :00 seconds too,
+    // because isoDateTime() parses hour and minute only.
+    expect(movement.occurred_at).toBe("2026-09-28T10:08:00+08:00");
+  });
+
+  it("resolves the SC advice to the pair's two distinct own accounts", () => {
+    const movement = parseBankMovement(SC_FAST_ADVICE, {
+      senderBank: "SC",
+      receivedAt: "2026-09-28T03:14:27.000Z",
+    });
+    const scAccounts = [
+      { id: "sc-bonus-saver", name: "SC Bonus Saver", closed: false },
+      { id: "dbs-account", name: "DBS Account", closed: false },
+    ];
+    const scPayees = [
+      { id: "p-sc", name: "SC Bonus Saver", transfer_acct: "sc-bonus-saver" },
+      { id: "p-dbs", name: "DBS Account", transfer_acct: "dbs-account" },
+    ];
+    const scFacts = [
+      { text: "Account ending 6445 belongs to SC Bonus Saver", score: 1 },
+      { text: "Account ending 5750 belongs to DBS Account", score: 1 },
+    ];
+
+    const resolved = resolveMovementAccounts(
+      movement,
+      scAccounts,
+      scPayees,
+      identityMappingsFromFacts(scFacts, scAccounts),
+    );
+
+    // The whole point of the branch: the source is the OTHER own account, not
+    // the destination. This is what the DBS alert could not express, and it is
+    // what makes `internal` true so the transfer pair links.
+    expect(resolved.source_account.name).toBe("SC Bonus Saver");
+    expect(resolved.destination_account.name).toBe("DBS Account");
+    expect(resolved.source_account.id).not.toBe(resolved.destination_account.id);
+    expect(resolved.internal).toBe(true);
+  });
+
+  // The first cut of this branch tried a `(?:^|\n)`-anchored alternative
+  // first, but it matched against a string already flattened by
+  // `.replace(/\s+/g, " ")`, where a newline can never survive — so that
+  // alternative was unreachable and the branch worked only via its fallback.
+  // The two-layout test pins the behaviour that is real. It does NOT, and
+  // provably cannot, detect the dead alternative itself: it is behaviourally
+  // inert, so a mutation test that reinstates it still passes. Removing it is a
+  // simplification, not a behaviour fix.
+  //
+  // Review round 1 found three further defects this branch did not refuse.
+  // Each test below reproduces the defect's exact observable failure, verified
+  // by probe before the fix and gone after it.
+  it("uses the transaction's own due date, not the received date, for a forwarded advice", () => {
+    // Pre-fix this returned 2026-10-01: `isoDateTime` cannot read the dd/mm/yyyy
+    // label, so it fell back to the receipt date, and the original test passed
+    // anyway only because the fixture was received the same day.
+    const movement = parseBankMovement(SC_FAST_ADVICE, {
+      senderBank: "SC",
+      receivedAt: "2026-10-01T09:00:00.000Z",
+    });
+    expect(movement).not.toBeNull();
+    expect(movement.occurred_at).toBe("2026-09-28T10:08:00+08:00");
+  });
+
+  it("refuses the advice outright when the currency label is absent", () => {
+    // Pre-fix this booked a record with `currency: "SC"`, the only path in the
+    // file where a bank name can be written as a currency.
+    const withoutCurrency = SC_FAST_ADVICE.replace(/ Currency: SGD/, "");
+    expect(parseBankMovement(withoutCurrency, {
+      senderBank: "SC",
+      receivedAt: "2026-09-28T03:14:27.000Z",
+    })).toBeNull();
+  });
+
+  // Round 2 caught that the previous gate was on `senderBank`, which production
+  // derives as `bankFromSender(from)` — the outer `From:` header. For a
+  // forwarded advice that is the forwarder, not SC, so the gate refused exactly
+  // the case this branch exists for. `senderBank` is null/unknown here, the
+  // value the production path would actually supply.
+  it("parses a FORWARDED advice whose From: header is not SC", () => {
+    const movement = parseBankMovement(SC_FAST_ADVICE, {
+      senderBank: null, // forwarder's own domain, not a bank in DOMAIN_BANK_MAP
+      receivedAt: "2026-10-01T09:00:00.000Z",
+    });
+    expect(movement).not.toBeNull();
+    expect(movement.direction).toBe("outgoing");
+    expect(movement.own_account.suffix).toBe("6445");
+    expect(movement.own_account.bank).toBe("SC");
+    expect(movement.counterparty.suffix).toBe("5750");
+    expect(movement.occurred_at).toBe("2026-09-28T10:08:00+08:00");
+    expect(movement.currency).toBe("SGD");
+    expect(movement.amount_cents).toBe(-127500);
+  });
+
+  // Round 3 found the forwarded path still attributed the account to the
+  // FORWARDER: the gate proved Standard Chartered sent the advice, and the code
+  // then threw that away and used `senderBank` (the outer From: header) as the
+  // fallback bank. Forwarding from an OCBC address labelled SC account 6445 as
+  // OCBC. The masked value carries no bank name, so only the fallback decided.
+  it("attributes the own account to SC, not the forwarding address, on every header", () => {
+    for (const senderBank of [null, "OCBC", "UOB", "DBS"]) {
+      const movement = parseBankMovement(SC_FAST_ADVICE, {
+        senderBank,
+        receivedAt: "2026-10-01T09:00:00.000Z",
+      });
+      expect(movement, `senderBank=${senderBank}`).not.toBeNull();
+      expect(movement.own_account.bank, `senderBank=${senderBank}`).toBe("SC");
+    }
+  });
+
+  // "Payee Bank:" is the advice's only statement of the recipient's bank, and
+  // `bankFromText("******5750")` can only ever return null. The real advice
+  // leaves the field empty, so this pins that a populated one is read AND that
+  // the empty case does not run the bank name into the next field.
+  it("reads the recipient bank from the Payee Bank label when the advice states it", () => {
+    const withPayeeBank = SC_FAST_ADVICE.replace("Payee Bank:", "Payee Bank: DBS");
+    const movement = parseBankMovement(withPayeeBank, {
+      senderBank: "UOB",
+      receivedAt: "2026-09-28T03:14:27.000Z",
+    });
+    expect(movement).not.toBeNull();
+    expect(movement.counterparty.bank).toBe("DBS");
+  });
+
+  it("leaves the recipient bank unset when the advice leaves Payee Bank empty", () => {
+    expect(SC_FAST_ADVICE).toMatch(/Payee Bank:\s+Transaction message:/);
+    const movement = parseBankMovement(SC_FAST_ADVICE, {
+      senderBank: "SC",
+      receivedAt: "2026-09-28T03:14:27.000Z",
+    });
+    expect(movement).not.toBeNull();
+    expect(movement.counterparty.bank).toBeNull();
+  });
+
+  it("does not claim a non-SC alert that happens to use the same label layout", () => {
+    // "From account" / "To account" is generic FAST vocabulary. Pre-fix an
+    // inbound advice in that shape was booked OUTGOING from the recipient's
+    // account, inverting the direction and the leg pairing.
+    //
+    // Both the body signature AND the body mention of a bank are replaced, so
+    // this input satisfies neither possible gate -- it cannot pass merely
+    // because "DBS" is absent, and it cannot pass on a stale signature.
+    const otherBank = SC_FAST_ADVICE
+        .replace(/Standard Chartered Online Banking/g, "Some Bank Online Banking")
+        .replace(/Payee Bank:/g, "Counterparty Bank:");
+    expect(otherBank).not.toMatch(/Standard\s+Chartered/i);
+    expect(parseBankMovement(otherBank, {
+      senderBank: "DBS",
+      receivedAt: "2026-09-28T03:14:27.000Z",
+    })).toBeNull();
+  });
+
+  it("parses the SC advice whether the body is line-separated or flattened", () => {
+    const lineSeparated = SC_FAST_ADVICE.replace(/ Forwarded message/, "\nForwarded message")
+        .replace(/ Transaction reference/, "\nTransaction reference")
+        .replace(/ From account/, "\nFrom account")
+        .replace(/ To account/, "\nTo account")
+        .replace(/ Amount/, "\nAmount")
+        .replace(/ Currency/, "\nCurrency")
+        .replace(/ Transaction due date/, "\nTransaction due date");
+
+    for (const body of [SC_FAST_ADVICE, lineSeparated]) {
+      const movement = parseBankMovement(body, {
+        senderBank: "SC",
+        receivedAt: "2026-09-28T03:14:27.000Z",
+      });
+      expect(movement).not.toBeNull();
+      expect(movement.own_account.suffix).toBe("6445");
+      expect(movement.counterparty.suffix).toBe("5750");
+    }
+  });
 });
 
 describe("identityMappingsFromFacts", () => {
