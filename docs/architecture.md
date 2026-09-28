@@ -46,7 +46,7 @@ graph TB
 
 `codex-router` is **not** part of this repository. It is a separate repository (`darrencjh8/codex-router`) that CI checks out into `modules/codex-router` at deploy time, and `modules/docker-compose.yml` builds it from that path. The directory does not exist in a plain clone of this repo until the deploy workflow populates it.
 
-`opencode-sidecar` is the sixth compose service: a `node:22-slim` container that runs `opencode serve` on port `18788` to back the keyless `opencode-free/` lane. It publishes no port, has no healthcheck, and is reached only by `codex-router` over the compose network through `CODEX_ROUTER_OPENCODE_FREE_URL` (default `http://opencode-sidecar:18788`). It is not listed in the health-check table in [operations.md](operations.md) because it has no `/health` endpoint.
+`opencode-sidecar` is the fifth of the six compose services: a `node:22-slim` container that runs `opencode serve` on port `18788` to back the keyless `opencode-free/` lane. It publishes no port, has no healthcheck, and is reached only by `codex-router` over the compose network through `CODEX_ROUTER_OPENCODE_FREE_URL` (default `http://opencode-sidecar:18788`). It is not listed in the health-check table in [operations.md](operations.md) because it has no `/health` endpoint.
 
 ## How it works
 
