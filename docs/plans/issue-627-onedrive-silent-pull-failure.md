@@ -292,10 +292,11 @@ it("surfaces a failed Portfolio status fetch when there is no analysis", () => {
 ```
 
 Plan round 3 raised the absence of this as its one Medium, and the mutation proves it: dropping the
-new warning from *only* the fallback return leaves all 55 tests in the four CI-gated suites green.
-Every other leg's fallback rendering *is* pinned — broadly dropping `pre` from that return turns six
-tests red — so `portfolio_status` would be the one leg in the file quietly violating the convention
-the rest of it follows.
+new warning from *only* the fallback return leaves all 55 tests in the four CI-gated suites green at
+HEAD. Every other leg's fallback rendering *is* pinned — broadly dropping `pre` from that return turns
+**nine** tests red — so `portfolio_status` would be the one leg in that file not following the
+convention the rest of it follows. (Both counts are measured at HEAD, where R1's two new tests are not
+yet landed; they are 80 once they are.)
 
 **These two test changes are what discharge the mutation control.** Round 2 raised as Critical that
 R1 as previously specified left the control red while the Validation section claimed the control
