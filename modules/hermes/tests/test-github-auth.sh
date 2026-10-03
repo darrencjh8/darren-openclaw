@@ -84,6 +84,8 @@ else
     nope "T-precedence: exits 0 with only GH_APP_ID set" "got exit code $rc"
 fi
 
+# The App-first assertion runs in the isolated fake harness below, where the
+# request and gh-login arguments are available for inspection.
 # T-precedence: complete App config must send the minted JWT on the wire.
 # Uses fake curl + fake openssl + stub key so no network or secret is needed.
 echo ""
@@ -114,6 +116,21 @@ STUB
 chmod +x "$fakebin/gh"
 export FAKE_CURL_ARGS_FILE="$fakebin/curl-args.txt"
 export FAKE_GH_LOG="$fakebin/gh.log"
+: > "$FAKE_GH_LOG"
+fake_key="-----BEGIN RSA PRIVATE KEY-----\nfake\n-----END RSA PRIVATE KEY-----"
+
+# Ambient PAT-style variables must be cleared before gh is invoked.
+ambient_out=$(run_auth PATH="$fakebin:$PATH" \
+    GH_APP_ID=4090999 GH_APP_INSTALLATION_ID=141232599 GH_APP_PRIVATE_KEY="$fake_key" \
+    GH_TOKEN=ambient-token GITHUB_TOKEN=ambient-token \
+    GH_APP_TOKEN_FILE="$fakebin/ambient-token" \
+    bash "$AUTH_SCRIPT" 2>&1 || true)
+if grep -q "ambient-token" "$FAKE_CURL_ARGS_FILE" 2>/dev/null || grep -q "ambient-token" "$FAKE_GH_LOG" 2>/dev/null; then
+    nope "T-precedence: ambient PAT token is ignored" "token was sent to the API or gh"
+else
+    ok "T-precedence: ambient PAT token is ignored"
+fi
+: > "$FAKE_CURL_ARGS_FILE"
 : > "$FAKE_GH_LOG"
 FAKE_TOKEN_FILE="$fakebin/token"
 fake_key="-----BEGIN RSA PRIVATE KEY-----\nfake\n-----END RSA PRIVATE KEY-----"

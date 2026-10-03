@@ -193,13 +193,83 @@ PY
 mkdir -p /opt/data/memories-backup
 chown -R hermes:hermes /opt/data/memories-backup 2>/dev/null || true
 
-# Configure gh CLI with FRIDAY_PAT (injected via GitHub Actions secret)
-# Available at boot time — no racing with dashboard UI
-if [ -n "${FRIDAY_PAT:-}" ]; then
+# Configure gh CLI with the GitHub App when complete, else FRIDAY_PAT fallback.
+# App-first: a configured App is authoritative and must never be overwritten by
+# the PAT. PAT runs only when App configuration is incomplete; neither usable
+# leaves existing credentials untouched.
+if [ -n "${GH_APP_ID:-}" ] && [ -n "${GH_APP_INSTALLATION_ID:-}" ] && [ -n "${GH_APP_PRIVATE_KEY:-}" ]; then
+    su -m -s /bin/sh hermes -c '/opt/hermes-defaults/scripts/github-auth.sh' 2>/dev/null \
+        || echo "WARNING: github-app auth failed at boot (PAT fallback not attempted)" >&2
+elif [ -n "${FRIDAY_PAT:-}" ]; then
     printf '%s' "$FRIDAY_PAT" > /tmp/.gh-token-init
     su -s /bin/sh hermes -c "gh auth login --with-token < /tmp/.gh-token-init" 2>/dev/null || true
     rm -f /tmp/.gh-token-init
+else
+    echo "WARNING: neither GitHub App config nor FRIDAY_PAT present; leaving gh credentials untouched" >&2
 fi
+
+# Seed github-app-auth-refresh cron job (no_agent script-only refresh).
+# Follows the portfolio-daily-sync update-in-place pattern: a redeploy migrates
+# the old github-auth-refresh 50m insert-only job to the new name and schedule.
+python3 <<'PYEOF' || true
+import os, json, uuid, datetime
+jobs_path = "/opt/data/cron/jobs.json"
+os.makedirs(os.path.dirname(jobs_path), exist_ok=True)
+try:
+    with open(jobs_path) as f:
+        data = json.load(f)
+    jobs = data.get("jobs", []) if isinstance(data, dict) else data
+except (FileNotFoundError, json.JSONDecodeError):
+    jobs = []
+
+wanted = {
+    "name": "github-app-auth-refresh",
+    "schedule": {"kind": "interval", "minutes": 15, "display": "every 15m"},
+    "schedule_display": "every 15m",
+    "script": "github-auth.sh",
+    "no_agent": True,
+    "enabled": True,
+    "deliver": "local",
+    "next_run_at": None,
+}
+
+found = False
+for j in jobs:
+    if not isinstance(j, dict):
+        continue
+    if j.get("name") in ("github-app-auth-refresh", "github-auth-refresh"):
+        found = True
+        changed = False
+        if j.get("name") != wanted["name"]:
+            j["name"] = wanted["name"]
+            changed = True
+        for key in ("schedule", "schedule_display", "script", "no_agent", "deliver"):
+            if j.get(key) != wanted[key]:
+                j[key] = wanted[key]
+                changed = True
+        if "prompt" in j:
+            del j["prompt"]
+            changed = True
+        if "deliver_extra" in j:
+            del j["deliver_extra"]
+            changed = True
+        if changed:
+            print("cron: github-app-auth-refresh migrated to no_agent script-only 15m")
+        else:
+            print("cron: github-app-auth-refresh unchanged")
+        break
+
+if not found:
+    jobs.append({
+        "id": uuid.uuid4().hex[:12],
+        **wanted,
+        "created_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+    })
+    print("cron: github-app-auth-refresh seeded (no_agent)")
+
+with open(jobs_path, "w") as f:
+    json.dump({"jobs": jobs, "updated_at": datetime.datetime.now(datetime.timezone.utc).isoformat()}, f, indent=2)
+PYEOF
 
 # The container's own codex-router checkout is the driver dev-loop sessions
 # execute (`codex/skills/dev-loop/scripts/loop.py`), so it must not stay pinned

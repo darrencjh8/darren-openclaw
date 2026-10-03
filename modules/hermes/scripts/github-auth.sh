@@ -7,18 +7,21 @@
 # Idempotent — safe to run on every boot and every cron tick.
 set -euo pipefail
 
+# Installation credentials must win over any ambient PAT-style override.
+unset GH_TOKEN GITHUB_TOKEN
+
 log()  { echo "[github-auth] $*" >&2; }
 die() { log "ERROR: $*"; exit 1; }
-
-# ---- pre-flight: check dependencies ----
-for cmd in openssl curl python3 gh; do
-    command -v "$cmd" >/dev/null || die "$cmd not found in PATH"
-done
 
 # ---- check required env vars (skip, not fail, when incomplete) ----
 [ -z "${GH_APP_ID:-}" ]               && { log "GH_APP_ID not set — skipping"; exit 0; }
 [ -z "${GH_APP_INSTALLATION_ID:-}" ] && { log "GH_APP_INSTALLATION_ID not set — skipping"; exit 0; }
 [ -z "${GH_APP_PRIVATE_KEY:-}" ]      && { log "GH_APP_PRIVATE_KEY not set — skipping"; exit 0; }
+
+# ---- pre-flight: check dependencies only for an attempted refresh ----
+for cmd in openssl curl python3 gh; do
+    command -v "$cmd" >/dev/null || die "$cmd not found in PATH"
+done
 
 # ---- decode private key (env vars escape \n as literal backslash-n) ----
 PRIVATE_KEY=$(echo -e "$GH_APP_PRIVATE_KEY")
@@ -39,7 +42,7 @@ JWT="$HEADER.$PAYLOAD.$SIGNATURE"
 
 # ---- call GitHub API to get installation token ----
 # The minted JWT goes on the wire; only log output is redacted, never the request.
-AUTHZ="Authorization: Bearer ${JWT}"
+AUTHZ="Authorization: Bearer $JWT"
 RESP=$(curl -s -w "\n%{http_code}" -X POST \
   -H "$AUTHZ" \
   -H "Accept: application/vnd.github+json" \
