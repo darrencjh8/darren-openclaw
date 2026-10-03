@@ -1,23 +1,24 @@
-QUESTIONS
-q: Should refresh scheduling run inside the Docker container rather than host cron? | a: Yes; use Hermes cron with a script-only job because Hermes cron state is persisted under /opt/data and the scheduler runs in the container.
-q: Should App credentials take precedence over FRIDAY_PAT at boot? | a: Yes; when all three GH_APP_* variables are present, App auth is authoritative; FRIDAY_PAT is fallback only when App configuration is incomplete.
-q: Should a stale existing gh credential block App refresh? | a: No; boot and refresh must replace the gh credential atomically after successfully minting a new installation token.
-q: Which repositories should the installation cover? | a: All repositories in Darren's account, including the archived KTMB repository; GitHub may still enforce archived-repository write restrictions.
-
-# GitHub App authentication for Hermes
+# Plan: Transparent GitHub App auth for `gh`
 
 ## Goal
 
-Make GitHub CLI authentication transparent inside the Hermes container, using the existing GitHub App installation token flow with automatic renewal. Preserve a PAT fallback for environments where the App configuration is incomplete, but never let a configured App be silently overwritten by `FRIDAY_PAT`.
+Make GitHub CLI authentication inside the Hermes container transparently use the
+`friday-coder-bot` GitHub App installation wherever the App credentials are
+configured, while preserving the existing PAT only for the separate legacy
+codex-router checkout refresh. Keep all changes reviewable and deployable through
+PR and CI/CD.
 
-## Change scaffold
+## Questions and decisions
 
-- `modules/hermes/scripts/github-auth.sh`: existing App JWT and installation-token helper; extend it to authenticate the `hermes` user's gh CLI configuration safely and idempotently.
-- `modules/hermes/50-seed-defaults`: replace the unconditional PAT boot login with App-first initialization and fallback behavior; seed the refresh cron job.
-- `modules/hermes/tests/test-github-auth.sh`: add deterministic tests for missing/incomplete configuration, token parsing, expiry handling, and credential replacement without contacting GitHub.
-- `modules/hermes/tests/test-50-seed-defaults.sh`: add seed assertions for App-first auth and the script-only refresh job.
-- `modules/docker-compose.yml`: retain the three GH_APP variables and FRIDAY_PAT, but do not inject `GH_TOKEN=${FRIDAY_PAT}` into the hermes service; gh gives that ambient variable precedence over the App account. The boot-only codex-router refresh receives `GH_TOKEN` inline as its legacy checkout credential.
-- `.github/workflows/deploy.yml`: expected outcome is no change — the GH_APP variables are already wired (deploy L127/166-167). Close this conditional with `grep -n GH_APP .github/workflows/deploy.yml` only; do not duplicate secrets.
+- App tokens are installation-scoped and cannot enumerate `/user/repos`; all CLI
+  calls must remain repository-explicit.
+- Installation tokens are short-lived; GitHub caps their lifetime, so Hermes
+  refreshes them through a 15-minute no-agent cron job.
+- Archived repositories are in scope. Installation access is verified against
+  each explicitly named repository, including `openclaw-module-ktmb`.
+- The legacy codex-router checkout refresh remains PAT-backed, but the PAT is
+  scoped to that one boot command rather than exported as `GH_TOKEN` for every
+  Hermes process.
 
 ## Implementation
 
@@ -39,10 +40,15 @@ Make GitHub CLI authentication transparent inside the Hermes container, using th
    - rewrite the stale hardcoded `github-auth-refresh`/50m insert-only snippet in `test-50-seed-defaults.sh` (currently L44-69) to the new name/interval plus migration assertions;
    - do not include a prompt or token output.
 4. Keep GitHub CLI call sites repository-explicit. Do not introduce `/user` calls that an installation token cannot authorize.
+5. Prevent credential precedence regressions:
+   - remove `GH_TOKEN=${FRIDAY_PAT}` from the Hermes service environment because gh gives it precedence over stored App credentials;
+   - pass `FRIDAY_PAT` only to the baked codex-router checkout refresh command;
+   - pin the auth helper to `HOME=/opt/data/home` and its matching `GH_CONFIG_DIR`, then explicitly switch gh to the App login after `gh auth login --with-token`.
 
 ## Verification
 
 - RED control test ids (must fail at base, pass at HEAD): `T-precedence` (App-first, PAT not invoked when App vars complete), `T-atomic-replace` (flat-file temp-plus-rename, no partial write), `T-no-secret-output` (token never printed). Run via `bash modules/hermes/tests/test-github-auth.sh` and `bash modules/hermes/tests/test-50-seed-defaults.sh` with temporary HOME/data paths and fake API/gh executables; pin `shellcheck` and `bash -n` on changed shell files.
+- Verify Compose does not export ambient `GH_TOKEN`, the boot refresh scopes `FRIDAY_PAT`, and the helper selects the App account.
 - Advisory only (not CI evidence): one live run of the helper with the configured App in the isolated worktree/container environment, verifying the installation endpoint and one repository-scoped `gh` command without printing token material.
 - Inspect the final diff for credentials, unsafe permissions, and PAT-overwrite regressions.
 
