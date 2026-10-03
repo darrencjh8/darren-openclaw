@@ -43,6 +43,17 @@ JWT="$HEADER.$PAYLOAD.$SIGNATURE"
 # ---- call GitHub API to get installation token ----
 # The minted JWT goes on the wire; only log output is redacted, never the request.
 AUTHZ="Authorization: Bearer $JWT"
+APP_SLUG=$(curl -s \
+  -H "$AUTHZ" \
+  -H "Accept: application/vnd.github+json" \
+  "https://api.github.com/app" \
+  | python3 -c "import sys,json; print(json.load(sys.stdin).get('slug',''))")
+[ -n "$APP_SLUG" ] || die "GitHub API did not return the App slug"
+case "$APP_SLUG" in
+    *[!a-zA-Z0-9_-]*) die "GitHub API returned an invalid App slug" ;;
+esac
+APP_LOGIN="${APP_SLUG}[bot]"
+export GH_APP_LOGIN="$APP_LOGIN"
 RESP=$(curl -s -w "\n%{http_code}" -X POST \
   -H "$AUTHZ" \
   -H "Accept: application/vnd.github+json" \
@@ -74,26 +85,32 @@ trap - EXIT
 log "token stored (expires $EXPIRES_AT)"
 
 # ---- auth gh CLI as the hermes runtime user ----
-# The boot hook and the cron scheduler both run as hermes, so the su is only for
-# the root boot path. Authenticating as the caller keeps the credential owner the
-# user gh actually runs as, and su -m is refused here because it needs root.
+# The boot hook and the cron scheduler both run as hermes. Pin HOME because the
+# root boot hook invokes this through su -m, which otherwise preserves /root.
+# HERMES_HOME is the mounted data root; gh's config lives in its home subdirectory.
+export HOME="${GH_HOME:-/opt/data/home}"
+export GH_CONFIG_DIR="${GH_CONFIG_DIR:-$HOME/.config/gh}"
+
 if [ "$(id -u)" = "0" ]; then
     INIT_TMP=$(mktemp /tmp/.gh-app-token-init.XXXXXX)
     trap 'rm -f "$INIT_TMP"' EXIT
     printf '%s' "$TOKEN" > "$INIT_TMP"
     chmod 600 "$INIT_TMP"
-    su -s /bin/sh hermes -c "gh auth login --with-token < $INIT_TMP" 2>/dev/null \
-        || die "gh auth login failed for hermes"
+    su -s /bin/sh hermes -c "HOME=$HOME gh auth login --with-token < $INIT_TMP && HOME=$HOME gh auth switch --hostname github.com --user '${GH_APP_LOGIN:-friday-coder-bot[bot]}'" 2>/dev/null \
+        || die "gh auth login or switch failed for hermes"
     rm -f "$INIT_TMP"
 else
     INIT_TMP=$(mktemp "${TMPDIR:-/tmp}/.gh-app-token-init.XXXXXX")
     trap 'rm -f "$INIT_TMP"' EXIT
     printf '%s' "$TOKEN" > "$INIT_TMP"
     chmod 600 "$INIT_TMP"
-    gh auth login --with-token < "$INIT_TMP" 2>/dev/null \
+    HOME=$HOME gh auth login --with-token < "$INIT_TMP" 2>/dev/null \
         || die "gh auth login failed for $(id -un)"
+    gh auth switch --hostname github.com --user "${GH_APP_LOGIN:-friday-coder-bot[bot]}" 2>/dev/null \
+        || die "gh auth switch failed for $(id -un)"
     rm -f "$INIT_TMP"
 fi
 trap - EXIT
 
 log "done"
+exit 0

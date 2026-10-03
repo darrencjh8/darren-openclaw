@@ -246,7 +246,6 @@ services:
             - NOTION_API_KEY=${NOTION_API_KEY}
             - POLLINATIONS_API_KEY=${POLLINATIONS_API_KEY}
             - FRIDAY_PAT=${FRIDAY_PAT}
-            - GH_TOKEN=${FRIDAY_PAT}
             - EXPENSE_TRACKER_DATA=/opt/data/expense-tracker-data
         mem_limit: 3g
         networks:

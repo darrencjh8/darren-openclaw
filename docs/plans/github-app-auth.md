@@ -16,7 +16,8 @@ Make GitHub CLI authentication transparent inside the Hermes container, using th
 - `modules/hermes/50-seed-defaults`: replace the unconditional PAT boot login with App-first initialization and fallback behavior; seed the refresh cron job.
 - `modules/hermes/tests/test-github-auth.sh`: add deterministic tests for missing/incomplete configuration, token parsing, expiry handling, and credential replacement without contacting GitHub.
 - `modules/hermes/tests/test-50-seed-defaults.sh`: add seed assertions for App-first auth and the script-only refresh job.
-- `modules/docker-compose.yml` and `.github/workflows/deploy.yml`: expected outcome is no change — all three GH_APP vars are already wired (compose L232-234, deploy L127/166-167). Close this conditional with `grep -n GH_APP modules/docker-compose.yml .github/workflows/deploy.yml` only; do not duplicate secrets.
+- `modules/docker-compose.yml`: retain the three GH_APP variables and FRIDAY_PAT, but do not inject `GH_TOKEN=${FRIDAY_PAT}` into the hermes service; gh gives that ambient variable precedence over the App account. The boot-only codex-router refresh receives `GH_TOKEN` inline as its legacy checkout credential.
+- `.github/workflows/deploy.yml`: expected outcome is no change — the GH_APP variables are already wired (deploy L127/166-167). Close this conditional with `grep -n GH_APP .github/workflows/deploy.yml` only; do not duplicate secrets.
 
 ## Implementation
 
@@ -24,7 +25,7 @@ Make GitHub CLI authentication transparent inside the Hermes container, using th
    - exit 0 with a skip log and no alert when App configuration is incomplete (any of GH_APP_ID, GH_APP_INSTALLATION_ID, GH_APP_PRIVATE_KEY unset); return non-zero only on attempted-but-failed mint/auth/parse (bad key, malformed API response, failed gh login);
    - validate all required App variables before making a request;
    - mint a JWT with the configured App ID and private key;
-   - request an installation token by sending `Authorization: Bearer $JWT` on the wire (redact the value only in log output) and parse `token` plus `expires_at` from the response;
+   - request an installation token by sending `Authorization: Bearer <JWT>` on the wire (redact the value only in log output) and parse `token` plus `expires_at` from the response;
    - authenticate the `hermes` user via `su -s /bin/sh hermes -c "gh auth login --with-token"`, never log the token, and keep credential files mode `0600` owned by hermes — exact files: the hermes user's gh `hosts.yml` plus `/opt/data/.gh_token` if retained (write via `install -o hermes -g hermes -m 600` or chown after write); remove or rotate the stale mode-644 `/opt/data/.gh_token` regardless of owner;
    - restrict atomic temp-file-plus-rename replacement to flat files only (e.g. `/opt/data/.gh_token`); never hand-edit gh-managed `hosts.yml` — write it only through `gh auth login`, which owns that format.
 2. Make boot initialization idempotent and precedence-aware:

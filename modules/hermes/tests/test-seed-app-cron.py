@@ -75,6 +75,33 @@ class SeedAppCronTests(unittest.TestCase):
         self.assertIn("github-auth.sh", block)
         self.assertIn('elif [ -n "${FRIDAY_PAT:-}" ]', block)
         self.assertIn("PAT fallback not attempted", block)
+        helper = (ROOT / "scripts/github-auth.sh").read_text()
+        self.assertIn('export HOME="${GH_HOME:-/opt/data/home}"', helper)
+
+    def test_boot_refresh_scopes_pat_instead_of_ambient_gh_token(self) -> None:
+        text = SEED.read_text()
+        refresh = text[text.index("# The container's own codex-router checkout"):]
+        refresh = refresh[:refresh.index("python3 -c '")]
+        self.assertIn('GH_TOKEN="${FRIDAY_PAT:-}"', refresh)
+        self.assertNotIn("su -m -s /bin/sh hermes -c '/opt/hermes-defaults/scripts/refresh-codex-router-checkout.sh'", refresh)
+        self.assertIn("su -m -s /bin/sh hermes -c 'GH_TOKEN=\"$GH_TOKEN\" /opt/hermes-defaults/scripts/refresh-codex-router-checkout.sh'", refresh)
+        self.assertIn("/opt/hermes-defaults/scripts/refresh-codex-router-checkout.sh", refresh)
+
+    def test_seed_idempotence_runs_against_existing_jobs_file(self) -> None:
+        text = (ROOT / "tests/test-50-seed-defaults.sh").read_text()
+        marker = 'echo "--- idempotent (no duplicate) ---"'
+        segment = text[text.index(marker):text.index('echo ""', text.index(marker) + len(marker))]
+        self.assertIn("SEED_JOBS_PRIMED=1", segment)
+        self.assertIn('run_seed_python "$github_auth_snippet"', segment)
+        self.assertIn("count", segment)
+
+    def test_auth_helper_pins_home_and_switches_app(self) -> None:
+        text = (ROOT / "scripts/github-auth.sh").read_text()
+        self.assertIn('export HOME="${GH_HOME:-/opt/data/home}"', text)
+        self.assertIn('export GH_CONFIG_DIR=', text)
+        self.assertIn("gh auth switch", text)
+        self.assertIn("GH_APP_LOGIN", text)
+        self.assertIn("APP_SLUG", text)
 
 
 if __name__ == "__main__":

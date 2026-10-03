@@ -100,17 +100,24 @@ STUB
 chmod +x "$fakebin/openssl"
 cat > "$fakebin/curl" <<'STUB'
 #!/bin/bash
-# fake GitHub API: capture args, return a canned installation token
-printf '%s\n' "$@" > "${FAKE_CURL_ARGS_FILE:?}"
-printf '{"token":"fake-token-123","expires_at":"2030-01-01T00:00:00Z"}'
-printf '\n201'
+# fake GitHub API: capture args, return a canned App or installation response
+printf '%s\n' "$@" >> "${FAKE_CURL_ARGS_FILE:?}"
+if printf '%s\n' "$@" | grep -q '/app$'; then
+    printf '{"slug":"friday-coder-bot"}'
+else
+    printf '{"token":"fake-token-123","expires_at":"2030-01-01T00:00:00Z"}'
+    printf '\n201'
+fi
 STUB
 chmod +x "$fakebin/curl"
 cat > "$fakebin/gh" <<'STUB'
 #!/bin/bash
-# fake gh: record that auth login happened, never touch a real credential
+# fake gh: record auth commands, never touch a real credential
 printf '%s\n' "$*" >> "${FAKE_GH_LOG:?}"
 cat >/dev/null
+if [ "$1" = "api" ] && [ "$2" = "/app" ]; then
+    printf '{"slug":"friday-coder-bot"}'
+fi
 exit 0
 STUB
 chmod +x "$fakebin/gh"
@@ -164,6 +171,14 @@ if grep -q "auth login --with-token" "$FAKE_GH_LOG" 2>/dev/null; then
     ok "T-precedence: gh auth login runs with the installation token"
 else
     nope "T-precedence: gh auth login runs with the installation token" "gh log: $(cat "$FAKE_GH_LOG" 2>/dev/null | head -3)"
+fi
+
+# T-app-active: after login the helper must select the App account rather than
+# leaving a pre-existing PAT account active. The fake gh records the switch.
+if grep -q "auth switch.*--user friday-coder-bot\\[bot\\]" "$FAKE_GH_LOG" 2>/dev/null; then
+    ok "T-app-active: GitHub App account is selected"
+else
+    nope "T-app-active: GitHub App account is selected" "gh log: $(cat "$FAKE_GH_LOG" 2>/dev/null | head -5)"
 fi
 
 # T-atomic-replace: the credential must be swapped into place by a rename, not

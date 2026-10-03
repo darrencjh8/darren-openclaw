@@ -79,8 +79,16 @@ prime_seed_jobs
 export SEED_JOBS_PRIMED=0
 github_auth_snippet="$(extract_seed_block)"
 [ -n "$github_auth_snippet" ] || { nope "seed block extracted" "github-app-auth-refresh block missing from $SEED_SCRIPT"; github_auth_snippet=":"; }
-output=$(run_seed_python "$github_auth_snippet")
-job_line=$(printf '%s\n' "$output" | grep '^github-app-auth-refresh|')
+run_seed_python "$github_auth_snippet" >/dev/null
+job_line=$(python3 -c "
+import json
+with open('$TMPDIR/cron/jobs.json') as f:
+    data = json.load(f)
+for job in data.get('jobs', []):
+    sched = job.get('schedule', {})
+    print(f\"{job.get('name', '?')}|{sched.get('kind', type(sched).__name__)}|{job.get('schedule_display', 'missing')}\")
+")
+[ -n "$job_line" ] || { nope "seeded job is present" "jobs.json contains no jobs"; job_line="||"; }
 name=$(echo "$job_line" | cut -d'|' -f1)
 kind=$(echo "$job_line" | cut -d'|' -f2)
 display=$(echo "$job_line" | cut -d'|' -f3)
@@ -150,7 +158,8 @@ print('OK: parsed dict')
 
 echo ""
 echo "--- idempotent (no duplicate) ---"
-# Re-run the real seed block with no reset: update-in-place must not append.
+# Re-run the real seed block against the already-seeded file: update-in-place must not append.
+export SEED_JOBS_PRIMED=1
 run_seed_python "$github_auth_snippet" >/dev/null 2>&1 || true
 count=$(python3 -c "
 import json

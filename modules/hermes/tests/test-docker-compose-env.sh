@@ -72,11 +72,22 @@ test_has_workspace_volume() {
     fi
 }
 
+# gh gives GH_TOKEN precedence over hosts.yml, so the hermes service must not
+# inject the long-lived PAT as an ambient override.
+test_app_auth_not_shadowed() {
+    if awk '/^[[:space:]]*hermes:/,/^[a-z]/' "$COMPOSE_FILE" | grep -q 'GH_TOKEN=${FRIDAY_PAT}'; then
+        nope "App auth is not shadowed by ambient GH_TOKEN" "hermes service injects GH_TOKEN from FRIDAY_PAT"
+    else
+        ok "App auth is not shadowed by ambient GH_TOKEN"
+    fi
+}
+
 test_has_safe_root
 test_has_opt_data
 test_has_workspace
 test_has_tmp
 test_has_workspace_volume
+test_app_auth_not_shadowed
 
 echo ""
 echo "========================================="

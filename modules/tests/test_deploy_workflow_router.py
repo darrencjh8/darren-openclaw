@@ -273,11 +273,12 @@ class DeployWorkflowRouterTests(unittest.TestCase):
 
         boot = (Path(__file__).parents[1] / "hermes/50-seed-defaults").read_text(encoding="utf-8")
         # The baked path, not a filename match: /opt/data/scripts/ holds a copy that
-        # a fresh volume may not have reseeded yet. `-m` preserves the environment,
-        # because GH_TOKEN lives there and `su` resets it by default.
+        # a fresh volume may not have reseeded yet. Scope the PAT to this legacy
+        # checkout refresh; it must not remain ambient for other gh invocations.
         self.assertIn(
-            "su -m -s /bin/sh hermes -c '/opt/hermes-defaults/scripts/refresh-codex-router-checkout.sh'", boot
+            "su -m -s /bin/sh hermes -c 'GH_TOKEN=\"$GH_TOKEN\" /opt/hermes-defaults/scripts/refresh-codex-router-checkout.sh'", boot
         )
+        self.assertIn('GH_TOKEN="${FRIDAY_PAT:-}"', boot)
         # A boot hook may not fail the boot: the refresh call carries a fallback
         # that reports the failure and lets the boot continue.
         self.assertIn('|| echo "WARNING: could not advance the codex-router checkout', boot)
