@@ -16,17 +16,17 @@ Make GitHub CLI authentication transparent inside the Hermes container, using th
 - `modules/hermes/50-seed-defaults`: replace the unconditional PAT boot login with App-first initialization and fallback behavior; seed the refresh cron job.
 - `modules/hermes/tests/test-github-auth.sh`: add deterministic tests for missing/incomplete configuration, token parsing, expiry handling, and credential replacement without contacting GitHub.
 - `modules/hermes/tests/test-50-seed-defaults.sh`: add seed assertions for App-first auth and the script-only refresh job.
-- `modules/docker-compose.yml` and `.github/workflows/deploy.yml`: only change if validation shows the already-present GH_APP variables are not delivered to the Hermes runtime; do not duplicate secrets.
+- `modules/docker-compose.yml` and `.github/workflows/deploy.yml`: expected outcome is no change — all three GH_APP vars are already wired (compose L232-234, deploy L127/166-167). Close this conditional with `grep -n GH_APP_ID modules/docker-compose.yml .github/workflows/deploy.yml` only; do not duplicate secrets.
 
 ## Implementation
 
 1. Refactor the existing helper around one safe refresh path:
+   - exit 0 with a skip log and no alert when App configuration is incomplete (any of GH_APP_ID, GH_APP_INSTALLATION_ID, GH_APP_PRIVATE_KEY unset); return non-zero only on attempted-but-failed mint/auth/parse (bad key, malformed API response, failed gh login);
    - validate all required App variables before making a request;
    - mint a JWT with the configured App ID and private key;
-   - request an installation token and parse `token` plus `expires_at` from the response;
-   - feed the token to `gh auth login --with-token` as the actual runtime user, never log it, and keep credential files mode `0600`;
-   - use a temporary file in the target directory and an atomic replace where a file is written;
-   - return non-zero on malformed responses or failed authentication so cron records the failure.
+   - request an installation token by sending `Authorization: Bearer $JWT` on the wire (redact the value only in log output) and parse `token` plus `expires_at` from the response;
+   - authenticate the `hermes` user via `su -s /bin/sh hermes -c "gh auth login --with-token"`, never log the token, and keep credential files mode `0600` — exact files: the hermes user's gh `hosts.yml` plus `/opt/data/.gh_token` if retained; remove or rotate the stale mode-644 root-owned `/opt/data/.gh_token`;
+   - restrict atomic temp-file-plus-rename replacement to flat files only (e.g. `/opt/data/.gh_token`); never hand-edit gh-managed `hosts.yml` — write it only through `gh auth login`, which owns that format.
 2. Make boot initialization idempotent and precedence-aware:
    - App configuration complete: run the App helper and do not invoke PAT login;
    - App configuration incomplete and `FRIDAY_PAT` present: retain the PAT fallback;
@@ -34,16 +34,16 @@ Make GitHub CLI authentication transparent inside the Hermes container, using th
 3. Seed a Hermes cron job named `github-app-auth-refresh`:
    - every 15 minutes;
    - `no_agent: true`, `script: github-auth.sh`, `deliver: local`;
-   - update an existing job in place so the schedule and script cannot drift after redeploy;
+   - update in place following the existing portfolio-job migration pattern, so the schedule and script cannot drift after redeploy;
+   - rewrite the stale hardcoded `github-auth-refresh`/50m insert-only snippet in `test-50-seed-defaults.sh` (currently L44-69) to the new name/interval plus migration assertions;
    - do not include a prompt or token output.
 4. Keep GitHub CLI call sites repository-explicit. Do not introduce `/user` calls that an installation token cannot authorize.
 
 ## Verification
 
-- Run the shell tests for `github-auth.sh` and `50-seed-defaults` using temporary HOME/data paths and fake API/gh executables; assert no secret is printed and replacement is atomic.
-- Run the real helper once with the configured App in the isolated worktree/container environment, verify the installation endpoint and one repository-scoped `gh` command, and do not print token material.
-- Run repository validation for the changed shell/config files and inspect the final diff for credentials, unsafe permissions, and PAT-overwrite regressions.
-- Use the latest canonical dev-loop from `codex-router` commit `89871726252ce72083c6cbf31f850c2d799383c6`; obtain plan approval, RED/GREEN tests, two exact-HEAD independent review approvals, CI, and merge through the normal PR path.
+- RED control test ids (must fail at base, pass at HEAD): `T-precedence` (App-first, PAT not invoked when App vars complete), `T-atomic-replace` (flat-file temp-plus-rename, no partial write), `T-no-secret-output` (token never printed). Run via `bash modules/hermes/tests/test-github-auth.sh` and `bash modules/hermes/tests/test-50-seed-defaults.sh` with temporary HOME/data paths and fake API/gh executables; pin `shellcheck` and `bash -n` on changed shell files.
+- Advisory only (not CI evidence): one live run of the helper with the configured App in the isolated worktree/container environment, verifying the installation endpoint and one repository-scoped `gh` command without printing token material.
+- Inspect the final diff for credentials, unsafe permissions, and PAT-overwrite regressions.
 
 ## Non-goals
 
