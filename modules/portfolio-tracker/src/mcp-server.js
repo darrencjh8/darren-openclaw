@@ -134,6 +134,16 @@ export function formatSyncResult(raw) {
         }
     }
 
+    // portfolio_status is a sixth remote leg. tools.js:1025 stores a failed
+    // status fetch as { error: e.message } and nothing downstream consumes it —
+    // _buildAnalysis takes taxonomyData, not the status — so before this the
+    // only trace of a dead Portfolio.app status call was a console.warn nobody
+    // reads in a cron log. Reported here so the cron surface cannot look clean.
+    const status = raw.portfolio_status;
+    if (status && typeof status === "object" && status.error) {
+        legErrs.push(`⚠️ Portfolio status: ${status.error}`);
+    }
+
     // The sync aborted before it assembled a payload (an Actual Budget outage
     // throws out of fetchBudget). Without this the operator got the empty string
     // and the aborting error was lost, which is what let a dead grant look clean

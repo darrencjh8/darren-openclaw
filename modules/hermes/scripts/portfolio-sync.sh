@@ -52,8 +52,14 @@ try:
     # Every remote leg, not just pull/push: the IBKR flex legs fail silently
     # the same way and on their own token expiry. `or '?'` and `or ''` cover an
     # explicit null as well as a missing key, so a null never prints `None`.
-    for leg in ('pull', 'push', 'flex_pull', 'flex_import', 'taxonomy_export'):
+    for leg in ('pull', 'push', 'flex_pull', 'flex_import', 'taxonomy_export',
+                'portfolio_status'):
         r = data.get(leg)
+        if leg == 'portfolio_status' and isinstance(r, dict) and r.get('error'):
+            # tools.js stores a failed status fetch as {error: msg} and no other
+            # leg or consumer reads it, so surface it here too or the run is clean.
+            print(f'  {leg}: error ({r["error"]})')
+            continue
         if not isinstance(r, dict):
             # Absent, or an explicit null: render the placeholder. For
             # taxonomy_export this means the deployment does not export taxonomies.

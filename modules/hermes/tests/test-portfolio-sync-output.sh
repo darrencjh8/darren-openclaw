@@ -252,6 +252,13 @@ TAX_OK='{"sync_targets":[],
 check "a completed Sheets export is not an error" "$TAX_OK" "" "taxonomy_export: error"
 check "a completed Sheets export renders its status" "$TAX_OK" "taxonomy_export: completed ()"
 
+# portfolio_status has no `status` key: tools.js:1025 stores a failed status
+# fetch as {error}. Round 4 flagged it as a silently dropped leg.
+STATUS_ERR='{"sync_targets":[],
+  "pull":{"status":"ok","detail":"downloaded"},
+  "portfolio_status":{"error":"Portfolio.app unreachable"}}'
+check "a failed status fetch is reported" "$STATUS_ERR" "portfolio_status: error (Portfolio.app unreachable)"
+
 if [ -n "$SENTINEL_FROM_JS" ] && [ "$PARSER_SENTINEL" != "$SENTINEL_FROM_JS" ]; then
     echo "FAIL: the shell parser matches on '$PARSER_SENTINEL' but NOT_CONFIGURED_ERROR is '$SENTINEL_FROM_JS'" >&2
     echo "      the M4 not-configured guard would silently stop working" >&2

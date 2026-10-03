@@ -51,6 +51,8 @@ const RENDERER_TESTS = [
     "tests/onedrive-legs.test.js",
     "tests/mcp-server.test.js",
     "tests/java_bridge.test.js",
+    "tests/leg-coverage.test.js",
+    "tests/shell-leg-coverage.test.js",
 ];
 
 /**

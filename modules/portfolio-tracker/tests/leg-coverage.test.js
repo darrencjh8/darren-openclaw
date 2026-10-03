@@ -41,13 +41,12 @@ const NOT_LEGS = new Set([
     "sync_targets", // per-account AB rows, already rendered as ⚠️ lines
     "summary", // the "Synced 3/3 accounts" header
     "taxonomy_data", // local cache, only used to build the analysis body
-    "portfolio_status", // carried through for callers, not an operator surface
     "analysis", // the authoritative display itself
     "fx_rates_used", // inputs to the analysis body
 ]);
 
 /** Every leg the renderer and the shell parser must mention by name. */
-const REQUIRED = ["pull", "push", "flex_pull", "flex_import", "taxonomy_export"];
+const REQUIRED = ["pull", "push", "flex_pull", "flex_import", "taxonomy_export", "portfolio_status"];
 
 describe("the renderer covers every remote leg the payload carries", () => {
     it("finds the payload literal it is checking", () => {
@@ -80,6 +79,10 @@ describe("the renderer covers every remote leg the payload carries", () => {
             flex_pull: { success: false, error: "IBKR Flex error 1012" },
             flex_import: { status: "ok", trades_imported: 0, items_skipped: 4, errors: [] },
             taxonomy_export: { status: "error", detail: "Google Sheets API: 401" },
+            // This leg has no `status` at all: tools.js:1025 stores a failed
+            // status fetch as {error}. A generic status:"error" shape here would
+            // not match what the producer emits, so the test would prove nothing.
+            portfolio_status: { error: "Portfolio.app unreachable" },
         };
         for (const leg of REQUIRED) {
             const out = formatSyncResult({
