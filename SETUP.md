@@ -131,7 +131,7 @@ Never run `modules/deploy.sh` (or `git pull`) manually on this host. Without `--
 
 | File | Purpose |
 |------|---------|
-| `/home/runner/data/hermes/data/.gh_token` | GitHub App installation token (refreshed every 50 min) |
+| `/home/runner/data/hermes/data/.gh_token` | GitHub App installation token (refreshed every 15 min) |
 | `/home/runner/data/hermes/data/config.yaml` | Hermes gateway config |
 | `/home/runner/data/hermes/data/SOUL.md` | Agent personality |
 | `/home/runner/data/hermes/data/cron/jobs.json` | Cron job definitions |
@@ -145,7 +145,7 @@ Never run `modules/deploy.sh` (or `git pull`) manually on this host. Without `--
 
 | Job | Schedule | Purpose |
 |-----|----------|---------|
-| `github-auth-refresh` | Every 50 min | Refresh GitHub App installation token |
+| `github-app-auth-refresh` | Every 15 min | Refresh GitHub App installation token |
 | `memory-backup` | Every 360 min | Backup memories to private git repo |
 | `portfolio-daily-sync` | Daily at 10:00 SGT | Full portfolio sync pipeline |
 

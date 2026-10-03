@@ -166,15 +166,44 @@ else
     nope "T-precedence: gh auth login runs with the installation token" "gh log: $(cat "$FAKE_GH_LOG" 2>/dev/null | head -3)"
 fi
 
-# T-atomic-replace: flat-file credential writes must be atomic (temp + rename).
-# Fails at base: the helper writes /opt/data/.gh_token directly with no temp file.
+# T-atomic-replace: the credential must be swapped into place by a rename, not
+# rewritten in place. Assert the observable effect instead of the presence of a
+# staging call: an in-place rewrite (`> file`) keeps the same inode across
+# writes, while a temp-file + rename swap installs a new inode. Two consecutive
+# runs over the same token path therefore distinguish the two mechanisms, and a
+# stale staging file left behind would mean a reader could catch a partial one.
 echo ""
-echo "=== T-atomic-replace: no partial credential writes ==="
-atomic_probe=$(grep -cE 'mktemp|tmpfile|\.tmp' "$AUTH_SCRIPT" 2>/dev/null || true)
-if [ "${atomic_probe:-0}" -ge 1 ]; then
-    ok "T-atomic-replace: helper stages credential writes via temp file"
+echo "=== T-atomic-replace: credential installed by rename ==="
+atomic_dir="$fakebin/atomic"
+mkdir -p "$atomic_dir"
+atomic_token="$atomic_dir/token"
+
+run_auth PATH="$fakebin:$PATH" \
+    GH_APP_ID=4090999 GH_APP_INSTALLATION_ID=141232599 GH_APP_PRIVATE_KEY="$fake_key" \
+    GH_APP_TOKEN_FILE="$atomic_token" \
+    bash "$AUTH_SCRIPT" >/dev/null 2>&1 || true
+ino_before=$(stat -c '%i' "$atomic_token" 2>/dev/null || echo "missing")
+
+run_auth PATH="$fakebin:$PATH" \
+    GH_APP_ID=4090999 GH_APP_INSTALLATION_ID=141232599 GH_APP_PRIVATE_KEY="$fake_key" \
+    GH_APP_TOKEN_FILE="$atomic_token" \
+    bash "$AUTH_SCRIPT" >/dev/null 2>&1 || true
+ino_after=$(stat -c '%i' "$atomic_token" 2>/dev/null || echo "missing")
+
+if [ "$ino_before" = "missing" ] || [ "$ino_after" = "missing" ]; then
+    nope "T-atomic-replace: credential is replaced by rename, not rewritten" "token file was never written"
+elif [ "$ino_before" = "$ino_after" ]; then
+    nope "T-atomic-replace: credential is replaced by rename, not rewritten" \
+        "inode unchanged across writes ($ino_after): the file is rewritten in place, so a reader can observe a partial credential"
 else
-    nope "T-atomic-replace: helper stages credential writes via temp file" "no mktemp/tmp staging in $AUTH_SCRIPT"
+    ok "T-atomic-replace: credential is replaced by rename, not rewritten"
+fi
+
+leftovers=$(find "$atomic_dir" -mindepth 1 ! -name token | head -5)
+if [ -z "$leftovers" ]; then
+    ok "T-atomic-replace: no staging file survives the write"
+else
+    nope "T-atomic-replace: no staging file survives the write" "left behind: $leftovers"
 fi
 
 # Missing openssl should die with message
