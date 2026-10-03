@@ -344,7 +344,7 @@ export class PpJavaBridge {
         try {
             const result = await pullFromOneDrive();
             return {
-                status: "ok",
+                status: result.success ? "ok" : "error",
                 detail: result.success ? "downloaded" : result.error,
             };
         } catch (e) {

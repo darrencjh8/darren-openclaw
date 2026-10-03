@@ -11,6 +11,7 @@ import { z } from "zod";
 import { existsSync } from "fs";
 import { pullFromOneDrive, pushToOneDrive } from "./onedrive.js";
 import { getAuthUrl, exchangeCodeForToken } from "./onedrive_oauth.js";
+import { NOT_CONFIGURED_ERROR } from "./ibkr_flex.js";
 
 export function formatSyncResult(raw) {
     const lines = [];
@@ -19,8 +20,20 @@ export function formatSyncResult(raw) {
     const parts = [];
     if (raw.summary) parts.push(raw.summary);
     const fi = raw.flex_import;
-    if (fi && (fi.trades_imported > 0 || fi.dividends_imported > 0)) {
-        parts.push(`IBKR: ${fi.trades_imported || 0} trades, ${fi.dividends_imported || 0} dividends`);
+    // other_imported is a real success the header used to hide: a statement
+    // carrying only corporate actions imported fine but printed no IBKR line.
+    if (
+        fi &&
+        (fi.trades_imported > 0 ||
+            fi.dividends_imported > 0 ||
+            fi.other_imported > 0)
+    ) {
+        const bits = [];
+        if (fi.trades_imported > 0) bits.push(`${fi.trades_imported} trades`);
+        if (fi.dividends_imported > 0)
+            bits.push(`${fi.dividends_imported} dividends`);
+        if (fi.other_imported > 0) bits.push(`${fi.other_imported} other`);
+        parts.push(`IBKR: ${bits.join(", ")}`);
     }
     if (parts.length > 0) {
         lines.push(`🔄 ${parts.join(" · ")}`);
@@ -32,14 +45,128 @@ export function formatSyncResult(raw) {
         lines.push(`⚠️ ${e.name || e.account_id}: ${e.error || e.result?.error || "unknown"}`);
     }
 
+    // Remote round-trip failures. A dead OneDrive grant reaches here as
+    // { status: "error" }, and reporting that round trip as a success is the
+    // defect this guards: the sheet is then written from a stale local file.
+    //
+    // The IBKR flex legs are read here too. They failed silently for the same
+    // reason: the header branch below only fires when trades_imported > 0, and
+    // that is necessarily 0 on the path where the pull itself failed, so the
+    // failing leg was the one case the header could never report. flex_pull and
+    // flex_import are separate tokens with separate expiry, so either can fail
+    // while the OneDrive grant is healthy.
+    //
+    // Kept out of `lines` deliberately — `lines` carries the sync header, and
+    // the analysis body below already includes its own, so prepending it would
+    // duplicate the header the tests pin.
+    const legErrs = [];
+    for (const leg of ["pull", "push"]) {
+        const r = raw[leg];
+        if (r && r.status === "error") {
+            legErrs.push(`⚠️ OneDrive ${leg}: ${r.detail || "failed"}`);
+        }
+    }
+    const flexPull = raw.flex_pull;
+    // `skipped` is how pullFlexXml marks "this deployment has no IBKR flex
+    // configured" (ibkr_flex.js). That is configuration absence, not a remote
+    // failure: reporting it on every run would put a warning on every healthy
+    // sync, and an operator who sees that every day stops reading the line
+    // that #627 exists to make trustworthy. The error-string fallback keeps
+    // this working for a payload produced before the `skipped` flag existed.
+    if (flexPull && flexPull.success === false && !flexPull.skipped &&
+        flexPull.error !== NOT_CONFIGURED_ERROR) {
+        legErrs.push(`⚠️ IBKR flex: ${flexPull.error || "failed"}`);
+    }
+    const flexImport = raw.flex_import;
+    // PpClient.importIbkr sets status:"ok" unconditionally (PpClient.java) and
+    // reports per-item failures in a separate errors[] list, so status is never
+    // "error" in practice. Keying only on status made this branch dead code and
+    // a real import failure entirely silent: every trade for the period was
+    // dropped while both surfaces reported a clean sync.
+    if (flexImport) {
+        const detail = flexImport.detail || flexImport.error;
+        if (flexImport.status === "error" || detail) {
+            legErrs.push(`⚠️ IBKR import: ${detail || "failed"}`);
+        } else if (Array.isArray(flexImport.errors) && flexImport.errors.length > 0) {
+            const n = flexImport.errors.length;
+            legErrs.push(
+                `⚠️ IBKR import: ${n} item${n === 1 ? "" : "s"} failed to import — ` +
+                    `${flexImport.errors.join("; ")}`,
+            );
+        } else {
+            // The silent-drop route. PpClient counts an item as skipped at four
+            // sites that never touch errors[]: an unmapped account, a null
+            // portfolio, a null account key, or an item type this build does not
+            // handle (PpClient.java). So {0 imported, N skipped, errors: []} is
+            // the dominant failure mode, and it rendered byte-identical to a
+            // healthy run on both surfaces - the #627 defect class by a second
+            // path. Only flag it when nothing at all came in: a statement with
+            // items legitimately skipped alongside a real import is normal.
+            const imported =
+                (flexImport.trades_imported || 0) +
+                (flexImport.dividends_imported || 0) +
+                (flexImport.other_imported || 0);
+            const skipped = flexImport.items_skipped || 0;
+            if (imported === 0 && skipped > 0) {
+                legErrs.push(
+                    `⚠️ IBKR import: nothing imported — all ${skipped} item${skipped === 1 ? "" : "s"} skipped`,
+                );
+            }
+        }
+    }
+
+    // taxonomy_export is a fifth remote leg in the same payload (tools.js returns
+    // it alongside the other four) and it is the leg whose whole job is writing
+    // the sheet the operator reads. It has three failure shapes: status "error"
+    // when queryTaxonomies throws, "partial" with an errors[] list when cells fail
+    // or a classification has no mapping, and "skipped" per configuration gap.
+    // "skipped" is configuration absence, so it must not warn on every run.
+    const tax = raw.taxonomy_export;
+    if (tax) {
+        if (tax.status === "error") {
+            legErrs.push(`⚠️ Sheets export: ${tax.detail || tax.error || "failed"}`);
+        } else if (tax.status === "partial") {
+            const errs = Array.isArray(tax.errors) ? tax.errors : [];
+            legErrs.push(
+                `⚠️ Sheets export: ${errs.length} cell${errs.length === 1 ? "" : "s"} failed — ` +
+                    `${errs.join("; ") || "partial write"}`,
+            );
+        }
+    }
+
+    // portfolio_status is a sixth remote leg. tools.js:1025 stores a failed
+    // status fetch as { error: e.message } and nothing downstream consumes it —
+    // _buildAnalysis takes taxonomyData, not the status — so before this the
+    // only trace of a dead Portfolio.app status call was a console.warn nobody
+    // reads in a cron log. Reported here so the cron surface cannot look clean.
+    const status = raw.portfolio_status;
+    if (status && typeof status === "object" && status.error) {
+        legErrs.push(`⚠️ Portfolio status: ${status.error}`);
+    }
+
+    // The sync aborted before it assembled a payload (an Actual Budget outage
+    // throws out of fetchBudget). Without this the operator got the empty string
+    // and the aborting error was lost, which is what let a dead grant look clean
+    // during an AB outage.
+    const abortErrs = [];
+    if (raw.error) {
+        abortErrs.push(`❌ Sync aborted: ${raw.error}`);
+    }
+
+    const pre = [...legErrs, ...abortErrs];
+
     // Pre-computed analysis block (the authoritative portfolio display)
     // Return it directly — analysis.message_body already includes its own sync header.
+    // The error lines are still prepended, because this early return is
+    // the normal path after a taxonomy export and would otherwise hide them.
     if (raw.analysis?.message_body) {
-        return raw.analysis.message_body;
+        return pre.length
+            ? [...pre, raw.analysis.message_body].join("\n")
+            : raw.analysis.message_body;
     }
 
     // Fallback: no analysis available, show bare sync status
-    return lines.join("\n");
+    return [...pre, ...lines].join("\n");
 }
 
 function createTools(server, registry) {

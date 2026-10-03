@@ -20,10 +20,13 @@ vi.mock("../src/onedrive.js", () => ({
     pushToOneDrive: vi.fn(),
 }));
 
-// Mock IBKR Flex module
-vi.mock("../src/ibkr_flex.js", () => ({
-    pullFlexXml: vi.fn(),
-}));
+// Mock IBKR Flex module. NOT_CONFIGURED_ERROR is kept real: formatSyncResult
+// imports it to tell an unconfigured integration from a real failure, so a bare
+// { pullFlexXml } mock would leave it undefined and silently break the guard.
+vi.mock("../src/ibkr_flex.js", async () => {
+    const actual = await vi.importActual("../src/ibkr_flex.js");
+    return { ...actual, pullFlexXml: vi.fn() };
+});
 
 import { pullFromOneDrive, pushToOneDrive } from "../src/onedrive.js";
 import { pullFlexXml } from "../src/ibkr_flex.js";

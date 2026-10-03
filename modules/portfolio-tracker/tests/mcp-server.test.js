@@ -14,9 +14,13 @@ vi.mock("../src/onedrive_oauth.js", () => ({
         .mockReturnValue("https://login.microsoftonline.com/..."),
     exchangeCodeForToken: vi.fn(),
 }));
-vi.mock("../src/ibkr_flex.js", () => ({
-    pullFlexXml: vi.fn(),
-}));
+vi.mock("../src/ibkr_flex.js", async () => {
+    const actual = await vi.importActual("../src/ibkr_flex.js");
+    // Keep the real NOT_CONFIGURED_ERROR: formatSyncResult imports it to tell an
+    // unconfigured flex integration from a real failure. A bare { pullFlexXml }
+    // mock leaves that undefined and the guard silently stops matching.
+    return { ...actual, pullFlexXml: vi.fn() };
+});
 vi.mock("fs", async () => {
     const actual = await vi.importActual("fs");
     return { ...actual, existsSync: vi.fn(() => true) };
@@ -284,6 +288,51 @@ describe("formatSyncResult", () => {
         const out = formatSyncResult(raw);
         expect(out).toContain("🔄 Synced 1/1 accounts");
         expect(out).not.toContain("📊");
+    });
+
+    it("surfaces a failed OneDrive pull even when analysis is present", () => {
+        // The early return is the normal path after a taxonomy export, so this is
+        // the case that let a dead grant write the sheet with no visible error.
+        const raw = {
+            summary: "Synced 1/1 accounts",
+            pull: { status: "error", detail: "Token HTTP 400" },
+            push: { status: "error", detail: "Token HTTP 400" },
+            analysis: { message_body: "📊 2026-07-12\n\nLiquid SGD 100,000" },
+        };
+        const out = formatSyncResult(raw);
+        expect(out).toContain("⚠️ OneDrive pull: Token HTTP 400");
+        expect(out).toContain("⚠️ OneDrive push: Token HTTP 400");
+        expect(out).toContain("Liquid SGD 100,000");
+        expect(out).not.toContain("🔄");
+    });
+
+    it("surfaces a failed OneDrive pull when there is no analysis", () => {
+        // The other branch: analysis is absent whenever taxonomyData is falsy, so a
+        // pull failure with nothing to export must still say so, and the sync
+        // summary and target lines must survive alongside it.
+        const raw = {
+            summary: "Synced 1/2 accounts",
+            pull: { status: "error", detail: "Token HTTP 400" },
+            sync_targets: [{ name: "Deposit Account", status: "error", error: "timeout" }],
+        };
+        const out = formatSyncResult(raw);
+        expect(out).toBe(
+            [
+                "⚠️ OneDrive pull: Token HTTP 400",
+                "🔄 Synced 1/2 accounts",
+                "⚠️ Deposit Account: timeout",
+            ].join("\n"),
+        );
+    });
+
+    it("leaves a healthy run byte-identical", () => {
+        const healthy = {
+            summary: "Synced 1/1 accounts",
+            pull: { status: "ok", detail: "downloaded" },
+            push: { status: "ok", detail: "uploaded" },
+            analysis: { message_body: "📊 2026-07-12\n\nLiquid SGD 100,000" },
+        };
+        expect(formatSyncResult(healthy)).toBe("📊 2026-07-12\n\nLiquid SGD 100,000");
     });
 });
 

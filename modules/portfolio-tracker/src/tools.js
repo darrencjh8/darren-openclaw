@@ -951,7 +951,20 @@ export class ToolRegistry {
                 await sleep(500);
             }
         } catch (e) {
-            return { error: e.message, sync_targets: results };
+            // The legs already ran before this try, so they are returned here too.
+            // Returning only { error, sync_targets } is what let a dead OneDrive
+            // grant read as a clean run whenever an Actual Budget outage aborted
+            // the sync first: the caller had no pull/push to report (dev-loop
+            // review round 2, M2). The push has not run yet at this point, so it
+            // stays null rather than being reported as a success.
+            return {
+                error: e.message,
+                sync_targets: results,
+                pull: pullResult,
+                flex_pull: flexPullResult,
+                flex_import: flexImportResult,
+                push: pushResult,
+            };
         }
 
         // Step 3: Push updated PP file back to OneDrive

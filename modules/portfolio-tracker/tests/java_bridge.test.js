@@ -348,14 +348,14 @@ describe("PpJavaBridge", () => {
             expect(result).toEqual({ status: "ok", detail: "downloaded" });
         });
 
-        it("returns detail when pull returns error info", async () => {
+        it("returns error status when pull returns error info", async () => {
             mockPullFromOneDrive.mockResolvedValue({
                 success: false,
                 error: "Network error",
             });
             const bridge = new PpJavaBridge(jarPath, xmlPath);
             const result = await bridge.pull();
-            expect(result).toEqual({ status: "ok", detail: "Network error" });
+            expect(result).toEqual({ status: "error", detail: "Network error" });
         });
 
         it("returns error when pullFromOneDrive throws", async () => {
