@@ -26,7 +26,7 @@ PR and CI/CD.
    - exit 0 with a skip log and no alert when App configuration is incomplete (any of GH_APP_ID, GH_APP_INSTALLATION_ID, GH_APP_PRIVATE_KEY unset); return non-zero only on attempted-but-failed mint/auth/parse (bad key, malformed API response, failed gh login);
    - validate all required App variables before making a request;
    - mint a JWT with the configured App ID and private key;
-   - request an installation token by sending `Authorization: Bearer <JWT>` on the wire (redact the value only in log output) and parse `token` plus `expires_at` from the response;
+   - request an installation token by sending the JWT as the HTTP authorization bearer credential on the wire (redact the JWT value only in log output) and parse `token` plus `expires_at` from the response;
    - authenticate the `hermes` user via `su -s /bin/sh hermes -c "gh auth login --with-token"`, never log the token, and keep credential files mode `0600` owned by hermes — exact files: the hermes user's gh `hosts.yml` plus `/opt/data/.gh_token` if retained (write via `install -o hermes -g hermes -m 600` or chown after write); remove or rotate the stale mode-644 `/opt/data/.gh_token` regardless of owner;
    - restrict atomic temp-file-plus-rename replacement to flat files only (e.g. `/opt/data/.gh_token`); never hand-edit gh-managed `hosts.yml` — write it only through `gh auth login`, which owns that format.
 2. Make boot initialization idempotent and precedence-aware:
