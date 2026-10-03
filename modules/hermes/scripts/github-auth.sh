@@ -1,8 +1,10 @@
 #!/bin/bash
-# Generate short-lived GitHub App installation token and auth gh CLI.
+# Generate short-lived GitHub App installation token and auth gh CLI as hermes.
 # Requires: GH_APP_ID, GH_APP_INSTALLATION_ID, GH_APP_PRIVATE_KEY
 #
-# Idempotent — safe to run on every boot. Exits 0 on success, 1 on failure.
+# Exit contract: exit 0 skip (log, no alert) when App configuration is incomplete;
+# return non-zero only on attempted-but-failed mint/auth/parse.
+# Idempotent — safe to run on every boot and every cron tick.
 set -euo pipefail
 
 log()  { echo "[github-auth] $*" >&2; }
@@ -13,10 +15,10 @@ for cmd in openssl curl python3 gh; do
     command -v "$cmd" >/dev/null || die "$cmd not found in PATH"
 done
 
-# ---- check required env vars ----
-[ -z "${GH_APP_ID:-}" ]           && { log "GH_APP_ID not set — skipping"; exit 0; }
+# ---- check required env vars (skip, not fail, when incomplete) ----
+[ -z "${GH_APP_ID:-}" ]               && { log "GH_APP_ID not set — skipping"; exit 0; }
 [ -z "${GH_APP_INSTALLATION_ID:-}" ] && { log "GH_APP_INSTALLATION_ID not set — skipping"; exit 0; }
-[ -z "${GH_APP_PRIVATE_KEY:-}" ]    && { log "GH_APP_PRIVATE_KEY not set — skipping"; exit 0; }
+[ -z "${GH_APP_PRIVATE_KEY:-}" ]      && { log "GH_APP_PRIVATE_KEY not set — skipping"; exit 0; }
 
 # ---- decode private key (env vars escape \n as literal backslash-n) ----
 PRIVATE_KEY=$(echo -e "$GH_APP_PRIVATE_KEY")
@@ -36,10 +38,13 @@ fi
 JWT="$HEADER.$PAYLOAD.$SIGNATURE"
 
 # ---- call GitHub API to get installation token ----
+# The minted JWT goes on the wire; only log output is redacted, never the request.
+AUTHZ="Authorization: Bearer ${JWT}"
 RESP=$(curl -s -w "\n%{http_code}" -X POST \
-  -H "Authorization: Bearer $JWT" \
+  -H "$AUTHZ" \
   -H "Accept: application/vnd.github+json" \
   "https://api.github.com/app/installations/$GH_APP_INSTALLATION_ID/access_tokens")
+unset AUTHZ JWT
 HTTP_CODE=$(echo "$RESP" | tail -1)
 BODY=$(echo "$RESP" | sed '$d')
 
@@ -50,18 +55,42 @@ fi
 
 TOKEN=$(echo "$BODY" | python3 -c "import sys,json; print(json.load(sys.stdin).get('token',''))") || die "failed to parse token from API response"
 [ -z "$TOKEN" ] && die "API returned empty token"
+EXPIRES_AT=$(echo "$BODY" | python3 -c "import sys,json; print(json.load(sys.stdin).get('expires_at','unknown'))")
 
-	# ---- store token ----
-	# Remove stale root-owned file first (hermes can delete in its own dir)
-	rm -f /opt/data/.gh_token
-	echo "$TOKEN" > /opt/data/.gh_token
-	chmod 644 /opt/data/.gh_token
-log "token stored (expires $(echo "$BODY" | python3 -c "import sys,json; print(json.load(sys.stdin).get('expires_at','unknown'))"))"
+# ---- store token (atomic temp-file-plus-rename, hermes-owned 0600) ----
+# Flat files only: hosts.yml is gh-managed and is written solely via gh auth login.
+# The path is overridable so tests never touch the live credential.
+TOKEN_FILE="${GH_APP_TOKEN_FILE:-/opt/data/.gh_token}"
+TOK_TMP=$(mktemp "${TOKEN_FILE}.XXXXXX")
+trap 'rm -f "$TOK_TMP"' EXIT
+printf '%s' "$TOKEN" > "$TOK_TMP"
+chown hermes:hermes "$TOK_TMP" 2>/dev/null || true
+chmod 600 "$TOK_TMP"
+mv -f "$TOK_TMP" "$TOKEN_FILE"
+trap - EXIT
+log "token stored (expires $EXPIRES_AT)"
 
-# ---- auth gh CLI as root (cron / memory-backup) ----
-# Only try root auth if we are actually root; skip when running as hermes via cron.
+# ---- auth gh CLI as the hermes runtime user ----
+# The boot hook and the cron scheduler both run as hermes, so the su is only for
+# the root boot path. Authenticating as the caller keeps the credential owner the
+# user gh actually runs as, and su -m is refused here because it needs root.
 if [ "$(id -u)" = "0" ]; then
-    echo "$TOKEN" | gh auth login --with-token 2>/dev/null || log "warning: gh auth login failed for root (non-fatal)"
+    INIT_TMP=$(mktemp /tmp/.gh-app-token-init.XXXXXX)
+    trap 'rm -f "$INIT_TMP"' EXIT
+    printf '%s' "$TOKEN" > "$INIT_TMP"
+    chmod 600 "$INIT_TMP"
+    su -s /bin/sh hermes -c "gh auth login --with-token < $INIT_TMP" 2>/dev/null \
+        || die "gh auth login failed for hermes"
+    rm -f "$INIT_TMP"
+else
+    INIT_TMP=$(mktemp "${TMPDIR:-/tmp}/.gh-app-token-init.XXXXXX")
+    trap 'rm -f "$INIT_TMP"' EXIT
+    printf '%s' "$TOKEN" > "$INIT_TMP"
+    chmod 600 "$INIT_TMP"
+    gh auth login --with-token < "$INIT_TMP" 2>/dev/null \
+        || die "gh auth login failed for $(id -un)"
+    rm -f "$INIT_TMP"
 fi
+trap - EXIT
 
 log "done"

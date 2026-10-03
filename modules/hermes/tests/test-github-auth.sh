@@ -12,6 +12,15 @@ nope() { echo -e "  ${RED}FAIL${NC} $1 — $2"; fail=$((fail+1)); }
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 AUTH_SCRIPT="$SCRIPT_DIR/../scripts/github-auth.sh"
 
+# The container injects real GH_APP_* into the ambient environment, so every
+# case below must start from a scrubbed copy. A test that means "unset" and
+# inherits a live App ID would assert against production config, not the case.
+run_auth() {
+    env -u GH_APP_ID -u GH_APP_INSTALLATION_ID -u GH_APP_PRIVATE_KEY \
+        -u GITHUB_TOKEN -u GH_TOKEN \
+        "$@"
+}
+
 # ------------------------------------------------------------------ helpers --
 b64url() { base64 -w0 | tr '+/' '-_' | tr -d '='; }
 
@@ -59,7 +68,7 @@ echo ""
 echo "=== graceful exit without credentials ==="
 
 # Script should exit 0 when no env vars are set
-output=$(bash "$AUTH_SCRIPT" 2>&1) && rc=$? || rc=$?
+output=$(run_auth bash "$AUTH_SCRIPT" 2>&1) && rc=$? || rc=$?
 if [ "$rc" -eq 0 ]; then
     ok "exits 0 without GH_APP_ID"
 else
@@ -68,7 +77,7 @@ fi
 
 # Only APP_ID set, missing INSTALLATION_ID — should skip
 # T-precedence: incomplete App configuration must exit 0 without attempting auth.
-output=$(GH_APP_ID=123 bash "$AUTH_SCRIPT" 2>&1) && rc=$? || rc=$?
+output=$(run_auth GH_APP_ID=123 bash "$AUTH_SCRIPT" 2>&1) && rc=$? || rc=$?
 if [ "$rc" -eq 0 ]; then
     ok "T-precedence: exits 0 with only GH_APP_ID set"
 else
@@ -95,9 +104,23 @@ printf '{"token":"fake-token-123","expires_at":"2030-01-01T00:00:00Z"}'
 printf '\n201'
 STUB
 chmod +x "$fakebin/curl"
+cat > "$fakebin/gh" <<'STUB'
+#!/bin/bash
+# fake gh: record that auth login happened, never touch a real credential
+printf '%s\n' "$*" >> "${FAKE_GH_LOG:?}"
+cat >/dev/null
+exit 0
+STUB
+chmod +x "$fakebin/gh"
 export FAKE_CURL_ARGS_FILE="$fakebin/curl-args.txt"
+export FAKE_GH_LOG="$fakebin/gh.log"
+: > "$FAKE_GH_LOG"
+FAKE_TOKEN_FILE="$fakebin/token"
 fake_key="-----BEGIN RSA PRIVATE KEY-----\nfake\n-----END RSA PRIVATE KEY-----"
-curl_out=$(PATH="$fakebin:$PATH" GH_APP_ID=4090999 GH_APP_INSTALLATION_ID=141232599 GH_APP_PRIVATE_KEY="$fake_key" bash "$AUTH_SCRIPT" 2>&1) && curl_rc=$? || curl_rc=$?
+curl_out=$(run_auth PATH="$fakebin:$PATH" \
+    GH_APP_ID=4090999 GH_APP_INSTALLATION_ID=141232599 GH_APP_PRIVATE_KEY="$fake_key" \
+    GH_APP_TOKEN_FILE="$FAKE_TOKEN_FILE" \
+    bash "$AUTH_SCRIPT" 2>&1) && curl_rc=$? || curl_rc=$?
 captured_auth=$(grep -A1 "Authorization" "$FAKE_CURL_ARGS_FILE" 2>/dev/null || true)
 if [ "$curl_rc" -eq 0 ] && grep -q "Bearer eyJ" "$FAKE_CURL_ARGS_FILE" 2>/dev/null; then
     ok "T-precedence: Authorization header carries the minted JWT"
@@ -108,6 +131,22 @@ if echo "$captured_auth $curl_out" | grep -q "fake-token-123"; then
     nope "T-no-secret-output: token material must never appear in output" "token leaked into curl args or logs"
 else
     ok "T-no-secret-output: no token material in args dump or logs"
+fi
+
+# T-no-secret-output: the stored credential is hermes-readable only (0600).
+stored_mode=$(stat -c '%a' "$FAKE_TOKEN_FILE" 2>/dev/null || echo "missing")
+stored_owner=$(stat -c '%U' "$FAKE_TOKEN_FILE" 2>/dev/null || echo "missing")
+if [ "$stored_mode" = "600" ]; then
+    ok "T-no-secret-output: stored token file is mode 0600"
+else
+    nope "T-no-secret-output: stored token file is mode 0600" "got mode $stored_mode (owner $stored_owner)"
+fi
+
+# T-no-secret-output: gh must be authenticated, and the token never printed.
+if grep -q "auth login --with-token" "$FAKE_GH_LOG" 2>/dev/null; then
+    ok "T-precedence: gh auth login runs with the installation token"
+else
+    nope "T-precedence: gh auth login runs with the installation token" "gh log: $(cat "$FAKE_GH_LOG" 2>/dev/null | head -3)"
 fi
 
 # T-atomic-replace: flat-file credential writes must be atomic (temp + rename).
