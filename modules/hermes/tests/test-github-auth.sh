@@ -67,11 +67,58 @@ else
 fi
 
 # Only APP_ID set, missing INSTALLATION_ID — should skip
+# T-precedence: incomplete App configuration must exit 0 without attempting auth.
 output=$(GH_APP_ID=123 bash "$AUTH_SCRIPT" 2>&1) && rc=$? || rc=$?
 if [ "$rc" -eq 0 ]; then
-    ok "exits 0 with only GH_APP_ID set"
+    ok "T-precedence: exits 0 with only GH_APP_ID set"
 else
-    nope "exits 0 with only GH_APP_ID set" "got exit code $rc"
+    nope "T-precedence: exits 0 with only GH_APP_ID set" "got exit code $rc"
+fi
+
+# T-precedence: complete App config must send the minted JWT on the wire.
+# Uses fake curl + fake openssl + stub key so no network or secret is needed.
+echo ""
+echo "=== T-precedence: JWT sent on the wire (fake curl) ==="
+fakebin=$(mktemp -d)
+trap 'rm -rf "$fakebin"' RETURN
+cat > "$fakebin/openssl" <<'STUB'
+#!/bin/bash
+# fake signer: emit stable bytes regardless of key input
+printf 'fake-signature-bytes'
+STUB
+chmod +x "$fakebin/openssl"
+cat > "$fakebin/curl" <<'STUB'
+#!/bin/bash
+# fake GitHub API: capture args, return a canned installation token
+printf '%s\n' "$@" > "${FAKE_CURL_ARGS_FILE:?}"
+printf '{"token":"fake-token-123","expires_at":"2030-01-01T00:00:00Z"}'
+printf '\n201'
+STUB
+chmod +x "$fakebin/curl"
+export FAKE_CURL_ARGS_FILE="$fakebin/curl-args.txt"
+fake_key="-----BEGIN RSA PRIVATE KEY-----\nfake\n-----END RSA PRIVATE KEY-----"
+curl_out=$(PATH="$fakebin:$PATH" GH_APP_ID=4090999 GH_APP_INSTALLATION_ID=141232599 GH_APP_PRIVATE_KEY="$fake_key" bash "$AUTH_SCRIPT" 2>&1) && curl_rc=$? || curl_rc=$?
+captured_auth=$(grep -A1 "Authorization" "$FAKE_CURL_ARGS_FILE" 2>/dev/null || true)
+if [ "$curl_rc" -eq 0 ] && grep -q "Bearer eyJ" "$FAKE_CURL_ARGS_FILE" 2>/dev/null; then
+    ok "T-precedence: Authorization header carries the minted JWT"
+else
+    nope "T-precedence: Authorization header carries the minted JWT" "rc=$curl_rc args=$(cat "$FAKE_CURL_ARGS_FILE" 2>/dev/null | tr '\n' ' ' | head -c 300)"
+fi
+if echo "$captured_auth $curl_out" | grep -q "fake-token-123"; then
+    nope "T-no-secret-output: token material must never appear in output" "token leaked into curl args or logs"
+else
+    ok "T-no-secret-output: no token material in args dump or logs"
+fi
+
+# T-atomic-replace: flat-file credential writes must be atomic (temp + rename).
+# Fails at base: the helper writes /opt/data/.gh_token directly with no temp file.
+echo ""
+echo "=== T-atomic-replace: no partial credential writes ==="
+atomic_probe=$(grep -cE 'mktemp|tmpfile|\.tmp' "$AUTH_SCRIPT" 2>/dev/null || true)
+if [ "${atomic_probe:-0}" -ge 1 ]; then
+    ok "T-atomic-replace: helper stages credential writes via temp file"
+else
+    nope "T-atomic-replace: helper stages credential writes via temp file" "no mktemp/tmp staging in $AUTH_SCRIPT"
 fi
 
 # Missing openssl should die with message
