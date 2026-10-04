@@ -33,13 +33,12 @@ darren-openclaw/
 │   │   └── README.md
 │   ├── image-gen/                    # Standalone image tool (has tests; NOT a compose service)
 │   ├── perchance-gen/                # Perchance image script used by image-gen
-│   ├── signal-cli/                   # Optional Signal sidecar with its own compose file
 │   ├── onedrive-sync/                # Legacy config dir; referenced only for the OAuth token path
 │   └── tests/                        # Python tests for compose + workflow wiring
 ├── specs/                            # Spec-Kit feature specs (001-gateway … 030-spec-drift)
 ├── docs/                             # Design notes and verification records
 ├── scripts/                          # Host and runner helper scripts
-├── .github/workflows/                # deploy, test, signal deploy, codex-router sync/recovery, secrets scan
+├── .github/workflows/                # deploy, test, codex-router sync/recovery, secrets scan
 ├── .agents/skills/full-deploy/       # Operator runbook skill
 ├── design.md                         # Current architecture document
 ├── DEPLOY.md  SETUP.md               # Deployment flow and production host setup
@@ -51,5 +50,4 @@ Notes on the tree:
 
 - `modules/codex-router/` is absent from a fresh clone — CI checks it out as part of deployment.
 - `modules/image-gen/` and `modules/perchance-gen/` are present and tested, but `image-gen` is **not** a service in `modules/docker-compose.yml`, so `--component all` does not deploy it.
-- `modules/signal-cli/` has its own compose file and is deployed by `.github/workflows/deploy-signal.yml`, not by the main deploy workflow.
 - `modules/onedrive-sync/` is retained only because `modules/deploy.sh` still points at `modules/onedrive-sync/config/onedrive` for the OAuth refresh token. The rclone sync container it used to describe is retired; portfolio sync now happens in `src/onedrive.js`.

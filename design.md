@@ -92,7 +92,6 @@ darren-openclaw/                          # Umbrella repository root (product na
 │   │   └── .env.example
 │   ├── actual-api/                       # Official Actual Budget API proxy (Node.js)
 │   ├── image-gen/                        # Image generation MCP service
-│   ├── signal-cli/                       # Optional Signal channel deployment
 │   ├── perchance-gen/                    # Perchance image generation script
 │   ├── onedrive-sync/                    # Legacy rclone helper (superseded by portfolio-tracker OAuth tools)
 │   └── tests/                            # Repo-level Python checks (compose, logs, deploy workflow)
