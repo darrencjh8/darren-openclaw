@@ -74,9 +74,14 @@ class SeedAppCronTests(unittest.TestCase):
         self.assertIn("GH_APP_ID", block)
         self.assertIn("github-auth.sh", block)
         # The fallback PAT arrives as the root-only secret file, not as an
-        # ambient FRIDAY_PAT environment variable.
+        # ambient FRIDAY_PAT environment variable, and `su -m` carries the prefix
+        # assignment to the helper so the single-quoted body needs no expansion.
         self.assertIn("/run/secrets/friday_pat", block)
         self.assertIn('GH_PAT="$PAT"', block)
+        self.assertIn(
+            "GH_PAT=\"$PAT\" su -m -s /bin/sh hermes -c '/opt/hermes-defaults/scripts/github-auth.sh'",
+            block,
+        )
         self.assertNotIn("FRIDAY_PAT", block)
         # The boot hook is the only reader of the secret file. It must require a
         # regular, readable, non-empty file so a directory left behind by a
@@ -92,10 +97,13 @@ class SeedAppCronTests(unittest.TestCase):
         refresh = text[text.index("# The container's own codex-router checkout"):]
         refresh = refresh[:refresh.index("python3 -c '")]
         # The scoped credential is read from the secret file, never from an
-        # ambient FRIDAY_PAT, and it is passed only to the refresh command.
+        # ambient FRIDAY_PAT, and `su -m` passes the prefix assignment through.
         self.assertIn('GH_TOKEN="$(cat /run/secrets/friday_pat)"', refresh)
         self.assertNotIn("FRIDAY_PAT", refresh)
-        self.assertIn("su -m -s /bin/sh hermes -c 'GH_TOKEN=\"$GH_TOKEN\" /opt/hermes-defaults/scripts/refresh-codex-router-checkout.sh'", refresh)
+        self.assertIn(
+            "GH_TOKEN=\"$(cat /run/secrets/friday_pat)\" su -m -s /bin/sh hermes -c '/opt/hermes-defaults/scripts/refresh-codex-router-checkout.sh'",
+            refresh,
+        )
         self.assertIn("/opt/hermes-defaults/scripts/refresh-codex-router-checkout.sh", refresh)
 
     def test_seed_idempotence_runs_against_existing_jobs_file(self) -> None:

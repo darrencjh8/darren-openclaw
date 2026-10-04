@@ -210,7 +210,9 @@ fi
 rm -f /opt/data/.gh_token 2>/dev/null || true
 
 if [ -n "${GH_APP_ID:-}${GH_APP_INSTALLATION_ID:-}${GH_APP_PRIVATE_KEY:-}" ] || [ -n "$PAT" ]; then
-    GH_PAT="$PAT" su -m -s /bin/sh hermes -c 'GH_PAT="$GH_PAT" /opt/hermes-defaults/scripts/github-auth.sh' 2>/dev/null \
+    # `-m` preserves the environment, so the prefix assignment reaches the
+    # su'd shell and the helper; nothing needs expanding inside the quotes.
+    GH_PAT="$PAT" su -m -s /bin/sh hermes -c '/opt/hermes-defaults/scripts/github-auth.sh' 2>/dev/null \
         || echo "WARNING: GitHub authentication failed at boot" >&2
 else
     echo "WARNING: neither GitHub App config nor a fallback PAT secret is present; leaving gh credentials untouched" >&2
@@ -290,7 +292,9 @@ if true 2>>/opt/data/logs/codex-router-skills-sync.log; then
     refresh_log=/opt/data/logs/codex-router-skills-sync.log
 fi
 if [ -f /run/secrets/friday_pat ] && [ -s /run/secrets/friday_pat ] && [ -r /run/secrets/friday_pat ]; then
-    GH_TOKEN="$(cat /run/secrets/friday_pat)" su -m -s /bin/sh hermes -c 'GH_TOKEN="$GH_TOKEN" /opt/hermes-defaults/scripts/refresh-codex-router-checkout.sh' >>"$refresh_log" 2>&1 \
+    # The prefix assignment lands in su's environment, which `-m` preserves, so
+    # the script sees GH_TOKEN without expanding anything inside the single quotes.
+    GH_TOKEN="$(cat /run/secrets/friday_pat)" su -m -s /bin/sh hermes -c '/opt/hermes-defaults/scripts/refresh-codex-router-checkout.sh' >>"$refresh_log" 2>&1 \
         || echo "WARNING: could not advance the codex-router checkout in /workspace" >&2
 else
     su -m -s /bin/sh hermes -c '/opt/hermes-defaults/scripts/refresh-codex-router-checkout.sh' >>"$refresh_log" 2>&1 \

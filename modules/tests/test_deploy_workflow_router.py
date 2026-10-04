@@ -278,8 +278,11 @@ class DeployWorkflowRouterTests(unittest.TestCase):
         # invocations, so it is read from the root-only secret file, not FRIDAY_PAT.
         self.assertIn('GH_TOKEN="$(cat /run/secrets/friday_pat)"', boot)
         self.assertNotIn("FRIDAY_PAT", boot)
+        # `su -m` preserves the environment, so the prefix assignment reaches the
+        # su'd shell: the single-quoted body stays unexpanded and lint-clean.
         self.assertIn(
-            "su -m -s /bin/sh hermes -c 'GH_TOKEN=\"$GH_TOKEN\" /opt/hermes-defaults/scripts/refresh-codex-router-checkout.sh'", boot
+            "GH_TOKEN=\"$(cat /run/secrets/friday_pat)\" su -m -s /bin/sh hermes -c '/opt/hermes-defaults/scripts/refresh-codex-router-checkout.sh'",
+            boot,
         )
         # A boot hook may not fail the boot: the refresh call carries a fallback
         # that reports the failure and lets the boot continue.
