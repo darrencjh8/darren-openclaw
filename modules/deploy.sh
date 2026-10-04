@@ -895,22 +895,24 @@ export COMPOSE_DOCKER_CLI_BUILD=1 DOCKER_BUILDKIT=1
 # ---- scoped fallback PAT secret ----
 # The Hermes service must not receive FRIDAY_PAT as an ambient environment
 # variable: gh gives an ambient token precedence over the stored App credential.
-# It is delivered instead as a root-only 0400 file bind-mounted read-only into
+# It is delivered instead as a 0400 file bind-mounted read-only into
 # the container, and the file is materialized before any compose config/up call.
+# The file stays owned by the deploy user: the self-hosted runner has no
+# passwordless sudo, and /home/runner/data/hermes is already owned by that user.
+# The hermes container runs as root and reads the 0400 file through the mount.
 # The path must always stay a regular file: Docker materializes a bind mount
 # whose source is missing as a directory, which would then break the rotation
 # from empty back to a set PAT.
 SECRET_FILE="/home/runner/data/hermes/friday_pat.secret"
 SECRET_DIR="$(dirname "$SECRET_FILE")"
-sudo mkdir -p "$SECRET_DIR"
+mkdir -p "$SECRET_DIR"
 if [ -d "$SECRET_FILE" ]; then
-  sudo rmdir "$SECRET_FILE" 2>/dev/null || sudo rm -rf "$SECRET_FILE"
+  rmdir "$SECRET_FILE" 2>/dev/null || rm -rf "$SECRET_FILE"
 fi
 secret_tmp="$(mktemp "$SECRET_DIR/.friday_pat.XXXXXX")"
 (umask 077; printf '%s' "${FRIDAY_PAT:-}" > "$secret_tmp")
-sudo chown root:root "$secret_tmp"
-sudo chmod 0400 "$secret_tmp"
-sudo mv -f "$secret_tmp" "$SECRET_FILE"
+chmod 0400 "$secret_tmp"
+mv -f "$secret_tmp" "$SECRET_FILE"
 
 COMPOSE="docker-compose --project-name modules"
 if [[ " ${COMPONENTS[*]} " =~ " all " ]] || [[ ${#COMPONENTS[@]} -eq 1 && "${COMPONENTS[0]}" == "all" ]]; then

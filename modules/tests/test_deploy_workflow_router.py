@@ -332,26 +332,31 @@ class DeployWorkflowRouterTests(unittest.TestCase):
 
 
     def test_pat_secret_file_lifecycle(self):
-        """T-secret-file-delivery: the fallback PAT is delivered as a root-only
-        file, never as an ambient service variable.
+        """T-secret-file-delivery: the fallback PAT is delivered as a 0400 file,
+        never as an ambient service variable.
 
         The security property is the delivery path, so this asserts the exact host
-        path, root ownership, mode 0400, atomic creation, the always-present
-        regular-file invariant, and that the service environment cannot carry the
-        PAT. It is gated: without the change the file is never created and the
-        service still exports FRIDAY_PAT.
+        path, mode 0400, atomic creation, the always-present regular-file
+        invariant, and that the service environment cannot carry the PAT. The file
+        must be written without sudo: the self-hosted runner has no passwordless
+        sudo, so a sudo write aborts the deploy before any container starts. It is
+        gated: without the change the file is never created and the service still
+        exports FRIDAY_PAT.
         """
         deploy = DEPLOY_SCRIPT.read_text(encoding="utf-8")
 
         secret_path = "/home/runner/data/hermes/friday_pat.secret"
         self.assertIn(f'SECRET_FILE="{secret_path}"', deploy)
-        # Root ownership and 0400 on the file that is mounted into the container.
-        self.assertIn('sudo chown root:root "$secret_tmp"', deploy)
-        self.assertIn('sudo chmod 0400 "$secret_tmp"', deploy)
+        # Mode 0400 on the file that is mounted into the container, owned by the
+        # deploy user; the container runs as root and still reads it.
+        self.assertIn('chmod 0400 "$secret_tmp"', deploy)
         # Atomic creation: a same-directory temp file renamed into place.
         self.assertIn('secret_tmp="$(mktemp "$SECRET_DIR/.friday_pat.XXXXXX")"', deploy)
-        self.assertIn('sudo mv -f "$secret_tmp" "$SECRET_FILE"', deploy)
+        self.assertIn('mv -f "$secret_tmp" "$SECRET_FILE"', deploy)
         self.assertIn("umask 077", deploy)
+        # No step of the secret delivery may require an interactive sudo password.
+        secret_block = deploy[deploy.index("scoped fallback PAT secret"):deploy.index("$COMPOSE config -q")]
+        self.assertNotIn("sudo ", secret_block)
         # The path must stay a regular file: a directory left by an earlier
         # missing-source mount is repaired before writing.
         self.assertIn('if [ -d "$SECRET_FILE" ]', deploy)
