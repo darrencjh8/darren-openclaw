@@ -895,24 +895,30 @@ export COMPOSE_DOCKER_CLI_BUILD=1 DOCKER_BUILDKIT=1
 # ---- scoped fallback PAT secret ----
 # The Hermes service must not receive FRIDAY_PAT as an ambient environment
 # variable: gh gives an ambient token precedence over the stored App credential.
-# It is delivered instead as a 0400 file bind-mounted read-only into
+# It is delivered instead as a root-only 0400 file bind-mounted read-only into
 # the container, and the file is materialized before any compose config/up call.
-# The file stays owned by the deploy user: the self-hosted runner has no
-# passwordless sudo, and /home/runner/data/hermes is already owned by that user.
-# The hermes container runs as root and reads the 0400 file through the mount.
+# The deploy user cannot write $SECRET_DIR (it belongs to the container's hermes
+# uid 10000) and the self-hosted runner has no passwordless sudo, so a one-shot
+# root container writes the file. The PAT reaches that container on stdin only:
+# never in argv, never in the environment, and never in the build log. The
+# hermes container runs as root and reads the 0400 file through the mount.
 # The path must always stay a regular file: Docker materializes a bind mount
 # whose source is missing as a directory, which would then break the rotation
 # from empty back to a set PAT.
 SECRET_FILE="/home/runner/data/hermes/friday_pat.secret"
 SECRET_DIR="$(dirname "$SECRET_FILE")"
-mkdir -p "$SECRET_DIR"
-if [ -d "$SECRET_FILE" ]; then
-  rmdir "$SECRET_FILE" 2>/dev/null || rm -rf "$SECRET_FILE"
-fi
-secret_tmp="$(mktemp "$SECRET_DIR/.friday_pat.XXXXXX")"
-(umask 077; printf '%s' "${FRIDAY_PAT:-}" > "$secret_tmp")
-chmod 0400 "$secret_tmp"
-mv -f "$secret_tmp" "$SECRET_FILE"
+printf '%s' "${FRIDAY_PAT:-}" | docker run --rm -i --network none \
+  -v "$SECRET_DIR:/secrets" \
+  alpine:3 sh -c '
+    umask 077
+    if [ -d /secrets/friday_pat.secret ]; then
+      rmdir /secrets/friday_pat.secret 2>/dev/null || rm -rf /secrets/friday_pat.secret
+    fi
+    tmp="$(mktemp /secrets/.friday_pat.XXXXXX)"
+    cat > "$tmp"
+    chmod 0400 "$tmp"
+    mv -f "$tmp" /secrets/friday_pat.secret
+  '
 
 COMPOSE="docker-compose --project-name modules"
 if [[ " ${COMPONENTS[*]} " =~ " all " ]] || [[ ${#COMPONENTS[@]} -eq 1 && "${COMPONENTS[0]}" == "all" ]]; then
