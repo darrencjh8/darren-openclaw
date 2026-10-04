@@ -333,34 +333,39 @@ class DeployWorkflowRouterTests(unittest.TestCase):
 
 
     def test_pat_secret_file_lifecycle(self):
-        """T-secret-file-delivery: the fallback PAT is delivered as a 0400 file,
-        never as an ambient service variable.
+        """T-secret-file-delivery: the fallback PAT is delivered as a root-only
+        file, never as an ambient service variable.
 
         The security property is the delivery path, so this asserts the exact host
         path, mode 0400, atomic creation, the always-present regular-file
         invariant, and that the service environment cannot carry the PAT. The file
         must be written without sudo: the self-hosted runner has no passwordless
-        sudo, so a sudo write aborts the deploy before any container starts. It is
-        gated: without the change the file is never created and the service still
-        exports FRIDAY_PAT.
+        sudo, and the target directory belongs to the container's hermes uid 10000,
+        so a one-shot root container writes the file instead. It is gated: without
+        the change the file is never created and the service still exports
+        FRIDAY_PAT.
         """
         deploy = DEPLOY_SCRIPT.read_text(encoding="utf-8")
 
         secret_path = "/home/runner/data/hermes/friday_pat.secret"
         self.assertIn(f'SECRET_FILE="{secret_path}"', deploy)
-        # Mode 0400 on the file that is mounted into the container, owned by the
-        # deploy user; the container runs as root and still reads it.
-        self.assertIn('chmod 0400 "$secret_tmp"', deploy)
+        # The PAT reaches the writer on stdin, so it stays out of argv, out of the
+        # environment, and out of the build log.
+        self.assertIn('printf \'%s\' "${FRIDAY_PAT:-}" | docker run --rm -i --network none', deploy)
+        self.assertIn('-v "$SECRET_DIR:/secrets"', deploy)
+        # Mode 0400 on the file that is mounted into the container; the writer runs
+        # as root and the hermes container reads the file as root.
+        self.assertIn('chmod 0400 "$tmp"', deploy)
         # Atomic creation: a same-directory temp file renamed into place.
-        self.assertIn('secret_tmp="$(mktemp "$SECRET_DIR/.friday_pat.XXXXXX")"', deploy)
-        self.assertIn('mv -f "$secret_tmp" "$SECRET_FILE"', deploy)
+        self.assertIn('tmp="$(mktemp /secrets/.friday_pat.XXXXXX)"', deploy)
+        self.assertIn('mv -f "$tmp" /secrets/friday_pat.secret', deploy)
         self.assertIn("umask 077", deploy)
         # No step of the secret delivery may require an interactive sudo password.
         secret_block = deploy[deploy.index("scoped fallback PAT secret"):deploy.index("$COMPOSE config -q")]
         self.assertNotIn("sudo ", secret_block)
         # The path must stay a regular file: a directory left by an earlier
         # missing-source mount is repaired before writing.
-        self.assertIn('if [ -d "$SECRET_FILE" ]', deploy)
+        self.assertIn('if [ -d /secrets/friday_pat.secret ]', deploy)
         # The file is materialized before any compose config/up call, and the PAT
         # is never passed through the service environment.
         secret_index = deploy.index("scoped fallback PAT secret")
