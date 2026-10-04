@@ -651,12 +651,19 @@ import sys
 import yaml
 
 config = yaml.safe_load(open(sys.argv[1], encoding="utf-8"))
-print(config["memory"]["memory_char_limit"], config["sessions"]["retention_days"], config["sessions"]["auto_prune"])
+sessions = config["sessions"]
+print(
+    config["memory"]["memory_char_limit"],
+    sessions["retention_days"],
+    sessions["auto_prune"],
+    sessions["auto_archive"],
+    sessions["auto_archive_days"],
+)
 PY
 )
-[ "$seeded_memory_limits" = "2800 180 True" ] \
-    && ok "config: memory_char_limit 2800 + sessions.retention_days 180 + auto_prune on" \
-    || nope "memory/sessions config" "expected '2800 180 True', got '$seeded_memory_limits'"
+[ "$seeded_memory_limits" = "2800 60 True True 14" ] \
+    && ok "config: memory 2800 + retention 60 + prune/archive enabled (14d)" \
+    || nope "memory/sessions config" "expected '2800 60 True True 14', got '$seeded_memory_limits'"
 
 echo ""
 echo "=== compaction trigger derivation ==="

@@ -55,12 +55,13 @@ memory:
     memory_char_limit: 2800
 
 sessions:
-    # Ended sessions are the only un-filed episodic record, so keep them searchable
-    # longer than the 90-day default. state.db is index-dominated (~600 MB at 90
-    # days); if it passes ~2 GB, lower retention_days back to 90. auto_prune stays on
-    # so the database cannot grow without bound.
+    # Keep ended sessions searchable for 60 days. auto_prune removes ended sessions
+    # older than retention_days, while auto_archive hides inactive sessions earlier
+    # without deleting their transcript.
     auto_prune: true
-    retention_days: 180
+    retention_days: 60
+    auto_archive: true
+    auto_archive_days: 14
 
 skills:
     guard_agent_created: true
