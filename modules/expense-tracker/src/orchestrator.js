@@ -459,6 +459,18 @@ export const MOVEMENT_LIKE =
 export const ACCOUNT_TRANSFER_SHAPE_RE =
     /(?:A\/C\s+ending|Ref\s+ending|account\s+ending|\(-\d{4,}\)|received a transfer|bill payment|scheduled payment|was transferred|made a transfer|transfer to|transfer from)/i;
 
+/**
+ * A destination the paying bank itself names as a CREDIT CARD, e.g.
+ * "CITI CREDIT CARDS", "HSBC CREDIT CARDS", "UOB CREDIT CARDS". Used only as
+ * an exemption from the unverified-destination hold: a bill payment into a card
+ * is a card repayment, so it must not be held the way a genuinely unresolved
+ * own-account transfer is. Nothing is inferred about a counterparty the bank
+ * did not describe as a card, and a destination that resolves to one of the
+ * holder's own accounts (even a card account, named "Altitude" or "Yuu") is
+ * handled by the resolved-transfer path above rather than here.
+ */
+export const CARD_PRODUCT_RE = /\bcredit\s+cards?\b|\bcredit\s+card\b/i;
+
 export class AgentOrchestrator {
     constructor(config, tools) {
         this._config = config;
@@ -860,10 +872,21 @@ export class AgentOrchestrator {
             // invents a payment that may in fact be the holder's own transfer.
             // Held as Misc with no category instead — the payee is never guessed
             // and no expense is recorded. Issue #592, #598.
+            //
+            // A destination the alert itself calls a CREDIT CARD is the one
+            // exception: a bill payment into a card is a card repayment, not a
+            // possible own-account transfer, and it must not be held. The three
+            // production rows of 2026-10-01 (uid 1025/1026/1027, "Successful
+            // bill payment" to CITI/HSBC/UOB CREDIT CARDS) were all held here
+            // and notified to the user, because the destination card is a real
+            // card the tracker has no account for. The bank's own word for the
+            // destination is used, so nothing is inferred about an unnamed
+            // counterparty.
             const unverifiedDestination =
                 !resolved.destination_account &&
                 Boolean(movement.counterparty?.suffix);
-            if (unverifiedDestination) {
+            const destinationIsCardProduct = CARD_PRODUCT_RE.test(named || "");
+            if (unverifiedDestination && !destinationIsCardProduct) {
                 return {
                     merchant: named || "Bank transfer",
                     amount_cents: -Math.abs(movement.amount_cents),
@@ -901,6 +924,10 @@ export class AgentOrchestrator {
                 reasoning: "Deterministic external bank payment",
                 notify_message: "",
                 _suffix_mappings: suffixMappings,
+                // A destination the alert names as a card is a repayment into
+                // the holder's own credit line: it must never be categorised as
+                // spend on the funding account.
+                _card_repayment: destinationIsCardProduct || undefined,
                 _structured_movement: true,
                 _is_paynow: movement.is_paynow === true,
                 _paynow_merchant: movement.is_paynow_merchant === true,
@@ -1915,31 +1942,46 @@ export class AgentOrchestrator {
             // lookup below finds its payee; until then a credit from it is still
             // income and is held the same way an unresolved one is.
             if (credit && (unresolved || paynowAccountMatched)) {
-                // The counterparty bank's own email may already have booked
-                // this leg: the alert is then a duplicate of money already
-                // recorded, not an unresolved credit. Consult the journal before
-                // the hold is set — the later transfer block only runs for a
-                // resolved payee, so a person-name credit never reached it and
-                // the false "could not be matched" alert fired (issue #574).
-                const bookedLeg = await this._findBookedTransferLeg(output);
-                if (bookedLeg) {
-                    // Reserving this exact leg makes Phase 3 report the
-                    // duplicate and stop: nothing is booked, the email is
-                    // marked read, and no alert fires. Keep any fields the
-                    // deterministic parser already put on the reservation
-                    // (its transfer payee in particular).
-                    output._transfer = {
-                        ...(output._transfer || {}),
-                        budget_id: bookedLeg.budget_id,
-                        source_account_id: bookedLeg.source_account_id,
-                        destination_account_id: bookedLeg.destination_account_id,
-                        currency: bookedLeg.currency,
-                        amount_cents: bookedLeg.amount_cents,
-                        occurred_at: bookedLeg.occurred_at,
-                    };
-                    output._is_transfer = true;
+                // Structured movement output already carries the resolved pair;
+                // its own journal lookup is performed by Phase 3. Generic
+                // PayNow output still needs the early duplicate check because
+                // it has no deterministic transfer reservation yet.
+                if (output._structured_movement && output._is_transfer) {
+                    // Structured output is safe from the generic identity hold,
+                    // but still checks the journal so an already-booked far leg
+                    // is deduplicated before Phase 3.
+                    const bookedLeg = await this._findBookedTransferLeg(output);
+                    if (bookedLeg) {
+                        output._transfer = {
+                            ...(output._transfer || {}),
+                            budget_id: bookedLeg.budget_id,
+                            source_account_id: bookedLeg.source_account_id,
+                            destination_account_id: bookedLeg.destination_account_id,
+                            currency: bookedLeg.currency,
+                            amount_cents: bookedLeg.amount_cents,
+                            occurred_at: bookedLeg.occurred_at,
+                        };
+                    }
                 } else {
-                    output._hold_unresolved_paynow = true;
+                    // The counterparty bank's own email may already have booked
+                    // this leg: the alert is then a duplicate of money already
+                    // recorded, not an unresolved credit. Consult the journal
+                    // before the hold is set (issue #574).
+                    const bookedLeg = await this._findBookedTransferLeg(output);
+                    if (bookedLeg) {
+                        output._transfer = {
+                            ...(output._transfer || {}),
+                            budget_id: bookedLeg.budget_id,
+                            source_account_id: bookedLeg.source_account_id,
+                            destination_account_id: bookedLeg.destination_account_id,
+                            currency: bookedLeg.currency,
+                            amount_cents: bookedLeg.amount_cents,
+                            occurred_at: bookedLeg.occurred_at,
+                        };
+                        output._is_transfer = true;
+                    } else {
+                        output._hold_unresolved_paynow = true;
+                    }
                 }
             }
             if (selfMasked || (unresolved && credit)) {
@@ -2019,7 +2061,16 @@ export class AgentOrchestrator {
         // payee (the one with transfer_acct set) so Actual Budget creates a
         // transfer instead of a regular expense.
         // Also caches fetch_context so category resolution below reuses it.
-        if (output.payee_name && output.payee_name !== "Misc") {
+        // Structured parser output already has both account IDs and a transfer
+        // payee. Do not re-derive its direction from the display name: for an
+        // incoming credit the booked account is the destination, while the
+        // transfer payee names the source. Re-running the generic gate here
+        // misread that deliberate shape as a self-transfer and held it.
+        if (
+            !(output._structured_movement && output._is_transfer) &&
+            output.payee_name &&
+            output.payee_name !== "Misc"
+        ) {
             try {
                 cachedCtx =
                     cachedCtx ||
@@ -2029,19 +2080,82 @@ export class AgentOrchestrator {
                 const liveAccounts = Array.isArray(cachedCtx.accounts)
                     ? cachedCtx.accounts
                     : [];
-                const accountMatch = liveAccounts.find(
-                    (a) => a.name && a.name.toLowerCase() === output.payee_name.toLowerCase(),
-                );
                 const payees = Array.isArray(cachedCtx.payees) ? cachedCtx.payees : [];
+                // The destination account, in order of evidence strength:
+                //   1. the account the deterministic parser already resolved
+                //      (`_transfer.destination_account_id`),
+                //   2. the payee name resolved against the live account list.
+                //
+                // The account-id lookup matters because the alert names a card
+                // by PRODUCT ("Altitude", "CITI CREDIT CARDS"), not by the
+                // account's own name ("DBS Altitude Card"). The parser resolved
+                // both legs from the trailing suffix, but re-deriving the
+                // destination from the payee name alone found nothing, and the
+                // `!accountMatch` arm below then refused a transfer whose
+                // destination the pipeline had already verified — holding
+                // both a card repayment and the card-to-card leg of an
+                // own-account FAST transfer (uid 1031, uid 1025, 2026-10-01).
+                // Reusing the resolved id keeps this gate about the
+                // destination the alert establishes, not about how the bank
+                // chose to spell it.
+                const byId = output._transfer?.destination_account_id
+                    ? liveAccounts.find(
+                          (a) => a.id === output._transfer.destination_account_id,
+                      ) || null
+                    : null;
+                // An explicit name match IS evidence, and a refusal is not:
+                // `matchAccountByName` can refuse for a reason that means the
+                // name is owned by a real account (closed, duplicated). Only a
+                // genuine match may supply the destination.
+                const byName = matchAccountByName(output.payee_name, liveAccounts);
+                const accountMatch =
+                    byId ||
+                    (byName.matched
+                        ? liveAccounts.find((a) => a.id === byName.id) || null
+                        : null);
                 const transferPayee = payees.find((payee) =>
                     payee.transfer_acct && (payee.transfer_acct === accountMatch?.id ||
                         payee.name?.toLowerCase() === output.payee_name.toLowerCase()),
                 );
-                if (transferPayee && (
+                // A product-named card repayment can use the learned payee
+                // alias even when no matching account exists in this budget.
+                // It is safe only because the parser established the funding
+                // account and the alert explicitly says the destination is a
+                // credit card; ordinary unresolved destinations still hold.
+                const cardPayee = output._card_repayment === true
+                    ? payees.find((payee) =>
+                        !payee.transfer_acct &&
+                        payee.name?.toLowerCase() === output.payee_name.toLowerCase(),
+                    )
+                    : null;
+                const cardRepayment =
+                    !accountMatch &&
+                    Boolean(cardPayee);
+                if (cardRepayment) {
+                    if (!output.account_id) {
+                        // The funding side is unknown, so the money cannot be
+                        // moved: hold rather than guess which account paid.
+                        output.payee_name = "Misc";
+                        output.payee_source = "transfer_destination_refused";
+                        output.category_id = null;
+                        output._hold_unresolved_transfer = true;
+                    } else {
+                        output.payee_id = cardPayee.id;
+                        output._is_transfer = true;
+                    }
+                } else if (transferPayee && (
+                    // A card destination is refused when it could only be
+                    // reached by name — but NOT when the deterministic parser
+                    // already resolved both legs and reserved the pair. That
+                    // case is a repayment into the holder's own card, and
+                    // refusing it held the uid 1031/1032 rows ("bill payment"
+                    // to "Altitude"/"Yuu") even though source and destination
+                    // were both known accounts.
                     !accountMatch ||
                     accountMatch.closed ||
                     accountMatch.id === output.account_id ||
-                    await this._detectAccountType(accountMatch.name) === "credit card" ||
+                    (await this._detectAccountType(accountMatch.name) === "credit card" &&
+                        !output._transfer?.destination_account_id) ||
                     (!output._structured_movement && transferDestinationIsAmbiguous(searchTerm, accountMatch, liveAccounts))
                 )) {
                     // A closed or card account, a self target, or a bank-only
@@ -2051,11 +2165,11 @@ export class AgentOrchestrator {
                     output.category_id = null;
                     output._hold_unresolved_transfer = true;
                 } else if (accountMatch) {
-                    const transferPayee = payees.find(
+                    const matchedTransferPayee = payees.find(
                         (p) => p.transfer_acct === accountMatch.id,
                     );
-                    if (transferPayee) {
-                        output.payee_id = transferPayee.id;
+                    if (matchedTransferPayee) {
+                        output.payee_id = matchedTransferPayee.id;
                         output._is_transfer = true;
                         // The reserved transfer always runs source -> destination,
                         // and the booked account is the one this row sits on: it
@@ -2093,7 +2207,7 @@ export class AgentOrchestrator {
                                 occurred_at:
                                     output.occurred_at ||
                                     new Date().toISOString(),
-                                payee_id: transferPayee.id,
+                                payee_id: matchedTransferPayee.id,
                             };
                     } else if (output._hold_unresolved_paynow) {
                         // A credit that resolved to an account but has no
