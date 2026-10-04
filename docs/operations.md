@@ -28,7 +28,6 @@ Production deploys are performed by `.github/workflows/deploy.yml` on a **self-h
 Other workflows:
 
 - `.github/workflows/test.yml` — unit tests on pull requests: expense-tracker, actual-api, portfolio-tracker, the Java `pp-cli`, Python compose/host tests, Hermes script lint/tests, and image-gen. `deploy.yml` also calls it for non-push events before deploying.
-- `.github/workflows/deploy-signal.yml` — deploys `modules/signal-cli/` when that directory changes.
 - `.github/workflows/sync-codex-router.yml` — every five minutes, compares `codex-router` `main` against the last deployed revision and triggers a deploy when they differ.
 - `.github/workflows/recover-codex-router-auth.yml` — manual recovery for a codex-router account slot.
 - `.github/workflows/secrets-scan.yml` and `.gitleaks.toml` — secret scanning.
@@ -42,6 +41,5 @@ Other workflows:
 | actual-api | `127.0.0.1:3000` | 3000 | Actual Budget proxy, `/health` |
 | codex-router | `0.0.0.0:4100` | 4100 | OpenAI-compatible `/v1`, `/health/liveliness` |
 | hermes | `8642`, `9119`, `8644` | same | Hermes gateway ports; the webhook platform listens on 8644 |
-| signal-cli (optional) | `127.0.0.1:8084` | 8080 | signal-cli daemon HTTP |
 
 All services except `codex-router` publish to `127.0.0.1` only. `codex-router` binds `0.0.0.0:4100` so the `hermes_shared` network and external clients can reach it.

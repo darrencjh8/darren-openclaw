@@ -887,7 +887,7 @@ cd "$MODULES_DIR"
 echo ""
 echo "--- Building & Deploying ---"
 
-# Ensure shared network exists (idempotent — needed for signal-cli)
+# Ensure shared network exists (idempotent — hermes and codex-router join it)
 docker network create hermes_shared --driver bridge 2>/dev/null || true
 
 export COMPOSE_DOCKER_CLI_BUILD=1 DOCKER_BUILDKIT=1

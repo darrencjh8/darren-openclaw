@@ -91,7 +91,7 @@ Reclaim order after diagnosing leftover containers (this host's live stack is `m
 2. `docker rmi <image>...` — their images (`docker images | grep -i <prefix>` to list).
 3. `docker system prune -a -f` — everything else: all images with no running container (not just dangling), stopped containers, unused networks, build cache. Preview reclaimable space with `docker system df` first.
 
-**Pitfall — `-a` sweeps stopped containers + their images:** `docker ps -a` may show intentional `Exited (0)` tools (e.g. `signal-cli`, an on-demand CLI). `prune -a` deletes those too — note what to keep, or expect to re-`docker pull` afterward. Without `-a`, prune only drops *dangling* images and leaves tagged leftovers (`hermes-agent:local`, `test-*`, base images) — so `-a` is required when reclaiming those was the point.
+**Pitfall — `-a` sweeps stopped containers + their images:** `docker ps -a` may show intentional `Exited (0)` tools (e.g. `kokoro-tts`, an on-demand CLI). `prune -a` deletes those too — note what to keep, or expect to re-`docker pull` afterward. Without `-a`, prune only drops *dangling* images and leaves tagged leftovers (`hermes-agent:local`, `test-*`, base images) — so `-a` is required when reclaiming those was the point.
 
 **Pitfall — layer deletion outlasts the 180s terminal timeout:** a large prune returns `exit 124` (timeout) but finishes anyway — the deletions complete. Verify with `docker system df` (Images should collapse to just the active set) before assuming it died; raise `timeout=` or run `background=true` for big prunes.
 
