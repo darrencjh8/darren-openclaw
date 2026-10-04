@@ -29,13 +29,14 @@ PR and CI/CD.
 ## Implementation
 
 1. Refactor the existing helper around one safe refresh path:
-   - define App configuration as complete only when `GH_APP_ID` and `GH_APP_INSTALLATION_ID` are non-empty decimal integers and `GH_APP_PRIVATE_KEY` is non-empty and contains a valid PEM private-key header; empty, non-numeric, or malformed values are incomplete and use the PAT fallback when available;
+   - define App configuration as complete only when `GH_APP_ID` and `GH_APP_INSTALLATION_ID` are non-empty decimal integers and `GH_APP_PRIVATE_KEY` is non-empty and cryptographically parseable by `openssl pkey`; empty, non-numeric, header-only, or otherwise malformed values are incomplete and use the PAT fallback when available;
+   - use that same complete-configuration predicate in boot selection and the helper, so an invalid App never suppresses the documented PAT fallback;
    - exit 0 with a skip log and no alert when App configuration is incomplete and no PAT is present; return non-zero only after a valid App configuration is selected and mint/auth/parse fails;
    - validate all required App variables before making a request;
    - mint a JWT with the configured App ID and private key;
    - request an installation token by sending the JWT as the HTTP authorization bearer credential on the wire (redact the JWT value only in log output) and parse `token` plus `expires_at` from the response;
    - authenticate the `hermes` user via `su -s /bin/sh hermes -c "gh auth login --with-token"`, never log the token, and keep gh-managed `hosts.yml` mode `0600` and hermes-owned;
-   - do not retain `/opt/data/.gh_token`: feed the minted token only through the protected stdin login path and remove any stale legacy file before successful completion; no caller reads that file;
+   - do not retain `/opt/data/.gh_token`: remove any stale legacy file at helper entry and again in an unconditional exit/signal cleanup trap; feed the minted token only through the protected stdin login path, never create a replacement file, and ensure failure at mint, parse, or login leaves the file absent; no caller reads that file;
    - never hand-edit gh-managed `hosts.yml` and never use an in-place credential rewrite.
 2. Make boot initialization idempotent and precedence-aware:
    - valid complete App configuration: run the App helper and do not invoke PAT login;
@@ -48,18 +49,20 @@ PR and CI/CD.
    - rewrite the stale hardcoded `github-auth-refresh`/50m insert-only snippet in `test-50-seed-defaults.sh` to the new name/interval plus migration assertions;
    - do not include a prompt or token output.
 4. Inventory the scoped GitHub CLI call sites before implementation. For every `gh` invocation in `modules/hermes/scripts/`, `modules/hermes/50-seed-defaults`, and related tests, either require an explicit `--repo`/`-R owner/repository` or document why it is local authentication plumbing rather than a repository operation. Ban `/user`, `/user/repos`, `gh repo list`, and current-directory repository inference for installation-token paths. Add fake-`gh` assertions for each repository operation, including `darrencjh8/codex-router`, `darrencjh8/friday-memory`, and archived `darrencjh8/openclaw-module-ktmb` where applicable.
-5. Prevent credential precedence regressions:
-   - remove `GH_TOKEN=${FRIDAY_PAT}` from the Hermes service environment because gh gives it precedence over stored App credentials;
+5. Prevent credential precedence regressions and ambient PAT use:
+   - remove `GH_TOKEN=${FRIDAY_PAT}` and the broad `FRIDAY_PAT=${FRIDAY_PAT}` export from the Hermes service environment because gh gives ambient credentials precedence over stored App credentials and the memory scripts must not inherit the PAT;
+   - remove the `FRIDAY_PAT` fallback branches from `memory-backup.sh` and `memory-restore.sh`; those scripts use stored `gh` App credentials only and skip safely when no gh token is available;
    - pass `FRIDAY_PAT` only to the baked codex-router checkout refresh command;
    - pin the auth helper to `HOME=/opt/data/home` and its matching `GH_CONFIG_DIR`, then explicitly switch gh to the App login after `gh auth login --with-token`.
 
 ## Verification
 
 - RED control mapping, each required to fail at base and pass at HEAD: `T-precedence` = `test_app_config_validation_and_pat_fallback` plus `test_app_account_selected` in `modules/hermes/tests/test-github-auth.sh`; `T-atomic-replace` = `test_atomic_credential_install` in that same harness; `T-no-secret-output` = `test_token_never_appears_in_output` there. The command is `bash modules/hermes/tests/test-github-auth.sh`; expected exit is non-zero at base and zero at HEAD. Also run `bash modules/hermes/tests/test-50-seed-defaults.sh`, `python3 modules/hermes/tests/test-seed-app-cron.py`, `bash modules/hermes/tests/test-docker-compose-env.sh`, and `bash modules/hermes/tests/test-refresh-codex-router-checkout.sh` at HEAD. Run `bash -n` on every changed shell file and pin the shellcheck version printed by `shellcheck --version` in the evidence.
-- Verify Compose does not export ambient `GH_TOKEN`, the boot refresh scopes `FRIDAY_PAT`, the helper selects the App account, invalid App values take the PAT fallback, and no `.gh_token` file is retained after success or failure.
+- Verify Compose exports neither ambient `GH_TOKEN` nor broad `FRIDAY_PAT`, memory backup/restore have no PAT fallback, the boot refresh scopes `FRIDAY_PAT` only to the checkout command, the helper selects the App account, invalid App values take the PAT fallback, and no `.gh_token` file is retained after success or failure.
+- Verify malformed PEM input fails the shared App-completeness predicate and selects the PAT fallback without making an App request; verify stale `.gh_token` cleanup after mint, parse, login, and signal failure paths.
 - Verify every inventory entry from step 4 with fake-`gh` argument capture; repository operations must carry an explicit owner/repository target and no captured operation may use `/user` or `/user/repos`.
 - Advisory only (not CI evidence): one live run of the helper with the configured App in the isolated worktree/container environment, verifying the installation endpoint and one repository-scoped `gh` command without printing token material.
-- Inspect the final diff for credentials, unsafe permissions, PAT-overwrite regressions, and stale `.gh_token` consumers.
+- Inspect the final diff for credentials, unsafe permissions, PAT-overwrite regressions, and stale `.gh_token` consumers; repository search must show no remaining `FRIDAY_PAT` read in memory backup/restore and no broad Compose export.
 
 ## Non-goals
 
