@@ -175,13 +175,14 @@ that position: `test-50-seed-defaults.sh` extracts and executes the probe block,
 stubs only the reconcile script, and asserts the log equals exactly the stub's
 output, so a call inside the block would run an unstubbed path and break an
 assertion this plan lists in Verification; and the fetch needs a credential, which on a
-fresh volume comes from the boot hook's scoped `FRIDAY_PAT`.
+fresh volume comes from the boot hook's scoped fallback PAT secret file
+(`/run/secrets/friday_pat`).
 The `gh auth login` block above is not what makes this work: the refresh uses a
 one-shot credential because its checkout is separate from the App gh config.
-The call is `GH_TOKEN="${FRIDAY_PAT:-}" su -m -s /bin/sh hermes -c 'GH_TOKEN="$GH_TOKEN" /opt/hermes-defaults/scripts/refresh-codex-router-checkout.sh'`:
-`-m` preserves the scoped credential for the legacy checkout refresh, while the
-service no longer carries an ambient `GH_TOKEN` that would override the App account
-for unrelated gh commands. It carries a fallback (`|| echo "WARNING: could not advance the
+The call is `GH_TOKEN="$(cat /run/secrets/friday_pat)" su -m -s /bin/sh hermes -c '/opt/hermes-defaults/scripts/refresh-codex-router-checkout.sh'`:
+`-m` preserves the scoped credential for the legacy checkout refresh, so no inner
+re-export is needed, while the service no longer carries an ambient `GH_TOKEN` that
+would override the App account for unrelated gh commands. It carries a fallback (`|| echo "WARNING: could not advance the
 codex-router checkout …"`), so a failed refresh logs and never fails the boot, and
 it appends to the same `/opt/data/logs/codex-router-skills-sync.log` the reconcile
 writes. Verification gains one boot-path check: after a container recreate or a

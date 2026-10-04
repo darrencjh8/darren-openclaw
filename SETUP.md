@@ -131,7 +131,8 @@ Never run `modules/deploy.sh` (or `git pull`) manually on this host. Without `--
 
 | File | Purpose |
 |------|---------|
-| `/home/runner/data/hermes/data/.gh_token` | GitHub App installation token (refreshed every 15 min) |
+| `/home/runner/data/hermes/friday_pat.secret` | Scoped fallback PAT, bind-mounted read-only as `/run/secrets/friday_pat` for the boot-time codex-router checkout refresh |
+| `/home/runner/data/hermes/data/.gh_token` | Retired: the installation token is supplied through gh's own `hosts.yml`, never a flat file |
 | `/home/runner/data/hermes/data/config.yaml` | Hermes gateway config |
 | `/home/runner/data/hermes/data/SOUL.md` | Agent personality |
 | `/home/runner/data/hermes/data/cron/jobs.json` | Cron job definitions |

@@ -11,8 +11,12 @@
 #
 # Idempotent — safe to run on every boot and every cron tick.
 #
-# --check-app-config prints `complete` or `incomplete` and exits 0. Boot uses it
-# so the selection predicate has exactly one implementation.
+# --check-app-config prints `complete` or `incomplete` and exits 0. It exposes
+# the App-completeness test so the same rule can be reused.
+# ponytail: boot does not call it. Boot runs once per container start, so the
+# extra `su` round-trip buys nothing; boot gates on coarse variable presence and
+# lets this helper make the real App-vs-fallback decision. If the completeness
+# rule ever changes, keep boot's presence check in sync.
 set -euo pipefail
 
 log() { echo "[github-auth] $*" >&2; }
