@@ -1,10 +1,11 @@
-FROM nousresearch/hermes-agent:v2026.8.31
+FROM nousresearch/hermes-agent:v2026.9.24
+# gh and ntn live in the persisted /opt/data volume, installed by the
+# "Ensure Hermes container tooling" step in .github/workflows/deploy.yml, so
+# rebuilding this image does not reinstall them.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    gh \
     poppler-utils \
     qpdf \
     && rm -rf /var/lib/apt/lists/*
-RUN npm install --global ntn
 COPY config.yaml SOUL.md.template /opt/hermes-defaults/
 COPY skills/ /opt/hermes-defaults/skills/
 COPY scripts/ /opt/hermes-defaults/scripts/
