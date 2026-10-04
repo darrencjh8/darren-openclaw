@@ -12,6 +12,7 @@
  * numbers truncated to their leading segment.
  */
 import { describe, expect, it, vi } from "vitest";
+import { parseBankMovement } from "../src/bank-movement.js";
 
 const DBS_ACCOUNT = "506df429-0000-0000-0000-000000000001";
 const DBS_ALTITUDE = "9029069b-0000-0000-0000-000000000002";
@@ -54,16 +55,21 @@ const facts = [
     { text: "UOB CREDIT CARDS maps to UOB One Card payee", score: 1 },
 ];
 
-async function orchestrate(body, { senderBank, receivedAt } = {}) {
+async function orchestrate(
+    body,
+    { senderBank, receivedAt, facts: factsOverride, accounts: accountsOverride } = {},
+) {
     const { AgentOrchestrator } = await import("../src/orchestrator.js");
+    const activeFacts = factsOverride || facts;
+    const activeAccounts = accountsOverride || accounts;
     const calls = [];
     const tools = {
         executeTool: vi.fn(async (name, args) => {
             calls.push({ name, args });
             if (name === "fetch_context")
-                return { accounts, categories: [], payees };
-            if (name === "search_memory") return { results: facts };
-            if (name === "list_facts") return { facts };
+                return { accounts: activeAccounts, categories: [], payees };
+            if (name === "search_memory") return { results: activeFacts };
+            if (name === "list_facts") return { facts: activeFacts };
             if (name === "check_duplicate") return false;
             if (name === "check_schedule_collision") return false;
             if (name === "find_link_candidate")
@@ -209,5 +215,99 @@ describe("the flattened OCBC transfer request is not held", () => {
         expect(phase2.payee_id).toBe("p-dbs-account");
         expect(phase2._is_transfer).toBe(true);
         expect(phase2.category_id).toBeNull();
+    });
+});
+
+// ── 3. Only a COMPLETED scheduled transfer is a movement ─────────
+
+describe("Ryt scheduled transfer completion", () => {
+    it("does NOT parse a failed scheduled transfer as a movement", () => {
+        // Same opening sentence, non-completion status. Booking this would
+        // post a debit for money that never left.
+        const failed = RYT_SCHEDULED_TRANSFER.replace(
+            "was successfully completed",
+            "was unsuccessful",
+        );
+        expect(
+            parseBankMovement(failed, {
+                senderBank: "Ryt",
+                receivedAt: "2026-10-01T02:02:00.000Z",
+            }),
+        ).toBeNull();
+    });
+
+    it("does NOT parse a pending scheduled transfer as a movement", () => {
+        const pending = RYT_SCHEDULED_TRANSFER.replace(
+            "was successfully completed",
+            "is pending approval",
+        );
+        expect(
+            parseBankMovement(pending, {
+                senderBank: "Ryt",
+                receivedAt: "2026-10-01T02:02:00.000Z",
+            }),
+        ).toBeNull();
+    });
+
+    it("does NOT parse a reminder with no completion clause", () => {
+        const reminder = RYT_SCHEDULED_TRANSFER.replace(
+            "was successfully completed",
+            "will be processed on that date",
+        );
+        expect(
+            parseBankMovement(reminder, {
+                senderBank: "Ryt",
+                receivedAt: "2026-10-01T02:02:00.000Z",
+            }),
+        ).toBeNull();
+    });
+});
+
+// ── 4. A card-product destination with no alias must fail closed ──
+
+describe("a card-product destination that cannot be linked is held, not spent", () => {
+    it("holds uid 1025 when memory has no Citi Reward alias", async () => {
+        // The production alias is what makes this row bookable. Without it the
+        // destination is an unlinkable card product, so the row must hold —
+        // falling through here posts the repayment as spend.
+        const { phase2, calls } = await orchestrate(DBS_BILLPAY_TO_CITI, {
+            senderBank: "DBS",
+            receivedAt: "2026-10-01T13:12:59.000Z",
+            facts: facts.filter((f) => !/CITI CREDIT CARDS/i.test(f.text)),
+        });
+
+        expect(phase2).toBeTruthy();
+        expect(phase2._hold_unresolved_transfer).toBe(true);
+        expect(calls.some((c) => c.name === "insert_transaction")).toBe(false);
+    });
+});
+
+// ── 5. A scheduled transfer must not become an external expense ───
+
+const RYT_SCHEDULED_TRANSFER =
+    "Hi Darren, Your scheduled transfer of RM908.25 to ACCOUNT HOLDER on 1/10/2026, " +
+    "10:02 AM (GMT+8) was successfully completed. For more details, just log into the " +
+    "Ryt Bank App and head to Scheduled Transfers.";
+
+describe("a Ryt scheduled transfer is never booked as an external expense", () => {
+    it("holds instead of inserting when the destination is the holder", async () => {
+        // Production shape: the alert names the holder, and the tracker holds a
+        // person-to-person movement whose other leg it cannot verify. The
+        // placeholder name needs the matching legal-name fact that production
+        // carries, otherwise it stops being an own identity at all.
+        const { phase2, calls } = await orchestrate(RYT_SCHEDULED_TRANSFER, {
+            senderBank: "Ryt",
+            receivedAt: "2026-10-01T02:02:00.000Z",
+            accounts: [...accounts, { id: "ryt-main", name: "Ryt Main Account", closed: false }],
+            facts: [
+                ...facts,
+                { text: "Legal name: ACCOUNT HOLDER -> ABCD (statement password)", score: 1 },
+            ],
+        });
+
+        expect(phase2).toBeTruthy();
+        expect(phase2._hold_unresolved_transfer).toBe(true);
+        expect(phase2.category_id).toBeNull();
+        expect(calls.some((c) => c.name === "insert_transaction")).toBe(false);
     });
 });

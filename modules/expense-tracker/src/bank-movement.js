@@ -314,10 +314,15 @@ export function parseBankMovement(text, { senderBank = null, receivedAt } = {}) 
   // completed successfully!" and the movement is never recorded (uid 999/1010/
   // 1012, 2026-10-01; three alerts in one run). The amount, destination and
   // time are all present in the sentence, so it is parsed rather than guessed.
+  //
+  // The completion clause is REQUIRED, not decoration. The same opening
+  // sentence is used for notices that are not money movements — "was
+  // unsuccessful", "is pending approval", a reminder that it "will be
+  // processed". Matching the prefix alone booked those as real debits.
   const rytScheduled = body
     .replace(/\s+/g, " ")
     .match(
-      /scheduled transfer of\s+(SGD|RM|MYR)\s*([\d,.]+)\s+to\s+(.+?)\s+on\s+(\d{1,2}\/\d{1,2}\/\d{4})\s*,?\s*(\d{1,2}:\d{2}\s*(?:AM|PM)?)(?:\s*\(GMT\+8\))?/i,
+      /scheduled transfer of\s+(SGD|RM|MYR)\s*([\d,.]+)\s+to\s+(.+?)\s+on\s+(\d{1,2}\/\d{1,2}\/\d{4})\s*,?\s*(\d{1,2}:\d{2}\s*(?:AM|PM)?)(?:\s*\(GMT\+8\))?\s*(?:was|has\s+been)\s+(?:successfully\s+completed|completed\s+successfully)/i,
     );
   if (rytScheduled) {
     const currency = /^RM$/i.test(rytScheduled[1]) ? "MYR" : rytScheduled[1].toUpperCase();
@@ -327,9 +332,10 @@ export function parseBankMovement(text, { senderBank = null, receivedAt } = {}) 
     if (!occurredAt) return null;
     const counterparty = rytScheduled[3].trim();
     // A scheduled transfer always leaves the named source account, so it is
-    // outgoing. The source is stated only when the sentence carries the
-    // "from <account>" clause; when it does not, "Main Account" is the bank's
-    // own default for this alert and is used as the own-account name only.
+    // outgoing. The sentence does not carry the source account, so name and
+    // suffix are left null on purpose: resolution falls back to the sender
+    // bank, and holds rather than guessing when that is ambiguous. Do NOT
+    // invent "Main Account" here — the alert never says it.
     return {
       kind: "bank_movement", direction: "outgoing",
       amount_cents: cents(currency, rytScheduled[2], "outgoing"), currency,

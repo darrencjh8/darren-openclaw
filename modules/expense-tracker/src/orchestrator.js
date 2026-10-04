@@ -2119,22 +2119,23 @@ export class AgentOrchestrator {
                 );
                 // A product-named card repayment can use the learned payee
                 // alias even when no matching account exists in this budget.
-                // It is safe only because the parser established the funding
-                // account and the alert explicitly says the destination is a
-                // credit card; ordinary unresolved destinations still hold.
+                // It is safe only when the alias actually resolves: the
+                // destination wording alone ("... CREDIT CARDS") identifies a
+                // card PRODUCT, not one of the holder's own accounts, and the
+                // same wording is used for cards that are not the holder's.
                 const cardPayee = output._card_repayment === true
                     ? payees.find((payee) =>
                         !payee.transfer_acct &&
                         payee.name?.toLowerCase() === output.payee_name.toLowerCase(),
                     )
                     : null;
-                const cardRepayment =
-                    !accountMatch &&
-                    Boolean(cardPayee);
-                if (cardRepayment) {
-                    if (!output.account_id) {
-                        // The funding side is unknown, so the money cannot be
-                        // moved: hold rather than guess which account paid.
+                if (output._card_repayment === true) {
+                    if (!cardPayee || !output.account_id) {
+                        // Either the card cannot be linked to a payee, or the
+                        // funding side is unknown. Both mean the money cannot
+                        // be moved safely: HOLD. Letting this fall through
+                        // books the repayment as spend on the funding card,
+                        // which the card rule exists to prevent.
                         output.payee_name = "Misc";
                         output.payee_source = "transfer_destination_refused";
                         output.category_id = null;
@@ -2218,6 +2219,19 @@ export class AgentOrchestrator {
                     }
                 }
             } catch {}
+        }
+
+        // A card-product destination that could not be linked to a payee must
+        // never be posted as spend. The transfer gate above is skipped entirely
+        // when the payee resolved to nothing (payee_name === "Misc"), which is
+        // exactly the unlinked case, so this check has to sit outside it.
+        // When the gate did link the card, _is_transfer is already set and this
+        // is a no-op.
+        if (output._card_repayment === true && !output._is_transfer) {
+            output.payee_name = "Misc";
+            output.payee_source = "transfer_destination_refused";
+            output.category_id = null;
+            output._hold_unresolved_transfer = true;
         }
 
         // Step 2: Category resolution.
