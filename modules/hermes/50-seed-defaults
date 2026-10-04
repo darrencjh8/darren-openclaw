@@ -193,26 +193,113 @@ PY
 mkdir -p /opt/data/memories-backup
 chown -R hermes:hermes /opt/data/memories-backup 2>/dev/null || true
 
-# Configure gh CLI with FRIDAY_PAT (injected via GitHub Actions secret)
-# Available at boot time — no racing with dashboard UI
-if [ -n "${FRIDAY_PAT:-}" ]; then
-    printf '%s' "$FRIDAY_PAT" > /tmp/.gh-token-init
-    su -s /bin/sh hermes -c "gh auth login --with-token < /tmp/.gh-token-init" 2>/dev/null || true
-    rm -f /tmp/.gh-token-init
+# Configure gh CLI authentication. The helper installs GitHub App auth when the
+# App configuration is complete, and otherwise installs the scoped fallback PAT.
+# The PAT arrives as a root-only secret file rather than an ambient environment
+# variable, so no unrelated child process inherits it; the helper reads that file
+# only when the App configuration is incomplete.
+# The boot hook is the single reader: it must be a readable, non-empty regular
+# file (a directory left by an earlier missing-source mount is not a PAT).
+PAT=""
+if [ -f /run/secrets/friday_pat ] && [ -s /run/secrets/friday_pat ] && [ -r /run/secrets/friday_pat ]; then
+    PAT=$(cat /run/secrets/friday_pat)
 fi
+
+# The flat token file is retired: gh owns hosts.yml and the helper feeds the
+# credential through stdin only, so clear any stale file before either branch.
+rm -f /opt/data/.gh_token 2>/dev/null || true
+
+if [ -n "${GH_APP_ID:-}${GH_APP_INSTALLATION_ID:-}${GH_APP_PRIVATE_KEY:-}" ] || [ -n "$PAT" ]; then
+    # `-m` preserves the environment, so the prefix assignment reaches the
+    # su'd shell and the helper; nothing needs expanding inside the quotes.
+    GH_PAT="$PAT" su -m -s /bin/sh hermes -c '/opt/hermes-defaults/scripts/github-auth.sh' 2>/dev/null \
+        || echo "WARNING: GitHub authentication failed at boot" >&2
+else
+    echo "WARNING: neither GitHub App config nor a fallback PAT secret is present; leaving gh credentials untouched" >&2
+fi
+unset PAT
+
+# Seed github-app-auth-refresh cron job (no_agent script-only refresh).
+# Follows the portfolio-daily-sync update-in-place pattern: a redeploy migrates
+# the old github-auth-refresh 50m insert-only job to the new name and schedule.
+python3 <<'PYEOF' || true
+import os, json, uuid, datetime
+jobs_path = "/opt/data/cron/jobs.json"
+os.makedirs(os.path.dirname(jobs_path), exist_ok=True)
+try:
+    with open(jobs_path) as f:
+        data = json.load(f)
+    jobs = data.get("jobs", []) if isinstance(data, dict) else data
+except (FileNotFoundError, json.JSONDecodeError):
+    jobs = []
+
+wanted = {
+    "name": "github-app-auth-refresh",
+    "schedule": {"kind": "interval", "minutes": 15, "display": "every 15m"},
+    "schedule_display": "every 15m",
+    "script": "github-auth.sh",
+    "no_agent": True,
+    "enabled": True,
+    "deliver": "local",
+    "next_run_at": None,
+}
+
+found = False
+for j in jobs:
+    if not isinstance(j, dict):
+        continue
+    if j.get("name") in ("github-app-auth-refresh", "github-auth-refresh"):
+        found = True
+        changed = False
+        if j.get("name") != wanted["name"]:
+            j["name"] = wanted["name"]
+            changed = True
+        for key in ("schedule", "schedule_display", "script", "no_agent", "deliver"):
+            if j.get(key) != wanted[key]:
+                j[key] = wanted[key]
+                changed = True
+        if "prompt" in j:
+            del j["prompt"]
+            changed = True
+        if "deliver_extra" in j:
+            del j["deliver_extra"]
+            changed = True
+        if changed:
+            print("cron: github-app-auth-refresh migrated to no_agent script-only 15m")
+        else:
+            print("cron: github-app-auth-refresh unchanged")
+        break
+
+if not found:
+    jobs.append({
+        "id": uuid.uuid4().hex[:12],
+        **wanted,
+        "created_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+    })
+    print("cron: github-app-auth-refresh seeded (no_agent)")
+
+with open(jobs_path, "w") as f:
+    json.dump({"jobs": jobs, "updated_at": datetime.datetime.now(datetime.timezone.utc).isoformat()}, f, indent=2)
+PYEOF
 
 # The container's own codex-router checkout is the driver dev-loop sessions
 # execute (`codex/skills/dev-loop/scripts/loop.py`), so it must not stay pinned
 # to an old revision while the reconciled skill roots move. No target: track
-# origin/main. `su -m` preserves GH_TOKEN, which the fetch needs, because the hook
-# runs as root and `su` resets the environment by default. A failed refresh logs
-# a warning and never fails the boot.
+# origin/main. Scope the fallback PAT to this legacy checkout refresh only;
+# ambient GH_TOKEN would override the App account for every other gh invocation.
 refresh_log=/dev/null
 if true 2>>/opt/data/logs/codex-router-skills-sync.log; then
     refresh_log=/opt/data/logs/codex-router-skills-sync.log
 fi
-su -m -s /bin/sh hermes -c '/opt/hermes-defaults/scripts/refresh-codex-router-checkout.sh' >>"$refresh_log" 2>&1 \
-    || echo "WARNING: could not advance the codex-router checkout in /workspace" >&2
+if [ -f /run/secrets/friday_pat ] && [ -s /run/secrets/friday_pat ] && [ -r /run/secrets/friday_pat ]; then
+    # The prefix assignment lands in su's environment, which `-m` preserves, so
+    # the script sees GH_TOKEN without expanding anything inside the single quotes.
+    GH_TOKEN="$(cat /run/secrets/friday_pat)" su -m -s /bin/sh hermes -c '/opt/hermes-defaults/scripts/refresh-codex-router-checkout.sh' >>"$refresh_log" 2>&1 \
+        || echo "WARNING: could not advance the codex-router checkout in /workspace" >&2
+else
+    su -m -s /bin/sh hermes -c '/opt/hermes-defaults/scripts/refresh-codex-router-checkout.sh' >>"$refresh_log" 2>&1 \
+        || echo "WARNING: could not advance the codex-router checkout in /workspace" >&2
+fi
 
 python3 -c '
 import os, re, glob

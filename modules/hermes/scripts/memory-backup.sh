@@ -4,11 +4,11 @@ set -e
 
 [ -z "${MEMORY_REPO_URL}" ] && exit 0
 
-# Auth: use gh CLI token, then FRIDAY_PAT, then GITHUB_TOKEN env
+# Auth: the stored gh App credential only. The long-lived PAT is not delivered
+# to this script (it is scoped to the codex-router checkout refresh), so there is
+# no PAT fallback here; with no usable credential the sync is skipped.
 if AUTH_TOKEN=$(gh auth token 2>/dev/null); then
     :
-elif [ -n "${FRIDAY_PAT:-}" ]; then
-    AUTH_TOKEN="${FRIDAY_PAT}"
 elif [ -n "${GITHUB_TOKEN:-}" ]; then
     AUTH_TOKEN="${GITHUB_TOKEN}"
 else

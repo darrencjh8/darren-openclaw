@@ -154,6 +154,9 @@ jobs:
               run: bash modules/hermes/tests/test-github-auth.sh
             - name: Test 50-seed-defaults cron jobs
               run: bash modules/hermes/tests/test-50-seed-defaults.sh
+            - name: Test seeded GitHub App cron block
+              # Dashed filename, so run it as a script rather than via -m unittest.
+              run: python modules/hermes/tests/test-seed-app-cron.py
             - name: Test memory backup script
               run: bash modules/hermes/tests/test-memory-backup.sh
             - name: Test Hermes model routing

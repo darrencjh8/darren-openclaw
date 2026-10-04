@@ -356,7 +356,7 @@ graph TB
 | Job | Schedule | Action |
 |---|---|---|
 | portfolio-daily-sync | `0 12 * * *` (daily noon, container time) | `portfolio-sync.sh` — REST `POST /tools/pp-sync-all` (no_agent, zero tokens) |
-| github-auth-refresh | Every 50 min | Refresh GitHub App token |
+| github-app-auth-refresh | Every 15 min | `github-auth.sh` — App-first `gh` auth (no_agent, zero tokens) |
 | memory-backup | Every 360 min | Backup Hermes memories to private repo |
 
 ### 6.5 Implementation Status

@@ -72,11 +72,64 @@ test_has_workspace_volume() {
     fi
 }
 
+# gh gives GH_TOKEN precedence over hosts.yml, so the hermes service must not
+# inject the long-lived PAT as an ambient override. The PAT is delivered only as
+# the root-only read-only secret mount, and no service environment may carry it.
+test_app_auth_not_shadowed() {
+    if awk '/^[[:space:]]*hermes:/,/^[a-z]/' "$COMPOSE_FILE" | grep -qE 'GH_TOKEN=.*FRIDAY_PAT'; then
+        nope "App auth is not shadowed by ambient GH_TOKEN" "hermes service injects GH_TOKEN from FRIDAY_PAT"
+    else
+        ok "App auth is not shadowed by ambient GH_TOKEN"
+    fi
+}
+
+# The PAT must not reach the hermes service environment at all; scoping is by the
+# read-only secret mount, not by an environment variable.
+test_pat_secret_not_in_compose_environment() {
+    if awk '/^[[:space:]]*hermes:/,/^[a-z]/' "$COMPOSE_FILE" | grep -q 'FRIDAY_PAT='; then
+        nope "T-pat-secret-delivery: FRIDAY_PAT is not in the hermes service environment" \
+            "hermes service still exports FRIDAY_PAT"
+    else
+        ok "T-pat-secret-delivery: FRIDAY_PAT is not in the hermes service environment"
+    fi
+}
+
+# The fallback PAT is delivered as a read-only mount of a root-only host file.
+test_pat_secret_mounted_read_only() {
+    if grep -q '/home/runner/data/hermes/friday_pat.secret:/run/secrets/friday_pat:ro' "$COMPOSE_FILE"; then
+        ok "T-pat-secret-delivery: fallback PAT is a read-only secret mount"
+    else
+        nope "T-pat-secret-delivery: fallback PAT is a read-only secret mount" \
+            "missing /home/runner/data/hermes/friday_pat.secret:/run/secrets/friday_pat:ro"
+    fi
+}
+
+# The memory scripts must not read the long-lived PAT: it is scoped to the
+# codex-router checkout refresh, and an ambient PAT there would bypass the App.
+test_memory_scripts_do_not_read_pat() {
+    local script_dir="$SCRIPT_DIR/../scripts"
+    local leaked=""
+    for f in "$script_dir/memory-backup.sh" "$script_dir/memory-restore.sh"; do
+        if grep -q 'FRIDAY_PAT' "$f"; then
+            leaked="$leaked $(basename "$f")"
+        fi
+    done
+    if [ -n "$leaked" ]; then
+        nope "T-memory-no-pat: memory scripts do not read FRIDAY_PAT" "still reads it in:$leaked"
+    else
+        ok "T-memory-no-pat: memory scripts do not read FRIDAY_PAT"
+    fi
+}
+
 test_has_safe_root
 test_has_opt_data
 test_has_workspace
 test_has_tmp
 test_has_workspace_volume
+test_app_auth_not_shadowed
+test_pat_secret_not_in_compose_environment
+test_pat_secret_mounted_read_only
+test_memory_scripts_do_not_read_pat
 
 echo ""
 echo "========================================="

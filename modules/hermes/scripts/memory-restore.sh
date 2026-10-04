@@ -11,7 +11,9 @@ FIRST_BOOT=false
 
 log() { echo "[memory-restore] $*" >&2; }
 
-# Auth: use gh CLI token, then GITHUB_TOKEN env
+# Auth: the stored gh App credential only. The long-lived PAT is not delivered
+# to this script (it is scoped to the codex-router checkout refresh), so there is
+# no PAT fallback here; with no usable credential the restore is skipped.
 if AUTH_TOKEN=$(gh auth token 2>/dev/null); then
     :
 elif [ -n "${GITHUB_TOKEN:-}" ]; then

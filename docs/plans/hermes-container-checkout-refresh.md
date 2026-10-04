@@ -25,7 +25,7 @@ base, so this measurement is what the change is justified by):
   generation of that checkout
 - the checkout's remote is `https://github.com/darrencjh8/codex-router.git`, owned
   by the container's `hermes` user, whose git has no credential helper; gh is
-  authenticated there (`GH_TOKEN` is in the hermes service environment), and
+  authenticated there through the boot hook's scoped `GH_TOKEN`, and
   `git -c credential.helper='!gh auth git-credential' ls-remote origin main`
   returns `c80dfb8`. Because that helper only runs for an HTTPS remote, the fetch
   depends on the remote staying HTTPS — a `git://` or `file://` remote would need
@@ -175,14 +175,13 @@ that position: `test-50-seed-defaults.sh` extracts and executes the probe block,
 stubs only the reconcile script, and asserts the log equals exactly the stub's
 output, so a call inside the block would run an unstubbed path and break an
 assertion this plan lists in Verification; and the fetch needs a credential, which on a
-fresh volume comes from `GH_TOKEN`, preserved in the hook's environment by `su -m`.
-The `gh auth login` block above is not what makes this work: it runs `su` without
-`-m`, so it writes gh's config into hermes' HOME while this call reads root's.
-The call is `su -m -s /bin/sh hermes -c '/opt/hermes-defaults/scripts/refresh-codex-router-checkout.sh'`:
-`-m` preserves the environment, because the hook's environment carries `GH_TOKEN`
-(from `modules/docker-compose.yml`) and `su` resets it by default, so without `-m`
-the boot fetch would run with no credential on a volume whose gh config is also
-missing. It carries a fallback (`|| echo "WARNING: could not advance the
+fresh volume comes from the boot hook's scoped `FRIDAY_PAT`.
+The `gh auth login` block above is not what makes this work: the refresh uses a
+one-shot credential because its checkout is separate from the App gh config.
+The call is `GH_TOKEN="${FRIDAY_PAT:-}" su -m -s /bin/sh hermes -c 'GH_TOKEN="$GH_TOKEN" /opt/hermes-defaults/scripts/refresh-codex-router-checkout.sh'`:
+`-m` preserves the scoped credential for the legacy checkout refresh, while the
+service no longer carries an ambient `GH_TOKEN` that would override the App account
+for unrelated gh commands. It carries a fallback (`|| echo "WARNING: could not advance the
 codex-router checkout …"`), so a failed refresh logs and never fails the boot, and
 it appends to the same `/opt/data/logs/codex-router-skills-sync.log` the reconcile
 writes. Verification gains one boot-path check: after a container recreate or a

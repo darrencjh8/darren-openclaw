@@ -40,8 +40,8 @@ grep -Fq -- 'docker exec -e CODEX_ROUTER_LOCK_WAIT_SECONDS=300 -u hermes hermes'
 # skills block, so it passed before the block existed.
 grep -Fq -- 'refresh-codex-router-checkout.sh' "$SEED_SCRIPT" \
     && ok "the boot hook refreshes the checkout" || nope "the boot hook refreshes the checkout"
-grep -Eq "su -m -s /bin/sh hermes -c '/opt/hermes-defaults/scripts/refresh-codex-router-checkout\\.sh'" "$SEED_SCRIPT" \
-    && ok "the boot hook preserves the environment for the baked refresh" || nope "the boot hook preserves the environment for the baked refresh"
+grep -Eq "GH_TOKEN=\"\\\$\\(cat /run/secrets/friday_pat\\)\" su -m -s /bin/sh hermes -c '/opt/hermes-defaults/scripts/refresh-codex-router-checkout\.sh'" "$SEED_SCRIPT" \
+    && ok "the boot hook scopes the PAT for the baked refresh" || nope "the boot hook scopes the PAT for the baked refresh"
 
 echo "=== behaviour against real repositories ==="
 sandbox=$(mktemp -d)

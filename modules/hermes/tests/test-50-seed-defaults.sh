@@ -24,7 +24,10 @@ run_seed_python() {
     # Sets up a temp jobs.json, runs the snippet, and returns the resulting jobs.
     local jobs_path="$TMPDIR/cron/jobs.json"
     mkdir -p "$(dirname "$jobs_path")"
-    echo '{"jobs": []}' > "$jobs_path"
+    if [ "${SEED_JOBS_PRIMED:-0}" -eq 0 ]; then
+        echo '{"jobs": []}' > "$jobs_path"
+        export SEED_JOBS_PRIMED=1
+    fi
     python3 -c "$1"
     python3 -c "
 import json
@@ -40,43 +43,104 @@ for j in jobs:
 "
 }
 
-# Extract the github-auth-refresh seeding snippet
-github_auth_snippet='
-import os, json, uuid, datetime
-jobs_path = "/'"$TMPDIR"'/cron/jobs.json"
-os.makedirs(os.path.dirname(jobs_path), exist_ok=True)
-try:
-    with open(jobs_path) as f:
-        data = json.load(f)
-    jobs = data.get("jobs", []) if isinstance(data, dict) else data
-except (FileNotFoundError, json.JSONDecodeError):
-    jobs = []
-if not any(j.get("name") == "github-auth-refresh" for j in jobs if isinstance(j, dict)):
-    jobs.append({
-        "id": uuid.uuid4().hex[:12],
-        "name": "github-auth-refresh",
-        "schedule": {"kind": "interval", "minutes": 50, "display": "every 50m"},
-        "schedule_display": "every 50m",
-        "script": "github-auth.sh",
-        "no_agent": True,
-        "enabled": True,
-        "deliver": "local",
-        "next_run_at": None,
-        "created_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
-    })
-    with open(jobs_path, "w") as f:
-        json.dump({"jobs": jobs, "updated_at": datetime.datetime.now(datetime.timezone.utc).isoformat()}, f, indent=2)
-'
+# The real seed block is executed from the seed file (never copied): extract the
+# github-app-auth-refresh PYEOF block and run it against the temp jobs path.
+extract_seed_block() {
+    python3 - "$SEED_SCRIPT" "$TMPDIR" <<'PY'
+import re
+import sys
+seed_path, tmpdir = sys.argv[1], sys.argv[2]
+content = open(seed_path, encoding="utf-8").read()
+marker = "github-app-auth-refresh"
+pos = content.find(marker)
+if pos < 0:
+    sys.exit("seed block marker missing: " + marker)
+start_tag = "python3 <<'PYEOF' || true\n"
+start = content.find(start_tag, pos)
+if start < 0:
+    start_tag = "python3 <<'PYEOF'\n"
+    start = content.find(start_tag, pos)
+end_tag = "\nPYEOF"
+end = content.find(end_tag, start)
+if start < 0 or end < 0:
+    sys.exit("seed block boundaries missing for: " + marker)
+block = content[start + len(start_tag):end]
+print(block.replace("/opt/data/cron/jobs.json", tmpdir + "/cron/jobs.json"))
+PY
+}
 
-echo "--- github-auth-refresh ---"
-output=$(run_seed_python "$github_auth_snippet")
-name=$(echo "$output" | cut -d'|' -f1)
-kind=$(echo "$output" | cut -d'|' -f2)
-display=$(echo "$output" | cut -d'|' -f3)
+prime_seed_jobs() {
+    rm -rf "$TMPDIR/cron"
+    export SEED_JOBS_PRIMED=0
+}
 
-[ "$name" = "github-auth-refresh" ] && ok "job name" || nope "job name" "got: $name"
+echo "--- github-app-auth-refresh (from real seed) ---"
+prime_seed_jobs
+export SEED_JOBS_PRIMED=0
+github_auth_snippet="$(extract_seed_block)"
+[ -n "$github_auth_snippet" ] || { nope "seed block extracted" "github-app-auth-refresh block missing from $SEED_SCRIPT"; github_auth_snippet=":"; }
+run_seed_python "$github_auth_snippet" >/dev/null
+job_line=$(python3 -c "
+import json
+with open('$TMPDIR/cron/jobs.json') as f:
+    data = json.load(f)
+for job in data.get('jobs', []):
+    sched = job.get('schedule', {})
+    print(f\"{job.get('name', '?')}|{sched.get('kind', type(sched).__name__)}|{job.get('schedule_display', 'missing')}\")
+")
+[ -n "$job_line" ] || { nope "seeded job is present" "jobs.json contains no jobs"; job_line="||"; }
+name=$(echo "$job_line" | cut -d'|' -f1)
+kind=$(echo "$job_line" | cut -d'|' -f2)
+display=$(echo "$job_line" | cut -d'|' -f3)
+
+[ "$name" = "github-app-auth-refresh" ] && ok "job name is github-app-auth-refresh" || nope "job name" "got: $name"
 [ "$kind" = "interval" ] && ok "schedule kind is interval" || nope "schedule kind" "got: $kind"
-[ "$display" = "every 50m" ] && ok "schedule_display set" || nope "schedule_display" "got: $display"
+[ "$display" = "every 15m" ] && ok "schedule_display is every 15m" || nope "schedule_display" "got: $display"
+
+minutes_val=$(python3 -c "
+import json
+with open('$TMPDIR/cron/jobs.json') as f:
+    data = json.load(f)
+for j in data.get('jobs', []):
+    print(j.get('schedule', {}).get('minutes', 'missing'))
+")
+[ "$minutes_val" = "15" ] && ok "interval is 15 minutes" || nope "interval minutes" "got: $minutes_val"
+
+cron_script_val=$(python3 -c "
+import json
+with open('$TMPDIR/cron/jobs.json') as f:
+    data = json.load(f)
+for j in data.get('jobs', []):
+    print(j.get('script', 'missing'))
+")
+[ "$cron_script_val" = "github-auth.sh" ] && ok "script is github-auth.sh" || nope "script" "got: $cron_script_val"
+
+cron_no_agent_val=$(python3 -c "
+import json
+with open('$TMPDIR/cron/jobs.json') as f:
+    data = json.load(f)
+for j in data.get('jobs', []):
+    print(j.get('no_agent', 'missing'))
+")
+[ "$cron_no_agent_val" = "True" ] && ok "no_agent is True" || nope "no_agent" "got: $cron_no_agent_val"
+
+cron_prompt_val=$(python3 -c "
+import json
+with open('$TMPDIR/cron/jobs.json') as f:
+    data = json.load(f)
+for j in data.get('jobs', []):
+    print(j.get('prompt', 'ABSENT'))
+")
+[ "$cron_prompt_val" = "ABSENT" ] && ok "no prompt field (zero-token cron)" || nope "no prompt field" "got: $cron_prompt_val"
+
+cron_deliver_val=$(python3 -c "
+import json
+with open('$TMPDIR/cron/jobs.json') as f:
+    data = json.load(f)
+for j in data.get('jobs', []):
+    print(j.get('deliver', 'missing'))
+")
+[ "$cron_deliver_val" = "local" ] && ok "deliver is local" || nope "deliver" "got: $cron_deliver_val"
 
 # Verify schedule is NOT a raw string
 raw_check=$(python3 -c "
@@ -94,8 +158,9 @@ print('OK: parsed dict')
 
 echo ""
 echo "--- idempotent (no duplicate) ---"
-# Run the same snippet again — should not create a second job
-run_seed_python "$github_auth_snippet" >/dev/null
+# Re-run the real seed block against the already-seeded file: update-in-place must not append.
+export SEED_JOBS_PRIMED=1
+run_seed_python "$github_auth_snippet" >/dev/null 2>&1 || true
 count=$(python3 -c "
 import json
 with open('$TMPDIR/cron/jobs.json') as f:
@@ -104,6 +169,68 @@ jobs = data.get('jobs', [])
 print(len(jobs))
 ")
 [ "$count" -eq 1 ] && ok "idempotent: exactly 1 job" || nope "idempotent" "got $count jobs"
+
+echo ""
+echo "--- migration: legacy github-auth-refresh 50m becomes the 15m job ---"
+# Rename the seeded job to the legacy name/schedule, then run the real block:
+# it must rename and reschedule in place, never append a second job.
+python3 -c "
+import json
+path = '$TMPDIR/cron/jobs.json'
+with open(path) as f:
+    data = json.load(f)
+jobs = data.get('jobs', [])
+jobs[0]['name'] = 'github-auth-refresh'
+jobs[0]['schedule'] = {'kind': 'interval', 'minutes': 50, 'display': 'every 50m'}
+jobs[0]['schedule_display'] = 'every 50m'
+with open(path, 'w') as f:
+    json.dump(data, f)
+"
+run_seed_python "$github_auth_snippet" >/dev/null 2>&1 || true
+mig_name=$(python3 -c "
+import json
+with open('$TMPDIR/cron/jobs.json') as f:
+    data = json.load(f)
+print(data.get('jobs', [])[0].get('name', 'missing'))
+")
+mig_minutes=$(python3 -c "
+import json
+with open('$TMPDIR/cron/jobs.json') as f:
+    data = json.load(f)
+print(data.get('jobs', [])[0].get('schedule', {}).get('minutes', 'missing'))
+")
+mig_count=$(python3 -c "
+import json
+with open('$TMPDIR/cron/jobs.json') as f:
+    data = json.load(f)
+print(len(data.get('jobs', [])))
+")
+[ "$mig_name" = "github-app-auth-refresh" ] && ok "migration renames legacy job" || nope "migration renames legacy job" "got: $mig_name"
+[ "$mig_minutes" = "15" ] && ok "migration reschedules to 15m" || nope "migration reschedules" "got: $mig_minutes"
+[ "$mig_count" -eq 1 ] && ok "migration keeps exactly 1 job" || nope "migration job count" "got $mig_count jobs"
+
+echo ""
+echo "--- boot precedence: App-first, scoped PAT fallback only when incomplete ---"
+# The real seed must prefer the App helper and never invoke PAT login when the
+# App triple is present. The fallback PAT arrives as the root-only secret file,
+# never as an ambient FRIDAY_PAT environment variable.
+boot_block=$(python3 - "$SEED_SCRIPT" <<'PY'
+import sys
+content = open(sys.argv[1], encoding="utf-8").read()
+marker = "Configure gh CLI authentication"
+pos = content.find(marker)
+print(content[pos:pos+2500] if pos >= 0 else "")
+PY
+)
+echo "$boot_block" | grep -q "GH_APP_ID" || nope "boot: App-first branch" "App condition missing from $SEED_SCRIPT"
+echo "$boot_block" | grep -q "github-auth.sh" || nope "boot: App helper invoked" "github-auth.sh missing from boot block"
+echo "$boot_block" | grep -q "/run/secrets/friday_pat" || nope "boot: PAT fallback retained" "secret file missing from boot block"
+echo "$boot_block" | grep -q 'GH_PAT="$PAT"' || nope "boot: PAT passed to helper" "GH_PAT not forwarded from the secret file"
+if echo "$boot_block" | grep -q "FRIDAY_PAT"; then
+    nope "boot: PAT is not ambient" "FRIDAY_PAT environment fallback is still present in the boot block"
+else
+    ok "T-precedence: boot prefers App, scoped PAT fallback only when incomplete"
+fi
 
 echo ""
 echo "=== memory-backup schedule ==="
@@ -139,6 +266,7 @@ if not any(j.get("name") == "memory-backup" for j in jobs if isinstance(j, dict)
 
 # Fresh tempdir for memory backup test
 rm -rf "$TMPDIR/cron"
+export SEED_JOBS_PRIMED=0
 output2=$(run_seed_python "$memory_snippet")
 name2=$(echo "$output2" | cut -d'|' -f1)
 kind2=$(echo "$output2" | cut -d'|' -f2)
@@ -188,6 +316,7 @@ if not any(j.get("name") == "portfolio-daily-sync" for j in jobs if isinstance(j
 '
 
 rm -rf "$TMPDIR/cron"
+export SEED_JOBS_PRIMED=0
 output3=$(run_seed_python "$portfolio_snippet")
 name3=$(echo "$output3" | cut -d'|' -f1)
 kind3=$(echo "$output3" | cut -d'|' -f2)
@@ -264,6 +393,7 @@ echo "=== portfolio-daily-sync schedule integrity ==="
 
 # Verify schedule is still cron with correct expr
 rm -rf "$TMPDIR/cron"
+export SEED_JOBS_PRIMED=0
 output_ps=$(run_seed_python "$portfolio_snippet")
 name_ps=$(echo "$output_ps" | cut -d'|' -f1)
 kind_ps=$(echo "$output_ps" | cut -d'|' -f2)
@@ -295,65 +425,29 @@ for j in data.get('jobs', []):
 echo ""
 echo "=== portfolio-daily-sync seed script integrity ==="
 
-# Verify real 50-seed-defaults script has no_agent: True for portfolio-daily-sync
-seed_has_no_agent=$(python3 -c "
-import re
-with open('$SEED_SCRIPT') as f:
-    content = f.read()
-match = re.search(r\"<<'PYEOF'.*?\n(.*?)\nPYEOF\", content, re.DOTALL)
-if not match:
-    print('PYEOF_NOT_FOUND')
-else:
-    pyblock = match.group(1)
-    has_no_agent = '\"no_agent\":' in pyblock or \"'no_agent':\" in pyblock
-    print('found' if has_no_agent else 'missing')
-")
-[ "$seed_has_no_agent" = "found" ] && ok "seed: has no_agent field" || nope "seed: has no_agent field" "got: $seed_has_no_agent"
-
-# Verify real 50-seed-defaults script has script: portfolio-sync.sh
-seed_has_script=$(python3 -c "
-import re
-with open('$SEED_SCRIPT') as f:
-    content = f.read()
-match = re.search(r\"<<'PYEOF'.*?\n(.*?)\nPYEOF\", content, re.DOTALL)
-if not match:
-    print('PYEOF_NOT_FOUND')
-else:
-    pyblock = match.group(1)
-    has_script = 'portfolio-sync.sh' in pyblock
-    print('found' if has_script else 'missing')
-")
-[ "$seed_has_script" = "found" ] && ok "seed: has script portfolio-sync.sh" || nope "seed: has script portfolio-sync.sh" "got: $seed_has_script"
-
-# Verify real 50-seed-defaults script does NOT have a prompt for portfolio-daily-sync
-seed_has_prompt=$(python3 -c "
-import re
-with open('$SEED_SCRIPT') as f:
-    content = f.read()
-match = re.search(r\"<<'PYEOF'.*?\n(.*?)\nPYEOF\", content, re.DOTALL)
-if not match:
-    print('PYEOF_NOT_FOUND')
-else:
-    pyblock = match.group(1)
-    has_prompt = 'new_prompt' in pyblock
-    print('has_prompt' if has_prompt else 'no_prompt')
-")
-[ "$seed_has_prompt" = "no_prompt" ] && ok "seed: no prompt (zero-token)" || nope "seed: no prompt (zero-token)" "got: $seed_has_prompt"
-
-# Verify real 50-seed-defaults script has deliver: local
-seed_deliver=$(python3 -c "
-import re
-with open('$SEED_SCRIPT') as f:
-    content = f.read()
-match = re.search(r\"<<'PYEOF'.*?\n(.*?)\nPYEOF\", content, re.DOTALL)
-if not match:
-    print('PYEOF_NOT_FOUND')
-else:
-    pyblock = match.group(1)
-    has_local_deliver = '\"deliver\": \"local\"' in pyblock or \"'deliver': 'local'\" in pyblock or '\"deliver\":\"local\"' in pyblock
-    print('local' if has_local_deliver else 'not_local')
-")
-[ "$seed_deliver" = "local" ] && ok "seed: deliver is local" || nope "seed: deliver is local" "got: $seed_deliver"
+# Verify the portfolio block specifically rather than the first PYEOF block
+# (the first block is now github-app-auth-refresh).
+portfolio_block=$(python3 - "$SEED_SCRIPT" <<'PY'
+import sys
+content = open(sys.argv[1], encoding="utf-8").read()
+marker = "# Seed portfolio-sync cron job"
+pos = content.find(marker)
+start_tag = "python3 <<'PYEOF' || true\n"
+start = content.find(start_tag, pos)
+end = content.find("\nPYEOF", start)
+print(content[start + len(start_tag):end] if pos >= 0 and start >= 0 and end >= 0 else "")
+PY
+)
+[ -n "$portfolio_block" ] && ok "seed: portfolio block found" || nope "seed: portfolio block" "not found"
+echo "$portfolio_block" | grep -q '"no_agent": True' && ok "seed: has no_agent field" || nope "seed: has no_agent field" "missing"
+echo "$portfolio_block" | grep -q 'portfolio-sync.sh' && ok "seed: has script portfolio-sync.sh" || nope "seed: has script portfolio-sync.sh" "missing"
+portfolio_prompt=$(printf '%s\n' "$portfolio_block" | grep -E '^[[:space:]]+"prompt"[[:space:]]*:' || true)
+if [ -n "$portfolio_prompt" ]; then
+    nope "seed: no prompt (zero-token)" "prompt present"
+else
+    ok "seed: no prompt (zero-token)"
+fi
+echo "$portfolio_block" | grep -q '"deliver": "local"' && ok "seed: deliver is local" || nope "seed: deliver is local" "missing"
 
 echo ""
 echo "=== retired profile migration ==="
@@ -388,6 +482,16 @@ reviewer_isolation = 'if not isinstance(memory, dict):' in content and 'memory[\
 print('present' if profiles and fields and reviewer_isolation else 'missing')
 ")
 [ "$managed_routing_migration" = "present" ] && ok "managed profile routing and reviewer isolation migrate on startup" || nope "managed profile migration" "got: $managed_routing_migration"
+
+if ! python3 -c 'import yaml' >/dev/null 2>&1; then
+    echo "  SKIP YAML-backed seed merge tests (PyYAML unavailable)"
+    echo ""
+    echo "========================================="
+    echo -e " Results: ${GREEN}$pass passed${NC}, ${RED}$fail failed${NC}"
+    echo "========================================="
+    [ "$fail" -eq 0 ]
+    exit $?
+fi
 
 migration_block=$(python3 - "$SEED_SCRIPT" <<'PY'
 import re
@@ -443,8 +547,11 @@ agent_preserved = config["agent"]["disabled_toolsets"] == ["user-owned"]
 print("pass" if isolated and preserved and routed and escalating and effort and agent_preserved else "fail")
 PY
 )
-[ "$migration_result" = "pass" ] && ok "existing reviewer profile migrates to isolated round routing" || nope "reviewer isolation fixture" "got: $migration_result"
-
+if [ "$migration_result" = "pass" ]; then
+    ok "existing reviewer profile migrates to isolated round routing"
+else
+    nope "reviewer isolation fixture" "got: $migration_result"
+fi
 cat > "$migration_target/config.yaml" <<'YAML'
 model:
   provider: stale
@@ -478,7 +585,11 @@ effort = config["agent"]["reasoning_effort"] == "high"
 print("pass" if isolated and preserved and routed and escalating and effort else "fail")
 PY
 )
-[ "$null_memory_status" -eq 0 ] && [ "$null_memory_result" = "pass" ] && ok "null reviewer memory migrates safely" || nope "null reviewer memory migration" "status=$null_memory_status result=$null_memory_result output=$null_memory_output"
+if [ "$null_memory_status" -eq 0 ] && [ "$null_memory_result" = "pass" ]; then
+    ok "null reviewer memory migrates safely"
+else
+    nope "null reviewer memory migration" "status=$null_memory_status result=$null_memory_result output=$null_memory_output"
+fi
 
 echo ""
 echo "=== hermes config seeding ==="
@@ -543,21 +654,30 @@ command = entries[0].get("command", "") if entries and isinstance(entries[0], di
 print(command)
 PY
 )
-[ "$seed_ran" = "ok" ] && [ "$seeded_hook" = "/opt/data/agent-hooks/remind-worktree.sh" ] \
-    && ok "config: runtime-installed hooks.pre_llm_call survives the seed" \
-    || nope "seed preserves hooks.pre_llm_call" "status=$seed_ran got '$seeded_hook'"
+if [ "$seed_ran" = "ok" ] && [ "$seeded_hook" = "/opt/data/agent-hooks/remind-worktree.sh" ]; then
+    ok "config: runtime-installed hooks.pre_llm_call survives the seed"
+else
+    nope "seed preserves hooks.pre_llm_call" "status=$seed_ran got '$seeded_hook'"
+fi
 
 seeded_auto_accept=$(python3 - "$seed_config" <<'PY'
 import sys
-import yaml
+
+try:
+    import yaml
+except ModuleNotFoundError:
+    print("SKIP_PYYAML")
+    raise SystemExit(0)
 
 config = yaml.safe_load(open(sys.argv[1], encoding="utf-8"))
 print(config.get("hooks_auto_accept"))
 PY
 )
-[ "$seed_ran" = "ok" ] && [ "$seeded_auto_accept" = "True" ] \
-    && ok "config: other unknown top-level keys survive the seed" \
-    || nope "seed preserves unknown top-level keys" "status=$seed_ran got '$seeded_auto_accept'"
+if [ "$seed_ran" = "ok" ] && [ "$seeded_auto_accept" = "True" ]; then
+    ok "config: other unknown top-level keys survive the seed"
+else
+    nope "seed preserves unknown top-level keys" "status=$seed_ran got '$seeded_auto_accept'"
+fi
 
 # A failing merge must never fall back to the raw copy that caused #461: an
 # existing live config stays untouched, and only a missing file is bootstrapped.
@@ -615,27 +735,41 @@ fi
 
 seeded_threshold_tokens=$(python3 - "$seed_config" <<'PY'
 import sys
-import yaml
+
+try:
+    import yaml
+except ModuleNotFoundError:
+    print("SKIP_PYYAML")
+    raise SystemExit(0)
 
 config = yaml.safe_load(open(sys.argv[1], encoding="utf-8"))
 print((config.get("compression") or {}).get("threshold_tokens"))
 PY
 )
-[ "$seeded_threshold_tokens" = "300000" ] \
-    && ok "config: compression.threshold_tokens is 300000 (seeded copy inherits 300k)" \
-    || nope "compression.threshold_tokens" "expected 300000, got $seeded_threshold_tokens"
+if [ "$seeded_threshold_tokens" = "300000" ]; then
+    ok "config: compression.threshold_tokens is 300000 (seeded copy inherits 300k)"
+else
+    nope "compression.threshold_tokens" "expected 300000, got $seeded_threshold_tokens"
+fi
 
 seeded_threshold=$(python3 - "$seed_config" <<'PY'
 import sys
-import yaml
+
+try:
+    import yaml
+except ModuleNotFoundError:
+    print("SKIP_PYYAML")
+    raise SystemExit(0)
 
 config = yaml.safe_load(open(sys.argv[1], encoding="utf-8"))
 print((config.get("compression") or {}).get("threshold"))
 PY
 )
-[ "$seeded_threshold" = "0.5" ] \
-    && ok "config: compression.threshold is 0.50" \
-    || nope "compression.threshold" "expected 0.5, got $seeded_threshold"
+if [ "$seeded_threshold" = "0.5" ]; then
+    ok "config: compression.threshold is 0.50"
+else
+    nope "compression.threshold" "expected 0.5, got $seeded_threshold"
+fi
 
 # The merge must write the baked bytes unchanged, not re-serialise the parsed
 # config: comments in the baked file are not round-tripped by PyYAML.
@@ -648,7 +782,12 @@ grep -q 'Keep this block AFTER `webhook`' "$seed_config" \
 # un-filed episodic record survives. Assert the seeded copy, not the repo file.
 seeded_memory_limits=$(python3 - "$seed_config" <<'PY'
 import sys
-import yaml
+
+try:
+    import yaml
+except ModuleNotFoundError:
+    print("SKIP_PYYAML")
+    raise SystemExit(0)
 
 config = yaml.safe_load(open(sys.argv[1], encoding="utf-8"))
 sessions = config["sessions"]
@@ -661,9 +800,11 @@ print(
 )
 PY
 )
-[ "$seeded_memory_limits" = "2800 60 True True 14" ] \
-    && ok "config: memory 2800 + retention 60 + prune/archive enabled (14d)" \
-    || nope "memory/sessions config" "expected '2800 60 True True 14', got '$seeded_memory_limits'"
+if [ "$seeded_memory_limits" = "2800 60 True True 14" ]; then
+    ok "config: memory 2800 + retention 60 + prune/archive enabled (14d)"
+else
+    nope "memory/sessions config" "expected '2800 60 True True 14', got '$seeded_memory_limits'"
+fi
 
 echo ""
 echo "=== compaction trigger derivation ==="
@@ -709,9 +850,11 @@ for window, expected in ((272_000, 204_000), (400_000, 300_000), (1_048_576, 300
 print("pass" if not failures else "; ".join(failures))
 PY
 )
-[ "$derived_trigger" = "pass" ] \
-    && ok "config: derived compaction trigger is min(floor_ratio x window, 300000)" \
-    || nope "compaction trigger derivation" "$derived_trigger"
+if [ "$derived_trigger" = "pass" ]; then
+    ok "config: derived compaction trigger is min(floor_ratio x window, 300000)"
+else
+    nope "compaction trigger derivation" "$derived_trigger"
+fi
 
 echo ""
 echo "=== opencode config seeding is retired ==="
