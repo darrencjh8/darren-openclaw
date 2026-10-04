@@ -210,24 +210,26 @@ print(len(data.get('jobs', [])))
 [ "$mig_count" -eq 1 ] && ok "migration keeps exactly 1 job" || nope "migration job count" "got $mig_count jobs"
 
 echo ""
-echo "--- boot precedence: App-first, PAT fallback only when incomplete ---"
+echo "--- boot precedence: App-first, scoped PAT fallback only when incomplete ---"
 # The real seed must prefer the App helper and never invoke PAT login when the
-# App triple is present.
+# App triple is present. The fallback PAT arrives as the root-only secret file,
+# never as an ambient FRIDAY_PAT environment variable.
 boot_block=$(python3 - "$SEED_SCRIPT" <<'PY'
 import sys
 content = open(sys.argv[1], encoding="utf-8").read()
-marker = "Configure gh CLI with the GitHub App"
+marker = "Configure gh CLI authentication"
 pos = content.find(marker)
-print(content[pos:pos+2000] if pos >= 0 else "")
+print(content[pos:pos+2500] if pos >= 0 else "")
 PY
 )
 echo "$boot_block" | grep -q "GH_APP_ID" || nope "boot: App-first branch" "App condition missing from $SEED_SCRIPT"
 echo "$boot_block" | grep -q "github-auth.sh" || nope "boot: App helper invoked" "github-auth.sh missing from boot block"
-echo "$boot_block" | grep -q "elif" || nope "boot: PAT is fallback-only" "no elif fallback in boot block"
-echo "$boot_block" | grep -q "FRIDAY_PAT" || nope "boot: PAT fallback retained" "FRIDAY_PAT missing from boot block"
-if echo "$boot_block" | grep -q "GH_APP_ID" && echo "$boot_block" | grep -q "github-auth.sh" \
-    && echo "$boot_block" | grep -q "elif" && echo "$boot_block" | grep -q "FRIDAY_PAT"; then
-    ok "T-precedence: boot prefers App, PAT fallback only when incomplete"
+echo "$boot_block" | grep -q "/run/secrets/friday_pat" || nope "boot: PAT fallback retained" "secret file missing from boot block"
+echo "$boot_block" | grep -q 'GH_PAT="$PAT"' || nope "boot: PAT passed to helper" "GH_PAT not forwarded from the secret file"
+if echo "$boot_block" | grep -q "FRIDAY_PAT"; then
+    nope "boot: PAT is not ambient" "FRIDAY_PAT environment fallback is still present in the boot block"
+else
+    ok "T-precedence: boot prefers App, scoped PAT fallback only when incomplete"
 fi
 
 echo ""

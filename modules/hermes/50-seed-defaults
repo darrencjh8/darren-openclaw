@@ -193,20 +193,29 @@ PY
 mkdir -p /opt/data/memories-backup
 chown -R hermes:hermes /opt/data/memories-backup 2>/dev/null || true
 
-# Configure gh CLI with the GitHub App when complete, else FRIDAY_PAT fallback.
-# App-first: a configured App is authoritative and must never be overwritten by
-# the PAT. PAT runs only when App configuration is incomplete; neither usable
-# leaves existing credentials untouched.
-if [ -n "${GH_APP_ID:-}" ] && [ -n "${GH_APP_INSTALLATION_ID:-}" ] && [ -n "${GH_APP_PRIVATE_KEY:-}" ]; then
-    su -m -s /bin/sh hermes -c '/opt/hermes-defaults/scripts/github-auth.sh' 2>/dev/null \
-        || echo "WARNING: github-app auth failed at boot (PAT fallback not attempted)" >&2
-elif [ -n "${FRIDAY_PAT:-}" ]; then
-    printf '%s' "$FRIDAY_PAT" > /tmp/.gh-token-init
-    su -s /bin/sh hermes -c "gh auth login --with-token < /tmp/.gh-token-init" 2>/dev/null || true
-    rm -f /tmp/.gh-token-init
-else
-    echo "WARNING: neither GitHub App config nor FRIDAY_PAT present; leaving gh credentials untouched" >&2
+# Configure gh CLI authentication. The helper installs GitHub App auth when the
+# App configuration is complete, and otherwise installs the scoped fallback PAT.
+# The PAT arrives as a root-only secret file rather than an ambient environment
+# variable, so no unrelated child process inherits it; the helper reads that file
+# only when the App configuration is incomplete.
+# The boot hook is the single reader: it must be a readable, non-empty regular
+# file (a directory left by an earlier missing-source mount is not a PAT).
+PAT=""
+if [ -f /run/secrets/friday_pat ] && [ -s /run/secrets/friday_pat ] && [ -r /run/secrets/friday_pat ]; then
+    PAT=$(cat /run/secrets/friday_pat)
 fi
+
+# The flat token file is retired: gh owns hosts.yml and the helper feeds the
+# credential through stdin only, so clear any stale file before either branch.
+rm -f /opt/data/.gh_token 2>/dev/null || true
+
+if [ -n "${GH_APP_ID:-}${GH_APP_INSTALLATION_ID:-}${GH_APP_PRIVATE_KEY:-}" ] || [ -n "$PAT" ]; then
+    GH_PAT="$PAT" su -m -s /bin/sh hermes -c 'GH_PAT="$GH_PAT" /opt/hermes-defaults/scripts/github-auth.sh' 2>/dev/null \
+        || echo "WARNING: GitHub authentication failed at boot" >&2
+else
+    echo "WARNING: neither GitHub App config nor a fallback PAT secret is present; leaving gh credentials untouched" >&2
+fi
+unset PAT
 
 # Seed github-app-auth-refresh cron job (no_agent script-only refresh).
 # Follows the portfolio-daily-sync update-in-place pattern: a redeploy migrates
@@ -274,14 +283,19 @@ PYEOF
 # The container's own codex-router checkout is the driver dev-loop sessions
 # execute (`codex/skills/dev-loop/scripts/loop.py`), so it must not stay pinned
 # to an old revision while the reconciled skill roots move. No target: track
-# origin/main. Scope the PAT to this legacy checkout refresh only; ambient GH_TOKEN
-# would override the App account for every other gh invocation.
+# origin/main. Scope the fallback PAT to this legacy checkout refresh only;
+# ambient GH_TOKEN would override the App account for every other gh invocation.
 refresh_log=/dev/null
 if true 2>>/opt/data/logs/codex-router-skills-sync.log; then
     refresh_log=/opt/data/logs/codex-router-skills-sync.log
 fi
-GH_TOKEN="${FRIDAY_PAT:-}" su -m -s /bin/sh hermes -c 'GH_TOKEN="$GH_TOKEN" /opt/hermes-defaults/scripts/refresh-codex-router-checkout.sh' >>"$refresh_log" 2>&1 \
-    || echo "WARNING: could not advance the codex-router checkout in /workspace" >&2
+if [ -f /run/secrets/friday_pat ] && [ -s /run/secrets/friday_pat ] && [ -r /run/secrets/friday_pat ]; then
+    GH_TOKEN="$(cat /run/secrets/friday_pat)" su -m -s /bin/sh hermes -c 'GH_TOKEN="$GH_TOKEN" /opt/hermes-defaults/scripts/refresh-codex-router-checkout.sh' >>"$refresh_log" 2>&1 \
+        || echo "WARNING: could not advance the codex-router checkout in /workspace" >&2
+else
+    su -m -s /bin/sh hermes -c '/opt/hermes-defaults/scripts/refresh-codex-router-checkout.sh' >>"$refresh_log" 2>&1 \
+        || echo "WARNING: could not advance the codex-router checkout in /workspace" >&2
+fi
 
 python3 -c '
 import os, re, glob

@@ -69,12 +69,21 @@ class SeedAppCronTests(unittest.TestCase):
 
     def test_boot_app_precedes_pat(self) -> None:
         text = SEED.read_text()
-        block = text[text.index("Configure gh CLI with the GitHub App"):]
+        block = text[text.index("Configure gh CLI authentication"):]
         block = block[:block.index("# The container's own codex-router checkout")]
         self.assertIn("GH_APP_ID", block)
         self.assertIn("github-auth.sh", block)
-        self.assertIn('elif [ -n "${FRIDAY_PAT:-}" ]', block)
-        self.assertIn("PAT fallback not attempted", block)
+        # The fallback PAT arrives as the root-only secret file, not as an
+        # ambient FRIDAY_PAT environment variable.
+        self.assertIn("/run/secrets/friday_pat", block)
+        self.assertIn('GH_PAT="$PAT"', block)
+        self.assertNotIn("FRIDAY_PAT", block)
+        # The boot hook is the only reader of the secret file. It must require a
+        # regular, readable, non-empty file so a directory left behind by a
+        # missing-source bind mount cannot be used as a credential.
+        self.assertIn("[ -f /run/secrets/friday_pat ] && [ -s /run/secrets/friday_pat ] && [ -r /run/secrets/friday_pat ]", block)
+        # The retired flat token file is cleared on every boot.
+        self.assertIn("rm -f /opt/data/.gh_token", block)
         helper = (ROOT / "scripts/github-auth.sh").read_text()
         self.assertIn('export HOME="${GH_HOME:-/opt/data/home}"', helper)
 
@@ -82,8 +91,10 @@ class SeedAppCronTests(unittest.TestCase):
         text = SEED.read_text()
         refresh = text[text.index("# The container's own codex-router checkout"):]
         refresh = refresh[:refresh.index("python3 -c '")]
-        self.assertIn('GH_TOKEN="${FRIDAY_PAT:-}"', refresh)
-        self.assertNotIn("su -m -s /bin/sh hermes -c '/opt/hermes-defaults/scripts/refresh-codex-router-checkout.sh'", refresh)
+        # The scoped credential is read from the secret file, never from an
+        # ambient FRIDAY_PAT, and it is passed only to the refresh command.
+        self.assertIn('GH_TOKEN="$(cat /run/secrets/friday_pat)"', refresh)
+        self.assertNotIn("FRIDAY_PAT", refresh)
         self.assertIn("su -m -s /bin/sh hermes -c 'GH_TOKEN=\"$GH_TOKEN\" /opt/hermes-defaults/scripts/refresh-codex-router-checkout.sh'", refresh)
         self.assertIn("/opt/hermes-defaults/scripts/refresh-codex-router-checkout.sh", refresh)
 
@@ -100,8 +111,20 @@ class SeedAppCronTests(unittest.TestCase):
         self.assertIn('export HOME="${GH_HOME:-/opt/data/home}"', text)
         self.assertIn('export GH_CONFIG_DIR=', text)
         self.assertIn("gh auth switch", text)
-        self.assertIn("GH_APP_LOGIN", text)
         self.assertIn("APP_SLUG", text)
+        # One shared completeness predicate decides App vs fallback, and the
+        # retired flat token file is cleared on every exit path.
+        self.assertIn("app_config_complete", text)
+        self.assertIn("cleanup_legacy_token", text)
+
+    def test_boot_refresh_keeps_the_refresh_contract(self) -> None:
+        # The scoped PAT and the App credential share one helper, so the boot
+        # refresh must still pass an explicit GH_TOKEN to the same script path.
+        text = SEED.read_text()
+        refresh = text[text.index("# The container's own codex-router checkout"):]
+        self.assertIn("GH_TOKEN=\"$(cat /run/secrets/friday_pat)\"", refresh)
+        self.assertIn("refresh-codex-router-checkout.sh", refresh)
+        self.assertIn('|| echo "WARNING: could not advance the codex-router checkout', refresh)
 
 
 if __name__ == "__main__":

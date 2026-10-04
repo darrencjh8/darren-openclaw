@@ -273,23 +273,26 @@ class DeployWorkflowRouterTests(unittest.TestCase):
 
         boot = (Path(__file__).parents[1] / "hermes/50-seed-defaults").read_text(encoding="utf-8")
         # The baked path, not a filename match: /opt/data/scripts/ holds a copy that
-        # a fresh volume may not have reseeded yet. Scope the PAT to this legacy
-        # checkout refresh; it must not remain ambient for other gh invocations.
+        # a fresh volume may not have reseeded yet. Scope the fallback PAT to this
+        # legacy checkout refresh; it must not remain ambient for other gh
+        # invocations, so it is read from the root-only secret file, not FRIDAY_PAT.
+        self.assertIn('GH_TOKEN="$(cat /run/secrets/friday_pat)"', boot)
+        self.assertNotIn("FRIDAY_PAT", boot)
         self.assertIn(
             "su -m -s /bin/sh hermes -c 'GH_TOKEN=\"$GH_TOKEN\" /opt/hermes-defaults/scripts/refresh-codex-router-checkout.sh'", boot
         )
-        self.assertIn('GH_TOKEN="${FRIDAY_PAT:-}"', boot)
         # A boot hook may not fail the boot: the refresh call carries a fallback
         # that reports the failure and lets the boot continue.
         self.assertIn('|| echo "WARNING: could not advance the codex-router checkout', boot)
         # Placement matters twice over. test-50-seed-defaults.sh extracts and
         # executes the skills probe block and asserts its log exactly, so the call
-        # must sit after that block's fi; and the fetch needs the credential that
-        # `gh auth login --with-token` writes, so it must also sit after that.
+        # must sit after that block's fi; and the fetch needs a credential, which
+        # the auth block installs through the shared helper, so it must also sit
+        # after that block.
         probe_end = boot.index("sync-codex-router-skills.sh 2>/dev/null || true\nfi")
         call_index = boot.index("refresh-codex-router-checkout.sh", probe_end)
         self.assertGreater(call_index, probe_end)
-        auth_index = boot.index("gh auth login --with-token")
+        auth_index = boot.index("Configure gh CLI authentication")
         self.assertGreater(call_index, auth_index)
 
     def test_the_checkout_refresh_classifier_leaves_a_skipped_checkout_alone(self):
@@ -323,6 +326,51 @@ class DeployWorkflowRouterTests(unittest.TestCase):
         # with the same bounded budget the HTTP health checks used.
         self.assertRegex(gate, r"for _ in \$\(seq 1 10\)")
         self.assertIn("sleep 6", gate)
+
+
+    def test_pat_secret_file_lifecycle(self):
+        """T-secret-file-delivery: the fallback PAT is delivered as a root-only
+        file, never as an ambient service variable.
+
+        The security property is the delivery path, so this asserts the exact host
+        path, root ownership, mode 0400, atomic creation, the always-present
+        regular-file invariant, and that the service environment cannot carry the
+        PAT. It is gated: without the change the file is never created and the
+        service still exports FRIDAY_PAT.
+        """
+        deploy = DEPLOY_SCRIPT.read_text(encoding="utf-8")
+
+        secret_path = "/home/runner/data/hermes/friday_pat.secret"
+        self.assertIn(f'SECRET_FILE="{secret_path}"', deploy)
+        # Root ownership and 0400 on the file that is mounted into the container.
+        self.assertIn('sudo chown root:root "$secret_tmp"', deploy)
+        self.assertIn('sudo chmod 0400 "$secret_tmp"', deploy)
+        # Atomic creation: a same-directory temp file renamed into place.
+        self.assertIn('secret_tmp="$(mktemp "$SECRET_DIR/.friday_pat.XXXXXX")"', deploy)
+        self.assertIn('sudo mv -f "$secret_tmp" "$SECRET_FILE"', deploy)
+        self.assertIn("umask 077", deploy)
+        # The path must stay a regular file: a directory left by an earlier
+        # missing-source mount is repaired before writing.
+        self.assertIn('if [ -d "$SECRET_FILE" ]', deploy)
+        # The file is materialized before any compose config/up call, and the PAT
+        # is never passed through the service environment.
+        secret_index = deploy.index("scoped fallback PAT secret")
+        compose_index = deploy.index("$COMPOSE config -q")
+        self.assertLess(secret_index, compose_index)
+
+        compose = COMPOSE_FILE.read_text(encoding="utf-8")
+        # The host file is bind-mounted read-only as the container's secret.
+        self.assertIn(f"{secret_path}:/run/secrets/friday_pat:ro", compose)
+        # No service environment may export the PAT.
+        self.assertNotIn("FRIDAY_PAT=", compose)
+
+    def test_deploy_workflow_delivers_the_pat_secret_without_ambient_export(self):
+        workflow = WORKFLOW.read_text(encoding="utf-8")
+        # The workflow still supplies the secret to the deploy process, which is
+        # what writes the root-only file the container mounts.
+        self.assertIn("FRIDAY_PAT: ${{ secrets.FRIDAY_PAT }}", workflow)
+        compose = COMPOSE_FILE.read_text(encoding="utf-8")
+        self.assertNotIn("FRIDAY_PAT=${FRIDAY_PAT}", compose)
 
 
 if __name__ == "__main__":
