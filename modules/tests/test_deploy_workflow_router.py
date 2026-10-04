@@ -14,6 +14,7 @@ TEST_WORKFLOW = Path(__file__).parents[2] / ".github/workflows/test.yml"
 ROUTER_CI_WORKFLOW = Path(__file__).parents[2] / ".github/workflows/codex-router-ci.yml"
 DEPLOY_SCRIPT = Path(__file__).parents[1] / "deploy.sh"
 HERMES_CONFIG = Path(__file__).parents[1] / "hermes/config.yaml"
+HERMES_DOCKERFILE = Path(__file__).parents[1] / "hermes/Dockerfile"
 BEHAVIOUR_SUITE = Path(__file__).parents[1] / "hermes/tests/test-refresh-codex-router-checkout.sh"
 
 
@@ -374,6 +375,39 @@ class DeployWorkflowRouterTests(unittest.TestCase):
         self.assertIn("FRIDAY_PAT: ${{ secrets.FRIDAY_PAT }}", workflow)
         compose = COMPOSE_FILE.read_text(encoding="utf-8")
         self.assertNotIn("FRIDAY_PAT=${FRIDAY_PAT}", compose)
+
+
+    def test_hermes_image_pins_a_released_version_and_bakes_no_cli_tools(self):
+        dockerfile = HERMES_DOCKERFILE.read_text(encoding="utf-8")
+
+        first_line = dockerfile.splitlines()[0]
+        self.assertRegex(first_line, r"^FROM nousresearch/hermes-agent:v\d{4}\.\d+\.\d+$")
+        # gh and ntn are installed into the persisted /opt/data volume by
+        # deploy.yml, so rebuilding the image must not reinstall them.
+        self.assertNotIn("npm install --global", dockerfile)
+        self.assertNotIn("\n    gh \\", dockerfile)
+
+    def test_deploy_installs_hermes_cli_tools_into_the_persisted_volume(self):
+        workflow = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
+        steps = workflow["jobs"]["deploy"]["steps"]
+        named = {step.get("name"): step for step in steps}
+        step = named["Ensure Hermes container tooling"]
+        run = step["run"]
+
+        # /opt/data is the persisted volume and is already on the image PATH.
+        self.assertIn("/opt/data/.local", run)
+        # Idempotent: install only when the tool is missing.
+        self.assertIn("command -v gh", run)
+        self.assertIn("command -v ntn", run)
+        self.assertIn("npm install --global --prefix /opt/data/.local ntn", run)
+        # The release lookup is authenticated, so a per-IP rate limit cannot
+        # fail the deploy.
+        self.assertIn("Authorization: Bearer ${GH_TOKEN}", run)
+        self.assertIn("GH_TOKEN", step["env"])
+        # Hermes-only, and after the container is up.
+        self.assertIn("hermes", step["if"])
+        names = [s.get("name") for s in steps]
+        self.assertLess(names.index("Deploy services"), names.index("Ensure Hermes container tooling"))
 
 
 if __name__ == "__main__":

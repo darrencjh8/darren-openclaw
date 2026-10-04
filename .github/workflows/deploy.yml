@@ -200,6 +200,37 @@ jobs:
                       bash ./modules/deploy.sh $ARGS --non-interactive --skip-build
                   fi
 
+            - name: Ensure Hermes container tooling
+              if: >-
+                  success() &&
+                  (steps.changes.outputs.components == 'all' || contains(format(' {0} ', steps.changes.outputs.components), ' hermes '))
+              env:
+                  # Authenticates the release lookup below; unauthenticated
+                  # api.github.com calls are limited to 60 per hour per IP and a
+                  # rate limit here would fail the deploy.
+                  GH_TOKEN: ${{ secrets.FRIDAY_PAT }}
+              run: |
+                  # gh and ntn are installed into the container's persisted
+                  # /opt/data volume, which is already on the image PATH, rather
+                  # than baked into an image layer. Rebuilding the image or
+                  # recreating the container therefore reuses them instead of
+                  # reinstalling. Each install is skipped when the tool exists.
+                  if ! docker exec hermes sh -c 'command -v gh' >/dev/null 2>&1; then
+                      gh_version=$(curl -fsSL -H "Authorization: Bearer ${GH_TOKEN}" \
+                          https://api.github.com/repos/cli/cli/releases/latest \
+                          | sed -n 's/.*"tag_name": *"v\([^"]*\)".*/\1/p')
+                      gh_arch=$(docker exec hermes dpkg --print-architecture)
+                      docker exec hermes sh -c "
+                          mkdir -p /opt/data/.local/bin &&
+                          curl -fsSL https://github.com/cli/cli/releases/download/v${gh_version}/gh_${gh_version}_linux_${gh_arch}.tar.gz | tar -xz -C /tmp &&
+                          install -m 0755 /tmp/gh_${gh_version}_linux_${gh_arch}/bin/gh /opt/data/.local/bin/gh &&
+                          rm -rf /tmp/gh_${gh_version}_linux_${gh_arch}"
+                  fi
+                  if ! docker exec hermes sh -c 'command -v ntn' >/dev/null 2>&1; then
+                      docker exec hermes npm install --global --prefix /opt/data/.local ntn
+                  fi
+                  docker exec hermes sh -c 'gh --version && ntn --version'
+
             - name: Record deployed Codex Router revision
               if: >-
                   success() &&
