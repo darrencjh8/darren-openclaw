@@ -473,6 +473,21 @@ print('present' if 'hermes profile create \$name --no-alias' in content else 'mi
 ")
 [ "$code_reviewer_seed" = "present" ] && ok "remaining profiles are registered on startup" || nope "profile registration" "got: $code_reviewer_seed"
 
+# `hermes profile create` raises "A profile named ... already exists" for any directory that
+# already carries an identity marker, and the seed copies write config.yaml/SOUL.md/profile.yaml
+# before this call, so registration must be guarded by that same predicate.
+profile_registration_guard=$(python3 -c "
+import re
+with open('$SEED_SCRIPT') as f:
+    content = f.read()
+guard = re.search(
+    r'for marker in config\.yaml \.env SOUL\.md profile\.yaml auth\.json state\.db; do'
+    r'.*?if \[ \"[$]identity\" -eq 0 \]; then\s*\n\s*su -s /bin/sh hermes -c \"hermes profile create [$]name --no-alias\"',
+    content, re.DOTALL)
+print('present' if guard else 'missing')
+")
+[ "$profile_registration_guard" = "present" ] && ok "profile registration is skipped when the profile already exists" || nope "profile registration guard" "got: $profile_registration_guard"
+
 managed_routing_migration=$(python3 -c "
 with open('$SEED_SCRIPT') as f:
     content = f.read()
