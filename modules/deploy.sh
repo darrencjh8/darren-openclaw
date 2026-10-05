@@ -924,14 +924,43 @@ else
   TARGETS="${COMPONENTS[*]}"
 fi
 
+# codex-router is one service to callers and three containers underneath: the
+# caddy front `codex-router` plus the two router colours `codex-router-a` and
+# `codex-router-b`. The generic lists below are split by token so that a build
+# compiles the colours (never the front, which is a stock caddy image the build
+# has nothing to add to) and `up` leaves all three to the rolling update.
+# Both lists are derived per token rather than by matching the whole line:
+# TARGETS is one space-separated line, so a line-anchored match finds nothing.
+# A TARGETS that names the front and a colour already (every `all` deploy does)
+# would otherwise repeat that colour, because the front expands to both; awk
+# drops the repeats and keeps the order.
+# shellcheck disable=SC2086  # the loop splits TARGETS on purpose
+BUILD_TARGETS=$(for TARGET in $TARGETS; do
+  case "$TARGET" in
+    codex-router) printf 'codex-router-a\ncodex-router-b\n' ;;
+    *) printf '%s\n' "$TARGET" ;;
+  esac
+done | awk '!seen[$0]++' | tr '\n' ' ')
+# shellcheck disable=SC2086  # the loop splits TARGETS on purpose
+UP_TARGETS=$(for TARGET in $TARGETS; do
+  case "$TARGET" in
+    codex-router|codex-router-a|codex-router-b) ;;
+    *) printf '%s\n' "$TARGET" ;;
+  esac
+done | awk '!seen[$0]++' | tr '\n' ' ')
+
 # Validate the compose config before stopping or rebuilding anything: a bad
 # config used to take the stack down first and only fail at `up`.
 $COMPOSE config -q >/dev/null
 
 # Build (skip if --skip-build)
 if ! $SKIP_BUILD; then
-  echo "  Building $TARGETS..."
-  $COMPOSE build $TARGETS
+  echo "  Building $BUILD_TARGETS..."
+  # A component list naming only the front has nothing to build; a bare
+  # `$COMPOSE build` would build every service in the file instead.
+  if [ -n "$BUILD_TARGETS" ]; then
+    $COMPOSE build $BUILD_TARGETS
+  fi
 fi
 
 # Deploy
@@ -947,10 +976,17 @@ fi
 # --remove-orphans retires the container of a service this revision deleted.
 # Without it, `up` leaves the old container running forever: compose only ever
 # adds and updates services, it never sweeps one that left the file.
-if [ "${FORCE_ALL:-false}" = "true" ]; then
-    $COMPOSE up -d --remove-orphans --force-recreate $TARGETS
-else
-    $COMPOSE up -d --remove-orphans $TARGETS
+# The codex-router front and colours are excluded from UP_TARGETS: the rolling
+# update below brings them up in the order that keeps 4100 served. When only
+# they are left, skip the generic `up` entirely — `up -d` with no service
+# argument reconciles the whole project, which is not what a router deploy is
+# asking for.
+if [ -n "$UP_TARGETS" ]; then
+    if [ "${FORCE_ALL:-false}" = "true" ]; then
+        $COMPOSE up -d --remove-orphans --force-recreate $UP_TARGETS
+    else
+        $COMPOSE up -d --remove-orphans $UP_TARGETS
+    fi
 fi
 
 # ---- health checks ----
@@ -1118,6 +1154,95 @@ if should_deploy "portfolio-tracker" || should_deploy "all"; then
 fi
 
 if should_deploy "codex-router" || should_deploy "all"; then
+  # ---- codex-router rolling update ----
+  # One colour serves at all times: start the idle colour, wait until it answers
+  # inside its own container, then move the front onto it and stop the old
+  # colour with the drain budget its stop_grace_period allows. Stopping the
+  # serving colour first would cut every stream in flight, which is the
+  # behaviour this roll exists to remove.
+  echo ""
+  echo "--- codex-router rolling update ---"
+
+  # docker prints "<name> <compose service label>"; matching the label rather
+  # than the name avoids counting lookalike containers from other projects.
+  colour_container() {
+    docker ps --filter status=running \
+      --format '{{.Names}} {{.Label "com.docker.compose.service"}}' \
+      | awk -v service="$1" '$2 == service {print $1; exit}'
+  }
+
+  colour_ready() {
+    local container
+    container="$(colour_container "$1")"
+    [ -n "$container" ] || return 1
+    docker exec "$container" curl -fsS http://127.0.0.1:4100/health/liveliness >/dev/null 2>&1
+  }
+
+  # The front prefers codex-router-a, so a running colour is only "serving" if it
+  # answers; anything else is the idle half of the pair, reused if this
+  # revision's image needs it.
+  serving=""
+  idle=""
+  for colour in codex-router-a codex-router-b; do
+    [ -n "$(colour_container "$colour")" ] || continue
+    if [ -z "$serving" ] && colour_ready "$colour"; then
+      serving="$colour"
+    elif [ -z "$idle" ]; then
+      idle="$colour"
+    fi
+  done
+  # The candidate is never the serving colour: recreating that one would leave
+  # the front with nothing to retry against. This is the state every second
+  # deploy starts in — the cutover deploy starts colour a and has nothing to
+  # stop, so a is both the only running colour and the serving one.
+  if [ -z "$idle" ] || [ "$idle" = "$serving" ]; then
+    if [ "$serving" = "codex-router-a" ]; then
+      idle="codex-router-b"
+    else
+      idle="codex-router-a"
+    fi
+  fi
+  echo "  serving: ${serving:-none}; rolling: $idle"
+
+  $COMPOSE up -d --remove-orphans "$idle"
+
+  ROUTER_DRAIN_SECONDS="${ROUTER_DRAIN_SECONDS:-600}"
+  idle_ready=false
+  idle_container="$(colour_container "$idle")"
+  for _ in $(seq 1 "$ROUTER_READY_ATTEMPTS"); do
+    if [ -n "$idle_container" ] && docker exec "$idle_container" curl -fsS http://127.0.0.1:4100/health/liveliness >/dev/null 2>&1; then
+      idle_ready=true
+      break
+    fi
+    sleep "$HEALTH_RETRY_SLEEP"
+  done
+
+  if $idle_ready; then
+    echo -e "  ${GREEN}✓ $idle ready${NC}"
+    # The front exists from this point on. `#675`'s cutover: until its first
+    # start the legacy container still owns 4100, so this revision's first
+    # deploy is the last one that interrupts a stream.
+    $COMPOSE up -d --remove-orphans codex-router
+    # An edit to the Caddyfile is a bind-mounted file change, which compose does
+    # not hash: without this reload the front keeps the configuration it booted
+    # with, which would leave the role out of the roll.
+    if $COMPOSE exec -T codex-router caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile; then
+      if [ -n "$serving" ]; then
+        echo "  stopping $serving (drain ${ROUTER_DRAIN_SECONDS}s)"
+        $COMPOSE stop -t "$ROUTER_DRAIN_SECONDS" "$serving"
+      fi
+    else
+      # The reload validates before it swaps, so a failure means the front is
+      # still serving the previous configuration: keep the old colour up rather
+      # than take down the only upstream it names.
+      echo -e "  ${RED}✗ caddy reload failed; keeping ${serving:-no colour}${NC}"
+      failed=$((failed + 1))
+    fi
+  else
+    echo -e "  ${RED}✗ $idle did not become ready in ${ROUTER_READY_SECONDS}s; keeping ${serving:-the running front}${NC}"
+    failed=$((failed + 1))
+  fi
+
   health_ok "codex-router" "http://localhost:4100/health/liveliness" "$ROUTER_READY_ATTEMPTS" || failed=$((failed + 1))
 fi
 

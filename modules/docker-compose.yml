@@ -4,6 +4,58 @@ x-logging: &default-logging
         max-size: "10m"
         max-file: "3"
 
+# The two codex-router colours are the same service twice: same build context,
+# same image tag, same environment, same state volume. Only one of them serves
+# at a time, through the caddy front below, and deploy.sh rolls them one at a
+# time. Keep them in lockstep through this anchor rather than by copying the
+# block, which would let the pair drift.
+x-codex-router-color: &codex-router-color
+    build:
+        context: ./codex-router
+        dockerfile: Dockerfile
+    image: modules-codex-router:local
+    environment:
+        - CODEX_ROUTER_AUTH_PASSWORD=${CODEX_ROUTER_AUTH_PASSWORD}
+        - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}
+        # External provider keys: discovery skips a provider whose key is
+        # absent, so an unset value simply leaves those models unpublished.
+        # COMMANDCODE_API_KEY is the exception: Hermes pins six auxiliary
+        # slots to a commandcode/* model, so an unpublished Command Code
+        # provider breaks them outright instead of degrading. deploy.sh
+        # validates it as required.
+        - COMMANDCODE_API_KEY=${COMMANDCODE_API_KEY:-}
+        - OPENCODE_GO_API_KEY=${OPENCODE_GO_API_KEY:-}
+        - OPENCODE_ZEN_API_KEY=${OPENCODE_ZEN_API_KEY:-}
+        - OPENCODE_API_KEY=${OPENCODE_API_KEY:-}
+        - CODEX_ROUTER_OPENCODE_ZEN_MODELS=${CODEX_ROUTER_OPENCODE_ZEN_MODELS:-space-bunny-free}
+        # Per-hop budget for the auto-thinking pool. The router's own default
+        # is 120, which is short for a reasoning model and sits below the
+        # opencode-free lane's 300s turn deadline, so a lower budget would
+        # always pre-empt the lane. Forwarded from the deploy workflow's
+        # environment; this default applies when it is not set there.
+        - CODEX_ROUTER_AUTO_THINKING_TIMEOUT_SECONDS=${CODEX_ROUTER_AUTO_THINKING_TIMEOUT_SECONDS:-300}
+    restart: unless-stopped
+    # A colour publishes no port of its own: the front owns 4100, so both
+    # colours can run at once without a bind conflict.
+    mem_limit: 1536m
+    volumes:
+        - codex_router_state:/app/state
+    healthcheck:
+        test:
+            [
+                "CMD-SHELL",
+                "curl -fsS http://127.0.0.1:4100/health/liveliness || exit 1",
+            ]
+        interval: 30s
+        timeout: 10s
+        retries: 3
+        start_period: 60s
+    # The drain budget for a stream in flight. deploy.sh stops the old colour
+    # with `stop -t "$ROUTER_DRAIN_SECONDS"`, whose default is the same 10m;
+    # without it docker's 10s default SIGKILLs a streaming response mid-flight.
+    stop_grace_period: 10m
+    logging: *default-logging
+
 services:
     expense-tracker:
         build:
@@ -110,47 +162,36 @@ services:
             start_period: 30s
         logging: *default-logging
 
+    # The caddy front. It is the only thing that publishes 4100 and the only
+    # service callers address; the colours behind it are an implementation
+    # detail of the roll. `lb_policy first` plus the fixed upstream order below
+    # means a healthy codex-router-a wins whenever it is available.
     codex-router:
-        build:
-            context: ./codex-router
-            dockerfile: Dockerfile
+        image: caddy:2-alpine
         ports:
             - "0.0.0.0:4100:4100"
-        environment:
-            - CODEX_ROUTER_AUTH_PASSWORD=${CODEX_ROUTER_AUTH_PASSWORD}
-            - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}
-            # External provider keys: discovery skips a provider whose key is
-            # absent, so an unset value simply leaves those models unpublished.
-            # COMMANDCODE_API_KEY is the exception: Hermes pins six auxiliary
-            # slots to a commandcode/* model, so an unpublished Command Code
-            # provider breaks them outright instead of degrading. deploy.sh
-            # validates it as required.
-            - COMMANDCODE_API_KEY=${COMMANDCODE_API_KEY:-}
-            - OPENCODE_GO_API_KEY=${OPENCODE_GO_API_KEY:-}
-            - OPENCODE_ZEN_API_KEY=${OPENCODE_ZEN_API_KEY:-}
-            - OPENCODE_API_KEY=${OPENCODE_API_KEY:-}
-            - CODEX_ROUTER_OPENCODE_ZEN_MODELS=${CODEX_ROUTER_OPENCODE_ZEN_MODELS:-space-bunny-free}
-            # Per-hop budget for the auto-thinking pool. The router's own default
-            # is 120, which is short for a reasoning model and sits below the
-            # opencode-free lane's 300s turn deadline, so a lower budget would
-            # always pre-empt the lane. Forwarded from the deploy workflow's
-            # environment; this default applies when it is not set there.
-            - CODEX_ROUTER_AUTO_THINKING_TIMEOUT_SECONDS=${CODEX_ROUTER_AUTO_THINKING_TIMEOUT_SECONDS:-300}
-        restart: unless-stopped
-        mem_limit: 1536m
         volumes:
-            - codex_router_state:/app/state
+            - ./codex-router-front/Caddyfile:/etc/caddy/Caddyfile:ro
+        restart: unless-stopped
+        # caddy:2-alpine ships no curl, so the healthcheck uses wget.
         healthcheck:
             test:
                 [
                     "CMD-SHELL",
-                    "curl -fsS http://127.0.0.1:4100/health/liveliness || exit 1",
+                    "wget -q -O /dev/null http://127.0.0.1:4100/health/liveliness || exit 1",
                 ]
             interval: 30s
             timeout: 10s
             retries: 3
-            start_period: 60s
+            start_period: 10s
+        mem_limit: 128m
         logging: *default-logging
+
+    codex-router-a:
+        <<: *codex-router-color
+
+    codex-router-b:
+        <<: *codex-router-color
 
     hermes:
         build:

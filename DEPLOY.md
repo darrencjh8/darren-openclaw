@@ -23,7 +23,8 @@ darren-openclaw/
 │   ├── expense-tracker/
 │   ├── actual-api/
 │   ├── image-gen/
-│   └── codex-router/              # Checked out from darrencjh8/codex-router by CI (not tracked here)
+│   ├── codex-router/              # Checked out from darrencjh8/codex-router by CI (not tracked here)
+│   └── codex-router-front/        # Caddy config for the front that publishes 4100
 ├── .github/workflows/deploy.yml   # CI/CD entry point
 └── specs/                         # Spec-Kit feature specs
 ```
@@ -42,6 +43,7 @@ There is no `gateway/` directory in the repository (`git ls-files gateway` retur
    - `modules/portfolio-tracker/` → `portfolio-tracker`
    - `modules/actual-api/` → `actual-api`
    - changes to `.github/workflows/deploy.yml`, `modules/docker-compose.yml`, or `modules/deploy.sh` → `codex-router`
+   - changes to `modules/codex-router-front/` → `codex-router`
    - root `Dockerfile` / `deploy.sh` / `modules/docker-compose.yml`, or nothing matched → `all`
    - The `gateway/` rule is a vestige; that directory no longer exists.
 4. **Create data dirs:** `mkdir -p /home/runner/data/{expense-tracker/data,portfolio-tracker/data,hermes/{data,workspace}}`.
@@ -50,6 +52,25 @@ There is no `gateway/` directory in the repository (`git ls-files gateway` retur
 7. **Record:** the deployed codex-router revision is written to `codex-router-sha.txt` and uploaded as a workflow artifact.
 
 `--skip-build` is essential in CI: without it, `deploy.sh` runs its own `git pull` and image build, bypassing the pipeline's change detection and health gate.
+
+### Rolling codex-router update
+
+codex-router is served by three containers: the caddy front `codex-router`, which owns
+`0.0.0.0:4100`, and the two identical router colours `codex-router-a` and `codex-router-b`, which
+publish no ports. `modules/build.sh` builds the colours and skips the front, which is a stock
+`caddy:2-alpine` image. `deploy.sh` never brings the colours up as a group; after the generic
+`compose up` it rolls them:
+
+1. Pick the running colour that is not serving, defaulting to `codex-router-a`.
+2. `compose up -d codex-router-a` (or `-b`) and wait for `/health/liveliness` on that colour.
+3. Recreate the front so it starts with the new colour healthy, then reload its Caddyfile.
+4. `compose stop -t "$ROUTER_DRAIN_SECONDS" <old colour>` (default 600s) so in-flight streams finish;
+   both colours carry `stop_grace_period: 10m` for the same reason.
+
+The front's Caddyfile uses `lb_policy first` with the upstreams written `codex-router-a` then
+`codex-router-b`, `lb_try_duration 30s` so a request that lands on a stopping colour is retried, and
+`flush_interval -1` so streaming responses are not buffered. If the new colour never becomes ready
+the deploy fails without moving the front, and the previously serving colour keeps serving.
 
 ### How an environment variable reaches the gateway
 

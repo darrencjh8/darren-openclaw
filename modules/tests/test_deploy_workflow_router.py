@@ -84,9 +84,13 @@ class DeployWorkflowRouterTests(unittest.TestCase):
         # the router had no Zen route; the router routes to Zen, Go and Command
         # Code again, so the keys belong on the router service only.
         compose = yaml.safe_load(COMPOSE_FILE.read_text(encoding="utf-8"))
-        router_env = compose["services"]["codex-router"]["environment"]
-        for key in ("OPENCODE_API_KEY", "OPENCODE_ZEN_API_KEY", "OPENCODE_GO_API_KEY", "COMMANDCODE_API_KEY"):
-            self.assertIn(f"{key}=${{{key}:-}}", router_env)
+        # The router runs as two colour containers behind the caddy front; the
+        # front carries no router env of its own.
+        for colour in ("codex-router-a", "codex-router-b"):
+            router_env = compose["services"][colour]["environment"]
+            for key in ("OPENCODE_API_KEY", "OPENCODE_ZEN_API_KEY", "OPENCODE_GO_API_KEY", "COMMANDCODE_API_KEY"):
+                self.assertIn(f"{key}=${{{key}:-}}", router_env)
+        self.assertNotIn("environment", compose["services"]["codex-router"])
 
         deploy_script = DEPLOY_SCRIPT.read_text(encoding="utf-8")
         router_section = deploy_script.split("# ---- codex-router ----", 1)[1].split("# ---- pluggable modules", 1)[0]
