@@ -104,6 +104,15 @@ const RYT_SENT_PERSON = RYT_FRAME(
 );
 
 /**
+ * #654 boundary — the incoming person credit from a name that is NOT the
+ * holder, so the release predicate (not the own-identity arm) decides the row.
+ * Same person, same amount, opposite direction to RYT_SENT_PERSON.
+ */
+const RYT_RECEIVED_FROM_PERSON = RYT_FRAME(
+    "Money's in! You've received RM255.00 from LEE WEI LING on 18/9/2026, 5:04 AM (GMT+8) using your\nMain Account.",
+);
+
+/**
  * #654 / uid 1012 — the Ryt scheduled-transfer completion. It names a person
  * and NO source account (own_account is {name:null, bank, suffix:null}), so with
  * two live accounts at the bank nothing can pin the source.
@@ -827,6 +836,37 @@ To: ACCOUNT HOLDER SC A/C ending 6445
 
         expect(phase2._hold_unresolved_transfer).toBeUndefined();
         expect(calls.some((c) => c.name === "insert_transaction")).toBe(true);
+    });
+
+    // The release predicate is direction-independent, but the booking arms are
+    // not: `_resolveMovementToOutput` has no incoming arm for a non-internal
+    // movement that has a counterparty, so it falls to `return null`. Both
+    // outcomes of the incoming leg are pinned here — inherited at HEAD, out of
+    // scope for this change, and pinned so the boundary cannot silently widen.
+    it("HOLDS an incoming person credit when no fact releases it (#654)", async () => {
+        const { phase2, calls } = await orchestrate(RYT_RECEIVED_FROM_PERSON, {
+            senderBank: "Ryt",
+            receivedAt: "2026-09-18T00:00:00.000Z",
+            accounts: rytAccounts,
+        });
+
+        expect(phase2._hold_cause).toBe("person_identity_unverified");
+        expect(calls.some((c) => c.name === "insert_transaction")).toBe(false);
+    });
+
+    it("still DROPS that incoming credit once a `maps to ... payee` fact releases it (#654 boundary)", async () => {
+        const { phase1, calls } = await orchestrate(RYT_RECEIVED_FROM_PERSON, {
+            senderBank: "Ryt",
+            receivedAt: "2026-09-18T00:00:00.000Z",
+            accounts: rytAccounts,
+            listFacts: ["LEE WEI LING merchant maps to Bak Kwa Trading payee"],
+        });
+
+        // Released, and then dropped for want of an incoming booking arm — NOT
+        // booked as income and NOT held. Closing this means adding an incoming
+        // person arm, which is its own change with its own reproduction.
+        expect(phase1).toBeNull();
+        expect(calls.some((c) => c.name === "insert_transaction")).toBe(false);
     });
 
     it("does NOT release the hold from a legal-name or account-type fact (#654)", async () => {
