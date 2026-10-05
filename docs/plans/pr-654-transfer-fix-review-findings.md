@@ -4,7 +4,7 @@ q: Where should the memory lookup happen? | a: `_resolveMovementToOutput`, at th
 q: Which memory read decides the person/business question? | a: `list_facts` (full deterministic read from disk), NOT `search_memory`. A recall miss on `search_memory` would silently book a real person transfer as spend, which is the exact defect this closes. The read is made only when `movement.person_transfer === true`, so plain merchant alerts pay nothing.
 q: EXACTLY which facts release the hold? | a: Only the payee/category mapping grammar — a fact whose key normalises equal to the alert's counterparty name under `normalizeIdentityName` (orchestrator.js:290, already used at :759) using the shape `KEY (merchant )?maps to VALUE (payee|category)`. A legal-name / account-holder fact or an `is a ... account` fact can NEVER release the hold. It is fail-closed: an unrecognised grammar holds.
 q: What closes the loop when a person-shaped name is held? | a: Hold only, and name the counterparty and the cause in the notification (Option 1, Darren 2026-10-05). No reply path, no auto-learn, and the notification does NOT tell the user to teach it — nothing would act on that. The cause rides a NEW `_hold_person_identity` flag, not `notify_message` (ignored by the notify path at orchestrator.js:2395-2406) and not `reasoning` (LLM-authored for the three Phase-2 holds).
-q: Does the hold also fire on INCOMING person credits? | a: Yes, deliberately. The flag is direction-independent (bank-movement.js:292-293 sets it for `received` as well as `sent`) and an unverified incoming person credit is as unverifiable as an outgoing one; this already matches the #585 precedent that an own-name credit is held rather than booked as income. Stated in Behaviour changes.
+q: Does the hold also fire on INCOMING person credits? | a: Yes, deliberately, but only where the alert resolves to exactly ONE live account at the sender bank. The flag is direction-independent (bank-movement.js:292-293 sets it for `received` as well as `sent`) and an unverified incoming person credit is as unverifiable as an outgoing one; this already matches the #585 precedent that an own-name credit is held rather than booked as income. BOUNDARY, verified: with 2+ live accounts at the sender bank the movement is dropped at orchestrator.js:740 before the hold site, because resolveAccountByBank refuses an ambiguous bank, and F2's new branch is keyed on `outgoing`. That case is unchanged by this plan, is listed under "Not in scope", and is pinned by a test at both account counts.
 q: May the pipeline write facts automatically? | a: Only what the alert itself proves — digits and bank names printed in the body (orchestrator.js:2819 suffix->account, :2749 account type). Never a judgment fact. No new auto-learn is added by this plan.
 q: Should the LLM-extractor route be covered too? | a: Yes (H4), and at `_llmExtractMovement` (orchestrator.js:1040-1052) where the movement is built — NOT at the Phase-1 sanitize block at :1297-1303, which runs after every `_resolveMovementToOutput` caller has already returned.
 q: Is the generic full Phase-1 LLM path covered? | a: No. The loop at orchestrator.js:1128 never enters `_resolveMovementToOutput`, so no movement hold can reach it. Stated as a boundary and tracked as its own issue.
@@ -72,6 +72,16 @@ Extend the existing hold condition rather than adding a gate, so one site owns
 - No direction term: the hold covers incoming person credits too (see QUESTIONS).
 - The existing `knownOwnIdentity` term is unchanged, so nothing that holds today
   stops holding.
+- **The incoming leg is covered ONLY when the sender bank's account count is
+  unambiguous.** Verified: an incoming person credit with ONE live account at the
+  sender bank reaches `:761` and is held, but with TWO it is dropped at `:740`
+  before the hold site, because `resolveAccountByBank` (bank-movement.js:698-702)
+  refuses the ambiguous bank. F2's new branch is keyed on `outgoing`, so it cannot
+  cover this either. So the plan does NOT widen the incoming claim: q7 and
+  Behaviour change #1 both state that an incoming person credit for a holder with
+  2+ accounts at the sender bank remains dropped today and after this change, and
+  it is listed under "Not in scope" with its own issue. The incoming test is pinned
+  at BOTH account counts so the boundary is visible in the suite.
 
 **Do NOT use `looksLikePersonName` as the person/business discriminator.** It is
 structural and list-free, and a person name is indistinguishable from an unlisted
@@ -127,11 +137,17 @@ using your Ryt Credit` parses with `person_transfer: false` (verified live again
 the parser at this revision). That is a hole in the Critical, so the verb list is
 widened to `/^(received|sent|paid)$/i`.
 
-This does not disturb the must-book merchant pins, because they reach a different
-branch: the `was paid at MERCHANT` form is parsed at bank-movement.js:250-252,
-which carries no `person_transfer` key at all, and `looksLikePersonName("CFF
-UNITED PLT")` is false (pinned at production-incidents.test.js:113-136). Both
-pins are listed in Tests so neither is amended.
+This does not disturb the must-book merchant pins, but NOT for the reason a first
+reading suggests. Only the uid 132 `was paid at MERCHANT` fixture is safe by
+construction: that branch is parsed at bank-movement.js:250-252 and carries no
+`person_transfer` key at all (verified). The uid 917/918 pins are a DIFFERENT
+sentence form — `You've paid … to MERCHANT` — which passes through :272-306 and DOES
+carry the key, at value `false` only because the verb gate excludes `paid`. Their
+real protection is `looksLikePersonName` rejecting them: `CLINIC MERCHANT` because
+`clinic` is in NON_PERSON, and `365 BAKERY` because of the bare-digit rejection
+(pinned at production-incidents.test.js:113-136). Both pins are listed in Tests
+item 6, asserted in the sentence form they actually use, so a change to
+NON_PERSON that flipped them would be caught.
 
 ### F2 — hold the ambiguous case
 
@@ -178,6 +194,18 @@ account-resolution holds (`:737`, `:907`) and add a person-identity variant nami
 the counterparty and the cause. `payee_source` gets its own value for the same
 reason.
 
+**Three hold texts, not two — F2 adds a third site inside the SAME
+`!source || !date` block that returns at `:740`, i.e. BEFORE the person-hold site
+at `:761-765`.** So a person transfer that is ALSO ambiguous at the sender bank
+(uid 1012's `Your scheduled transfer of … to <person> …`, where the Ryt branch
+sets `own_account {name:null, bank:"Ryt", suffix:null}`) takes F2's branch, never
+reaches `:761`, never sets `_hold_person_identity`, and is told the transfer
+DESTINATION was unsafe when the cause was the source account. Give F2's new branch
+its OWN cause string (`Held: source account ambiguous at this bank; the transfer to
+"<name>" was not booked`), and set `_hold_person_identity` on it as well when the
+counterparty is person-shaped, so the matrix is keyed on cause rather than on which
+site won. Tests assert all three texts render their own cause.
+
 **Do NOT branch on `reasoning`.** It is a literal for the Phase-1 hold but
 LLM-authored free text for the three Phase-2 holds (`:2142`, `:2167`, `:2234` all
 set `payee_source = "transfer_destination_refused"`), so keying the notification on
@@ -199,9 +227,36 @@ become the most common merchant shape. The hold is already journaled via
 
 `person_transfer` is written only at bank-movement.js:301,347 and read nowhere.
 Set it in `_llmExtractMovement` where that route builds its movement
-(orchestrator.js:1040-1052), from the same `looksLikePersonName` check the
-deterministic parser uses, so the value exists BEFORE `:1053` calls
+(orchestrator.js:1040-1052), so the value exists BEFORE `:1053` calls
 `_resolveMovementToOutput` and the F1 hold applies to that route too.
+
+**The check is NOT "the same" as the parser's — the two paths disagree on
+direction, not on spelling.** The deterministic Ryt branches build `counterparty`
+from the NAMED PERSON in both directions (bank-movement.js:293-297), so there
+`looksLikePersonName(counterparty)` means "the counterparty is a person". The
+extractor route assigns `own_account` from `from_account` and `counterparty` from
+`to_account` UNCONDITIONALLY (orchestrator.js:1046-1047), and
+`getMovementExtractorPrompt` (prompts.js:124) defines `to_account` as the
+destination — which on an incoming movement is the HOLDER'S OWN ACCOUNT. Verified:
+`looksLikePersonName` is true for `Main Account`, `Savings Account`,
+`Current Account`, `POSB Cashback Account`, `Ryt Credit` and `DBS account`, and
+false for `DBS Account 4380`, `OCBC 360`, `Your account ending 4380`. Keying on
+`to_account` unconditionally therefore holds real incoming credits, and the
+release predicate cannot rescue them: the plan's own fact table marks the only two
+account-shape facts this module writes (`NAME is a TYPE account` :2749,
+`... ending NNNN belongs to NAME` :2819) as unable to release, so no
+`Main Account maps to <x> payee|category` fact can ever exist.
+
+Key the flag on the correct side per direction:
+
+```js
+const namedParty = direction === "outgoing" ? to : from;
+person_transfer = looksLikePersonName(namedParty);
+```
+
+AND, belt and braces, suppress it whenever that name is one of the holder's own
+live accounts (`matchAccountByName(namedParty, accounts, aliases).matched`), since
+an account name is by definition not a counterparty. Both pins are in Tests.
 
 It must NOT be set at the Phase-1 sanitize block (`:1297-1303`). Every
 `_resolveMovementToOutput` caller — `_runStructuredMovement` (:667-673),
@@ -242,13 +297,33 @@ RED first, each failing on real code at the revision named in Evidence:
    - the same counterparty with ONLY a legal-name fact
      (`Legal name: CHONG JIN HENG -> CHON (statement password)`) → still held
      (the case an overlap rule gets wrong, and F1's own regression guard);
-   - an incoming person credit with no fact → held, and NOT booked as income.
+   - an incoming person credit with ONE live account at the sender bank → held,
+     and NOT booked as income;
+   - the same incoming credit with TWO live accounts at the sender bank → still
+     dropped (the M2 boundary, pinned so the claim cannot silently widen).
 6. NEW — boundary pins, so the gaps are visible in the suite and not only in prose:
    - `paid ... to LEE WEI LING` is held (the `:292-293` verb fix);
    - `was paid at CFF UNITED PLT` still books (must-book pin preserved);
+   - `You've paid ... to CLINIC MERCHANT` and `... to 365 BAKERY` still book —
+     asserted on the SENTENCE FORM they actually use, because the protection is
+     `looksLikePersonName` rejecting `CLINIC MERCHANT` (`clinic` in NON_PERSON)
+     and `365 BAKERY` (bare-digit), NOT the absence of a `person_transfer` key;
    - `ACME CONSULTANCY` is now held (must-hold pin, amended — see Behaviour changes);
+   - a `paid ... to <person-shaped real merchant>` sentence (e.g. `MARINA BAY
+     SANDS`, `NTUC FAIRPRICE`, both verified person-shaped) is held, and the same
+     counterparty with a `maps to ... payee` fact books — the new surface the verb
+     widening opens, pinned on both sides;
    - an outgoing movement naming an unresolvable source account still yields the
-     current drop (the F2 boundary).
+     current drop (the F2 boundary);
+   - the generic full Phase-1 LLM path (loop at :1128) never enters
+     `_resolveMovementToOutput` and therefore never reaches a movement hold.
+7. NEW — the three hold texts each render their OWN cause: destination-unresolved
+   (`:737`), person-identity (`:761`), and source-account-ambiguous (F2's new
+   branch), including the uid-1012 shape that reaches F2's branch FIRST and so
+   never sets `_hold_person_identity` at `:761`.
+8. NEW — H4 direction pins: an extractor-routed INCOMING credit whose `to_account`
+   is the holder's own `Main Account` must NOT set `person_transfer`; an outgoing
+   one whose `to_account` is `LEE WEI LING` must.
 
 Items 1-2 are new whole test files under `tests/`, which the dev-loop policy
 treats as a `tests_only` mutation, plus lines added to existing test files.
@@ -297,24 +372,42 @@ treats as a `tests_only` mutation, plus lines added to existing test files.
   - `transfer-person-hold-red.test.js` — 2 failed (the F1 RED, expected);
   - `transfer-ambiguity-hold-red.test.js` — 2 failed (the F2/F3 RED, expected);
   - `orchestrator.test.js` — 4 failed, all `Test timed out in 5000ms`
-    (`:2726`, `:2835`, `:2907`, `:3078`, the #574 journal cases), and they fail
-    when that file is run alone too;
+    (`:2726`, `:2835`, `:2907`, `:3078`, the #574 journal cases);
   - `dedup.test.js` — worker-hook `onTaskUpdate` timeouts (`:14`, `:81`, `:177`).
 
-  The last two are **pre-existing environment timeouts in this container, not
-  code failures**: both files drive real sqlite/worker fixtures and are slow
-  enough here (261s and 48s) to trip vitest's 5s per-test and worker-RPC
-  deadlines. They do not reproduce in CI on Node 22 — the `expense-tracker`
-  check passes on this branch — and their counts vary between runs on this box
-  (`8 failed` and `11 failed` were both observed at the same revision). They are
-  therefore excluded from the delta by name, not by a total.
+  **CORRECTION (plan round 2, finding M3): the two flaky files do NOT fail when run
+  alone on this machine.** The earlier claim that they "fail when that file is run
+  alone too" is false and is withdrawn. Re-measured under Node v22.20.0 at this
+  revision:
+  - `npx vitest run tests/orchestrator.test.js` → `Test Files 1 passed (1) | Tests
+    108 passed (108)`, twice, ~21s each;
+  - `npx vitest run tests/dedup.test.js` → `Test Files 1 passed (1) | Tests 39
+    passed (39)`, ~103s, with one worker `onTaskUpdate` error and NO failing test.
 
-  **GREEN is therefore:** the two RED files pass; the pins in Tests item 6 hold
-  their new outcomes; no failure appears in any file this change touches
-  (`bank-movement.js`, `orchestrator.js` and their suites); and the run's
-  failures are exactly the two flaky files above, with no new file or test name
-  among them. **CI on Node 22 (`npm ci && npm test`) is the authoritative
-  full-suite gate**, because this container cannot produce a stable total.
+  The reproducible claim is the stronger one: **both files pass in isolation and
+  only fail under full-suite parallel load in this container**, because they drive
+  real sqlite/worker fixtures and are slow enough here to trip vitest's 5s
+  per-test and worker-RPC deadlines. That is a load ceiling, not a broken file.
+  Their counts also vary between full-suite runs on this box (`8 failed`, `9
+  failed` and `10 failed` were all observed at the same revision), so the printed
+  total is only indicative. They do not reproduce in CI on Node 22 — the
+  `expense-tracker` check passes on this branch — and CI on Node 22
+  (`npm ci && npm test`) is the authoritative full-suite gate.
+
+  **GREEN is therefore, in this order:**
+  1. the two RED files pass;
+  2. the pins in Tests items 5-8 hold their stated outcomes;
+  3. **no test this change touches may fail, whichever file it lives in** — the
+     delta rule is scoped by TEST NAME, not by file. Concretely: every test in
+     `tests/orchestrator.test.js`, `tests/bank-movement.test.js`,
+     `tests/production-incidents.test.js`, `tests/deterministic-orchestrator.test.js`
+     and `tests/llm-output-sanitizer.test.js` must pass, and the #574
+     transfer-detection cases at `:2726/:2835/:2907/:3078` must pass IN ISOLATION
+     (`npx vitest run tests/orchestrator.test.js`) since they demonstrably do;
+  4. the only failures tolerated in a full-suite run are timeout/RPC-shaped ones in
+     `orchestrator.test.js` and `dedup.test.js`, and each must be shown to be
+     timeout-shaped rather than assertion-shaped. Any NEW failing file or test name
+     fails the gate.
 - The earlier "42 files / 1203 passed / 5 skipped / 0 failed" figure was recorded
   against a different revision and is NOT inherited. It is replaced by the
   measured run above.
@@ -323,12 +416,16 @@ treats as a `tests_only` mutation, plus lines added to existing test files.
 
 1. A transfer in EITHER direction to any unremembered person-shaped counterparty
    is HELD, not booked — outgoing stops being booked as spend, and incoming stops
-   being booked as income. This closes the Critical, and it re-admits the
-   name-shape sensitivity that `orchestrator.js:743-747` once removed to fix a real
+   being booked as income — **provided the sender bank has exactly ONE live
+   account**. With 2+ accounts at the sender bank an INCOMING person credit is
+   still dropped, unchanged by this change (see q7 and "Not in scope"). This closes
+   the Critical, and it re-admits
+   the name-shape sensitivity that `orchestrator.js:743-747` once removed to fix a real
    production incident (`CFF UNITED PLT` wrongly held). A counterparty with a
    `maps to ... payee|category` fact in memory books normally; a brand-new vendor
    is HELD every time until such a fact exists — which today means a
-   migration-written or hand-written fact line, NOT a reply to the notification.
+   migration-written or hand-written fact line (write it with `learn_fact`), NOT a
+   reply to the notification.
    The must-book pin at `production-incidents.test.js:663` (`ACME CONSULTANCY`)
    therefore changes from "must book" to "must hold" and is amended by this
    change — stated plainly here and in the PR body rather than buried. The
@@ -347,6 +444,19 @@ treats as a `tests_only` mutation, plus lines added to existing test files.
   diff past what the findings prove.
 - The named-but-unresolvable source-account drop (the F2 boundary above, the
   issue #592 phantom-expense family) — pinned by a test, fixed separately.
+- **An INCOMING person credit for a holder with 2+ live accounts at the sender
+  bank** — dropped at orchestrator.js:740 today and after this change, because
+  `resolveAccountByBank` refuses an ambiguous bank and F2's new branch is keyed on
+  `outgoing`. Closing it means widening the ambiguity branch to incoming person
+  movements, which is the opposite trade from F2 (it would also cover every
+  incoming bank credit), so it is its own change with its own reproduction. Pinned
+  at both account counts.
+- The `paid` verb widening's new surface: recurring person-shaped merchant
+  descriptors (`MARINA BAY SANDS`, `NTUC FAIRPRICE`, `GOLDEN VILLAGE`,
+  `COLD STORAGE`, `FARM FRESH`, `BUKIT TIMAH` are all verified person-shaped) are
+  held every time until a `maps to` fact exists, which the pipeline never writes
+  for a merchant it has no fact for. Disclosed in Behaviour change #1, pinned on
+  both sides in Tests item 6, and the unblock is `learn_fact`.
 - Person-shaped counterparties on the generic full Phase-1 LLM path (:1128),
   which never enters `_resolveMovementToOutput` and cannot reach a movement hold.
 - `CARD_PRODUCT_RE`'s redundant alternation (`\bcredit\s+cards?\b` already
