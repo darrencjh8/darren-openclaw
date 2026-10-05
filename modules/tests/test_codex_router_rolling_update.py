@@ -467,6 +467,44 @@ class CodexRouterRollingUpdateTests(unittest.TestCase):
         # front, so its image or resource stanza needs FORCE_ALL.
         self.assertIn("FORCE_ALL", deploy)
 
+    def test_a_failed_front_lookup_never_recreates_the_listener(self):
+        deploy = DEPLOY_SCRIPT.read_text(encoding="utf-8")
+
+        # Structural: the lookup keeps its failure, the way colour_container does,
+        # instead of `|| true`-ing it into "the front is absent".
+        lookup = function_block(deploy, "front_running")
+        self.assertNotIn("|| true", lookup)
+        self.assertIn("|| return 2", lookup)
+
+        def gate(running, force_all=None):
+            docker = (
+                "docker() { return 1; }"
+                if running is None
+                else f"docker() {{ printf '%s\\n' {shlex.quote(running)}; }}"
+            )
+            body = "\n".join(
+                [
+                    docker,
+                    "unset FORCE_ALL" if force_all is None else f"FORCE_ALL={force_all}",
+                    "front_needs_start",
+                ]
+            )
+            return run_shell_functions(
+                deploy, ("front_running", "front_needs_start"), body
+            ).returncode
+
+        # A failed `docker ps` proves nothing, so it never starts the front: the
+        # start is `up -d codex-router`, and that recreates the one container that
+        # owns 0.0.0.0:4100, closing every in-flight stream. The reload that
+        # follows is the check instead, and it fails on a genuinely absent front.
+        self.assertEqual(1, gate(None))
+        self.assertEqual(1, gate(None, "true"))
+
+        # A confirmed absence is still created, and a running front is still left
+        # alone.
+        self.assertEqual(0, gate(""))
+        self.assertEqual(1, gate("modules-codex-router-1"))
+
     def test_a_wedged_candidate_is_recreated_on_every_roll(self):
         deploy = DEPLOY_SCRIPT.read_text(encoding="utf-8")
 
