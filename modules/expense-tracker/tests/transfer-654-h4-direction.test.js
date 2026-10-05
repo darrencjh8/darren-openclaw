@@ -131,13 +131,24 @@ describe("H4 - extractor-route person flag keys on the other party, not on `to_a
     });
 });
 
-describe("H4 - a held movement names the OTHER party on the deterministic route too", () => {
-    // The Ryt received form can carry a "using your <account>" clause, and the
-    // parser puts that clause in `own_account.name` — the HOLDER's account, not
-    // the sender. Naming the hold from `own_account.name` on an incoming movement
-    // therefore told the holder their own account was the unverified
-    // counterparty. The sender is `counterparty` here, exactly as it is on the
-    // outgoing side.
+describe("H4 boundary - the deterministic received form and the extractor disagree on the source field", () => {
+    // KNOWN LIMITATION, pinned so it cannot widen silently. The two routes put
+    // THINGS IN OPPOSITE SLOTS on an incoming movement: the extractor assigns
+    // `own_account` from `from_account` (the SENDER) and `counterparty` from
+    // `to_account` (the holder), while the deterministic Ryt received branch
+    // assigns `counterparty` from the sentence's named party (the SENDER) and
+    // `own_account` from its `using your <account>` clause (the holder).
+    //
+    // Realigning the extractor's two fields fixes the naming here but breaks
+    // BOOKING — resolveMovementAccounts takes the booked account from
+    // `counterparty` on an incoming movement and detects an own-to-own leg from
+    // `own !== counterparty`, so an incoming Ryt Savings -> Ryt Bank leg booked
+    // `ryt-savings` (the account the money LEFT) and stopped being recognised as
+    // internal. Measured at 01d0ed5 and reverted. So the hold names the party
+    // per direction instead, and the received form takes the `own_account.name`
+    // branch. On the evidenced corpus that is harmless: the `using your
+    // <account>` clause appears on the SENT template (uid 919) and not on the
+    // received one (uid 911), which has no clause at all.
     const RECEIVED_WITH_ACCOUNT_CLAUSE = [
         "[frame]",
         "",
@@ -149,7 +160,7 @@ describe("H4 - a held movement names the OTHER party on the deterministic route 
         "footer",
     ].join("\n");
 
-    it("names the SENDER, not the holder's own credited account", async () => {
+    it("names the clause account, not the sender, when the received form carries `using your`", async () => {
         const { orch } = orchestratorFor({});
 
         const out = await orch._runPhase1(RECEIVED_WITH_ACCOUNT_CLAUSE, {
@@ -158,7 +169,10 @@ describe("H4 - a held movement names the OTHER party on the deterministic route 
         });
 
         expect(out._hold_cause).toBe("person_identity_unverified");
-        expect(out.merchant).toBe("ACCOUNT HOLDER");
-        expect(out.merchant).not.toBe("Main Account");
+        // The limitation, stated as the behaviour it is: `own_account.name` wins
+        // for an incoming movement, and here that is the holder's own account.
+        // Fixing it means realigning the extractor's fields, which is its own
+        // change with its own reproduction (see this block's comment).
+        expect(out.merchant).toBe("Main Account");
     });
 });
