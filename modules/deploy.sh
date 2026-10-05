@@ -735,6 +735,14 @@ echo "--- Pluggable Modules ---"
 MODULE_COUNT=0
 for mod_env in "$ROOT"/modules/*/module.env; do
   [ -f "$mod_env" ] || continue
+  # The deploy checkout runs with clean: false, so a module directory removed
+  # from the repository (the retired ktmb-booking submodule) lingers in the
+  # runner workspace and would keep demanding secrets nobody sets. Validate only
+  # modules this revision tracks.
+  if git -C "$ROOT" rev-parse --git-dir >/dev/null 2>&1 \
+    && ! git -C "$ROOT" ls-files --error-unmatch "${mod_env#"$ROOT"/}" >/dev/null 2>&1; then
+    continue
+  fi
   source "$mod_env"
   MODULE_COUNT=$((MODULE_COUNT + 1))
   mod_dir="$(dirname "$mod_env")"

@@ -370,6 +370,54 @@ else
     nope "pluggable health checks gated on TARGETS" "TARGETS gate not found"
 fi
 
+# The deploy checkout runs with clean: false, so a module the repository deleted
+# stays on disk in the runner workspace. Discovery must ignore it, or the deploy
+# fails validating secrets for a module that no longer exists.
+if grep -qF 'git -C "$ROOT" ls-files --error-unmatch' "$DEPLOY_SCRIPT"; then
+    ok "pluggable discovery skips modules this revision does not track"
+else
+    nope "pluggable discovery skips untracked modules" "tracked-module guard not found"
+fi
+
+# Behavioural check of that guard: an untracked leftover module is skipped while
+# a tracked one is still discovered. The guard is lifted from deploy.sh itself,
+# so the test fails if the shipped condition changes.
+guard_repo=$(mktemp -d)/guard-repo
+mkdir -p "$guard_repo/modules/leftover" "$guard_repo/modules/real"
+printf 'MODULE_NAME=leftover\nMODULE_REQUIRED_VARS=(LEFTOVER_TOKEN)\n' > "$guard_repo/modules/leftover/module.env"
+printf 'MODULE_NAME=real\nMODULE_REQUIRED_VARS=(REAL_TOKEN)\n' > "$guard_repo/modules/real/module.env"
+git -C "$guard_repo" init -q
+git -C "$guard_repo" -c user.email=t@example.com -c user.name=t add modules/real/module.env
+git -C "$guard_repo" -c user.email=t@example.com -c user.name=t commit -qm init
+guard_code=$(python3 - "$DEPLOY_SCRIPT" <<'PY'
+import re
+import sys
+
+src = open(sys.argv[1], encoding="utf-8").read()
+match = re.search(r'(  if git -C "\$ROOT".*?\n  fi\n)', src, re.DOTALL)
+print(match.group(1) if match else "")
+PY
+)
+if [ -z "$guard_code" ]; then
+    nope "tracked-module discovery" "guard block not found in deploy.sh"
+else
+    guard_out=$(
+        ROOT="$guard_repo"
+        found=""
+        for mod_env in "$ROOT"/modules/*/module.env; do
+            [ -f "$mod_env" ] || continue
+            eval "$guard_code"
+            found="$found $(basename "$(dirname "$mod_env")")"
+        done
+        echo "$found"
+    )
+    if [ "${guard_out// /}" = "real" ]; then
+        ok "leftover module skipped, tracked module still discovered"
+    else
+        nope "tracked-module discovery" "expected 'real', got: '$guard_out'"
+    fi
+fi
+
 if grep -q "docker stop .*kokoro-tts" "$DEPLOY_SCRIPT"; then
     ok "full deploy stops kokoro-tts"
 else
