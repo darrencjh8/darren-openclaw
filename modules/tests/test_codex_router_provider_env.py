@@ -38,14 +38,18 @@ OPTIONAL_PROVIDER_KEYS = (
 class CodexRouterProviderEnvTests(unittest.TestCase):
     def test_router_service_forwards_provider_keys(self):
         config = yaml.safe_load(COMPOSE_FILE.read_text(encoding="utf-8"))
-        environment = config["services"]["codex-router"]["environment"]
+        # The router is two interchangeable colour containers; both must carry
+        # the keys, because either one can be the serving colour after a roll.
+        for colour in ("codex-router-a", "codex-router-b"):
+            environment = config["services"][colour]["environment"]
 
-        for key in PROVIDER_KEYS:
-            self.assertIn(f"{key}=${{{key}:-}}", environment)
-        self.assertIn(
-            "CODEX_ROUTER_OPENCODE_ZEN_MODELS=${CODEX_ROUTER_OPENCODE_ZEN_MODELS:-space-bunny-free}",
-            environment,
-        )
+            for key in PROVIDER_KEYS:
+                self.assertIn(f"{key}=${{{key}:-}}", environment, colour)
+            self.assertIn(
+                "CODEX_ROUTER_OPENCODE_ZEN_MODELS=${CODEX_ROUTER_OPENCODE_ZEN_MODELS:-space-bunny-free}",
+                environment,
+                colour,
+            )
 
     def test_deploy_workflow_passes_provider_secrets(self):
         workflow = WORKFLOW.read_text(encoding="utf-8")

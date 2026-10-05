@@ -30,7 +30,23 @@ else
   SERVICES="${COMPONENTS[*]}"
 fi
 
-echo "Building: $SERVICES"
+# codex-router builds the two router colours; `codex-router` itself is the caddy
+# front, a stock image this build has nothing to add to. Derived per token
+# because SERVICES is one space-separated line, so a line-anchored match finds
+# nothing and `all` would still try to build the front. awk drops the repeat a
+# SERVICES naming both the front and a colour would otherwise produce. A colour
+# name is not a component either: asking for one builds both colours, because
+# deploy.sh rolls either of them and the one left unbuilt would keep serving this
+# revision's predecessor.
+# shellcheck disable=SC2086  # the loop splits SERVICES on purpose
+BUILD_SERVICES=$(for SERVICE in $SERVICES; do
+  case "$SERVICE" in
+    codex-router|codex-router-a|codex-router-b) printf 'codex-router-a\ncodex-router-b\n' ;;
+    *) printf '%s\n' "$SERVICE" ;;
+  esac
+done | awk '!seen[$0]++' | tr '\n' ' ')
+
+echo "Building: $BUILD_SERVICES"
 
 # ---- Pre-build: pp-cli.jar (Java CLI for Portfolio Performance) ----
 if [[ " $SERVICES " =~ " portfolio-tracker " ]] || [[ " $SERVICES " =~ " all " ]]; then
@@ -58,7 +74,11 @@ if [[ " $SERVICES " =~ " portfolio-tracker " ]] || [[ " $SERVICES " =~ " all " ]
   fi
 fi
 
-$COMPOSE build $SERVICES
+# An empty list means there was nothing here this build knows how to build; a
+# bare `$COMPOSE build` would build every service in the file instead.
+if [ -n "$BUILD_SERVICES" ]; then
+  $COMPOSE build $BUILD_SERVICES
+fi
 echo "✓ Build complete"
 
 # ---- Portfolio Tracker: Java CLI ----

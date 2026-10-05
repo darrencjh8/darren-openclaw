@@ -91,9 +91,12 @@ This changes the group to `runner` and adds group read permission without touchi
 | Expense Tracker | `modules-expense-tracker-1` | 127.0.0.1:8080 | 8080 | `/health` |
 | Portfolio Tracker | `modules-portfolio-tracker-1` | 127.0.0.1:8081 | 8081 | `/health` |
 | Actual API | `modules-actual-api-1` | 127.0.0.1:3000 | 3000 | — |
-| Codex Router | `modules-codex-router-1` | 0.0.0.0:4100 | 4100 | `/health/liveliness` |
+| Codex Router (front) | `modules-codex-router-1` | 0.0.0.0:4100 | 4100 | `/health/liveliness` |
+| Codex Router (colours) | `modules-codex-router-a-1`, `modules-codex-router-b-1` | — | 4100 | `/health/liveliness` |
 
-Expense Tracker, Portfolio Tracker, and Actual API bind to `127.0.0.1` (localhost only). Hermes publishes `8642`, `9119`, `8644` on all interfaces, and Codex Router publishes `4100` on all interfaces so Hermes providers can reach `http://codex-router:4100/v1`.
+Expense Tracker, Portfolio Tracker, and Actual API bind to `127.0.0.1` (localhost only). Hermes publishes `8642`, `9119`, `8644` on all interfaces, and the Codex Router front publishes `4100` on all interfaces so Hermes providers can reach `http://codex-router:4100/v1`.
+
+Codex Router is three containers: the caddy front `codex-router`, which owns port 4100, and the two identical router colours `codex-router-a` and `codex-router-b`, which publish nothing and are only reachable through the front. A deploy replaces one colour at a time, so 4100 keeps serving.
 
 ---
 
@@ -102,7 +105,7 @@ Expense Tracker, Portfolio Tracker, and Actual API bind to `127.0.0.1` (localhos
 | Volume | Mounted To | Service |
 |--------|-----------|---------|
 | `onedrive_data` | `/data/onedrive` | portfolio-tracker |
-| `codex_router_state` | `/app/state` | codex-router |
+| `codex_router_state` | `/app/state` | codex-router-a, codex-router-b |
 
 Named volumes live at `/var/lib/docker/volumes/` — managed by Docker, not directly accessible.
 
@@ -110,7 +113,7 @@ Named volumes live at `/var/lib/docker/volumes/` — managed by Docker, not dire
 
 ## Deploy
 
-Shipping is CI/CD only: pushing to `main` triggers `.github/workflows/deploy.yml` on the self-hosted runner, which detects changed components, builds with `modules/build.sh`, then runs `modules/deploy.sh <components> --non-interactive --skip-build`.
+Shipping is CI/CD only: pushing to `main` triggers `.github/workflows/deploy.yml` on the self-hosted runner, which detects changed components, builds with `modules/build.sh`, then runs `modules/deploy.sh <components> --non-interactive --skip-build`. A codex-router deploy is a rolling update: `deploy.sh` starts the idle colour, waits for its `/health/liveliness`, moves the front to it, then stops the previously serving colour after a `ROUTER_DRAIN_SECONDS` (default 600) drain.
 
 Never run `modules/deploy.sh` (or `git pull`) manually on this host. Without `--skip-build`, `modules/deploy.sh` performs its own `git pull` and image build, which bypasses the pipeline's change detection and health gate. Merges to `main` are the only shipping path.
 

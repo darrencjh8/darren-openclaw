@@ -23,7 +23,8 @@ darren-openclaw/
 │   ├── expense-tracker/
 │   ├── actual-api/
 │   ├── image-gen/
-│   └── codex-router/              # Checked out from darrencjh8/codex-router by CI (not tracked here)
+│   ├── codex-router/              # Checked out from darrencjh8/codex-router by CI (not tracked here)
+│   └── codex-router-front/        # Caddy config for the front that publishes 4100
 ├── .github/workflows/deploy.yml   # CI/CD entry point
 └── specs/                         # Spec-Kit feature specs
 ```
@@ -42,6 +43,7 @@ There is no `gateway/` directory in the repository (`git ls-files gateway` retur
    - `modules/portfolio-tracker/` → `portfolio-tracker`
    - `modules/actual-api/` → `actual-api`
    - changes to `.github/workflows/deploy.yml`, `modules/docker-compose.yml`, or `modules/deploy.sh` → `codex-router`
+   - changes to `modules/codex-router-front/` → `codex-router`
    - root `Dockerfile` / `deploy.sh` / `modules/docker-compose.yml`, or nothing matched → `all`
    - The `gateway/` rule is a vestige; that directory no longer exists.
 4. **Create data dirs:** `mkdir -p /home/runner/data/{expense-tracker/data,portfolio-tracker/data,hermes/{data,workspace}}`.
@@ -50,6 +52,49 @@ There is no `gateway/` directory in the repository (`git ls-files gateway` retur
 7. **Record:** the deployed codex-router revision is written to `codex-router-sha.txt` and uploaded as a workflow artifact.
 
 `--skip-build` is essential in CI: without it, `deploy.sh` runs its own `git pull` and image build, bypassing the pipeline's change detection and health gate.
+
+### Rolling codex-router update
+
+codex-router is served by three containers: the caddy front `codex-router`, which owns
+`0.0.0.0:4100`, and the two identical router colours `codex-router-a` and `codex-router-b`, which
+publish no ports. `modules/build.sh` builds the colours and skips the front, which is a stock
+`caddy:2-alpine` image. `deploy.sh` never brings the colours up as a group; after the generic
+`compose up` it rolls them:
+
+1. Pick the running colour that is not serving, defaulting to `codex-router-a`. A colour counts as
+   running only if `docker ps` names it and it answers `/health/liveliness`; if `docker ps` fails and
+   the stack's containers cannot be read at all, the roll stops before starting or stopping anything
+   and the next scheduled deploy retries from the same state.
+2. `compose up -d --force-recreate codex-router-a` (or `-b`) and wait for `/health/liveliness` on that
+   colour. The recreate is deliberate: a colour that runs but never answers is the idle colour on
+   every roll, and a plain `up -d` is a no-op on an unchanged container, so that candidate would be
+   re-selected and the deploy would fail every time.
+3. Start the front if it is not running (its first start is the cutover from the pre-roll layout),
+   then reload its Caddyfile, retrying a failed reload a bounded three times: `up -d` returns when
+   the container starts, not when caddy has bound its admin listener, so the reload on that path can
+   land on a booting front. A front that is already running is left alone: it owns the only
+   published listener, and `up -d` would recreate it if its stanza or image changed. Because of that,
+   a change to the front's own compose stanza (image, memory limit, healthcheck) is applied only by a
+   deploy with `force_all=true`.
+4. `compose stop -t "$ROUTER_DRAIN_SECONDS" <old colour>` (default 600s) so in-flight streams finish;
+   both colours carry `stop_grace_period: 10m` for the same reason.
+
+`deploy.sh` identifies the front by the `modules.role=codex-router-front` label rather than by its
+compose service name, because the legacy router container uses that same service name until the
+cutover replaces it. That lookup follows the same rule as the colour probe: a failed `docker ps` is
+inconclusive, so the front is left exactly as it is rather than started with `up -d` (which would
+recreate the one container that owns `0.0.0.0:4100` and drop every in-flight stream), even under
+`force_all=true`, and the next scheduled deploy retries from the same state. Only a lookup that
+proves the front is absent starts it. The Caddyfile reaches the front as a bind-mounted directory
+(`./codex-router-front:/etc/caddy:ro`), not as a single mounted file: a checkout that replaces the
+file's inode would otherwise leave the mount pointing at the old one. A colour name is accepted as a
+component name (`--component codex-router-a`) and means `codex-router`: `deploy.sh` rewrites it
+before the preflight and `build.sh` builds both colours for it.
+
+The front's Caddyfile uses `lb_policy first` with the upstreams written `codex-router-a` then
+`codex-router-b`, `lb_try_duration 30s` so a request that lands on a stopping colour is retried, and
+`flush_interval -1` so streaming responses are not buffered. If the new colour never becomes ready
+the deploy fails without moving the front, and the previously serving colour keeps serving.
 
 ### How an environment variable reaches the gateway
 

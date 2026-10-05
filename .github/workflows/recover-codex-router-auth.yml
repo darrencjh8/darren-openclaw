@@ -48,17 +48,26 @@ jobs:
               env:
                   ACCOUNT: ${{ inputs.account }}
               run: |
-                  mapfile -t container_ids < <(
-                      docker ps \
-                          --filter label=com.docker.compose.service=codex-router \
+                  container_id=""
+                  # The router runs as two colour containers behind the caddy
+                  # front, so the front is not a target and either colour is.
+                  # Prefer codex-router-a to match the front's upstream order,
+                  # and fall back to whichever colour is actually running.
+                  for service in codex-router-a codex-router-b; do
+                      container_id="$(docker ps \
+                          --filter "label=com.docker.compose.project=modules" \
+                          --filter "label=com.docker.compose.service=$service" \
                           --filter status=running \
-                          --format '{{.ID}}'
-                  )
-                  if [ "${#container_ids[@]}" -ne 1 ]; then
-                      echo "Expected exactly one running codex-router container" >&2
+                          --format '{{.ID}}' | head -n 1)"
+                      if [ -n "$container_id" ]; then
+                          echo "Using the running $service container"
+                          break
+                      fi
+                  done
+                  if [ -z "$container_id" ]; then
+                      echo "No running codex-router colour container" >&2
                       exit 1
                   fi
-                  container_id="${container_ids[0]}"
                   docker exec -i "$container_id" python -u - "$ACCOUNT" \
                       < modules/codex-router-auth-recovery.py
 

@@ -93,6 +93,9 @@ jobs:
                   echo "$CHANGED" | grep -q "^modules/expense-tracker/" && COMPONENTS="$COMPONENTS expense-tracker"
                   echo "$CHANGED" | grep -q "^modules/portfolio-tracker/" && COMPONENTS="$COMPONENTS portfolio-tracker"
                   echo "$CHANGED" | grep -q "^modules/actual-api/"     && COMPONENTS="$COMPONENTS actual-api"
+                  # The front's Caddyfile decides what 4100 serves, so a change to
+                  # it must reach the host through a router deployment.
+                  echo "$CHANGED" | grep -q "^modules/codex-router-front/" && COMPONENTS="$COMPONENTS codex-router"
                   echo "$CHANGED" | grep -q "^gateway/"                && COMPONENTS="$COMPONENTS hermes"
                   echo "$CHANGED" | grep -q "^\.github/"               && COMPONENTS="$COMPONENTS hermes"
                   echo "$CHANGED" | grep -qE "^(\.github/workflows/deploy\.yml|modules/(docker-compose\.yml|deploy\.sh))$" && COMPONENTS="$COMPONENTS codex-router"

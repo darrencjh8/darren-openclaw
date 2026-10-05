@@ -122,7 +122,11 @@ class AuthRecoveryWorkflowTests(unittest.TestCase):
 
         self.assertIn('case "$ACCOUNT" in', text)
         self.assertIn("acct1|acct2|acct3", text)
-        self.assertIn("label=com.docker.compose.service=codex-router", text)
+        # The front is a caddy proxy with no python in it, so the recovery has to
+        # exec into one of the router colours, preferring the front's own order.
+        self.assertIn("for service in codex-router-a codex-router-b; do", text)
+        self.assertIn('--filter "label=com.docker.compose.service=$service"', text)
+        self.assertIn('if [ -z "$container_id" ]; then', text)
         self.assertIn('docker exec -i "$container_id" python -u - "$ACCOUNT"', text)
         self.assertIn("modules/codex-router-auth-recovery.py", text)
         self.assertIn("http://127.0.0.1:4100/v1/codex-router/status", text)

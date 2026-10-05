@@ -104,6 +104,14 @@ class DeployChangeDetectionTests(unittest.TestCase):
     def test_deploy_script_change_redeploys_everything(self):
         self.assertEqual("all", self.components_for_change("modules/deploy.sh"))
 
+    def test_codex_router_front_change_deploys_router(self):
+        # The front's Caddyfile is what 4100 serves, so a change to it is a
+        # router deployment even though it lives outside modules/codex-router.
+        self.assertEqual(
+            "codex-router",
+            self.components_for_change("modules/codex-router-front/Caddyfile"),
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
