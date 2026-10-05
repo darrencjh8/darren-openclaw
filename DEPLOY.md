@@ -51,6 +51,25 @@ There is no `gateway/` directory in the repository (`git ls-files gateway` retur
 
 `--skip-build` is essential in CI: without it, `deploy.sh` runs its own `git pull` and image build, bypassing the pipeline's change detection and health gate.
 
+### How an environment variable reaches the gateway
+
+A deploy variable travels `deploy.yml` job env → `modules/docker-compose.yml`
+`environment:` → the container's process environment. That is enough for tools
+and CLIs that read `os.environ`, and `deploy.sh` validates the platform
+allowlists (`SLACK_ALLOWED_USERS`, `TELEGRAM_ALLOWED_USERS`) so a deploy cannot
+start a bot nobody can talk to. It is **not** enough for a hermes authorization
+allowlist: hermes authorizes a chat caller through the per-profile secret scope
+built from `$HERMES_HOME/.env`, and with `gateway.multiplex_profiles: true` a
+value that exists only in the container environment reads back empty — the bot
+connects and then rejects every caller as unauthorized.
+
+`modules/hermes/50-seed-defaults` closes that gap on every boot by mirroring
+each deployed `*_ALLOWED_USERS` into `$HERMES_HOME/.env` (the environment wins,
+an unset variable never deletes a key, and the file is replaced atomically at
+mode 600). A new allowlist therefore needs no Dockerfile change and no volume
+hand-edit: set the variable — a GitHub variable for GHA, `modules/hermes/.env`
+for a local deploy — and redeploy.
+
 ## Entry Points
 
 ### `modules/build.sh`

@@ -130,6 +130,15 @@ deploy hard-requires it. Leaving it empty would otherwise produce a bot that
 connects and answers nobody. Set it at the same scope the deploy job uses —
 environment `darren-prod`, not repository scope.
 
+The deployed value reaches the gateway through the profile's own `.env`, not
+through the container environment: hermes authorizes a caller via the
+per-profile secret scope, and with `gateway.multiplex_profiles` enabled a
+container-only allowlist reads back empty — the bot connects and then rejects
+every caller as unauthorized. `modules/hermes/50-seed-defaults` mirrors every
+deployed `*_ALLOWED_USERS` into `$HERMES_HOME/.env` at boot, so redeploying the
+variable is enough and the volume never needs a hand-edit. See
+[DEPLOY.md](../../DEPLOY.md) for the full env-var path.
+
 For a local (non-CI) deployment, put the same five keys in the gitignored
 `modules/hermes/.env`:
 
