@@ -233,6 +233,11 @@ services:
             - GH_APP_ID=${GH_APP_ID}
             - GH_APP_INSTALLATION_ID=${GH_APP_INSTALLATION_ID}
             - GH_APP_PRIVATE_KEY=${GH_APP_PRIVATE_KEY}
+            # github-auth.sh pins HOME=/opt/data/home, so gh's own config lives
+            # at /opt/data/home/.config/gh. Without this, a shell that keeps the
+            # container's default HOME reads an empty /opt/data/.config/gh and
+            # reports "not logged into any GitHub hosts" while the App is fine.
+            - GH_CONFIG_DIR=/opt/data/home/.config/gh
             - HERMES_DASHBOARD_BASIC_AUTH_USERNAME=${HERMES_DASHBOARD_BASIC_AUTH_USERNAME}
             - HERMES_DASHBOARD_BASIC_AUTH_PASSWORD=${HERMES_DASHBOARD_BASIC_AUTH_PASSWORD}
             - IDENTITY_NAME=${IDENTITY_NAME}
