@@ -915,6 +915,14 @@ printf '%s' "${FRIDAY_PAT:-}" | docker run --rm -i --network none \
   '
 
 COMPOSE="docker-compose --project-name modules"
+# A colour name is an internal detail of the router, not a component. Accept it
+# and deploy the router, rather than building an image for a component that
+# should_deploy then refuses and nothing ever starts.
+for i in "${!COMPONENTS[@]}"; do
+  case "${COMPONENTS[$i]}" in
+    codex-router-a|codex-router-b) COMPONENTS[$i]="codex-router" ;;
+  esac
+done
 if [[ " ${COMPONENTS[*]} " =~ " all " ]] || [[ ${#COMPONENTS[@]} -eq 1 && "${COMPONENTS[0]}" == "all" ]]; then
   # Always resolve the full service list — never leave TARGETS empty.
   # An empty TARGETS causes docker compose to silently ignore --force-recreate
@@ -1163,10 +1171,11 @@ if should_deploy "codex-router" || should_deploy "all"; then
   echo ""
   echo "--- codex-router rolling update ---"
 
-  # docker prints "<name> <compose service label>"; matching the label rather
-  # than the name avoids counting lookalike containers from other projects.
+  # docker prints "<name> <compose service label>"; the service label plus the
+  # project filter keeps this to this stack's own containers, whatever else runs
+  # on the host under a lookalike service name.
   colour_container() {
-    docker ps --filter status=running \
+    docker ps --filter status=running --filter label=com.docker.compose.project=modules \
       --format '{{.Names}} {{.Label "com.docker.compose.service"}}' \
       | awk -v service="$1" '$2 == service {print $1; exit}'
   }
@@ -1208,8 +1217,11 @@ if should_deploy "codex-router" || should_deploy "all"; then
 
   ROUTER_DRAIN_SECONDS="${ROUTER_DRAIN_SECONDS:-600}"
   idle_ready=false
-  idle_container="$(colour_container "$idle")"
   for _ in $(seq 1 "$ROUTER_READY_ATTEMPTS"); do
+    # Re-resolved every attempt: `up -d` can return while the colour is still
+    # crash-looping, and a name captured once would stay empty for the whole
+    # budget even after the container comes up.
+    idle_container="$(colour_container "$idle")"
     if [ -n "$idle_container" ] && docker exec "$idle_container" curl -fsS http://127.0.0.1:4100/health/liveliness >/dev/null 2>&1; then
       idle_ready=true
       break

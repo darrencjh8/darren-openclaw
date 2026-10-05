@@ -28,16 +28,16 @@ COLOURS = ("codex-router-a", "codex-router-b")
 # upstream order), a retry window for a request that lands on the colour being
 # stopped, health probing that takes a dead colour out of rotation, and
 # unbuffered streaming.
-EXPECTED_DIRECTIVES = (
-    "lb_policy",
-    "lb_try_duration",
-    "lb_try_interval",
-    "health_uri",
-    "health_interval",
-    "health_timeout",
-    "fail_duration",
-    "flush_interval",
-)
+EXPECTED_DIRECTIVES = {
+    "lb_policy": "first",
+    "lb_try_duration": "30s",
+    "lb_try_interval": "250ms",
+    "health_uri": "/health/liveliness",
+    "health_interval": "10s",
+    "health_timeout": "5s",
+    "fail_duration": "30s",
+    "flush_interval": "-1",
+}
 
 
 def statement(text, name):
@@ -58,6 +58,29 @@ def run_derivation(script, name, sample_name, sample_value):
             f"{sample_name}={shlex.quote(sample_value)}",
             statement(script, name),
             'printf "%s\\n" "$' + name + '"',
+        ]
+    )
+    result = subprocess.run(
+        ["bash", "-c", body], capture_output=True, text=True, check=True
+    )
+    return result.stdout.split()
+
+
+def component_normalisation(deploy, components):
+    """Run deploy.sh's colour-to-component normalisation over a component list."""
+    lines = deploy.splitlines()
+    start = next(
+        i
+        for i, line in enumerate(lines)
+        if line.strip() == 'for i in "${!COMPONENTS[@]}"; do'
+    )
+    end = next(i for i in range(start, len(lines)) if lines[i].strip() == "done")
+    body = "\n".join(
+        [
+            "set -euo pipefail",
+            "COMPONENTS=(" + " ".join(shlex.quote(c) for c in components) + ")",
+            "\n".join(lines[start : end + 1]),
+            'printf "%s\\n" "${COMPONENTS[@]}"',
         ]
     )
     result = subprocess.run(
@@ -179,14 +202,19 @@ class CodexRouterRollingUpdateTests(unittest.TestCase):
         self.assertNotIn("auto_https", text)
         self.assertIn("codex-router-a:4100 codex-router-b:4100", proxy[0])
 
-        # Every directive is indented inside the site block, and the set is
-        # exactly the eight the front's behaviour depends on.
+        # Every directive is indented inside the site block, and the set and the
+        # values are exactly the ones the front's behaviour depends on: the retry
+        # window has to outlast a colour swap, and the health interval has to be
+        # short relative to a roll.
         directives = [
-            line.split()[0]
+            line.split()
             for line in lines[1:]
             if not line.startswith("reverse_proxy ") and line != "}"
         ]
-        self.assertEqual(list(EXPECTED_DIRECTIVES), directives)
+        self.assertEqual(
+            [[name, value] for name, value in EXPECTED_DIRECTIVES.items()],
+            directives,
+        )
         for line in raw[1:-1]:
             self.assertTrue(line.startswith((" ", "\t")), f"not indented: {line!r}")
         self.assertIn("lb_policy first", text)
@@ -317,6 +345,36 @@ class CodexRouterRollingUpdateTests(unittest.TestCase):
                 )
                 self.assertNotEqual(serving, idle)
 
+    def test_colour_component_deploys_the_router_instead_of_nothing(self):
+        deploy = DEPLOY_SCRIPT.read_text(encoding="utf-8")
+
+        # `--component codex-router-a` is not a component: it resolves to the
+        # router, so the roll and the generic up both see a service to act on
+        # instead of the build-only no-op that would exit 0 having deployed
+        # nothing.
+        self.assertEqual(
+            ["codex-router"], component_normalisation(deploy, ["codex-router-a"])
+        )
+        self.assertEqual(
+            ["codex-router"], component_normalisation(deploy, ["codex-router-b"])
+        )
+        self.assertEqual(
+            ["codex-router", "hermes"],
+            component_normalisation(deploy, ["codex-router-a", "hermes"]),
+        )
+        # Everything else, including the router itself and `all`, is untouched.
+        self.assertEqual(
+            ["codex-router"], component_normalisation(deploy, ["codex-router"])
+        )
+        self.assertEqual(["all"], component_normalisation(deploy, ["all"]))
+        # The rewrite has to happen before TARGETS is derived from COMPONENTS.
+        self.assertLess(
+            deploy.index('for i in "${!COMPONENTS[@]}"; do'),
+            deploy.index("TARGETS=$($COMPOSE config --services"),
+        )
+        # should_deploy reads COMPONENTS, so it now matches the router.
+        self.assertIn('[[ "$c" == "all" || "$c" == "$1" ]] && return 0', deploy)
+
     def test_roll_readiness_failure_keeps_the_serving_colour(self):
         deploy = DEPLOY_SCRIPT.read_text(encoding="utf-8")
 
@@ -325,8 +383,16 @@ class CodexRouterRollingUpdateTests(unittest.TestCase):
             """--format '{{.Names}} {{.Label "com.docker.compose.service"}}'""",
             deploy,
         )
+        self.assertIn("--filter label=com.docker.compose.project=modules", deploy)
         self.assertIn("awk -v service=", deploy)
         self.assertIn("for colour in codex-router-a codex-router-b; do", deploy)
+        # The container name is re-resolved on every attempt: a colour that is
+        # crash-looping when `up -d` returns must not leave the probe empty for
+        # the whole readiness budget.
+        self.assertLess(
+            deploy.index('for _ in $(seq 1 "$ROUTER_READY_ATTEMPTS"); do'),
+            deploy.index('idle_container="$(colour_container "$idle")"'),
+        )
         # A readiness timeout is a failed deploy, not a silent cutover: the
         # front is not moved and the old colour keeps serving.
         self.assertIn("failed=$((failed + 1))", deploy)
