@@ -81,6 +81,17 @@ test_force_all "FORCE_ALL=true adds --force-recreate" "true" "true"
 test_force_all "FORCE_ALL=false does not add --force-recreate" "false" "false"
 test_force_all "FORCE_ALL empty defaults to no --force-recreate" "" "false"
 
+# Test: every compose `up` sweeps retired services. A service deleted from
+# docker-compose.yml keeps its container running otherwise: compose only adds and
+# updates, so the retired container would outlive the deploy that removed it.
+up_count=$(grep -cE '\$COMPOSE up -d' "$DEPLOY_SCRIPT" || true)
+orphan_count=$(grep -E '\$COMPOSE up -d' "$DEPLOY_SCRIPT" | grep -c -- '--remove-orphans' || true)
+if [ "$up_count" -gt 0 ] && [ "$up_count" -eq "$orphan_count" ]; then
+    ok "every compose up passes --remove-orphans ($up_count invocation(s))"
+else
+    nope "compose up passes --remove-orphans" "$orphan_count of $up_count invocations carry the flag"
+fi
+
 echo ""
 echo "=== deploy.sh TARGETS resolution ==="
 
