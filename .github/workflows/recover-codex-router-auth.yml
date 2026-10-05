@@ -16,8 +16,12 @@ on:
 permissions:
     contents: read
 
+# Shares the production deploy's group on purpose. Both jobs run on the same
+# self-hosted host, check out into the same workspace directory, and touch the
+# same containers: this one execs into the running codex-router container that a
+# deploy restarts and health-checks. Separate groups let the two interleave.
 concurrency:
-    group: codex-router-auth-recovery
+    group: production-deploy
     cancel-in-progress: false
 
 jobs:
