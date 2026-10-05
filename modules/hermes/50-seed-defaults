@@ -314,6 +314,62 @@ for path in paths:
         f.write(content)
 '
 
+# Mirror the deployed platform allowlists into the profile's .env.
+#
+# Hermes authorizes a chat caller by reading the platform allowlist through the
+# per-profile secret scope, not through the process environment: under
+# gateway.multiplex_profiles the reader is scoped to the profile, so a value
+# that exists only in the container environment reads back empty — the bot
+# connects and then rejects every caller as unauthorized. The profile .env is
+# where hermes's own writers keep an allowlist (setup, the dashboard,
+# _save_allowlist), so the deployed variables are mirrored there on every boot.
+#
+# The container environment wins: a stale value left behind in the persistent
+# volume is corrected at the next boot, and a variable that is unset or empty
+# never removes a key. GATEWAY_ALLOWED_USERS is skipped because it is the global
+# allow-any switch, not a per-platform list.
+python3 <<'PYALLOWLIST' || echo "WARNING: could not mirror platform allowlists into the profile .env" >&2
+import os, pathlib, tempfile
+
+home = pathlib.Path(os.environ.get("HERMES_HOME") or "/opt/data")
+env_path = home / ".env"
+
+# ponytail: allowlists are comma-separated ids, so they carry no whitespace,
+# quotes or '#'. Values that need dotenv quoting would use hermes's own
+# _quote_env_value instead of this plain KEY=value mirror.
+wanted = {
+    key: value.strip()
+    for key, value in os.environ.items()
+    if key.endswith("_ALLOWED_USERS") and key != "GATEWAY_ALLOWED_USERS" and value.strip()
+}
+if wanted:
+    old_text = env_path.read_text() if env_path.exists() else None
+    kept, mirrored = [], set()
+    for line in (old_text or "").splitlines():
+        key = line.split("=", 1)[0].strip() if "=" in line and not line.lstrip().startswith("#") else None
+        if key in wanted:
+            kept.append("%s=%s" % (key, wanted[key]))
+            mirrored.add(key)
+        else:
+            kept.append(line)
+    kept.extend("%s=%s" % (key, value) for key, value in wanted.items() if key not in mirrored)
+    new_text = "\n".join(kept) + "\n"
+    if new_text != old_text:
+        # Replace atomically so an interrupted boot cannot truncate the
+        # profile's secret file, and keep it readable only by the owner.
+        fd, tmp = tempfile.mkstemp(dir=str(home), prefix=".env.seed-")
+        with os.fdopen(fd, "w") as f:
+            f.write(new_text)
+        os.chmod(tmp, 0o600)
+        os.replace(tmp, env_path)
+        try:
+            st = home.stat()
+            os.chown(env_path, st.st_uid, st.st_gid)
+        except OSError:
+            pass
+        print("allowlists: mirrored %s into %s" % (",".join(sorted(wanted)), env_path))
+PYALLOWLIST
+
 # Seed memory-backup cron job (idempotent — skips if already present)
 if [ -n "${MEMORY_REPO_URL}" ]; then
     python3 -c '
