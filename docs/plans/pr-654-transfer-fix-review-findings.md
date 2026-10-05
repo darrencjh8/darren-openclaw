@@ -3,7 +3,7 @@ q: Should the hold cover a transfer to ANY person, or only the holder's own lega
 q: Where should the memory lookup happen? | a: `_resolveMovementToOutput`, at the existing hold site (orchestrator.js:761-765), which already receives the movement. Parsing stays free of account facts.
 q: Which memory read decides the person/business question? | a: `list_facts` (full deterministic read from disk), NOT `search_memory`. A recall miss on `search_memory` would silently book a real person transfer as spend, which is the exact defect this closes. The read is made only when `movement.person_transfer === true`, so plain merchant alerts pay nothing.
 q: EXACTLY which facts release the hold? | a: Only the payee/category mapping grammar — a fact whose key normalises equal to the alert's counterparty name under `normalizeIdentityName` (orchestrator.js:290, already used at :759) using the shape `KEY (merchant )?maps to VALUE (payee|category)`. A legal-name / account-holder fact or an `is a ... account` fact can NEVER release the hold. It is fail-closed: an unrecognised grammar holds.
-q: What closes the loop when a person-shaped name is held? | a: Hold only, and name the counterparty and the cause in the notification (Option 1, Darren 2026-10-05). No reply path, no auto-learn, and the notification does NOT tell the user to teach it — nothing would act on that. The cause rides a NEW `_hold_person_identity` flag, not `notify_message` (ignored by the notify path at orchestrator.js:2395-2406) and not `reasoning` (LLM-authored for the three Phase-2 holds).
+q: What closes the loop when a person-shaped name is held? | a: Hold only, and name the counterparty and the cause in the notification (Option 1, Darren 2026-10-05). No reply path, no auto-learn, and the notification does NOT tell the user to teach it — nothing would act on that. The cause rides a NEW `_hold_cause` string with one value per held row, not `notify_message` (ignored by the notify path at orchestrator.js:2395-2406) and not `reasoning` (LLM-authored for the three Phase-2 holds).
 q: Does the hold also fire on INCOMING person credits? | a: Yes, deliberately, but only where the alert resolves to exactly ONE live account at the sender bank. The flag is direction-independent (bank-movement.js:292-293 sets it for `received` as well as `sent`) and an unverified incoming person credit is as unverifiable as an outgoing one; this already matches the #585 precedent that an own-name credit is held rather than booked as income. BOUNDARY, verified: with 2+ live accounts at the sender bank the movement is dropped at orchestrator.js:740 before the hold site, because resolveAccountByBank refuses an ambiguous bank, and F2's new branch is keyed on `outgoing`. That case is unchanged by this plan, is listed under "Not in scope", and is pinned by a test at both account counts.
 q: May the pipeline write facts automatically? | a: Only what the alert itself proves — digits and bank names printed in the body (orchestrator.js:2819 suffix->account, :2749 account type). Never a judgment fact. No new auto-learn is added by this plan.
 q: Should the LLM-extractor route be covered too? | a: Yes (H4), and at `_llmExtractMovement` (orchestrator.js:1040-1052) where the movement is built — NOT at the Phase-1 sanitize block at :1297-1303, which runs after every `_resolveMovementToOutput` caller has already returned.
@@ -64,9 +64,64 @@ Extend the existing hold condition rather than adding a gate, so one site owns
 "person movement with no verified leg" (orchestrator.js:761-765):
 
 - `orchestrator.js:761-765` — add `movement.person_transfer === true` as an
-  OR-term of `unverifiablePersonMovement`, and add a `_hold_person_identity: true`
-  to the row it returns. The `!resolved.internal` term already stands, so a
-  transfer that DID resolve to a tracked account still books as a transfer.
+  OR-term of `unverifiablePersonMovement`, and add a `_hold_cause:
+  "person_identity_unverified"` to the row it returns. The `!resolved.internal`
+  term already stands, so a transfer that DID resolve to a tracked account still
+  books as a transfer.
+- **The `!matchAccountByName(...)` term at `:764` must move INTO the
+  `knownOwnIdentity` arm, not stay as a term of the whole condition (plan round 2,
+  finding H6).** As written the condition is
+  `!resolved.internal && (knownOwnIdentity || person_transfer) && !match` — the
+  `!match` term gates EVERY arm, so a counterparty that resolves to a live account
+  by ANY route suppresses the hold even when `person_transfer === true`.
+  `matchAccountByName` matches on TOKEN CONTAINMENT (suffix-facts.js:246-275,
+  `query.every(w => target.includes(w))`), so with accounts
+  `[Ryt Bank, Wei Ling Savings]` the person name `WEI LING` resolves `matched:true`
+  to `Wei Ling Savings` (while `WEI LING TAN` does not). Verified by executing the
+  condition: `!resolved.internal && (true || true) && !match` evaluates **false**
+  — the hold never fires and the transfer books as spend. That defeats the Critical
+  on BOTH routes, so removing only the H4 suppression is not sufficient; the
+  pre-existing term has the same defect. Restructure so the account-match test
+  applies only to the old own-identity arm:
+
+  ```js
+  const personNamed = movement.person_transfer === true;
+  const unverifiablePersonMovement =
+      !resolved.internal &&
+      ( (knownOwnIdentity && !matchAccountByName(counterparty, accounts, mappings.aliases).matched)
+        || personNamed );
+  ```
+
+  This preserves today's behaviour exactly for the own-identity arm (the name still
+  must not resolve to an account) while the new `person_transfer` arm no longer
+  consults account matching at all — a person name is held because it is an
+  unremembered person, not because it failed an account lookup. `!resolved.internal`
+  still stands, so a transfer that DID resolve to a tracked account books as a
+  transfer. A whole-token identity check is the only safe form of this test, the
+  same discipline the release predicate uses.
+- **Name the counterparty direction-aware (plan round 2, finding M2).** The held
+  row reads `merchant: movement.counterparty.name` (:767) and both notify
+  templates interpolate `llmOutput.merchant`, but on the extractor route
+  `counterparty` is built unconditionally from `to_account` (:1047) — so on an
+  INCOMING credit it is the holder's OWN account. Measured on a held incoming
+  credit (`from_account:"LEE WEI LING"`, `to_account:"Main Account"`): `merchant
+  "Main Account"`, `raw_description "Transfer from Main Account"`, notification
+  `Held an unresolved transfer` — the holder is told a transfer to their own
+  account was held because the counterparty could not be verified. Compute the
+  name once at the hold site and use it for `merchant`, `raw_description`,
+  `reasoning` and the notification:
+
+  ```js
+  const namedParty = movement.direction === "outgoing"
+      ? movement.counterparty?.name
+      : (movement.own_account?.name || movement.counterparty?.name);
+  ```
+
+  This is the SAME `namedParty` H4 already computes on that route, so the two
+  sections now agree on one definition. The deterministic routes are already
+  correct here — the Ryt branches build `counterparty` from the named party in
+  both directions (bank-movement.js:293-297) and the OCBC reference deposit sets
+  it to the sender (:551-558) — so this is exactly the extractor route's gap.
 - The held row stays `Misc`, no category, no amount booked. `raw_description`,
   `reasoning` and `payee_source` must say which cause it was.
 - No direction term: the hold covers incoming person credits too (see QUESTIONS).
@@ -128,6 +183,29 @@ would release a real person transfer — re-opening F1 behind F1.
 `list_facts`, and any fact whose key does not normalise equal to the counterparty.
 The predicate is fail-closed by construction.
 
+**The release predicate is reachable ONLY on the outgoing path (plan round 2,
+finding M3).** Verified by executing the revised plan end to end: with
+`LEE WEI LING merchant maps to Bak Kwa Trading payee` in memory, an OUTGOING
+person credit releases and books, but the same INCOMING credit still returns
+`null`. The reason is structural and pre-existing, not something this plan
+introduces: `_resolveMovementToOutput` has only three booking arms — the internal
+transfer arm (`:789`), the `incoming && !counterparty` unidentified-deposit arm
+(`:844`), and the `outgoing` arm (`:866`) — and an INCOMING movement that HAS a
+counterparty but is not internal reaches neither, falling to `return null` at
+`:936`. Measured identically at HEAD (`409f3fd`) and after the change, so this is
+inherited behaviour.
+
+So an incoming person credit is HELD when the predicate does not release it, and
+still DROPPED when it does: the release half of F1 is dead code in the incoming
+direction. Do not state otherwise. Behaviour change #1 is amended to say the
+release takes effect on OUTGOING person movements only, and that an incoming
+person credit is either held (predicate does not release) or dropped (it does) —
+the `maps to … payee` fact is therefore an unblock for the outgoing direction
+only. Tests pin both: an outgoing person credit with the fact books, and the same
+incoming credit with the fact is dropped rather than booked. Adding an incoming
+booking arm for a person counterparty is its own change and is listed under
+"Not in scope".
+
 #### F1 — the `paid` sentence form (the third Ryt verb)
 
 `bank-movement.js:275` accepts `received|sent|paid`, but the flag at `:292-293` is
@@ -187,24 +265,38 @@ notify path at `:2395-2406` ignores that field anyway, hardcoding
 hold that text is wrong: the destination was never the problem, the counterparty
 identity was.
 
-Add a dedicated internal flag `_hold_person_identity: true` to the person hold,
-stripped alongside `_card_repayment` in F3, and branch the notify template at
-`:2395-2406` on it: keep the existing destination text for the two
-account-resolution holds (`:737`, `:907`) and add a person-identity variant naming
-the counterparty and the cause. `payee_source` gets its own value for the same
-reason.
+Add a dedicated internal `_hold_cause` string (see the three-cause matrix below) to
+the person hold, stripped alongside `_card_repayment` in F3, and switch the notify
+template at `:2395-2406` on it: keep the existing destination text for the two
+account-resolution holds (`:737`, `:907`) and add person-identity and
+source-ambiguous variants naming the counterparty and the cause. `payee_source`
+gets its own value for the same reason.
 
 **Three hold texts, not two — F2 adds a third site inside the SAME
 `!source || !date` block that returns at `:740`, i.e. BEFORE the person-hold site
 at `:761-765`.** So a person transfer that is ALSO ambiguous at the sender bank
 (uid 1012's `Your scheduled transfer of … to <person> …`, where the Ryt branch
 sets `own_account {name:null, bank:"Ryt", suffix:null}`) takes F2's branch, never
-reaches `:761`, never sets `_hold_person_identity`, and is told the transfer
-DESTINATION was unsafe when the cause was the source account. Give F2's new branch
-its OWN cause string (`Held: source account ambiguous at this bank; the transfer to
-"<name>" was not booked`), and set `_hold_person_identity` on it as well when the
-counterparty is person-shaped, so the matrix is keyed on cause rather than on which
-site won. Tests assert all three texts render their own cause.
+reaches `:761`, and is told the transfer DESTINATION was unsafe when the cause was
+the source account. Give F2's new branch its OWN cause string (`Held: source
+account ambiguous at this bank; the transfer to "<name>" was not booked`).
+
+**The cause is ONE value per held row, never two booleans (plan round 2, finding
+M1).** F2's branch does NOT also set `_hold_person_identity`: that branch already
+holds the person-shaped counterparty by name, and `:2395-2406` would see two true
+flags on one row with no stated branch order, so the notification would depend on
+which `if` happened to come first. Instead the hold sites set one dedicated
+`_hold_cause` string — `"destination_unresolved"` (`:737`), `"source_account_ambiguous"`
+(F2's new branch), `"person_identity_unverified"` (`:761`) — and the notify
+template switches on it, so one row renders exactly one cause. `_hold_unresolved_transfer`
+remains the single "this row is held" flag every site already sets; `_hold_cause` is
+the discriminator. `payee_source` still gets its own value per site for the same
+reason.
+
+Tests assert all three texts render their own cause, and Tests item 7 pins the
+uid-1012 shape to the source-ambiguous text REGARDLESS of whether its counterparty
+is person-shaped — it never sets `_hold_person_identity`, because it never reaches
+`:761`.
 
 **Do NOT branch on `reasoning`.** It is a literal for the Phase-1 hold but
 LLM-authored free text for the three Phase-2 holds (`:2142`, `:2167`, `:2234` all
@@ -247,16 +339,49 @@ account-shape facts this module writes (`NAME is a TYPE account` :2749,
 `... ending NNNN belongs to NAME` :2819) as unable to release, so no
 `Main Account maps to <x> payee|category` fact can ever exist.
 
-Key the flag on the correct side per direction:
+Key the flag on the correct side per direction, and on nothing else:
 
 ```js
 const namedParty = direction === "outgoing" ? to : from;
 person_transfer = looksLikePersonName(namedParty);
 ```
 
-AND, belt and braces, suppress it whenever that name is one of the holder's own
-live accounts (`matchAccountByName(namedParty, accounts, aliases).matched`), since
-an account name is by definition not a counterparty. Both pins are in Tests.
+**There is NO name-matches-account suppression (plan round 2, finding H6).** An
+earlier revision of this section added one — "suppress it whenever that name is
+one of the holder's own live accounts (`matchAccountByName(namedParty, accounts,
+aliases).matched`)" — reasoning that "an account name is by definition not a
+counterparty". That is false for the resolver named: `matchAccountByName`
+(suffix-facts.js:288-304) falls through to `matchWithoutAliases` step 2 (:246-275),
+which matches on TOKEN CONTAINMENT (`query.every(w => target.includes(w))`). With
+accounts `[Ryt Bank, Wei Ling Savings]`, the person name `WEI LING` resolves
+`matched:true` to `Wei Ling Savings` while `WEI LING TAN` does not. So the
+suppression silently turns OFF the hold for a real person transfer whenever the
+holder has a joint, trust, minor or homonym account, and F1's new OR-term then
+reads `person_transfer === false` and never fires — the Critical re-opens on the
+very route H4 exists to close.
+
+Measured, on the same `You've sent RM250.00 to WEI LING … using your Main Account`
+alert: deterministic route -> `person_transfer:true`, held, notified, no insert;
+extractor route -> `hold:false`, `payee_name:"Misc"`, phase 3
+`{action:"inserted", details:"MYR 250 at WEI LING -> Misc"}`, `insert_transaction`
+called. The same email holds on one route and posts as spend on the other.
+
+The direction keying alone is sufficient and is verified: an extractor-routed
+incoming credit whose `from_account` is `LEE WEI LING` and whose `to_account` is
+`Main Account` sets `person_transfer:true` and is held. If an own-account guard is
+ever wanted it must compare WHOLE tokens —
+`normalizeIdentityName(namedParty) === normalizeIdentityName(account.name)` over
+live accounts — the same discipline the release predicate uses, and never
+`matchAccountByName(...).matched`. Do not add it here: an account list and aliases
+are not in scope at `:1040-1052` (`_llmExtractMovement` holds no context; the
+resolver reads its own `fetch_context` at `:684`), so the term would either not
+compile or cost an extra context round-trip per alert.
+
+Tests item 8 therefore pins BOTH directions by direction keying alone: an incoming
+credit whose `to_account` is the holder's own `Main Account` must not set the flag,
+and an outgoing one whose `to_account` is `LEE WEI LING` must — plus a case where
+an OUTGOING counterparty that resolves by containment to an account (`WEI LING` vs
+`Wei Ling Savings`) is still held, so a reintroduced suppression cannot go green.
 
 It must NOT be set at the Phase-1 sanitize block (`:1297-1303`). Every
 `_resolveMovementToOutput` caller — `_runStructuredMovement` (:667-673),
@@ -270,7 +395,7 @@ it. That boundary is stated in "Not in scope" and pinned by a test.
 
 ### F3 — sanitize
 
-Add `delete output._card_repayment;` and `delete output._hold_person_identity;` to
+Add `delete output._card_repayment;` and `delete output._hold_cause;` to
 the list at `orchestrator.js:1297-1303`, and extend the existing sanitizer test
 rather than adding a file, so the invariant stays pinned next to its siblings.
 
@@ -313,17 +438,31 @@ RED first, each failing on real code at the revision named in Evidence:
      SANDS`, `NTUC FAIRPRICE`, both verified person-shaped) is held, and the same
      counterparty with a `maps to ... payee` fact books — the new surface the verb
      widening opens, pinned on both sides;
+   - the release fact is effective OUTGOING only: an outgoing person credit with a
+     `maps to ... payee` fact books, and the same INCOMING credit with that fact
+     is DROPPED, not booked (no incoming booking arm — `:936`; plan round 2
+     finding M3), pinned on both sides;
    - an outgoing movement naming an unresolvable source account still yields the
      current drop (the F2 boundary);
    - the generic full Phase-1 LLM path (loop at :1128) never enters
      `_resolveMovementToOutput` and therefore never reaches a movement hold.
-7. NEW — the three hold texts each render their OWN cause: destination-unresolved
-   (`:737`), person-identity (`:761`), and source-account-ambiguous (F2's new
-   branch), including the uid-1012 shape that reaches F2's branch FIRST and so
-   never sets `_hold_person_identity` at `:761`.
-8. NEW — H4 direction pins: an extractor-routed INCOMING credit whose `to_account`
-   is the holder's own `Main Account` must NOT set `person_transfer`; an outgoing
-   one whose `to_account` is `LEE WEI LING` must.
+7. NEW — the three hold texts each render their OWN `_hold_cause`, one per row:
+   destination-unresolved (`:737`), person-identity (`:761`), and
+   source-account-ambiguous (F2's new branch). The uid-1012 shape reaches F2's
+   branch FIRST and so never reaches `:761`: it is pinned to the
+   source-ambiguous text REGARDLESS of whether its counterparty is person-shaped,
+   and it sets no second cause flag.
+8. NEW — H4 direction pins, by direction keying ALONE:
+   - an extractor-routed INCOMING credit whose `to_account` is the holder's own
+     `Main Account` must NOT set `person_transfer`; an outgoing one whose
+     `to_account` is `LEE WEI LING` must;
+   - an OUTGOING transfer to `WEI LING` is HELD even with a live account named
+     `Wei Ling Savings` in the set — i.e. no name-matches-account suppression at
+     either the H4 site or the `:764` hold term, so a reintroduced
+     `matchAccountByName(...).matched` term cannot go green. This case fails at the
+     reviewed revision without the F1 restructure;
+   - a held INCOMING credit's `merchant`, `raw_description` and notification name
+     the SENDER (`LEE WEI LING`), never the holder's own account.
 
 Items 1-2 are new whole test files under `tests/`, which the dev-loop policy
 treats as a `tests_only` mutation, plus lines added to existing test files.
@@ -421,16 +560,22 @@ treats as a `tests_only` mutation, plus lines added to existing test files.
    still dropped, unchanged by this change (see q7 and "Not in scope"). This closes
    the Critical, and it re-admits
    the name-shape sensitivity that `orchestrator.js:743-747` once removed to fix a real
-   production incident (`CFF UNITED PLT` wrongly held). A counterparty with a
-   `maps to ... payee|category` fact in memory books normally; a brand-new vendor
-   is HELD every time until such a fact exists — which today means a
+   production incident (`CFF UNITED PLT` wrongly held).
+   **The `maps to ... payee|category` release applies to OUTGOING person movements
+   only.** An INCOMING person credit is HELD when the predicate does not release
+   it and still DROPPED when it does, because no incoming booking arm exists for a
+   movement that has a counterparty and is not internal (it falls to `return null`
+   at `:936`) — measured identically at HEAD and after the change, so this is
+   inherited, not introduced here (plan round 2, finding M3). The fact is therefore
+   an unblock for the outgoing direction only. A brand-new vendor is HELD every
+   time until such a fact exists — which today means a
    migration-written or hand-written fact line (write it with `learn_fact`), NOT a
    reply to the notification.
    The must-book pin at `production-incidents.test.js:663` (`ACME CONSULTANCY`)
    therefore changes from "must book" to "must hold" and is amended by this
    change — stated plainly here and in the PR body rather than buried. The
    `CFF UNITED PLT` pin at `:646-660` and the `was paid at` form are NOT affected.
-2. `_card_repayment` and `_hold_person_identity` are stripped from LLM output
+2. `_card_repayment` and `_hold_cause` are stripped from LLM output
    (hardening, no booking change).
 3. A hold now names the counterparty and the cause in its notification.
 4. A held email is marked read, so it no longer re-notifies on every idle poll.
@@ -457,6 +602,13 @@ treats as a `tests_only` mutation, plus lines added to existing test files.
   held every time until a `maps to` fact exists, which the pipeline never writes
   for a merchant it has no fact for. Disclosed in Behaviour change #1, pinned on
   both sides in Tests item 6, and the unblock is `learn_fact`.
+- **An INCOMING person credit released by a `maps to … payee` fact** — dropped,
+  not booked, because `_resolveMovementToOutput` has no incoming booking arm for a
+  movement that has a counterparty and is not internal (it falls to `return null`
+  at `:936`). Inherited at HEAD, measured identical before and after this change
+  (plan round 2, finding M3). Pinned at both outcomes so it cannot silently
+  widen; closing it means adding an incoming person arm, which is its own change
+  with its own reproduction.
 - Person-shaped counterparties on the generic full Phase-1 LLM path (:1128),
   which never enters `_resolveMovementToOutput` and cannot reach a movement hold.
 - `CARD_PRODUCT_RE`'s redundant alternation (`\bcredit\s+cards?\b` already
