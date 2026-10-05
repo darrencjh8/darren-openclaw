@@ -581,11 +581,6 @@ if $GITHUB_MODE || check_file "$HERMES_ENV"; then
   check_var "GH_APP_INSTALLATION_ID" "$HERMES_ENV"
   check_var "GH_APP_PRIVATE_KEY" "$HERMES_ENV"
 
-  # Dashboard Auth
-  echo "  [Dashboard Auth]"
-  check_var "HERMES_DASHBOARD_BASIC_AUTH_USERNAME" "$HERMES_ENV"
-  check_var "HERMES_DASHBOARD_BASIC_AUTH_PASSWORD" "$HERMES_ENV"
-
   # Persona
   echo "  [Persona]"
   check_var "IDENTITY_NAME" "$HERMES_ENV"

@@ -125,8 +125,6 @@ jobs:
                   SLACK_APP_TOKEN: ${{ secrets.SLACK_APP_TOKEN }}
                   HERMES_WEBHOOK_SECRET: ${{ secrets.HERMES_WEBHOOK_SECRET }}
                   GH_APP_PRIVATE_KEY: ${{ secrets.GH_APP_PRIVATE_KEY }}
-                  HERMES_DASHBOARD_BASIC_AUTH_USERNAME: ${{ secrets.HERMES_DASHBOARD_BASIC_AUTH_USERNAME }}
-                  HERMES_DASHBOARD_BASIC_AUTH_PASSWORD: ${{ secrets.HERMES_DASHBOARD_BASIC_AUTH_PASSWORD }}
                   ACTUAL_BUDGET_PASSWORD: ${{ secrets.ACTUAL_BUDGET_PASSWORD }}
                   IMAP_USERNAME: ${{ secrets.IMAP_USERNAME }}
                   IMAP_PASSWORD: ${{ secrets.IMAP_PASSWORD }}
