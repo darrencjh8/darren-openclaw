@@ -278,6 +278,13 @@ describe("a card-product destination that cannot be linked is held, not spent", 
 
         expect(phase2).toBeTruthy();
         expect(phase2._hold_unresolved_transfer).toBe(true);
+        expect(phase2._hold_cause).toBe("destination_unresolved");
+        // The destination-refusal family renders the DESTINATION story, not the
+        // person one or the source-ambiguous one — one cause per held row.
+        const text = calls.find((c) => c.name === "notify_user")?.args?.message || "";
+        expect(text).toMatch(/transfer destination/i);
+        expect(text).not.toMatch(/which of your accounts it left/);
+        expect(text).not.toMatch(/could not verify/);
         expect(calls.some((c) => c.name === "insert_transaction")).toBe(false);
     });
 });
@@ -307,6 +314,7 @@ describe("a Ryt scheduled transfer is never booked as an external expense", () =
 
         expect(phase2).toBeTruthy();
         expect(phase2._hold_unresolved_transfer).toBe(true);
+        expect(phase2._hold_cause).toBe("person_identity_unverified");
         expect(phase2.category_id).toBeNull();
         expect(calls.some((c) => c.name === "insert_transaction")).toBe(false);
     });

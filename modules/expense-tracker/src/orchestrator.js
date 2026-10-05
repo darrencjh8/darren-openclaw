@@ -2337,6 +2337,7 @@ export class AgentOrchestrator {
                         output.payee_source = "transfer_destination_refused";
                         output.category_id = null;
                         output._hold_unresolved_transfer = true;
+                        output._hold_cause = "destination_unresolved";
                     } else {
                         output.payee_id = cardPayee.id;
                         output._is_transfer = true;
@@ -2362,6 +2363,7 @@ export class AgentOrchestrator {
                     output.payee_source = "transfer_destination_refused";
                     output.category_id = null;
                     output._hold_unresolved_transfer = true;
+                    output._hold_cause = "destination_unresolved";
                 } else if (accountMatch) {
                     const matchedTransferPayee = payees.find(
                         (p) => p.transfer_acct === accountMatch.id,
@@ -2429,6 +2431,7 @@ export class AgentOrchestrator {
             output.payee_source = "transfer_destination_refused";
             output.category_id = null;
             output._hold_unresolved_transfer = true;
+            output._hold_cause = "destination_unresolved";
         }
 
         // Step 2: Category resolution.
@@ -2603,6 +2606,7 @@ export class AgentOrchestrator {
                     const messages = {
                         person_identity_unverified: `Held: ${prefix}transfer to "${heldName}" was not booked — I could not verify "${heldName}" as a payee or one of your accounts, and booking it would record a stranger as spending or income.`,
                         source_account_ambiguous: `Held: ${prefix}transfer to "${heldName}" was not booked — I could not tell which of your accounts it left, because more than one account at that bank matches the alert. Nothing was recorded.`,
+                        destination_unresolved: `Held: transfer destination for ${prefix}"${heldName}" was not safe to resolve, so it was not booked.`,
                     };
                     const message = messages[llmOutput._hold_cause] ||
                         `Held: transfer destination for ${prefix}"${heldName}" was not safe to resolve, so it was not booked.`;
