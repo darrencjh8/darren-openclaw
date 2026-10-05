@@ -130,3 +130,35 @@ describe("H4 - extractor-route person flag keys on the other party, not on `to_a
         expect(calls).not.toContain("insert_transaction");
     });
 });
+
+describe("H4 - a held movement names the OTHER party on the deterministic route too", () => {
+    // The Ryt received form can carry a "using your <account>" clause, and the
+    // parser puts that clause in `own_account.name` — the HOLDER's account, not
+    // the sender. Naming the hold from `own_account.name` on an incoming movement
+    // therefore told the holder their own account was the unverified
+    // counterparty. The sender is `counterparty` here, exactly as it is on the
+    // outgoing side.
+    const RECEIVED_WITH_ACCOUNT_CLAUSE = [
+        "[frame]",
+        "",
+        "Hi Darren,",
+        "",
+        "Money's in! You've received RM62.00 from ACCOUNT HOLDER on 18/9/2026,",
+        "5:04 AM (GMT+8) using your Main Account.",
+        "",
+        "footer",
+    ].join("\n");
+
+    it("names the SENDER, not the holder's own credited account", async () => {
+        const { orch } = orchestratorFor({});
+
+        const out = await orch._runPhase1(RECEIVED_WITH_ACCOUNT_CLAUSE, {
+            senderBank: "Ryt",
+            receivedAt: "2026-09-18T00:00:00.000Z",
+        });
+
+        expect(out._hold_cause).toBe("person_identity_unverified");
+        expect(out.merchant).toBe("ACCOUNT HOLDER");
+        expect(out.merchant).not.toBe("Main Account");
+    });
+});

@@ -911,15 +911,17 @@ export class AgentOrchestrator {
                 !matchAccountByName(counterparty, accounts, mappings.aliases).matched) ||
                 personNamed);
         if (unverifiablePersonMovement) {
-            // Name the COUNTERPARTY, which is the other party to the money — not
-            // the destination account field. On the LLM-extractor route
-            // `counterparty` is built unconditionally from `to_account`
-            // (orchestrator.js _llmExtractMovement), so on an INCOMING credit it
-            // is the holder's OWN account; naming it told the holder a transfer to
-            // their own account was held because the counterparty was unverified.
-            const namedParty = movement.direction === "outgoing"
-                ? counterparty
-                : (movement.own_account?.name || counterparty);
+            // Name the COUNTERPARTY. Both movement routes now build it as the
+            // OTHER party to the money regardless of direction — the deterministic
+            // parser names the counterparty from the alert sentence, and
+            // _llmExtractMovement below assigns `counterparty` from the source on an
+            // incoming movement and the destination on an outgoing one. So there is
+            // no direction term here: an earlier revision preferred
+            // `own_account.name` for incoming movements, which named the holder's
+            // OWN credited account as the unverified counterparty on the
+            // deterministic Ryt received form whenever it carried a
+            // "using your <account>" clause.
+            const namedParty = counterparty;
             return {
                 merchant: namedParty || "Bank transfer",
                 amount_cents: movement.direction === "incoming"
@@ -1196,30 +1198,40 @@ export class AgentOrchestrator {
             const from = String(parsed?.from_account || "").trim();
             const to = String(parsed?.to_account || "").trim();
             if (!occurredAt || (!from && !to)) return null;
-            // The person/business flag must exist BEFORE _resolveMovementToOutput
-            // reads it, and it must key on the side that is actually the OTHER
-            // party to the money. This route assigns `own_account` from
-            // `from_account` and `counterparty` from `to_account` UNCONDITIONALLY
-            // (below), and the extractor prompt defines `to_account` as the
-            // DESTINATION — which on an incoming movement is the holder's OWN
-            // account. Keying on `to` for both directions therefore flagged real
-            // incoming credits as person transfers (looksLikePersonName accepts
-            // "Main Account", "Ryt Credit", "POSB Cashback Account"). So: the
-            // destination on an outgoing movement, the source on an incoming one.
-            // No account-name suppression is added here — `matchAccountByName`
-            // matches on token containment, so it silently released genuine person
-            // transfers (a name "WEI LING" resolved to an account "Wei Ling
-            // Savings"), and an account list is not in scope in this method.
-            const namedParty = direction === "outgoing" ? to : from;
+            // The two account fields follow the SAME convention as the
+            // deterministic parser, so `counterparty` is the OTHER party to the
+            // money in both directions and nothing downstream needs to special-
+            // case this route. The extractor prompt defines `from_account` as the
+            // source and `to_account` as the destination, so for an INCOMING
+            // movement the destination is the holder's own credited account —
+            // assigning `own_account` from `from_account` unconditionally put the
+            // SENDER in the holder's slot and the holder in the counterparty's.
+            // That is what made `looksLikePersonName(counterparty)` flag real
+            // incoming credits (`looksLikePersonName` accepts "Main Account",
+            // "Ryt Credit", "POSB Cashback Account") and what made a hold name the
+            // holder's own account as the unverified counterparty.
+            const incoming = direction === "incoming";
+            const holderAccount = incoming ? to : from;
+            const otherParty = incoming ? from : to;
             const movement = {
                 kind: "bank_movement",
                 direction,
                 amount_cents: cents(currency, amount, direction),
                 currency,
                 occurred_at: occurredAt,
-                own_account: from ? { name: from, bank: senderBank, suffix: suffix(from) } : null,
-                counterparty: to ? { name: to, bank: bankFromText(to), suffix: suffix(to) } : null,
-                person_transfer: looksLikePersonName(namedParty),
+                own_account: holderAccount
+                    ? { name: holderAccount, bank: senderBank, suffix: suffix(holderAccount) }
+                    : null,
+                counterparty: otherParty
+                    ? { name: otherParty, bank: bankFromText(otherParty), suffix: suffix(otherParty) }
+                    : null,
+                // Keyed on the counterparty, which after the assignment above is
+                // the other party in BOTH directions. No account-name suppression:
+                // `matchAccountByName` matches on token containment, so it silently
+                // released genuine person transfers (a person name "WEI LING"
+                // resolved to an account "Wei Ling Savings"), and an account list
+                // is not in scope in this method anyway.
+                person_transfer: looksLikePersonName(otherParty),
                 reference_number: String(parsed?.reference || ""),
                 recipient_bank: direction === "incoming" ? senderBank : null,
                 merchant_display_name: String(parsed?.merchant || ""),
