@@ -92,6 +92,18 @@ else
     nope "compose up passes --remove-orphans" "$orphan_count of $up_count invocations carry the flag"
 fi
 
+# Test: the best-effort `docker stop`s are guarded with `|| true`, not `; true`.
+# Under `set -e` a command followed by `; true` still ends the script before the
+# guard runs, and the containers in that list are optional: `kokoro-tts` is not on
+# production, so a missing one aborted three deploys before `compose up` ran.
+stop_count=$(grep -cE '\bdocker stop\b' "$DEPLOY_SCRIPT" || true)
+stop_guarded=$(grep -E '\bdocker stop\b' "$DEPLOY_SCRIPT" | grep -c -- '|| true' || true)
+if [ "$stop_count" -gt 0 ] && [ "$stop_count" -eq "$stop_guarded" ]; then
+    ok "every docker stop is best-effort (|| true) ($stop_count invocation(s))"
+else
+    nope "docker stop is best-effort" "$stop_guarded of $stop_count invocations carry || true"
+fi
+
 echo ""
 echo "=== deploy.sh TARGETS resolution ==="
 

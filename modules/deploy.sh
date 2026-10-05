@@ -936,8 +936,12 @@ fi
 
 # Deploy
 if [[ " ${COMPONENTS[*]} " =~ " all " ]]; then
-  docker ps -q --filter name=gateway | xargs -r docker stop 2>/dev/null; true
-  docker stop hermes modules-portfolio-tracker-1 modules-expense-tracker-1 modules-actual-api-1 kokoro-tts 2>/dev/null; true
+  # `|| true` rather than `; true`: under `set -e` a command followed by `; true`
+  # still ends the script before the guard runs. Both stops are best-effort —
+  # the gateway and kokoro-tts containers come from other projects and are absent
+  # on some hosts, which aborted three deploys before `compose up` ran.
+  docker ps -q --filter name=gateway | xargs -r docker stop 2>/dev/null || true
+  docker stop hermes modules-portfolio-tracker-1 modules-expense-tracker-1 modules-actual-api-1 kokoro-tts 2>/dev/null || true
 fi
 
 # --remove-orphans retires the container of a service this revision deleted.
