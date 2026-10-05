@@ -609,7 +609,6 @@ class CodexRouterRollingUpdateTests(unittest.TestCase):
                     '  for c in $RUNNING; do [ "$c" = "$1" ] && printf "%s\\n" "$c"; done',
                     "  return 0",
                     "}",
-                    "colour_ready() { return 1; }",
                     "\n".join(lines[start : up + 1]),
                     "fi",
                     'printf "failed=%s\\n" "$failed"',
@@ -633,6 +632,73 @@ class CodexRouterRollingUpdateTests(unittest.TestCase):
             "up -d --remove-orphans --force-recreate codex-router-a", cutover.stdout
         )
         self.assertIn("failed=0", cutover.stdout)
+
+    def test_the_readiness_probe_never_looks_the_colour_up_again(self):
+        deploy = DEPLOY_SCRIPT.read_text(encoding="utf-8")
+
+        # The selection resolves each colour's container through one guarded
+        # lookup, which can tell a docker failure from a genuine no-match. A
+        # lookup inside the readiness probe is a second, unguarded one: its
+        # failure reads as "this colour is not serving", the caller falls through
+        # to the candidate branch, and the steady state — where the only running
+        # colour is the one the front serves — ends in a force-recreate of the
+        # front's only upstream. The probe takes the name the caller already
+        # resolved instead.
+        probe = function_block(deploy, "colour_ready")
+        self.assertNotIn("colour_container", probe)
+        self.assertIn('docker exec "$1"', probe)
+
+        lines = deploy.splitlines()
+        start = next(i for i, line in enumerate(lines) if line.strip() == 'serving=""')
+        up = next(
+            i
+            for i in range(start, len(lines))
+            if "--force-recreate" in lines[i] and '"$idle"' in lines[i]
+        )
+
+        def roll(probe_lookup_fails):
+            body = "\n".join(
+                [
+                    "set -euo pipefail",
+                    "COMPOSE=echo",
+                    'RED=""; NC=""',
+                    "failed=0",
+                    f"PROBE_LOOKUP_FAILS={probe_lookup_fails}",
+                    "docker() {",
+                    "  if [ \"$1\" = ps ]; then",
+                    # Fail the `docker ps` that the probe reaches through
+                    # `colour_container`, and only that one: the selection's own
+                    # lookup must keep working, so a roll that recreates the
+                    # serving colour is the probe's doing.
+                    '    case " ${FUNCNAME[*]} " in',
+                    '      *" colour_ready "*) [ "$PROBE_LOOKUP_FAILS" = true ] && return 1 ;;',
+                    "    esac",
+                    '    printf "%s\\n" "modules-codex-router-a-1 codex-router-a"',
+                    "  fi",
+                    "  return 0",
+                    "}",
+                    function_block(deploy, "colour_container"),
+                    function_block(deploy, "colour_ready"),
+                    "\n".join(lines[start : up + 1]),
+                    "fi",
+                    'printf "failed=%s\\n" "$failed"',
+                ]
+            )
+            return subprocess.run(["bash", "-c", body], capture_output=True, text=True)
+
+        # Control: the colour answers, so it serves and the other colour rolls.
+        healthy = roll("false")
+        self.assertEqual(0, healthy.returncode, healthy.stderr)
+        self.assertIn("serving: codex-router-a; rolling: codex-router-b", healthy.stdout)
+        self.assertNotIn("force-recreate codex-router-a", healthy.stdout)
+
+        # The probe's own lookup failing must change nothing: the colour still
+        # serves, and the roll still takes the other one.
+        raced = roll("true")
+        self.assertEqual(0, raced.returncode, raced.stderr)
+        self.assertIn("serving: codex-router-a; rolling: codex-router-b", raced.stdout)
+        self.assertNotIn("force-recreate codex-router-a", raced.stdout)
+        self.assertIn("failed=0", raced.stdout)
 
     def test_every_colour_probe_is_time_bounded(self):
         deploy = DEPLOY_SCRIPT.read_text(encoding="utf-8")
@@ -668,12 +734,18 @@ class CodexRouterRollingUpdateTests(unittest.TestCase):
         )
         region = "\n".join(lines[start : not_ready + 1])
 
-        def roll(stop_status):
+        def roll(stop_status, reload_failures=0):
             with tempfile.TemporaryDirectory() as tmp:
                 compose = Path(tmp) / "fake-compose"
                 compose.write_text(
                     "#!/bin/sh\n"
                     f'[ "$1" = "stop" ] && exit {stop_status}\n'
+                    'if [ "$1" = "exec" ]; then\n'
+                    f'  n=$(cat "{tmp}/execs" 2>/dev/null || echo 0)\n'
+                    "  n=$((n + 1))\n"
+                    f'  printf "%s\\n" "$n" > "{tmp}/execs"\n'
+                    f'  [ "$n" -gt {reload_failures} ] || exit 1\n'
+                    "fi\n"
                     "exit 0\n",
                     encoding="utf-8",
                 )
@@ -710,6 +782,31 @@ class CodexRouterRollingUpdateTests(unittest.TestCase):
         self.assertEqual(0, broken.returncode, broken.stderr)
         self.assertIn("✗ stop codex-router-a failed", broken.stdout)
         self.assertIn("failed=1", broken.stdout)
+
+        # `up -d` returns when the front's container starts, not when caddy has
+        # bound its admin listener, so the reload on the start paths can land on a
+        # booting front. That is a race, not a broken configuration: retrying it
+        # keeps a serving front from being reported as a failed deploy.
+        retried = roll(0, reload_failures=1)
+        self.assertEqual(0, retried.returncode, retried.stderr)
+        self.assertIn("stopping codex-router-a (drain 600s)", retried.stdout)
+        self.assertIn("failed=0", retried.stdout)
+
+        # The retry is bounded: a configuration caddy keeps refusing still fails
+        # the deploy, after a fixed number of attempts rather than forever.
+        deploy = DEPLOY_SCRIPT.read_text(encoding="utf-8")
+        reload_loop = deploy[
+            deploy.index("reload_ok=false") : deploy.index("if [ \"$reload_ok\" = true ]")
+        ]
+        self.assertEqual(1, reload_loop.count("caddy reload --config"))
+        self.assertIn("for _ in 1 2 3; do", reload_loop)
+        self.assertIn("sleep 2", reload_loop)
+
+        refused = roll(0, reload_failures=99)
+        self.assertEqual(0, refused.returncode, refused.stderr)
+        self.assertIn("✗ caddy reload failed", refused.stdout)
+        self.assertIn("failed=1", refused.stdout)
+        self.assertNotIn("stopping codex-router-a", refused.stdout)
 
 
 if __name__ == "__main__":

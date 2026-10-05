@@ -61,13 +61,18 @@ publish no ports. `modules/build.sh` builds the colours and skips the front, whi
 `caddy:2-alpine` image. `deploy.sh` never brings the colours up as a group; after the generic
 `compose up` it rolls them:
 
-1. Pick the running colour that is not serving, defaulting to `codex-router-a`.
+1. Pick the running colour that is not serving, defaulting to `codex-router-a`. A colour counts as
+   running only if `docker ps` names it and it answers `/health/liveliness`; if `docker ps` fails and
+   the stack's containers cannot be read at all, the roll stops before starting or stopping anything
+   and the next scheduled deploy retries from the same state.
 2. `compose up -d --force-recreate codex-router-a` (or `-b`) and wait for `/health/liveliness` on that
    colour. The recreate is deliberate: a colour that runs but never answers is the idle colour on
    every roll, and a plain `up -d` is a no-op on an unchanged container, so that candidate would be
    re-selected and the deploy would fail every time.
 3. Start the front if it is not running (its first start is the cutover from the pre-roll layout),
-   then reload its Caddyfile. A front that is already running is left alone: it owns the only
+   then reload its Caddyfile, retrying a failed reload a bounded three times: `up -d` returns when
+   the container starts, not when caddy has bound its admin listener, so the reload on that path can
+   land on a booting front. A front that is already running is left alone: it owns the only
    published listener, and `up -d` would recreate it if its stanza or image changed. Because of that,
    a change to the front's own compose stanza (image, memory limit, healthcheck) is applied only by a
    deploy with `force_all=true`.

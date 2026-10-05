@@ -1212,14 +1212,16 @@ if should_deploy "codex-router" || should_deploy "all"; then
     ! front_running || [ "${FORCE_ALL:-false}" = "true" ]
   }
 
+  # Takes the container name, never the colour: a second lookup here would be a
+  # second chance for `docker ps` to fail, and this probe's failure reads as "the
+  # colour does not answer", which makes that colour the roll's candidate. The
+  # selection below resolves the name once, through its guarded lookup.
+  #
   # --max-time/--connect-timeout bound every probe: a colour that holds the
   # connection open without answering would otherwise block the roll forever
   # instead of reaching the readiness budget below.
   colour_ready() {
-    local container
-    container="$(colour_container "$1")" || return 1
-    [ -n "$container" ] || return 1
-    docker exec "$container" curl -fsS --max-time 5 --connect-timeout 2 \
+    docker exec "$1" curl -fsS --max-time 5 --connect-timeout 2 \
       http://127.0.0.1:4100/health/liveliness >/dev/null 2>&1
   }
 
@@ -1232,7 +1234,7 @@ if should_deploy "codex-router" || should_deploy "all"; then
   for colour in codex-router-a codex-router-b; do
     container="$(colour_container "$colour")" || { colour_probe_failed=true; continue; }
     [ -n "$container" ] || continue
-    if [ -z "$serving" ] && colour_ready "$colour"; then
+    if [ -z "$serving" ] && colour_ready "$container"; then
       serving="$colour"
     elif [ -z "$idle" ]; then
       idle="$colour"
@@ -1296,7 +1298,21 @@ if should_deploy "codex-router" || should_deploy "all"; then
       # not hash: without this reload the front keeps the configuration it booted
       # with, which would leave the role out of the roll. The directory is mounted
       # rather than the file so a checkout that replaces the inode is still read.
-      if timeout 30 $COMPOSE exec -T codex-router caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile; then
+      #
+      # `up -d` returns when the container starts, not when caddy has bound its
+      # admin listener, so on the paths that start the front (the cutover and
+      # FORCE_ALL) the first reload can land on a booting front. That is a race,
+      # not a broken configuration: the front is reading this same file. Retry
+      # before failing the deploy; three attempts bound the extra wait at 96s.
+      reload_ok=false
+      for _ in 1 2 3; do
+        if timeout 30 $COMPOSE exec -T codex-router caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile; then
+          reload_ok=true
+          break
+        fi
+        sleep 2
+      done
+      if [ "$reload_ok" = true ]; then
         if [ -n "$serving" ]; then
           echo "  stopping $serving (drain ${ROUTER_DRAIN_SECONDS}s)"
           $COMPOSE stop -t "$ROUTER_DRAIN_SECONDS" "$serving" || {
