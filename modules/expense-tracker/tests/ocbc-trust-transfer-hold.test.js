@@ -431,40 +431,36 @@ describe("_structured_movement is not a synonym for an internal resolution (#623
     });
 });
 
-// ── The uid 968 body depends on the extractor flattening the wrap ──
+// ── The uid 968 body keeps parsing across input paths ──
 
-describe("uid 968 only parses because the extractor flattens the bank's wrap", () => {
-    // The bank's text/plain part wraps mid-counterparty. The exact column is
-    // not load-bearing (and not measurable here, the leading emoji has no
-    // fixed width); what matters is only that a newline lands inside the name:
-    //   "...from OverseaChinese Banking Corporation\nLtd A/C ending 9001 on..."
-    // The Trust branch's `(.+?)` cannot cross that newline, so the RAW body
-    // does not parse. The IMAP path only ever sees the flattened form because
-    // `extractEmailContent` collapses `\s+` — and it does so on EVERY return
-    // path in that function, including all three of its internal catch
-    // fallbacks, so no branch of it hands back uncollapsed text.
-    //
-    // There is exactly one production entry that skips it: `processText` ->
-    // `_processTextInternal` (src/orchestrator.js:457) forwards
-    // `String(rawText || "")` straight to `_runPhase1` with no
-    // `extractEmailContent` call at all. Its only production caller is
-    // `_handle_process_transaction` (src/tools.js:2272), the Telegram entry,
-    // which `.trim()`s the text but does not collapse the wrap either. So the
-    // surviving exposure is Telegram only: a wrapped body pasted in there does
-    // NOT parse today and falls through to the LLM; the next test pins that
-    // gap rather than pretending it does not exist. Pinned here so a change to
-    // the collapse fails loudly instead of quietly dropping this credit leg
-    // off the deterministic path.
+describe("uid 968 tolerates the bank's wrapped text/plain body", () => {
+    // The bank's text/plain part wraps mid-counterparty. Matching against
+    // collapsed whitespace makes the parser independent of MIME line wrapping
+    // and keeps the Telegram/text path aligned with the IMAP path.
+    // This is redacted production data from uid 968: amount/date/time,
+    // suffix, and bank/product wording are retained; no credential is present.
+    // The IMAP extractor already collapses this whitespace; the parser now
+    // applies the same normalization when called directly.
+
+    // The Telegram/text entry point bypasses MIME extraction, so this fixture
+    // also exercises the raw-body path directly.
     const WRAPPED =
         "💰❤️🎉 Sweet! You have received SGD 6.48 from OverseaChinese Banking Corporation\nLtd A/C ending 9001 on 27 Sep 2026 11:49 SGT. For more info, please contact us via Trust App.";
 
-    it("returns null on the raw wrapped body", () => {
+    it("parses the raw wrapped body without relying on email extraction", () => {
         expect(
             parseBankMovement(WRAPPED, {
                 senderBank: "Trust",
                 receivedAt: "2026-09-27T03:49:46.000Z",
             }),
-        ).toBeNull();
+        ).toMatchObject({
+            direction: "incoming",
+            amount_cents: 648,
+            counterparty: {
+                name: "OverseaChinese Banking Corporation Ltd",
+                suffix: "9001",
+            },
+        });
     });
 
     it("parses once the extractor has collapsed the whitespace", async () => {
@@ -498,31 +494,18 @@ describe("uid 968 only parses because the extractor flattens the bank's wrap", (
         });
     });
 
-    it("KNOWN GAP: the wrapped body does not survive processText, which skips extraction", async () => {
-        // Exercises the REAL entry point, `processText`, not `_runPhase1`
-        // directly. That matters: the claim under test is specifically that
-        // `processText` -> `_processTextInternal` forwards `String(rawText)`
-        // straight through with no `extractEmailContent` call. Calling
-        // `_runPhase1` by hand cannot demonstrate that, because it bypasses
-        // the very step being blamed — and it lets the assertion pass even if
-        // `processText` starts extracting.
-        //
-        // The gap, stated plainly: a wrapped alert pasted in (the Telegram
-        // path) is NOT flattened, so the deterministic parser returns null and
-        // the row falls through to the LLM. That is a KNOWN GAP, not correct
-        // behaviour.
-        //
-        // This runs as a live assertion on purpose, so the gap cannot be
-        // forgotten. When it is fixed (flatten in `_runPhase1`, or make the
-        // Trust branch whitespace-tolerant) this test FAILS, which is the
-        // signal to invert the expectations and delete this comment. Do not
-        // delete the test without inverting it first.
+    it("keeps the processText entry point deterministic for a wrapped alert", async () => {
+        // The Telegram/text entry point bypasses MIME extraction. The parser
+        // itself must therefore tolerate the same real bank line wrapping.
         const { AgentOrchestrator } = await import("../src/orchestrator.js");
         const tools = {
             executeTool: vi.fn(async (name) => {
                 if (name === "fetch_context")
                     return { accounts, categories: [], payees };
                 if (name === "search_memory") return { results: facts };
+                if (name === "find_link_candidate") return { candidate: null, matches: 0 };
+                if (name === "check_duplicate") return false;
+                if (name === "insert_transaction") return { id: "tx-wrapped" };
                 return true;
             }),
             getPhase1ToolSchemas: vi.fn(() => []),
@@ -540,38 +523,27 @@ describe("uid 968 only parses because the extractor flattens the bank's wrap", (
             },
             tools,
         );
-        // The LLM is reached either way; stub it so the assertions are about
-        // the deterministic path. The exact call count is not the point — an
-        // empty body makes `_parseJsonFromContent` return null, so Phase 1
-        // walks its whole retry budget (2 validation retries + the initial
-        // call, and the LLM-extractor fallback) before giving up. `toBeGreaterThan(0)`
-        // states the actual claim: the row reached the LLM instead of being
-        // parsed deterministically.
-        orch._llm.chat = vi.fn().mockResolvedValue({
-            choices: [{ message: { content: "" } }],
-        });
+        orch._llm.chat = vi.fn();
 
-        // Assert the PARSER directly, not just the end result. Checking only
-        // `result.action` cannot tell this failure mode from any other reason
-        // Phase 1 gives up, so it would not reliably fail when the gap is
-        // fixed. `parseBankMovement` on the same string is the precise claim:
-        // today it returns null, and the day `_runPhase1` (or the Trust branch)
-        // starts flattening, this returns a movement and the test fails for the
-        // stated reason.
         expect(
             parseBankMovement(WRAPPED, {
                 senderBank: "Trust",
                 receivedAt: "2026-09-27T03:49:46.000Z",
             }),
-        ).toBeNull();
+        ).toMatchObject({
+            direction: "incoming",
+            amount_cents: 648,
+            counterparty: { suffix: "9001" },
+        });
 
-        // And the observable consequence at the entry point: no booking, the
-        // LLM reached instead. `processText` returns a notified result because
-        // nothing deterministic came back and the stubbed LLM produced nothing
-        // usable.
-        const result = await orch.processText(WRAPPED);
-        expect(result.action).toBe("notified");
-        expect(result.details).toMatch(/Couldn't understand/i);
-        expect(orch._llm.chat.mock.calls.length).toBeGreaterThan(0);
+        const phase1 = await orch._runPhase1(WRAPPED, {
+            senderBank: "Trust",
+            receivedAt: "2026-09-27T03:49:46.000Z",
+        });
+        expect(phase1).toMatchObject({
+            amount_cents: 648,
+            currency: "SGD",
+        });
+        expect(orch._llm.chat).not.toHaveBeenCalled();
     });
 });

@@ -127,6 +127,15 @@ const FIELD_LABELS = [
 // arrive as one line and field()'s line-start anchors never fire. Re-insert a
 // line break before each known label that is not already at a line start so
 // the deterministic parser keeps working without loosening account matching.
+//
+// Re-inserting the break is the whole fix: once every label sits at a line
+// start, the original single-line read in field() stops at the line break and
+// each value is bounded. A flattened body
+// ("Date of Transfer:01 Oct 2026Time of Transfer:12.36 AM SGT") has no
+// newlines, so the later label used to win the greedy read and the date became
+// "01 Oct 2026Time of Transfer:12.36 AM SGT" — the transfer then never parsed
+// at all (OCBC "We have processed your funds transfer request", uid 1029,
+// 2026-10-01). Verified: reverting this normalisation alone reproduces that.
 function restoreFieldLines(text) {
   const escaped = FIELD_LABELS.map((label) => label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|");
   const re = new RegExp(`(?<![\\n\\r])(?:${escaped})\\s*:`, "gi");
@@ -275,13 +284,21 @@ export function parseBankMovement(text, { senderBank = null, receivedAt } = {}) 
     if (!occurredAt) return null;
     const counterparty = rytSentence[4].trim();
     const ownAccount = rytSentence[7]?.trim() || null;
-    // A "received/sent ... <NAME>" alert is a person-to-person movement, not a
-    // merchant payment ("paid ... at/to MERCHANT" is one). When the
-    // counterparty is a bare person name it cannot be resolved to a tracked
-    // account or a real merchant, so Phase 2 holds it instead of booking the
-    // holder's own money as spend or income (#585).
+    // A "received/sent/paid ... from|to <NAME>" alert is a person-to-person
+    // movement, not a merchant payment. The `paid ... to <MERCHANT>` forms are NOT
+    // separated out into a branch of their own — they reach this same line (the
+    // pinned `You've paid RM255.00 to CLINIC MERCHANT` and `365 BAKERY` alerts do,
+    // verified) and they carry this key; what protects them is
+    // `looksLikePersonName` rejecting a business descriptor, not branch
+    // separation. When the counterparty
+    // is a bare person name it cannot be resolved to a tracked account or a real
+    // merchant, so Phase 2 holds it instead of booking the holder's own money as
+    // spend or income (#585). `paid` belongs in this list: the sentence form
+    // "You've paid RMx to <PERSON> ... using your <account>" is a transfer to a
+    // person wearing the same verb as a merchant payment, and excluding it left
+    // the Critical open on that form.
     const personTransfer =
-      /^(received|sent)$/i.test(rytSentence[1]) && looksLikePersonName(counterparty);
+      /^(received|sent|paid)$/i.test(rytSentence[1]) && looksLikePersonName(counterparty);
     return {
       kind: "bank_movement", direction,
       amount_cents: cents(currency, rytSentence[3], direction), currency,
@@ -295,7 +312,56 @@ export function parseBankMovement(text, { senderBank = null, receivedAt } = {}) 
     };
   }
 
-  const trust = body.match(/received\s+(SGD|MYR)\s*([\d,.]+)\s+from\s+(.+?)\s+A\/C\s+ending\s+(\d{4,})\s+on\s+(\d{1,2}\s+[A-Za-z]{3}\s+\d{4})\s+(\d{1,2}[:.]\d{2}\s*(?:AM|PM)?)\s*SGT/i);
+  // Ryt scheduled-transfer completion — the third Ryt sentence form, and the
+  // one that is not a "you've sent/received/paid" sentence:
+  //   "Your scheduled transfer of RM908.25 to CHONG JIN HENG on 1/10/2026,
+  //    10:02 AM (GMT+8) was successfully completed."
+  // Without this branch the alert matches nothing, returns null, and the whole
+  // email falls through to the LLM extractor — which cannot parse it either,
+  // so the user gets "Couldn't understand email ... re: Scheduled transfer
+  // completed successfully!" and the movement is never recorded (uid 999/1010/
+  // 1012, 2026-10-01; three alerts in one run). The amount, destination and
+  // time are all present in the sentence, so it is parsed rather than guessed.
+  //
+  // The completion clause is REQUIRED, not decoration. The same opening
+  // sentence is used for notices that are not money movements — "was
+  // unsuccessful", "is pending approval", a reminder that it "will be
+  // processed". Matching the prefix alone booked those as real debits.
+  const rytScheduled = body
+    .replace(/\s+/g, " ")
+    .match(
+      /scheduled transfer of\s+(SGD|RM|MYR)\s*([\d,.]+)\s+to\s+(.+?)\s+on\s+(\d{1,2}\/\d{1,2}\/\d{4})\s*,?\s*(\d{1,2}:\d{2}\s*(?:AM|PM)?)(?:\s*\(GMT\+8\))?\s*(?:was|has\s+been)\s+(?:successfully\s+completed|completed\s+successfully)/i,
+    );
+  if (rytScheduled) {
+    const currency = /^RM$/i.test(rytScheduled[1]) ? "MYR" : rytScheduled[1].toUpperCase();
+    const [day, monthNumber, year] = rytScheduled[4].split("/").map(Number);
+    const month = MONTH_NAMES[monthNumber - 1];
+    const occurredAt = month && isoDateTime(`${day} ${month} ${year}`, rytScheduled[5], receivedAt);
+    if (!occurredAt) return null;
+    const counterparty = rytScheduled[3].trim();
+    // A scheduled transfer always leaves the named source account, so it is
+    // outgoing. The sentence does not carry the source account, so name and
+    // suffix are left null on purpose: resolution falls back to the sender
+    // bank, and holds rather than guessing when that is ambiguous. Do NOT
+    // invent "Main Account" here — the alert never says it.
+    return {
+      kind: "bank_movement", direction: "outgoing",
+      amount_cents: cents(currency, rytScheduled[2], "outgoing"), currency,
+      occurred_at: occurredAt,
+      own_account: { name: null, bank: senderBank, suffix: null },
+      counterparty: { name: counterparty, bank: bankFromText(counterparty), suffix: null },
+      reference_number: "",
+      recipient_bank: null,
+      person_transfer: looksLikePersonName(counterparty),
+      merchant_display_name: counterparty,
+      raw_merchant_descriptor: counterparty,
+    };
+  }
+
+  // Trust's text/plain part can wrap the counterparty name at a column
+  // boundary. Matching on collapsed whitespace keeps the parser independent
+  // of MIME line wrapping while preserving the original body for labels.
+  const trust = body.replace(/\s+/g, " ").match(/received\s+(SGD|MYR)\s*([\d,.]+)\s+from\s+(.+?)\s+A\/C\s+ending\s+(\d{4,})\s+on\s+(\d{1,2}\s+[A-Za-z]{3}\s+\d{4})\s+(\d{1,2}[:.]\d{2}\s*(?:AM|PM)?)\s*SGT/i);
   if (trust) {
     return baseMovement({
       direction: "incoming", amount: trust[2], currency: trust[1],
