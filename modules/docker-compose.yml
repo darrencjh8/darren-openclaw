@@ -170,8 +170,16 @@ services:
         image: caddy:2-alpine
         ports:
             - "0.0.0.0:4100:4100"
+        # The directory, not the Caddyfile itself: a checkout that replaces the
+        # file's inode would leave a bind-mounted file pointing at the old one,
+        # so `caddy reload` would keep serving the configuration it booted with.
         volumes:
-            - ./codex-router-front/Caddyfile:/etc/caddy/Caddyfile:ro
+            - ./codex-router-front:/etc/caddy:ro
+        # deploy.sh keys the front's lifecycle on this label: the compose service
+        # name is reused by the legacy router container until the cutover
+        # replaces it, so the name cannot identify the front on its own.
+        labels:
+            - modules.role=codex-router-front
         restart: unless-stopped
         # caddy:2-alpine ships no curl, so the healthcheck uses wget.
         healthcheck:

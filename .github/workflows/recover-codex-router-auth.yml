@@ -55,6 +55,7 @@ jobs:
                   # and fall back to whichever colour is actually running.
                   for service in codex-router-a codex-router-b; do
                       container_id="$(docker ps \
+                          --filter "label=com.docker.compose.project=modules" \
                           --filter "label=com.docker.compose.service=$service" \
                           --filter status=running \
                           --format '{{.ID}}' | head -n 1)"

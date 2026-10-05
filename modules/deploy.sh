@@ -696,6 +696,17 @@ fi
 
 # ---- codex-router ----
 
+# A colour name is an internal detail of the router, not a component. Accept it
+# and deploy the router, rather than building an image for a component that
+# should_deploy then refuses and nothing ever starts. This runs before the
+# preflight below, which is keyed on the component: rewriting it afterwards let
+# `--component codex-router-a` through with the router's required secrets unset.
+for i in "${!COMPONENTS[@]}"; do
+  case "${COMPONENTS[$i]}" in
+    codex-router-a|codex-router-b) COMPONENTS[$i]="codex-router" ;;
+  esac
+done
+
 if should_deploy "codex-router" || should_deploy "all"; then
 echo ""
 echo "--- Codex Router ---"
@@ -915,14 +926,7 @@ printf '%s' "${FRIDAY_PAT:-}" | docker run --rm -i --network none \
   '
 
 COMPOSE="docker-compose --project-name modules"
-# A colour name is an internal detail of the router, not a component. Accept it
-# and deploy the router, rather than building an image for a component that
-# should_deploy then refuses and nothing ever starts.
-for i in "${!COMPONENTS[@]}"; do
-  case "${COMPONENTS[$i]}" in
-    codex-router-a|codex-router-b) COMPONENTS[$i]="codex-router" ;;
-  esac
-done
+
 if [[ " ${COMPONENTS[*]} " =~ " all " ]] || [[ ${#COMPONENTS[@]} -eq 1 && "${COMPONENTS[0]}" == "all" ]]; then
   # Always resolve the full service list — never leave TARGETS empty.
   # An empty TARGETS causes docker compose to silently ignore --force-recreate
@@ -1173,11 +1177,36 @@ if should_deploy "codex-router" || should_deploy "all"; then
 
   # docker prints "<name> <compose service label>"; the service label plus the
   # project filter keeps this to this stack's own containers, whatever else runs
-  # on the host under a lookalike service name.
+  # on the host under a lookalike service name. A docker failure prints nothing
+  # too, so its status is dropped: callers test only whether a container was
+  # named, and a failed probe must not be read as "no container" — nor abort the
+  # roll through the bare assignment in the readiness loop below.
   colour_container() {
     docker ps --filter status=running --filter label=com.docker.compose.project=modules \
       --format '{{.Names}} {{.Label "com.docker.compose.service"}}' \
-      | awk -v service="$1" '$2 == service {print $1; exit}'
+      | awk -v service="$1" '$2 == service {print $1; exit}' || true
+  }
+
+  # The front is this stack's caddy container, identified by the label compose
+  # gives only that service: the compose service name is reused by the legacy
+  # router container until the cutover replaces it, so the name alone cannot say
+  # which one is up.
+  front_running() {
+    [ -n "$(docker ps --filter status=running \
+      --filter label=com.docker.compose.project=modules \
+      --filter label=modules.role=codex-router-front -q || true)" ]
+  }
+
+  # The front is created when it is absent and otherwise only reconciled by the
+  # reload below. `up -d` would recreate a running front whose stanza or image
+  # changed, and the front owns the only published listener, so that recreate
+  # would interrupt every stream the roll exists to protect. ponytail: the
+  # ceiling is a change to the front's own compose stanza (image, memory limit,
+  # healthcheck), which now needs an explicit FORCE_ALL=true deploy; the upgrade
+  # path is to compare the running container's config hash here and recreate only
+  # when it really moved.
+  front_needs_start() {
+    ! front_running || [ "${FORCE_ALL:-false}" = "true" ]
   }
 
   colour_ready() {
@@ -1203,7 +1232,8 @@ if should_deploy "codex-router" || should_deploy "all"; then
   # The candidate is never the serving colour: recreating that one would leave
   # the front with nothing to retry against. This is the state every second
   # deploy starts in — the cutover deploy starts colour a and has nothing to
-  # stop, so a is both the only running colour and the serving one.
+  # stop, so a is both the only running colour and the serving one. The equality
+  # clause is defensive: the loop above never yields the same value twice.
   if [ -z "$idle" ] || [ "$idle" = "$serving" ]; then
     if [ "$serving" = "codex-router-a" ]; then
       idle="codex-router-b"
@@ -1213,7 +1243,12 @@ if should_deploy "codex-router" || should_deploy "all"; then
   fi
   echo "  serving: ${serving:-none}; rolling: $idle"
 
-  $COMPOSE up -d --remove-orphans "$idle"
+  # --force-recreate, not a plain up: a colour that runs but never answers
+  # /health/liveliness is the idle colour on every roll, and `up -d` is a no-op
+  # on an unchanged container, so the same wedged candidate would be re-selected
+  # and the deploy would fail every time while holding a second router. The
+  # selection above guarantees this is never the colour the front is serving.
+  $COMPOSE up -d --remove-orphans --force-recreate "$idle"
 
   ROUTER_DRAIN_SECONDS="${ROUTER_DRAIN_SECONDS:-600}"
   idle_ready=false
@@ -1233,11 +1268,15 @@ if should_deploy "codex-router" || should_deploy "all"; then
     echo -e "  ${GREEN}✓ $idle ready${NC}"
     # The front exists from this point on. `#675`'s cutover: until its first
     # start the legacy container still owns 4100, so this revision's first
-    # deploy is the last one that interrupts a stream.
-    $COMPOSE up -d --remove-orphans codex-router
+    # deploy is the last one that interrupts a stream. Every later roll finds it
+    # running and leaves it alone (see front_needs_start).
+    if front_needs_start; then
+      $COMPOSE up -d --remove-orphans codex-router
+    fi
     # An edit to the Caddyfile is a bind-mounted file change, which compose does
     # not hash: without this reload the front keeps the configuration it booted
-    # with, which would leave the role out of the roll.
+    # with, which would leave the role out of the roll. The directory is mounted
+    # rather than the file so a checkout that replaces the inode is still read.
     if $COMPOSE exec -T codex-router caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile; then
       if [ -n "$serving" ]; then
         echo "  stopping $serving (drain ${ROUTER_DRAIN_SECONDS}s)"

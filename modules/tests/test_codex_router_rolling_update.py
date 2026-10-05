@@ -89,6 +89,24 @@ def component_normalisation(deploy, components):
     return result.stdout.split()
 
 
+def function_block(text, name):
+    """Return the shell function `name() { ... }` from a script."""
+    lines = text.splitlines()
+    start = next(i for i, line in enumerate(lines) if line.strip() == f"{name}() {{")
+    end = next(i for i in range(start, len(lines)) if lines[i].strip() == "}")
+    return "\n".join(lines[start : end + 1])
+
+
+def run_shell_functions(deploy, names, body):
+    """Run several extracted shell functions under the deploy's own strict mode."""
+    script = "\n".join(
+        ["set -euo pipefail"]
+        + [function_block(deploy, name) for name in names]
+        + [body]
+    )
+    return subprocess.run(["bash", "-c", script], capture_output=True, text=True)
+
+
 def colour_selection(deploy, running, ready):
     """Run deploy.sh's serving/idle selection with stubbed container probes."""
     lines = deploy.splitlines()
@@ -131,10 +149,17 @@ class CodexRouterRollingUpdateTests(unittest.TestCase):
         self.assertNotIn("build", front)
         self.assertNotIn("environment", front)
         self.assertEqual("caddy:2-alpine", front["image"])
+        # The directory, not the file: `git checkout` can replace the Caddyfile's
+        # inode, and a bind-mounted file keeps the old one, so a reload would read
+        # the configuration the container booted with.
         self.assertEqual(
-            ["./codex-router-front/Caddyfile:/etc/caddy/Caddyfile:ro"],
+            ["./codex-router-front:/etc/caddy:ro"],
             front["volumes"],
         )
+        # The front's own label is what identifies it as the front: the compose
+        # service name is reused by the legacy router container until the cutover
+        # replaces it, so the name alone cannot say which one is running.
+        self.assertIn("modules.role=codex-router-front", front["labels"])
         # The log rotation every other service gets from the shared anchor.
         self.assertEqual(
             self.services["hermes"]["logging"], front["logging"]
@@ -278,6 +303,12 @@ class CodexRouterRollingUpdateTests(unittest.TestCase):
         self.assertEqual(
             ["hermes"], run_derivation(build, "BUILD_SERVICES", "SERVICES", "hermes ")
         )
+        # A colour name is not a component: asking for one has to build both
+        # colours, or the roll can promote the other colour's stale image.
+        self.assertEqual(
+            ["codex-router-a", "codex-router-b"],
+            run_derivation(build, "BUILD_SERVICES", "SERVICES", "codex-router-a "),
+        )
         # `--component all`: one build per colour, front dropped, order kept.
         self.assertEqual(
             ["codex-router-a", "codex-router-b", "hermes"],
@@ -298,7 +329,7 @@ class CodexRouterRollingUpdateTests(unittest.TestCase):
     def test_deploy_orders_the_roll_before_stopping_the_old_colour(self):
         deploy = DEPLOY_SCRIPT.read_text(encoding="utf-8")
 
-        up_idle = deploy.index('$COMPOSE up -d --remove-orphans "$idle"')
+        up_idle = deploy.index('$COMPOSE up -d --remove-orphans --force-recreate "$idle"')
         ready_wait = deploy.index('docker exec "$idle_container" curl -fsS')
         front = deploy.index("$COMPOSE up -d --remove-orphans codex-router")
         reload = deploy.index("caddy reload --config /etc/caddy/Caddyfile")
@@ -397,6 +428,123 @@ class CodexRouterRollingUpdateTests(unittest.TestCase):
         # front is not moved and the old colour keeps serving.
         self.assertIn("failed=$((failed + 1))", deploy)
         self.assertIn('echo -e "  ${RED}✗ $idle did not become ready', deploy)
+
+    def test_front_is_started_explicitly_and_the_roll_never_recreates_it(self):
+        deploy = DEPLOY_SCRIPT.read_text(encoding="utf-8")
+
+        def needs_start(running, force_all=None):
+            body = "\n".join(
+                [
+                    "COMPOSE=docker-compose",
+                    "unset FORCE_ALL" if force_all is None else f"FORCE_ALL={force_all}",
+                    f"docker() {{ printf '%s\\n' {shlex.quote(running)}; }}",
+                    "front_needs_start",
+                ]
+            )
+            return run_shell_functions(
+                deploy, ("front_running", "front_needs_start"), body
+            ).returncode
+
+        # No front yet (the cutover deploy, or a stopped one): create it.
+        self.assertEqual(0, needs_start(""))
+        # A front that is already up is left alone: `up -d` would recreate it if
+        # its stanza or image changed, closing the only published listener.
+        self.assertEqual(1, needs_start("modules-codex-router-1"))
+        # A deliberate change to the front's own stanza is still applicable.
+        self.assertEqual(0, needs_start("modules-codex-router-1", "true"))
+        self.assertEqual(0, needs_start("", "true"))
+
+        # The create is gated, and the reload still runs on every roll: the
+        # Caddyfile is a bind mount compose does not hash.
+        gate = deploy.index("if front_needs_start; then")
+        front_up = deploy.index("$COMPOSE up -d --remove-orphans codex-router")
+        self.assertLess(gate, front_up)
+        self.assertLess(front_up, deploy.index("caddy reload --config /etc/caddy/Caddyfile"))
+        # The ceiling the gate cuts: only a Caddyfile edit is applied to a running
+        # front, so its image or resource stanza needs FORCE_ALL.
+        self.assertIn("FORCE_ALL", deploy)
+
+    def test_a_wedged_candidate_is_recreated_on_every_roll(self):
+        deploy = DEPLOY_SCRIPT.read_text(encoding="utf-8")
+
+        # A colour that runs but never answers is the idle colour on every roll.
+        # Re-running `up -d` on an unchanged container is a no-op, so without
+        # --force-recreate that container is re-selected forever and the deploy
+        # fails every time while holding a second 1536 MiB router.
+        line = next(
+            line.strip()
+            for line in deploy.splitlines()
+            if "$COMPOSE up -d" in line and '"$idle"' in line
+        )
+        self.assertIn("--force-recreate", line)
+        run = subprocess.run(
+            [
+                "bash",
+                "-c",
+                "set -euo pipefail\n"
+                "COMPOSE=echo\n"
+                "idle=codex-router-b\n" + line,
+            ],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        self.assertEqual(
+            "up -d --remove-orphans --force-recreate codex-router-b",
+            run.stdout.strip(),
+        )
+
+    def test_colour_probe_survives_a_docker_failure(self):
+        deploy = DEPLOY_SCRIPT.read_text(encoding="utf-8")
+
+        # A failing `docker ps` is not "no such container". The readiness loop
+        # re-resolves the container with a bare assignment inside `set -euo
+        # pipefail`, so a transient docker error used to exit the script mid-roll:
+        # the front was never moved, the started colour was left running beside
+        # the serving one, and the deploy was recorded as failed while 4100 kept
+        # serving.
+        aborted = run_shell_functions(
+            deploy,
+            ("colour_container",),
+            "docker() { return 1; }\n"
+            'found="$(colour_container codex-router-a)"\n'
+            'printf "found=%s\\n" "$found"\n',
+        )
+        self.assertEqual(0, aborted.returncode, aborted.stderr)
+        self.assertEqual("found=\n", aborted.stdout)
+
+        found = run_shell_functions(
+            deploy,
+            ("colour_container",),
+            "docker() { printf '%s\\n' 'modules-codex-router-a-1 codex-router-a' "
+            "'modules-codex-router-b-1 codex-router-b'; }\n"
+            "colour_container codex-router-b\n",
+        )
+        self.assertEqual(0, found.returncode, found.stderr)
+        self.assertEqual("modules-codex-router-b-1\n", found.stdout)
+
+    def test_colour_normalisation_runs_before_the_router_preflight(self):
+        deploy = DEPLOY_SCRIPT.read_text(encoding="utf-8")
+
+        # `--component codex-router-a` is rewritten to the router, and the
+        # preflight is keyed on the component: rewriting it afterwards skips the
+        # router's required secrets and starts a router with an empty auth
+        # password.
+        normalise = deploy.index('for i in "${!COMPONENTS[@]}"; do')
+        self.assertLess(normalise, deploy.index('check_var "CODEX_ROUTER_AUTH_PASSWORD"'))
+        self.assertLess(normalise, deploy.index('check_var "COMMANDCODE_API_KEY"'))
+        self.assertLess(normalise, deploy.index("TARGETS=$($COMPOSE config --services"))
+
+    def test_recovery_workflow_scopes_the_colour_lookup_to_this_project(self):
+        workflow = RECOVERY_WORKFLOW.read_text(encoding="utf-8")
+
+        # The colour lookup is a `docker ps` by compose service label on the
+        # runner host, where another project's lookalike service would otherwise
+        # be exec'd into.
+        block = workflow[
+            workflow.index("for service in codex-router-a") : workflow.index("docker exec -i")
+        ]
+        self.assertIn('--filter "label=com.docker.compose.project=modules"', block)
 
     def test_recovery_workflow_targets_a_colour_not_the_front(self):
         workflow = RECOVERY_WORKFLOW.read_text(encoding="utf-8")

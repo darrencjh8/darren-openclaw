@@ -62,10 +62,25 @@ publish no ports. `modules/build.sh` builds the colours and skips the front, whi
 `compose up` it rolls them:
 
 1. Pick the running colour that is not serving, defaulting to `codex-router-a`.
-2. `compose up -d codex-router-a` (or `-b`) and wait for `/health/liveliness` on that colour.
-3. Recreate the front so it starts with the new colour healthy, then reload its Caddyfile.
+2. `compose up -d --force-recreate codex-router-a` (or `-b`) and wait for `/health/liveliness` on that
+   colour. The recreate is deliberate: a colour that runs but never answers is the idle colour on
+   every roll, and a plain `up -d` is a no-op on an unchanged container, so that candidate would be
+   re-selected and the deploy would fail every time.
+3. Start the front if it is not running (its first start is the cutover from the pre-roll layout),
+   then reload its Caddyfile. A front that is already running is left alone: it owns the only
+   published listener, and `up -d` would recreate it if its stanza or image changed. Because of that,
+   a change to the front's own compose stanza (image, memory limit, healthcheck) is applied only by a
+   deploy with `force_all=true`.
 4. `compose stop -t "$ROUTER_DRAIN_SECONDS" <old colour>` (default 600s) so in-flight streams finish;
    both colours carry `stop_grace_period: 10m` for the same reason.
+
+`deploy.sh` identifies the front by the `modules.role=codex-router-front` label rather than by its
+compose service name, because the legacy router container uses that same service name until the
+cutover replaces it. The Caddyfile reaches the front as a bind-mounted directory
+(`./codex-router-front:/etc/caddy:ro`), not as a single mounted file: a checkout that replaces the
+file's inode would otherwise leave the mount pointing at the old one. A colour name is accepted as a
+component name (`--component codex-router-a`) and means `codex-router`: `deploy.sh` rewrites it
+before the preflight and `build.sh` builds both colours for it.
 
 The front's Caddyfile uses `lb_policy first` with the upstreams written `codex-router-a` then
 `codex-router-b`, `lb_try_duration 30s` so a request that lands on a stopping colour is retried, and
