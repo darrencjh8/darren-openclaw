@@ -1178,13 +1178,16 @@ if should_deploy "codex-router" || should_deploy "all"; then
   # docker prints "<name> <compose service label>"; the service label plus the
   # project filter keeps this to this stack's own containers, whatever else runs
   # on the host under a lookalike service name. A docker failure prints nothing
-  # too, so its status is dropped: callers test only whether a container was
-  # named, and a failed probe must not be read as "no container" — nor abort the
-  # roll through the bare assignment in the readiness loop below.
+  # and returns 2, a genuine no-match prints nothing and returns 0: callers can
+  # tell "the daemon did not answer" from "no such container", which is the
+  # difference between a probe that proves nothing and one that proves absence.
   colour_container() {
-    docker ps --filter status=running --filter label=com.docker.compose.project=modules \
-      --format '{{.Names}} {{.Label "com.docker.compose.service"}}' \
-      | awk -v service="$1" '$2 == service {print $1; exit}' || true
+    local listing
+    if ! listing="$(docker ps --filter status=running --filter label=com.docker.compose.project=modules \
+      --format '{{.Names}} {{.Label "com.docker.compose.service"}}')"; then
+      return 2
+    fi
+    printf '%s\n' "$listing" | awk -v service="$1" '$2 == service {print $1; exit}'
   }
 
   # The front is this stack's caddy container, identified by the label compose
@@ -1209,11 +1212,15 @@ if should_deploy "codex-router" || should_deploy "all"; then
     ! front_running || [ "${FORCE_ALL:-false}" = "true" ]
   }
 
+  # --max-time/--connect-timeout bound every probe: a colour that holds the
+  # connection open without answering would otherwise block the roll forever
+  # instead of reaching the readiness budget below.
   colour_ready() {
     local container
-    container="$(colour_container "$1")"
+    container="$(colour_container "$1")" || return 1
     [ -n "$container" ] || return 1
-    docker exec "$container" curl -fsS http://127.0.0.1:4100/health/liveliness >/dev/null 2>&1
+    docker exec "$container" curl -fsS --max-time 5 --connect-timeout 2 \
+      http://127.0.0.1:4100/health/liveliness >/dev/null 2>&1
   }
 
   # The front prefers codex-router-a, so a running colour is only "serving" if it
@@ -1221,77 +1228,93 @@ if should_deploy "codex-router" || should_deploy "all"; then
   # revision's image needs it.
   serving=""
   idle=""
+  colour_probe_failed=false
   for colour in codex-router-a codex-router-b; do
-    [ -n "$(colour_container "$colour")" ] || continue
+    container="$(colour_container "$colour")" || { colour_probe_failed=true; continue; }
+    [ -n "$container" ] || continue
     if [ -z "$serving" ] && colour_ready "$colour"; then
       serving="$colour"
     elif [ -z "$idle" ]; then
       idle="$colour"
     fi
   done
-  # The candidate is never the serving colour: recreating that one would leave
-  # the front with nothing to retry against. This is the state every second
-  # deploy starts in — the cutover deploy starts colour a and has nothing to
-  # stop, so a is both the only running colour and the serving one. The equality
-  # clause is defensive: the loop above never yields the same value twice.
-  if [ -z "$idle" ] || [ "$idle" = "$serving" ]; then
-    if [ "$serving" = "codex-router-a" ]; then
-      idle="codex-router-b"
-    else
-      idle="codex-router-a"
+  # A probe that failed is not evidence that no colour is running. The default
+  # below would otherwise pick the colour it never saw — and in the steady state,
+  # where the only colour up is the one the front serves, that is the front's
+  # only upstream. Nothing has been started or stopped yet, so the roll stops
+  # here and the next deploy retries from this same state.
+  if [ "$colour_probe_failed" = true ]; then
+    echo -e "  ${RED}✗ could not read this stack's containers; skipping the codex-router roll${NC}"
+    failed=$((failed + 1))
+  else
+    # The candidate is never the serving colour: recreating that one would leave
+    # the front with nothing to retry against. This is the state every second
+    # deploy starts in — the cutover deploy starts colour a and has nothing to
+    # stop, so a is both the only running colour and the serving one. The equality
+    # clause is defensive: the loop above never yields the same value twice.
+    if [ -z "$idle" ] || [ "$idle" = "$serving" ]; then
+      if [ "$serving" = "codex-router-a" ]; then
+        idle="codex-router-b"
+      else
+        idle="codex-router-a"
+      fi
     fi
-  fi
-  echo "  serving: ${serving:-none}; rolling: $idle"
+    echo "  serving: ${serving:-none}; rolling: $idle"
 
-  # --force-recreate, not a plain up: a colour that runs but never answers
-  # /health/liveliness is the idle colour on every roll, and `up -d` is a no-op
-  # on an unchanged container, so the same wedged candidate would be re-selected
-  # and the deploy would fail every time while holding a second router. The
-  # selection above guarantees this is never the colour the front is serving.
-  $COMPOSE up -d --remove-orphans --force-recreate "$idle"
+    # --force-recreate, not a plain up: a colour that runs but never answers
+    # /health/liveliness is the idle colour on every roll, and `up -d` is a no-op
+    # on an unchanged container, so the same wedged candidate would be re-selected
+    # and the deploy would fail every time while holding a second router. The
+    # selection above guarantees this is never the colour the front is serving.
+    $COMPOSE up -d --remove-orphans --force-recreate "$idle"
 
-  ROUTER_DRAIN_SECONDS="${ROUTER_DRAIN_SECONDS:-600}"
-  idle_ready=false
-  for _ in $(seq 1 "$ROUTER_READY_ATTEMPTS"); do
-    # Re-resolved every attempt: `up -d` can return while the colour is still
-    # crash-looping, and a name captured once would stay empty for the whole
-    # budget even after the container comes up.
-    idle_container="$(colour_container "$idle")"
-    if [ -n "$idle_container" ] && docker exec "$idle_container" curl -fsS http://127.0.0.1:4100/health/liveliness >/dev/null 2>&1; then
-      idle_ready=true
-      break
-    fi
-    sleep "$HEALTH_RETRY_SLEEP"
-  done
+    ROUTER_DRAIN_SECONDS="${ROUTER_DRAIN_SECONDS:-600}"
+    idle_ready=false
+    for _ in $(seq 1 "$ROUTER_READY_ATTEMPTS"); do
+      # Re-resolved every attempt: `up -d` can return while the colour is still
+      # crash-looping, and a name captured once would stay empty for the whole
+      # budget even after the container comes up.
+      idle_container="$(colour_container "$idle")" || idle_container=""
+      if [ -n "$idle_container" ] && docker exec "$idle_container" curl -fsS --max-time 5 --connect-timeout 2 \
+        http://127.0.0.1:4100/health/liveliness >/dev/null 2>&1; then
+        idle_ready=true
+        break
+      fi
+      sleep "$HEALTH_RETRY_SLEEP"
+    done
 
-  if $idle_ready; then
-    echo -e "  ${GREEN}✓ $idle ready${NC}"
-    # The front exists from this point on. `#675`'s cutover: until its first
-    # start the legacy container still owns 4100, so this revision's first
-    # deploy is the last one that interrupts a stream. Every later roll finds it
-    # running and leaves it alone (see front_needs_start).
-    if front_needs_start; then
-      $COMPOSE up -d --remove-orphans codex-router
-    fi
-    # An edit to the Caddyfile is a bind-mounted file change, which compose does
-    # not hash: without this reload the front keeps the configuration it booted
-    # with, which would leave the role out of the roll. The directory is mounted
-    # rather than the file so a checkout that replaces the inode is still read.
-    if $COMPOSE exec -T codex-router caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile; then
-      if [ -n "$serving" ]; then
-        echo "  stopping $serving (drain ${ROUTER_DRAIN_SECONDS}s)"
-        $COMPOSE stop -t "$ROUTER_DRAIN_SECONDS" "$serving"
+    if $idle_ready; then
+      echo -e "  ${GREEN}✓ $idle ready${NC}"
+      # The front exists from this point on. `#675`'s cutover: until its first
+      # start the legacy container still owns 4100, so this revision's first
+      # deploy is the last one that interrupts a stream. Every later roll finds it
+      # running and leaves it alone (see front_needs_start).
+      if front_needs_start; then
+        $COMPOSE up -d --remove-orphans codex-router
+      fi
+      # An edit to the Caddyfile is a bind-mounted file change, which compose does
+      # not hash: without this reload the front keeps the configuration it booted
+      # with, which would leave the role out of the roll. The directory is mounted
+      # rather than the file so a checkout that replaces the inode is still read.
+      if timeout 30 $COMPOSE exec -T codex-router caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile; then
+        if [ -n "$serving" ]; then
+          echo "  stopping $serving (drain ${ROUTER_DRAIN_SECONDS}s)"
+          $COMPOSE stop -t "$ROUTER_DRAIN_SECONDS" "$serving" || {
+            echo -e "  ${RED}✗ stop $serving failed${NC}"
+            failed=$((failed + 1))
+          }
+        fi
+      else
+        # The reload validates before it swaps, so a failure means the front is
+        # still serving the previous configuration: keep the old colour up rather
+        # than take down the only upstream it names.
+        echo -e "  ${RED}✗ caddy reload failed; keeping ${serving:-no colour}${NC}"
+        failed=$((failed + 1))
       fi
     else
-      # The reload validates before it swaps, so a failure means the front is
-      # still serving the previous configuration: keep the old colour up rather
-      # than take down the only upstream it names.
-      echo -e "  ${RED}✗ caddy reload failed; keeping ${serving:-no colour}${NC}"
+      echo -e "  ${RED}✗ $idle did not become ready in ${ROUTER_READY_SECONDS}s; keeping ${serving:-the running front}${NC}"
       failed=$((failed + 1))
     fi
-  else
-    echo -e "  ${RED}✗ $idle did not become ready in ${ROUTER_READY_SECONDS}s; keeping ${serving:-the running front}${NC}"
-    failed=$((failed + 1))
   fi
 
   health_ok "codex-router" "http://localhost:4100/health/liveliness" "$ROUTER_READY_ATTEMPTS" || failed=$((failed + 1))

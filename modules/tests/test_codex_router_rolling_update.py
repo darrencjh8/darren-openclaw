@@ -11,6 +11,7 @@ the derived build/up lists that keep the front out of both.
 from pathlib import Path
 import shlex
 import subprocess
+import tempfile
 import unittest
 
 import yaml
@@ -112,7 +113,7 @@ def colour_selection(deploy, running, ready):
     lines = deploy.splitlines()
     start = next(i for i, line in enumerate(lines) if line.strip() == 'serving=""')
     end = next(
-        i for i, line in enumerate(lines) if line.strip().startswith('echo "  serving:')
+        i for i in range(start, len(lines)) if lines[i].strip().startswith('echo "  serving:')
     )
     body = "\n".join(
         [
@@ -128,6 +129,8 @@ def colour_selection(deploy, running, ready):
             "  return 1",
             "}",
             "\n".join(lines[start:end]),
+            # Close the guard that keeps a failed probe out of the roll.
+            "fi",
             'printf "%s|%s\\n" "$serving" "$idle"',
         ]
     )
@@ -507,11 +510,31 @@ class CodexRouterRollingUpdateTests(unittest.TestCase):
             deploy,
             ("colour_container",),
             "docker() { return 1; }\n"
-            'found="$(colour_container codex-router-a)"\n'
+            'found="$(colour_container codex-router-a)" || found="unreadable"\n'
             'printf "found=%s\\n" "$found"\n',
         )
         self.assertEqual(0, aborted.returncode, aborted.stderr)
-        self.assertEqual("found=\n", aborted.stdout)
+        self.assertEqual("found=unreadable\n", aborted.stdout)
+
+        # A docker error and a real no-match both print nothing, so the status is
+        # what separates them: the caller must not read a failed probe as absence.
+        unreadable = run_shell_functions(
+            deploy,
+            ("colour_container",),
+            "docker() { return 1; }\n"
+            "colour_container codex-router-a\n",
+        )
+        self.assertEqual(2, unreadable.returncode)
+        self.assertEqual("", unreadable.stdout)
+
+        absent = run_shell_functions(
+            deploy,
+            ("colour_container",),
+            "docker() { return 0; }\n"
+            "colour_container codex-router-a\n",
+        )
+        self.assertEqual(0, absent.returncode, absent.stderr)
+        self.assertEqual("", absent.stdout)
 
         found = run_shell_functions(
             deploy,
@@ -553,6 +576,140 @@ class CodexRouterRollingUpdateTests(unittest.TestCase):
         self.assertIn("for service in codex-router-a codex-router-b; do", workflow)
         self.assertIn('docker exec -i "$container_id" python -u - "$ACCOUNT"', workflow)
         self.assertNotIn("label=com.docker.compose.service=codex-router \\", workflow)
+
+
+    def test_a_failed_probe_never_recreates_a_colour_it_could_not_see(self):
+        deploy = DEPLOY_SCRIPT.read_text(encoding="utf-8")
+
+        # A docker error names no container, but that is not evidence that none is
+        # running. The selection reads an unreadable probe as "nothing is up" and
+        # falls back to a default candidate; in the steady state the colour it
+        # never saw is the one the front serves, and recreating that colour takes
+        # away the front's only upstream.
+        def roll(probe_status, running):
+            lines = deploy.splitlines()
+            start = next(
+                i for i, line in enumerate(lines) if line.strip() == 'serving=""'
+            )
+            up = next(
+                i
+                for i in range(start, len(lines))
+                if "--force-recreate" in lines[i] and '"$idle"' in lines[i]
+            )
+            body = "\n".join(
+                [
+                    "set -euo pipefail",
+                    "COMPOSE=echo",
+                    'RED=""; NC=""',
+                    "failed=0",
+                    f"PROBE_STATUS={probe_status}",
+                    f"RUNNING={shlex.quote(running)}",
+                    "colour_container() {",
+                    '  [ "$PROBE_STATUS" = "0" ] || return "$PROBE_STATUS"',
+                    '  for c in $RUNNING; do [ "$c" = "$1" ] && printf "%s\\n" "$c"; done',
+                    "  return 0",
+                    "}",
+                    "colour_ready() { return 1; }",
+                    "\n".join(lines[start : up + 1]),
+                    "fi",
+                    'printf "failed=%s\\n" "$failed"',
+                ]
+            )
+            return subprocess.run(["bash", "-c", body], capture_output=True, text=True)
+
+        # The daemon did not answer: nothing is started or stopped, and the roll is
+        # reported as failed so the next deploy retries from the same state.
+        unreadable = roll(2, "codex-router-a")
+        self.assertEqual(0, unreadable.returncode, unreadable.stderr)
+        self.assertNotIn("up -d", unreadable.stdout)
+        self.assertIn("skipping the codex-router roll", unreadable.stdout)
+        self.assertIn("failed=1", unreadable.stdout)
+
+        # A genuine absence (the cutover deploy, where no colour exists yet) still
+        # creates the default colour.
+        cutover = roll(0, "")
+        self.assertEqual(0, cutover.returncode, cutover.stderr)
+        self.assertIn(
+            "up -d --remove-orphans --force-recreate codex-router-a", cutover.stdout
+        )
+        self.assertIn("failed=0", cutover.stdout)
+
+    def test_every_colour_probe_is_time_bounded(self):
+        deploy = DEPLOY_SCRIPT.read_text(encoding="utf-8")
+
+        # A colour that runs with 4100 bound but never answers holds the connection
+        # in its listen backlog, so `curl` without a deadline waits forever: the
+        # readiness loop would never iterate, the 426 s budget would never be
+        # reached, and the deploy job would hang to its six-hour default while
+        # holding the shared deploy runner behind `concurrency: production-deploy`.
+        roll = deploy[
+            deploy.index("colour_container() {") : deploy.index('health_ok "codex-router"')
+        ]
+        probes = roll.split("curl -fsS")[1:]
+        self.assertEqual(2, len(probes))
+        for probe in probes:
+            self.assertIn("--max-time 5 --connect-timeout 2", probe.split("http")[0])
+
+        # The reload reaches the front's admin API through the same kind of exec,
+        # so it carries a deadline too.
+        self.assertIn("timeout 30 $COMPOSE exec -T codex-router caddy reload", deploy)
+
+    def test_a_failed_stop_is_reported_instead_of_aborting_the_deploy(self):
+        deploy = DEPLOY_SCRIPT.read_text(encoding="utf-8")
+
+        lines = deploy.splitlines()
+        start = next(
+            i for i, line in enumerate(lines) if line.strip() == "if $idle_ready; then"
+        )
+        not_ready = next(
+            i
+            for i in range(start, len(lines))
+            if "did not become ready in" in lines[i]
+        )
+        region = "\n".join(lines[start : not_ready + 1])
+
+        def roll(stop_status):
+            with tempfile.TemporaryDirectory() as tmp:
+                compose = Path(tmp) / "fake-compose"
+                compose.write_text(
+                    "#!/bin/sh\n"
+                    f'[ "$1" = "stop" ] && exit {stop_status}\n'
+                    "exit 0\n",
+                    encoding="utf-8",
+                )
+                compose.chmod(0o755)
+                body = "\n".join(
+                    [
+                        "set -euo pipefail",
+                        f"COMPOSE={compose}",
+                        'RED=""; NC=""; GREEN=""',
+                        "failed=0",
+                        "idle_ready=true",
+                        "serving=codex-router-a",
+                        "idle=codex-router-a",
+                        "ROUTER_DRAIN_SECONDS=600",
+                        "front_needs_start() { return 1; }",
+                        region,
+                        "fi",
+                        'printf "failed=%s\\n" "$failed"',
+                    ]
+                )
+                return subprocess.run(
+                    ["bash", "-c", body], capture_output=True, text=True
+                )
+
+        stopped = roll(0)
+        self.assertEqual(0, stopped.returncode, stopped.stderr)
+        self.assertIn("stopping codex-router-a (drain 600s)", stopped.stdout)
+        self.assertIn("failed=0", stopped.stdout)
+
+        # A non-zero stop used to end the script under `set -euo pipefail` after the
+        # front had already moved, so the post-roll checks and the summary never
+        # ran. It is a counted failure now, not an abort.
+        broken = roll(1)
+        self.assertEqual(0, broken.returncode, broken.stderr)
+        self.assertIn("✗ stop codex-router-a failed", broken.stdout)
+        self.assertIn("failed=1", broken.stdout)
 
 
 if __name__ == "__main__":
