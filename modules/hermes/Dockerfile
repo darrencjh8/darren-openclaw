@@ -13,3 +13,8 @@ COPY profiles/ /opt/hermes-defaults/profiles/
 RUN chmod +x /opt/hermes-defaults/scripts/*.sh
 COPY 50-seed-defaults /etc/cont-init.d/50-seed-defaults
 RUN chmod +x /etc/cont-init.d/50-seed-defaults
+# Debian's /etc/profile replaces PATH before it sources /etc/profile.d, so a
+# login shell (`bash -lc`, `sh -lc`) loses the image PATH entry for the
+# persisted volume directory and cannot see gh or ntn. Put it back for them;
+# non-login shells already inherit it from the image environment.
+RUN printf 'PATH="$PATH:/opt/data/.local/bin"\n' > /etc/profile.d/90-hermes-local-bin.sh
