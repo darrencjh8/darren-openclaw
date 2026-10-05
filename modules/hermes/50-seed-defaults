@@ -12,9 +12,13 @@
 # not define (runtime-installed `hooks`, a hand-added `hooks_auto_accept`) is
 # carried over.
 #
-# ponytail: no retired-key drop list. A key the baked config drops lingers in
-# the live file until an operator removes it; Hermes ignores unknown keys. Add a
-# drop list only if a retired key starts breaking boot.
+# ponytail: no retired-key drop list for this merge. A key the baked config
+# drops lingers in the live file until an operator removes it; Hermes ignores
+# unknown keys, and the baked `mcp_servers` wins here, so a retired MCP server
+# cannot survive in this file. Profile configs are different — they are only
+# copied when absent, so they carry a retired-key drop list in the managed
+# profile migration below. Add one here only if a retired key starts breaking
+# boot.
 if ! python3 - /opt/hermes-defaults/config.yaml /opt/data/config.yaml <<'PYCONFIG'
 import os
 import shutil
@@ -186,6 +190,15 @@ for name in managed_routing_profiles:
             target["memory"] = memory
         memory["memory_enabled"] = False
         memory["user_profile_enabled"] = False
+    # Retired MCP servers: the seed loop above only writes a profile config that is
+    # absent, so a server the baked profile dropped stayed in the live file and
+    # failed its connection on every boot (ktmb-booking's container is retired).
+    # A drop list rather than a general prune, so a hand-added server survives.
+    retired_mcp_servers = ("ktmb-booking",)
+    mcp_servers = target.get("mcp_servers")
+    if isinstance(mcp_servers, dict):
+        for server in retired_mcp_servers:
+            mcp_servers.pop(server, None)
     target_path.write_text(yaml.safe_dump(target, sort_keys=False))
 PY
 
