@@ -207,8 +207,10 @@ class DeployWorkflowRouterTests(unittest.TestCase):
         # The checkout belongs to the container's hermes user; root writes would
         # leave its objects unwritable for the sessions that create worktrees.
         # The owner, plus a lock wait longer than the boot fetch bound: a saturating
-        # fetch during a hermes recreate must not turn into a red deploy.
-        self.assertIn("docker exec -e CODEX_ROUTER_LOCK_WAIT_SECONDS=300 -u hermes hermes", checkout_block)
+        # fetch during a hermes recreate must not turn into a red deploy. The PAT
+        # goes in as well, because the gate runs before the workflow installs gh and
+        # a refresh that needs the gh binary cannot pass without it.
+        self.assertIn("docker exec -e CODEX_ROUTER_LOCK_WAIT_SECONDS=300 -e GH_TOKEN=\"${FRIDAY_PAT:-}\" -u hermes hermes", checkout_block)
         self.assertIn("failed=$((failed + 1))", checkout_block)
         # A hermes deploy recreates the container, so the block must wait for it
         # rather than run docker exec against a container that is still starting.
@@ -217,7 +219,7 @@ class DeployWorkflowRouterTests(unittest.TestCase):
         # The copy, the run, the removal and the outcome report are the block's
         # behaviour, so they are pinned rather than left to wording.
         self.assertIn("docker cp \"$CHECKOUT_SCRIPT\" hermes:/tmp/refresh-codex-router-checkout.sh", checkout_block)
-        self.assertIn("docker exec -e CODEX_ROUTER_LOCK_WAIT_SECONDS=300 -u hermes hermes sh /tmp/refresh-codex-router-checkout.sh", checkout_block)
+        self.assertIn("docker exec -e CODEX_ROUTER_LOCK_WAIT_SECONDS=300 -e GH_TOKEN=\"${FRIDAY_PAT:-}\" -u hermes hermes sh /tmp/refresh-codex-router-checkout.sh", checkout_block)
         self.assertIn("docker exec hermes rm -f /tmp/refresh-codex-router-checkout.sh", checkout_block)
         # The recovery recipe is pasted into an interactive shell, where history
         # expansion rewrites an unquoted `!gh`; the outer single quotes are what
