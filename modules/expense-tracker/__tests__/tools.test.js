@@ -8,6 +8,9 @@ vi.mock("better-sqlite3", () => {
     const mockDb = {
         prepare: vi.fn(() => mockStmt),
         exec: vi.fn(),
+        // Real better-sqlite3 exposes pragma(); src/dedup.js calls it to select
+        // synchronous=OFF in test mode, so the double must provide it too.
+        pragma: vi.fn(),
         close: vi.fn(),
     };
     const mockStmt = {
