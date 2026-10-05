@@ -1805,6 +1805,11 @@ export class ToolRegistry {
     const url = `${this._config.notifyUrl}`;
     const body = JSON.stringify({ message });
     const headers = { "Content-Type": "application/json" };
+    // Replay note (#665): this signature covers the body alone, with no
+    // timestamp and no nonce, so a captured request stays valid forever. The
+    // verifier is the upstream Hermes gateway, which recomputes the HMAC over
+    // the raw body and enforces no freshness window, so signing anything else
+    // here silently breaks notify. Replay defence has to start at the gateway.
     if (this._config.notifySecret) {
       const crypto = await import("crypto");
       const sig = crypto

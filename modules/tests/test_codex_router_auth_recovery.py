@@ -12,6 +12,7 @@ import yaml
 ROOT = Path(__file__).parents[2]
 SCRIPT = ROOT / "modules/codex-router-auth-recovery.py"
 WORKFLOW = ROOT / ".github/workflows/recover-codex-router-auth.yml"
+DEPLOY_WORKFLOW = ROOT / ".github/workflows/deploy.yml"
 
 
 def load_script():
@@ -104,7 +105,12 @@ class AuthRecoveryWorkflowTests(unittest.TestCase):
         self.assertEqual(account["type"], "choice")
         self.assertEqual(account["options"], ["acct1", "acct2", "acct3"])
         self.assertEqual(workflow["permissions"], {"contents": "read"})
-        self.assertEqual(workflow["concurrency"]["group"], "codex-router-auth-recovery")
+        # Must share the deploy group: both jobs use the same self-hosted host,
+        # the same workspace directory, and the same running containers.
+        deploy = yaml.safe_load(DEPLOY_WORKFLOW.read_text(encoding="utf-8"))
+        self.assertEqual(
+            workflow["concurrency"]["group"], deploy["concurrency"]["group"]
+        )
         self.assertFalse(workflow["concurrency"]["cancel-in-progress"])
         job = workflow["jobs"]["recover"]
         self.assertEqual(job["runs-on"], "self-hosted")
