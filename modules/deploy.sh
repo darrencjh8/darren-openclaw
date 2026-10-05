@@ -26,13 +26,6 @@ while [[ $# -gt 0 ]]; do
   shift
 done
 
-# ktmb-booking is retired: refuse an explicit request instead of failing the
-# health gate after deploying a module that cannot start.
-if [[ " ${COMPONENTS[*]} " =~ " ktmb-booking " ]]; then
-  echo "ktmb-booking is retired and no longer deployable" >&2
-  exit 1
-fi
-
 if [[ ${#COMPONENTS[@]} -eq 0 ]]; then
   echo "Usage: ./modules/deploy.sh --component <name> [--component <name>...] [--non-interactive]"
   echo ""
@@ -743,8 +736,6 @@ MODULE_COUNT=0
 for mod_env in "$ROOT"/modules/*/module.env; do
   [ -f "$mod_env" ] || continue
   source "$mod_env"
-  # ktmb-booking is retired (the module targets mcp 1.x and is unused).
-  if [ "${MODULE_NAME:-}" = "ktmb-booking" ]; then continue; fi
   MODULE_COUNT=$((MODULE_COUNT + 1))
   mod_dir="$(dirname "$mod_env")"
   echo -e "  ${GREEN}✓ Found: ${MODULE_NAME:-unknown} ($mod_dir)${NC}"
@@ -926,8 +917,6 @@ if [[ " ${COMPONENTS[*]} " =~ " all " ]] || [[ ${#COMPONENTS[@]} -eq 1 && "${COM
   # An empty TARGETS causes docker compose to silently ignore --force-recreate
   # and only touch services with changed images/configs.
   TARGETS=$($COMPOSE config --services | tr '\n' ' ')
-  # ktmb-booking is retired: the module targets mcp 1.x and is unused.
-  TARGETS=$(echo "$TARGETS" | tr ' ' '\n' | grep -vx ktmb-booking | tr '\n' ' ')
 else
   TARGETS="${COMPONENTS[*]}"
 fi
@@ -946,10 +935,6 @@ fi
 if [[ " ${COMPONENTS[*]} " =~ " all " ]]; then
   docker ps -q --filter name=gateway | xargs -r docker stop 2>/dev/null; true
   docker stop hermes modules-portfolio-tracker-1 modules-expense-tracker-1 modules-actual-api-1 kokoro-tts 2>/dev/null; true
-  # Retired ktmb-booking: signal any in-flight seat-watcher worker, then give the
-  # stop the same 11-minute grace the old drain provided.
-  docker exec modules-ktmb-booking-1 sh -c 'rm -f /etc/cron.d/ktmb-worker; pkill cron 2>/dev/null; touch /tmp/ktmb_worker.stop' 2>/dev/null || true
-  docker stop -t 660 modules-ktmb-booking-1 2>/dev/null; true
 fi
 
 if [ "${FORCE_ALL:-false}" = "true" ]; then

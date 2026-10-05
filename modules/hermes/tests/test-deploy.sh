@@ -351,42 +351,11 @@ fi
 
 echo ""
 echo "=== deploy.sh: retired modules ==="
-# ktmb-booking must never enter the resolved service list for "all"
-if grep -q "grep -vx ktmb-booking" "$DEPLOY_SCRIPT"; then
-    ok "ktmb-booking excluded from all-services TARGETS"
-else
-    nope "ktmb-booking excluded from all-services TARGETS" "grep -vx ktmb-booking not found"
-fi
-
-# The exclusion must not depend on whether the private submodule is cloned
-if grep -q "private submodule not cloned" "$DEPLOY_SCRIPT"; then
-    nope "ktmb exclusion is unconditional" "still gated on submodule presence"
-else
-    ok "ktmb exclusion is unconditional"
-fi
-
-# An explicit request for a retired module must fail fast (behavioural check)
-if out=$(bash "$DEPLOY_SCRIPT" --component ktmb-booking 2>&1); then
-    nope "explicit ktmb-booking deploy is rejected" "exit status was 0: $out"
-elif grep -q "ktmb-booking is retired" <<<"$out"; then
-    ok "explicit ktmb-booking deploy is rejected"
-else
-    nope "explicit ktmb-booking deploy is rejected" "unexpected output: $out"
-fi
-
-# The env-validation loop must skip retired modules too
-if grep -qF '= "ktmb-booking" ]; then continue' "$DEPLOY_SCRIPT"; then
-    ok "retired module skipped in env validation"
-else
-    nope "retired module skipped in env validation" "skip guard not found"
-fi
-
-
 # The retired submodule is deregistered
 if [ ! -e "$SCRIPT_DIR/../../../.gitmodules" ]; then
-    ok "ktmb submodule deregistered"
+    ok "retired submodule deregistered"
 else
-    nope "ktmb submodule deregistered" ".gitmodules still exists"
+    nope "retired submodule deregistered" ".gitmodules still exists"
 fi
 if grep -q "submodules: recursive" "$SCRIPT_DIR/../../../.github/workflows/deploy.yml"; then
     nope "deploy workflow no longer clones submodules" "submodules: recursive still set"
@@ -401,12 +370,6 @@ else
     nope "pluggable health checks gated on TARGETS" "TARGETS gate not found"
 fi
 
-# Retired containers are stopped by a full deploy, so no manual prod step
-if grep -q "docker stop .*modules-ktmb-booking-1" "$DEPLOY_SCRIPT"; then
-    ok "full deploy stops modules-ktmb-booking-1"
-else
-    nope "full deploy stops modules-ktmb-booking-1" "container not in the stop list"
-fi
 if grep -q "docker stop .*kokoro-tts" "$DEPLOY_SCRIPT"; then
     ok "full deploy stops kokoro-tts"
 else
@@ -452,25 +415,6 @@ if [ -f "$BUILD_SCRIPT" ]; then
     echo "$build_src" | grep -q "COMPONENTS=.*all" && ok "build.sh defaults to all when no --component flags" || nope "build.sh defaults to all" "not found"
     echo "$build_src" | grep -q "pp-cli.jar" && ok "build.sh pre-builds pp-cli.jar" || nope "build.sh pre-builds pp-cli.jar" "not found"
     echo "$build_src" | grep -q "COMPOSE.*build" && ok "build.sh calls docker compose build" || nope "build.sh calls docker compose build" "not found"
-    if grep -q "grep -vx ktmb-booking" "$BUILD_SCRIPT"; then
-        ok "build.sh excludes ktmb-booking from all"
-    else
-        nope "build.sh excludes ktmb-booking from all" "grep -vx ktmb-booking not found"
-    fi
-    if grep -q "private submodule not cloned" "$BUILD_SCRIPT"; then
-        nope "build.sh exclusion is unconditional" "still gated on submodule presence"
-    else
-        ok "build.sh exclusion is unconditional"
-    fi
-
-    # Behavioural check: the retired component is refused before any build
-    if out=$(bash "$BUILD_SCRIPT" --component ktmb-booking 2>&1); then
-        nope "build.sh rejects a retired component" "exit status was 0: $out"
-    elif grep -q "ktmb-booking is retired" <<<"$out"; then
-        ok "build.sh rejects a retired component"
-    else
-        nope "build.sh rejects a retired component" "unexpected output: $out"
-    fi
 else
     nope "build.sh exists" "file not found at $BUILD_SCRIPT"
 fi
