@@ -298,6 +298,42 @@ function normalizeIdentityName(value) {
 }
 
 /**
+ * True when a person-shaped counterparty is proven to be a REAL, remembered
+ * entity, so it books instead of being held. Fail-closed: no name, no facts, an
+ * unrecognised grammar or an unreadable fact store all answer false and hold.
+ *
+ * Only the payee/category mapping grammar qualifies:
+ *   `KEY (merchant )?maps to VALUE (payee|category)`
+ * It is the only fact shape in this module whose KEY is a counterparty name and
+ * whose existence asserts that name is a known non-person entity. A legal-name
+ * fact (`Legal name: NAME -> ...`), an `NAME is a TYPE account` fact and a
+ * `... ending NNNN belongs to NAME` fact all name an account or the holder, so
+ * none of them can release a person hold.
+ *
+ * The key is compared WHOLE after normalisation. A substring or token-overlap
+ * match is forbidden: `Legal name: CHONG JIN HENG -> CHON (statement password)`
+ * shares tokens with the counterparty, and an overlap rule would release a real
+ * person transfer.
+ *
+ * @param {string} name the alert's counterparty name
+ * @param {Array<{text?: string}|string>} facts the full deterministic fact list
+ * @returns {boolean}
+ */
+export function counterpartyIsRememberedEntity(name, facts) {
+    const key = normalizeIdentityName(name);
+    if (!key) return false;
+    return (facts || []).some((fact) => {
+        const text = typeof fact === "string" ? fact : fact?.text || "";
+        // Lazy match so the KEY cannot swallow the trailing "maps to VALUE".
+        const match = text.match(
+            /^(.+?)(?:\s+merchant)?\s+maps\s+to\s+(.+?)\s+(?:payee|category)\b/i,
+        );
+        if (!match) return false;
+        return normalizeIdentityName(match[1]) === key;
+    });
+}
+
+/**
  * True when the destination a transfer names cannot be pinned to exactly one
  * open account.
  *
@@ -673,6 +709,27 @@ export class AgentOrchestrator {
         return this._resolveMovementToOutput(movement, { allowSuffixLearning: true });
     }
 
+    /**
+     * The full fact store, for a decision that must not depend on recall.
+     *
+     * `search_memory` is a relevance search: a miss is silent, and a miss here
+     * would book a real person transfer as spend. `list_facts` is the
+     * deterministic read of the whole store. Any failure answers `[]`, which the
+     * release predicate treats as "not proven", so the hold stands.
+     */
+    async _personEntityFacts() {
+        try {
+            const result = await this._tools.executeTool("list_facts", {});
+            return Array.isArray(result?.facts) ? result.facts : [];
+        } catch (error) {
+            logger.warn({
+                event: "person_entity_facts_failed",
+                error: error.message,
+            });
+            return [];
+        }
+    }
+
     async _resolveMovementToOutput(movement, { allowSuffixLearning = false } = {}) {
         // A movement whose amount did not parse must not become a booking: the
         // sign flip below turned `null` into -0, and the route accepts 0, so a
@@ -694,6 +751,18 @@ export class AgentOrchestrator {
             const result = await this._tools.executeTool("search_memory", { query });
             facts.push(...(result?.results || []));
         }
+        // The person/business question is settled from a FULL deterministic read,
+        // never from `search_memory`: a recall miss on the queried name would
+        // silently book a real person transfer as spend, which is the defect the
+        // person hold closes. Read it only for a movement the parser already
+        // flagged person-shaped, so an ordinary merchant alert pays nothing.
+        // A payee/category mapping whose key is the counterparty is the ONLY
+        // thing that proves the name is a real, remembered entity.
+        const personCounterpartyReleased =
+            movement.person_transfer === true && counterpartyIsRememberedEntity(
+                movement.counterparty?.name,
+                await this._personEntityFacts(),
+            );
         const mappings = identityMappingsFromFacts(facts, accounts);
         const resolved = resolveMovementAccounts(movement, accounts, ctx?.payees || [], mappings);
         const source = resolved.source_account;
@@ -735,6 +804,67 @@ export class AgentOrchestrator {
                     notify_message: "",
                     _suffix_mappings: suffixMappings,
                     _hold_unresolved_transfer: true,
+                    _hold_cause: "destination_unresolved",
+                };
+            }
+            // F2: an OUTGOING movement whose source account cannot be pinned
+            // because the SENDER BANK is ambiguous — the alert names a bank but no
+            // account suffix, and two or more live accounts sit at that bank, so
+            // there is no evidence to break the tie. Without this the alert is
+            // DROPPED at `return null` below, so the user is never told and the
+            // money silently vanishes from the pipeline: the uid-1012
+            // scheduled-transfer shape ("Your scheduled transfer of … to <person>
+            // … was successfully completed", whose parser sets
+            // own_account {name:null, bank:"Ryt", suffix:null}).
+            //
+            // BOTH conditions are load-bearing. `!suffix` is what separates this
+            // from an ordinary bill-payment alert whose NAMED source suffix simply
+            // failed to resolve (own_account carries a suffix); those must keep
+            // falling through to the LLM extractor rather than becoming a hold.
+            // The 2+ live-account test is what makes the bank genuinely ambiguous —
+            // `resolveAccountByBank` returns null both for zero and for many, and
+            // only "many" is an ambiguity the user can resolve.
+            //
+            // Keyed on `outgoing` on purpose: an incoming movement with an
+            // ambiguous sender bank is an ordinary bank credit, and holding every
+            // one of those is the opposite trade. This branch sits BEFORE the
+            // person-hold site, so a person-shaped counterparty that lands here
+            // never reaches that site: it renders the source-ambiguous cause, and
+            // never the person-identity one.
+            const ownBank = movement.own_account?.bank;
+            const ownSuffix = movement.own_account?.suffix;
+            const ambiguousSenderBank =
+                !ownSuffix &&
+                ownBank &&
+                accounts.filter(
+                    (account) => !account.closed && bankFromText(account.name) === ownBank,
+                ).length >= 2;
+            if (
+                !source &&
+                date &&
+                movement.direction === "outgoing" &&
+                movement.counterparty?.name &&
+                ambiguousSenderBank
+            ) {
+                return {
+                    merchant: movement.counterparty.name,
+                    amount_cents: -Math.abs(movement.amount_cents),
+                    date,
+                    currency: movement.currency,
+                    account_id: "",
+                    account_name: "",
+                    budget_id: budgetId,
+                    action: "insert",
+                    payee_name: "Misc",
+                    category_id: null,
+                    raw_description: `Transfer to ${movement.counterparty.name}`,
+                    raw_merchant_descriptor: "",
+                    notes: movement.reference_number ? `Statement: ${movement.reference_number}` : "",
+                    reasoning: `Held: source account ambiguous at this bank; the transfer to "${movement.counterparty.name}" was not booked`,
+                    notify_message: "",
+                    _suffix_mappings: suffixMappings,
+                    _hold_unresolved_transfer: true,
+                    _hold_cause: "source_account_ambiguous",
                 };
             }
             return null;
@@ -758,13 +888,40 @@ export class AgentOrchestrator {
             const holder = match[1].split(/\s*(?:->|→|=>)\s*/, 1)[0];
             return normalizeIdentityName(holder) === normalizeIdentityName(counterparty);
         });
+        // Two independent reasons to hold a person-shaped movement. The own-identity arm
+        // is unchanged: the holder's legal name recalled from memory, AND the name
+        // must not resolve to a tracked account. The person-transfer arm is new: the
+        // PARSER already decided this is a person-to-person movement
+        // (bank-movement.js person_transfer, set from `looksLikePersonName`), and
+        // an unremembered person name is unverifiable without consulting accounts.
+        //
+        // The account-match test deliberately does NOT gate the second arm. As a
+        // term of the whole condition it suppressed the hold for ANY counterparty
+        // that resolves to an account, because `matchAccountByName` matches on
+        // TOKEN CONTAINMENT (suffix-facts.js matchWithoutAliases step 2,
+        // `query.every(w => target.includes(w))`): a transfer to the person
+        // `WEI LING` resolved `matched:true` to an account `Wei Ling Savings`
+        // (while `WEI LING TAN` did not), so a transfer to a real person booked
+        // as spend on every route. A person name is held because it is an
+        // unremembered person, not because it failed an account lookup.
+        const personNamed = movement.person_transfer === true && !personCounterpartyReleased;
         const unverifiablePersonMovement =
             !resolved.internal &&
-            knownOwnIdentity &&
-            !matchAccountByName(counterparty, accounts, mappings.aliases).matched;
+            ((knownOwnIdentity &&
+                !matchAccountByName(counterparty, accounts, mappings.aliases).matched) ||
+                personNamed);
         if (unverifiablePersonMovement) {
+            // Name the COUNTERPARTY, which is the other party to the money — not
+            // the destination account field. On the LLM-extractor route
+            // `counterparty` is built unconditionally from `to_account`
+            // (orchestrator.js _llmExtractMovement), so on an INCOMING credit it
+            // is the holder's OWN account; naming it told the holder a transfer to
+            // their own account was held because the counterparty was unverified.
+            const namedParty = movement.direction === "outgoing"
+                ? counterparty
+                : (movement.own_account?.name || counterparty);
             return {
-                merchant: movement.counterparty.name,
+                merchant: namedParty || "Bank transfer",
                 amount_cents: movement.direction === "incoming"
                     ? Math.abs(movement.amount_cents)
                     : -Math.abs(movement.amount_cents),
@@ -776,13 +933,14 @@ export class AgentOrchestrator {
                 action: "insert",
                 payee_name: "Misc",
                 category_id: null,
-                raw_description: `${movement.direction === "incoming" ? "Transfer from" : "Transfer to"} ${movement.counterparty.name}`,
+                raw_description: `${movement.direction === "incoming" ? "Transfer from" : "Transfer to"} ${namedParty || "an unverified counterparty"}`,
                 raw_merchant_descriptor: "",
                 notes: movement.reference_number ? `Statement: ${movement.reference_number}` : "",
-                reasoning: "Held: person-to-person movement with no verified other leg",
+                reasoning: `Held: transfer to "${namedParty || "an unverified counterparty"}" could not be matched to a known payee or account`,
                 notify_message: "",
                 _suffix_mappings: suffixMappings,
                 _hold_unresolved_transfer: true,
+                _hold_cause: "person_identity_unverified",
             };
         }
 
@@ -905,6 +1063,7 @@ export class AgentOrchestrator {
                     notify_message: "",
                     _suffix_mappings: suffixMappings,
                     _hold_unresolved_transfer: true,
+                    _hold_cause: "destination_unresolved",
                 };
             }
             return {
@@ -1037,6 +1196,21 @@ export class AgentOrchestrator {
             const from = String(parsed?.from_account || "").trim();
             const to = String(parsed?.to_account || "").trim();
             if (!occurredAt || (!from && !to)) return null;
+            // The person/business flag must exist BEFORE _resolveMovementToOutput
+            // reads it, and it must key on the side that is actually the OTHER
+            // party to the money. This route assigns `own_account` from
+            // `from_account` and `counterparty` from `to_account` UNCONDITIONALLY
+            // (below), and the extractor prompt defines `to_account` as the
+            // DESTINATION — which on an incoming movement is the holder's OWN
+            // account. Keying on `to` for both directions therefore flagged real
+            // incoming credits as person transfers (looksLikePersonName accepts
+            // "Main Account", "Ryt Credit", "POSB Cashback Account"). So: the
+            // destination on an outgoing movement, the source on an incoming one.
+            // No account-name suppression is added here — `matchAccountByName`
+            // matches on token containment, so it silently released genuine person
+            // transfers (a name "WEI LING" resolved to an account "Wei Ling
+            // Savings"), and an account list is not in scope in this method.
+            const namedParty = direction === "outgoing" ? to : from;
             const movement = {
                 kind: "bank_movement",
                 direction,
@@ -1045,6 +1219,7 @@ export class AgentOrchestrator {
                 occurred_at: occurredAt,
                 own_account: from ? { name: from, bank: senderBank, suffix: suffix(from) } : null,
                 counterparty: to ? { name: to, bank: bankFromText(to), suffix: suffix(to) } : null,
+                person_transfer: looksLikePersonName(namedParty),
                 reference_number: String(parsed?.reference || ""),
                 recipient_bank: direction === "incoming" ? senderBank : null,
                 merchant_display_name: String(parsed?.merchant || ""),
@@ -1301,6 +1476,16 @@ export class AgentOrchestrator {
                 delete output._structured_movement;
                 delete output._hold_unresolved_paynow;
                 delete output._hold_unresolved_transfer;
+                // `_hold_cause` chooses which held-row TEXT the notify branch
+                // renders, so a forged value would put words in the user's
+                // notification for a row the parser never produced. Stripped here
+                // with its `_hold_*` siblings.
+                delete output._hold_cause;
+                // `_card_repayment` is set only by the deterministic movement
+                // parser and read by the Phase-2 destination gate (it marks a
+                // repayment into the holder's own credit line). Phase-1 LLM output
+                // must not be able to assert it and skip that gate.
+                delete output._card_repayment;
 
                 // Date fallback: if the email body contains no recognisable
                 // date and the LLM returned a date that differs from today,
@@ -2394,15 +2579,33 @@ export class AgentOrchestrator {
             }
             if (llmOutput._hold_unresolved_transfer) {
                 if (!silent) {
-                    await this._tools.executeTool("notify_user", {
-                        message: `Held: transfer destination for ${bookableAmountPrefix(llmOutput.amount_cents, llmOutput.currency)}"${llmOutput.merchant || "unknown"}" was not safe to resolve, so it was not booked.`,
-                    });
+                    // One cause per held row. The three causes are NOT the same
+                    // story to the user, and the old text told the wrong one for
+                    // two of them: for a person transfer the destination was never
+                    // the problem, and for the F2 ambiguity the SOURCE account was.
+                    // The cause rides `_hold_cause` because `notify_message` is
+                    // ignored here and `reasoning` is LLM-authored on the Phase-2
+                    // holds, which made a wrong-text failure untestable.
+                    const heldName = llmOutput.merchant || "unknown";
+                    const prefix = bookableAmountPrefix(llmOutput.amount_cents, llmOutput.currency);
+                    const messages = {
+                        person_identity_unverified: `Held: ${prefix}transfer to "${heldName}" was not booked — I could not verify "${heldName}" as a payee or one of your accounts, and booking it would record a stranger as spending or income.`,
+                        source_account_ambiguous: `Held: ${prefix}transfer to "${heldName}" was not booked — I could not tell which of your accounts it left, because more than one account at that bank matches the alert. Nothing was recorded.`,
+                    };
+                    const message = messages[llmOutput._hold_cause] ||
+                        `Held: transfer destination for ${prefix}"${heldName}" was not safe to resolve, so it was not booked.`;
+                    await this._tools.executeTool("notify_user", { message });
                 }
                 await this._tools.executeTool("log_decision", {
                     action: "held_unresolved_transfer",
                     reasoning: llmOutput.reasoning || "",
                     timestamp: new Date().toISOString(),
                 });
+                // A held email must be marked read. imap.js re-fetches
+                // `{ unseen: true }` on every idle poll, so without this a held
+                // alert notifies again and again; the hold is already journaled
+                // by log_decision above, so nothing is lost by marking it read.
+                if (!silent) await this._tools.executeTool("mark_email_read", {});
                 return { action: "notified", details: "Held an unresolved transfer" };
             }
             const payeeName = llmOutput.payee_name || "Misc";

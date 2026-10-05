@@ -94,6 +94,27 @@ const RYT_RECEIVED_OWN_NAME_REAL = RYT_FRAME(
     "Money's in! You've received RM62.00 from ACCOUNT HOLDER on 18/9/2026, 5:04 AM (GMT+8).",
 );
 
+/**
+ * #654 — the `paid ... to <person>` form. Same sentence grammar as
+ * `sent`/`received` (bank-movement.js accepts `received|sent|paid`), a real
+ * person as the counterparty, and the merchant-verb `paid` on the front.
+ */
+const RYT_SENT_PERSON = RYT_FRAME(
+    "You've paid RM255.00 to LEE WEI LING on 19/9/2026, 10:50 AM (GMT+8) using your\nRyt Credit.",
+);
+
+/**
+ * #654 / uid 1012 — the Ryt scheduled-transfer completion. It names a person
+ * and NO source account (own_account is {name:null, bank, suffix:null}), so with
+ * two live accounts at the bank nothing can pin the source.
+ */
+const RYT_SCHEDULED_PERSON =
+    "Dear Customer,\n\nYour scheduled transfer of RM908.25 to LEE WEI LING on 1/10/2026, 10:02 AM (GMT+8) was successfully completed.\n\nThank you for banking with us.\nRyt Bank App and head to Scheduled Transfers.";
+
+/** uid 132 — the `was paid at <MERCHANT>` form; a different branch entirely. */
+const RYT_PAID_AT_MERCHANT =
+    "Hi Customer,\n\nRM200.00 was paid at TNG-EWALLET ECOM 3-EC using your Main Account on 2/9/2026, 12:46 AM (GMT+8).\n\nIf this was not you, give us a call.";
+
 /** uid 917 as actually delivered: a real merchant whose name reads like a person. */
 const RYT_PAID_MERCHANT_REAL = RYT_FRAME(
     "You've paid RM255.00 to CFF UNITED PLT on 19/9/2026, 10:50 AM (GMT+8) using your\nRyt Credit.",
@@ -224,7 +245,7 @@ Reference :
 
 describe("hold behaviour for person-name movements (#584 / #585)", () => {
     /** Orchestrator over a single Ryt/OCBC account and no matching payee. */
-    async function orchestrate(body, { senderBank, receivedAt, accounts, payees = [], extraFacts = [], legalFact = "Legal name: ACCOUNT HOLDER" }) {
+    async function orchestrate(body, { senderBank, receivedAt, accounts, payees = [], extraFacts = [], legalFact = "Legal name: ACCOUNT HOLDER", listFacts = [] }) {
         const { AgentOrchestrator } = await import("../src/orchestrator.js");
         const calls = [];
         const tools = {
@@ -237,6 +258,11 @@ describe("hold behaviour for person-name movements (#584 / #585)", () => {
                         ? { results: [{ text: legalFact }, ...extraFacts] }
                         : { results: extraFacts };
                 }
+                // The FULL deterministic fact read the person-hold release
+                // predicate uses. Distinct from search_memory on purpose: a recall
+                // miss must not release a hold, so the two are stubbed separately
+                // and a test can prove a fact releases only via this route.
+                if (name === "list_facts") return { facts: listFacts };
                 if (name === "check_duplicate") return false;
                 if (name === "check_schedule_collision") return false;
                 // The far-side read the #598 fix makes before reserving. Nothing
@@ -263,8 +289,11 @@ describe("hold behaviour for person-name movements (#584 / #585)", () => {
         );
         orch._llm.chat = vi.fn();
         const phase1 = await orch._runPhase1(body, { senderBank, receivedAt });
-        const phase2 = await orch._resolvePhase2(phase1);
-        const result = await orch._executePhase3(phase2);
+        // A dropped alert (no parser resolves it and the LLM declines) is a real
+        // outcome this change pins — `_resolvePhase2(null)` would throw, so stop
+        // at the null instead of pretending phase 2 ran.
+        const phase2 = phase1 ? await orch._resolvePhase2(phase1) : null;
+        const result = phase2 ? await orch._executePhase3(phase2) : null;
         return { phase1, phase2, result, calls, llm: orch._llm.chat };
     }
 
@@ -659,21 +688,36 @@ To: ACCOUNT HOLDER SC A/C ending 6445
         });
     });
 
-    it("books a sent payment to an unlisted business descriptor", async () => {
+    it("HOLDS a sent payment to an unlisted person-shaped business descriptor (#654)", async () => {
+        // This pin was "must book" until #654 and is AMENDED, not deleted: a
+        // transfer whose counterparty is an unremembered person-shaped name is
+        // now held for the user instead of being posted as spend. `ACME
+        // CONSULTANCY` is person-shaped (two alphabetic tokens, no NON_PERSON
+        // keyword, no digits), so it takes the same path as a real person name.
+        // Disclosed in the plan's Behaviour change #1 and the PR body.
+        //
+        // The genuine must-book merchant pins are DIFFERENT sentence forms and
+        // are unaffected: `You've paid … to CLINIC MERCHANT` / `365 BAKERY` are
+        // protected by `looksLikePersonName` REJECTING those names, and
+        // `RM200.00 was paid at TNG-EWALLET ECOM 3-EC` is a separate branch that
+        // carries no `person_transfer` key at all.
         const body = RYT_FRAME(
             "You've sent RM255.00 to ACME CONSULTANCY on 19/9/2026, 10:50 AM (GMT+8) using your\nRyt Credit.",
         );
-        const { phase2, calls } = await orchestrate(body, {
+        const { phase2, result, calls } = await orchestrate(body, {
             senderBank: "Ryt",
             receivedAt: "2026-09-19T02:50:21.000Z",
             accounts: rytAccounts,
         });
 
-        expect(phase2._hold_unresolved_transfer).toBeUndefined();
-        expect(calls.find((c) => c.name === "insert_transaction")?.args).toMatchObject({
+        expect(phase2).toMatchObject({
+            payee_name: "Misc",
             account_id: "ryt-bank",
-            amount_cents: -25500,
+            _hold_unresolved_transfer: true,
         });
+        expect(phase2.category_id ?? null).toBe(null);
+        expect(result.action).toBe("notified");
+        expect(calls.some((c) => c.name === "insert_transaction")).toBe(false);
     });
 
     it("holds the real uid 919 body delivered inside its template (#585)", async () => {
@@ -690,6 +734,146 @@ To: ACCOUNT HOLDER SC A/C ending 6445
         });
         expect(result.action).toBe("notified");
         expect(calls.some((c) => c.name === "insert_transaction")).toBe(false);
+    });
+
+    // ── #654 pins ───────────────────────────────────────────────────────────
+    // A person transfer is held in BOTH directions, and the held row names the
+    // actual counterparty, not the destination-account field.
+
+    it("holds a `paid ... to <person>` transfer: the `paid` verb is not a merchant-only form (#654)", async () => {
+        // The Ryt sentence grammar accepts `received|sent|paid`, and the
+        // `person_transfer` gate excluded `paid`, so this form booked as spend.
+        const body = RYT_FRAME(
+            "You've paid RM255.00 to LEE WEI LING on 19/9/2026, 10:50 AM (GMT+8) using your\nRyt Credit.",
+        );
+        const { phase2, result, calls } = await orchestrate(body, {
+            senderBank: "Ryt",
+            receivedAt: "2026-09-19T02:50:21.000Z",
+            accounts: rytAccounts,
+        });
+
+        expect(phase2).toMatchObject({
+            payee_name: "Misc",
+            account_id: "ryt-bank",
+            _hold_unresolved_transfer: true,
+            _hold_cause: "person_identity_unverified",
+        });
+        expect(result.action).toBe("notified");
+        expect(calls.some((c) => c.name === "insert_transaction")).toBe(false);
+    });
+
+    it("still BOOKS `was paid at <merchant>`: that branch carries no person flag (#654)", async () => {
+        // The genuine merchant pins are protected by `looksLikePersonName`
+        // REJECTING the name, not by the verb gate — and this `was paid at` form
+        // is a different branch that never sets the key at all.
+        const movement = parseBankMovement(
+            "Hi Customer,\n\nRM200.00 was paid at TNG-EWALLET ECOM 3-EC using your Main Account on 2/9/2026, 12:46 AM (GMT+8).\n\nIf this was not you, give us a call.",
+            { senderBank: "Ryt", receivedAt: "2026-09-02T00:00:00.000Z" },
+        );
+        expect(movement.person_transfer).toBeUndefined();
+
+        const { phase2, calls } = await orchestrate(RYT_PAID_AT_MERCHANT, {
+            senderBank: "Ryt",
+            receivedAt: "2026-09-02T00:00:00.000Z",
+            accounts: rytAccounts,
+        });
+        expect(phase2._hold_unresolved_transfer).toBeUndefined();
+        expect(calls.some((c) => c.name === "insert_transaction")).toBe(true);
+    });
+
+    it("holds an INCOMING person credit when the sender bank has ONE live account (#654)", async () => {
+        const { phase2, result, calls } = await orchestrate(RYT_RECEIVED_OWN_NAME_REAL, {
+            senderBank: "Ryt",
+            receivedAt: "2026-09-18T00:00:00.000Z",
+            accounts: rytAccounts,
+        });
+
+        expect(phase2).toMatchObject({
+            payee_name: "Misc",
+            _hold_unresolved_transfer: true,
+            _hold_cause: "person_identity_unverified",
+        });
+        // The held row names the SENDER, never the holder's own account.
+        expect(phase2.merchant).toBe("ACCOUNT HOLDER");
+        expect(result.action).toBe("notified");
+        expect(calls.some((c) => c.name === "insert_transaction")).toBe(false);
+    });
+
+    it("still DROPS an incoming person credit when TWO accounts share the sender bank (#654 boundary)", async () => {
+        // Not fixed by this change and pinned so the claim cannot silently widen:
+        // `resolveAccountByBank` refuses an ambiguous bank, so the movement never
+        // reaches the hold site, and F2's new branch is keyed on `outgoing`.
+        const { phase1 } = await orchestrate(RYT_RECEIVED_OWN_NAME_REAL, {
+            senderBank: "Ryt",
+            receivedAt: "2026-09-18T00:00:00.000Z",
+            accounts: [
+                { id: "ryt-bank", name: "Ryt Bank", closed: false },
+                { id: "ryt-savings", name: "Ryt Savings", closed: false },
+            ],
+        });
+
+        expect(phase1).toBeNull();
+    });
+
+    it("keys the hold on the counterparty, so a `maps to ... payee` fact releases it (#654)", async () => {
+        // Only the payee/category mapping grammar can release a person hold, and
+        // it must be read from the FULL fact list, not from search_memory.
+        const { phase2, calls } = await orchestrate(RYT_SENT_PERSON, {
+            senderBank: "Ryt",
+            receivedAt: "2026-09-19T02:50:21.000Z",
+            accounts: rytAccounts,
+            listFacts: ["LEE WEI LING merchant maps to Bak Kwa Trading payee"],
+        });
+
+        expect(phase2._hold_unresolved_transfer).toBeUndefined();
+        expect(calls.some((c) => c.name === "insert_transaction")).toBe(true);
+    });
+
+    it("does NOT release the hold from a legal-name or account-type fact (#654)", async () => {
+        // Fail-closed: a fact that names the holder or an account is not evidence
+        // that the counterparty is a real non-person entity. An overlap rule
+        // here would release a real person transfer behind this one.
+        const { phase2 } = await orchestrate(RYT_SENT_PERSON, {
+            senderBank: "Ryt",
+            receivedAt: "2026-09-19T02:50:21.000Z",
+            accounts: rytAccounts,
+            listFacts: [
+                "Legal name: LEE WEI LING -> LW (statement password)",
+                "LEE WEI LING is a bank account",
+            ],
+        });
+
+        expect(phase2._hold_unresolved_transfer).toBe(true);
+        expect(phase2._hold_cause).toBe("person_identity_unverified");
+    });
+
+    it("each hold cause renders its OWN notification text (#654)", async () => {
+        const personHold = await orchestrate(RYT_SENT_PERSON, {
+            senderBank: "Ryt",
+            receivedAt: "2026-09-19T02:50:21.000Z",
+            accounts: rytAccounts,
+        });
+        const personText = personHold.calls.find((c) => c.name === "notify_user")?.args?.message || "";
+        expect(personText).toMatch(/transfer to "LEE WEI LING"/);
+        expect(personText).not.toMatch(/destination/i);
+        // A held email is marked read, so it does not re-notify on every poll.
+        expect(personHold.calls.some((c) => c.name === "mark_email_read")).toBe(true);
+
+        // The F2 ambiguity is a DIFFERENT cause with a different story: the
+        // source account was unclear, not the counterparty.
+        const sourceAmbiguous = await orchestrate(RYT_SCHEDULED_PERSON, {
+            senderBank: "Ryt",
+            receivedAt: "2026-10-01T02:03:00.000Z",
+            accounts: [
+                { id: "ryt-bank", name: "Ryt Bank", closed: false },
+                { id: "ryt-savings", name: "Ryt Savings", closed: false },
+            ],
+        });
+        expect(sourceAmbiguous.phase2._hold_cause).toBe("source_account_ambiguous");
+        const sourceText = sourceAmbiguous.calls.find((c) => c.name === "notify_user")?.args?.message || "";
+        expect(sourceText).toMatch(/which of your accounts it left/);
+        // It never reaches the person-hold site, so it never claims that cause.
+        expect(sourceAmbiguous.phase2._hold_cause).not.toBe("person_identity_unverified");
     });
 });
 

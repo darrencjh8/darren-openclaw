@@ -284,13 +284,19 @@ export function parseBankMovement(text, { senderBank = null, receivedAt } = {}) 
     if (!occurredAt) return null;
     const counterparty = rytSentence[4].trim();
     const ownAccount = rytSentence[7]?.trim() || null;
-    // A "received/sent ... <NAME>" alert is a person-to-person movement, not a
-    // merchant payment ("paid ... at/to MERCHANT" is one). When the
-    // counterparty is a bare person name it cannot be resolved to a tracked
-    // account or a real merchant, so Phase 2 holds it instead of booking the
-    // holder's own money as spend or income (#585).
+    // A "received/sent/paid ... <NAME>" alert is a person-to-person movement,
+    // not a merchant payment ("paid ... at MERCHANT" is the merchant form, and
+    // that branch carries no person_transfer key at all). When the counterparty
+    // is a bare person name it cannot be resolved to a tracked account or a real
+    // merchant, so Phase 2 holds it instead of booking the holder's own money as
+    // spend or income (#585). `paid` belongs in this list: the sentence form
+    // "You've paid RMx to <PERSON> ... using your <account>" is a transfer to a
+    // person wearing the same verb as a merchant payment, and excluding it left
+    // the Critical open on that form. The merchant pins are protected by
+    // `looksLikePersonName` rejecting them (CLINIC MERCHANT, 365 BAKERY), not by
+    // this verb gate.
     const personTransfer =
-      /^(received|sent)$/i.test(rytSentence[1]) && looksLikePersonName(counterparty);
+      /^(received|sent|paid)$/i.test(rytSentence[1]) && looksLikePersonName(counterparty);
     return {
       kind: "bank_movement", direction,
       amount_cents: cents(currency, rytSentence[3], direction), currency,
