@@ -436,11 +436,18 @@ class CodexRouterRollingUpdateTests(unittest.TestCase):
         deploy = DEPLOY_SCRIPT.read_text(encoding="utf-8")
 
         def needs_start(running, force_all=None):
+            # Model `docker ps -q` and not "print whatever was canned": a present
+            # front prints its id, an absent one exits 0 and prints nothing (the
+            # shell's command substitution strips the trailing newline), and a
+            # failed lookup exits non-zero. `""` therefore reaches front_running as
+            # an empty string, which is the absent case the line below pins.
             body = "\n".join(
                 [
                     "COMPOSE=docker-compose",
                     "unset FORCE_ALL" if force_all is None else f"FORCE_ALL={force_all}",
-                    f"docker() {{ printf '%s\\n' {shlex.quote(running)}; }}",
+                    "docker() { "
+                    f"[ -z {shlex.quote(running)} ] || printf '%s\\n' {shlex.quote(running)}"
+                    "; }",
                     "front_needs_start",
                 ]
             )
@@ -477,10 +484,16 @@ class CodexRouterRollingUpdateTests(unittest.TestCase):
         self.assertIn("|| return 2", lookup)
 
         def gate(running, force_all=None):
+            # `docker ps -q` prints a container's id, and for an absent front exits
+            # 0 with no output at all; `return 1` is the failed lookup. The absent
+            # case therefore reaches front_running as an empty string rather than as
+            # a newline, which is what makes the assertion below about absence.
             docker = (
                 "docker() { return 1; }"
                 if running is None
-                else f"docker() {{ printf '%s\\n' {shlex.quote(running)}; }}"
+                else "docker() { "
+                f"[ -z {shlex.quote(running)} ] || printf '%s\\n' {shlex.quote(running)}"
+                "; }"
             )
             body = "\n".join(
                 [
