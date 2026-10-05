@@ -33,7 +33,7 @@ sh -n "$SCRIPT" && ok "refresh script parses as POSIX sh" || nope "refresh scrip
 echo "=== both writers call the refresh ==="
 grep -Fq -- 'refresh-codex-router-checkout.sh' "$DEPLOY_SCRIPT" \
     && ok "deploy.sh runs the refresh" || nope "deploy.sh runs the refresh"
-grep -Fq -- 'docker exec -e CODEX_ROUTER_LOCK_WAIT_SECONDS=300 -u hermes hermes' "$DEPLOY_SCRIPT" \
+grep -Fq -- 'docker exec -e CODEX_ROUTER_LOCK_WAIT_SECONDS=300 -e GH_TOKEN="${FRIDAY_PAT:-}" -u hermes hermes' "$DEPLOY_SCRIPT" \
     && ok "deploy.sh runs it as the checkout's owner" || nope "deploy.sh runs it as the checkout's owner"
 # The router-or-hermes scope itself is asserted against the new block in
 # test_deploy_workflow_router.py: matching it here also matched the sibling
@@ -42,6 +42,45 @@ grep -Fq -- 'refresh-codex-router-checkout.sh' "$SEED_SCRIPT" \
     && ok "the boot hook refreshes the checkout" || nope "the boot hook refreshes the checkout"
 grep -Eq "GH_TOKEN=\"\\\$\\(cat /run/secrets/friday_pat\\)\" su -m -s /bin/sh hermes -c '/opt/hermes-defaults/scripts/refresh-codex-router-checkout\.sh'" "$SEED_SCRIPT" \
     && ok "the boot hook scopes the PAT for the baked refresh" || nope "the boot hook scopes the PAT for the baked refresh"
+
+echo "=== the fetch authenticates with the caller's PAT, not with gh ==="
+# The deploy installs gh (and ntn) into the container's persisted volume only
+# after this gate, so a fetch that needs the gh binary deadlocks the deploy
+# whenever that volume lost it: measured 2026-10-05, every deploy from 22:33Z
+# died with "gh: not found" -> checkout not advanced -> deploy failed -> the
+# install step that would have provided gh never ran. Both callers hold the PAT
+# (the boot hook exports it, the deploy receives FRIDAY_PAT), so the helper this
+# script builds must hand git that token itself and keep gh only as a fallback.
+helper=$(sed -n "s/.*CREDENTIAL_HELPER='\(![^']*\)'.*/\1/p" "$SCRIPT" | head -1)
+if [ -z "$helper" ]; then
+    nope "the refresh builds a credential helper"
+else
+    ok "the refresh builds a credential helper"
+fi
+
+# Run the built helper through git's credential-helper protocol, so a broken
+# snippet fails here rather than in a deploy that already reported success.
+helper_rc=0
+helper_out=$(printf 'protocol=https\nhost=github.com\n\n' \
+    | GH_TOKEN=token-from-caller sh -c "${helper#!}" get 2>&1) || helper_rc=$?
+if [ "$helper_rc" -eq 0 ] && printf '%s\n' "$helper_out" | grep -qx 'password=token-from-caller'; then
+    ok "the helper yields an exported GH_TOKEN as the password"
+else
+    nope "the helper yields an exported GH_TOKEN as the password (rc=$helper_rc): $helper_out"
+fi
+helper_user=$(printf '%s\n' "$helper_out" | sed -n 's/^username=//p')
+if [ "$helper_user" = "x-access-token" ]; then
+    ok "the helper names the token user GitHub expects"
+else
+    nope "the helper names the token user GitHub expects (got: $helper_user)"
+fi
+
+grep -Fq -- "!gh auth git-credential" "$SCRIPT" \
+    && ok "gh's helper stays as the fallback when no PAT is exported" \
+    || nope "gh's helper stays as the fallback when no PAT is exported"
+grep -Fq -- '-e GH_TOKEN=' "$DEPLOY_SCRIPT" \
+    && ok "the deploy exports the PAT into the container refresh" \
+    || nope "the deploy exports the PAT into the container refresh"
 
 echo "=== behaviour against real repositories ==="
 sandbox=$(mktemp -d)

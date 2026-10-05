@@ -90,10 +90,23 @@ if [ "$branch_name" != "$BRANCH" ]; then
     exit 0
 fi
 
-# The image's git has no credential helper; gh is authenticated, so borrow its.
+# The image's git has no credential helper, so one has to be supplied. Prefer the
+# PAT the caller exports: both writers hold one (the boot hook exports GH_TOKEN,
+# the deploy passes FRIDAY_PAT), while gh lives in the persisted volume that the
+# deploy installs only *after* this gate, so a fetch that needs the gh binary
+# deadlocks the deploy whenever that volume lost it (measured 2026-10-05: "gh: not
+# found" -> checkout not advanced -> deploy failed -> the install step never ran).
+# gh's helper stays as the fallback for a caller that exports no token; the token
+# reaches the helper through the environment, never through the process arguments.
 # The bound matters because the lock serializes writers, not time: a hung fetch
 # would hold it and block the deploy's docker exec and the boot hook.
-if ! timeout --kill-after=10 120 git -c credential.helper='!gh auth git-credential' fetch --quiet origin "$BRANCH"; then
+if [ -n "${GH_TOKEN:-}" ]; then
+    # shellcheck disable=SC2016  # git expands $GH_TOKEN when it runs this helper, not now
+    CREDENTIAL_HELPER='!f() { printf "username=x-access-token\npassword=%s\n" "$GH_TOKEN"; }; f'
+else
+    CREDENTIAL_HELPER='!gh auth git-credential'
+fi
+if ! timeout --kill-after=10 120 git -c "credential.helper=$CREDENTIAL_HELPER" fetch --quiet origin "$BRANCH"; then
     echo "refresh-codex-router-checkout: could not fetch origin $BRANCH" >&2
     exit 1
 fi
