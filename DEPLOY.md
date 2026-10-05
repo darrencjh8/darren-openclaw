@@ -81,7 +81,11 @@ publish no ports. `modules/build.sh` builds the colours and skips the front, whi
 
 `deploy.sh` identifies the front by the `modules.role=codex-router-front` label rather than by its
 compose service name, because the legacy router container uses that same service name until the
-cutover replaces it. The Caddyfile reaches the front as a bind-mounted directory
+cutover replaces it. That lookup follows the same rule as the colour probe: a failed `docker ps` is
+inconclusive, so the front is left exactly as it is rather than started with `up -d` (which would
+recreate the one container that owns `0.0.0.0:4100` and drop every in-flight stream), even under
+`force_all=true`, and the next scheduled deploy retries from the same state. Only a lookup that
+proves the front is absent starts it. The Caddyfile reaches the front as a bind-mounted directory
 (`./codex-router-front:/etc/caddy:ro`), not as a single mounted file: a checkout that replaces the
 file's inode would otherwise leave the mount pointing at the old one. A colour name is accepted as a
 component name (`--component codex-router-a`) and means `codex-router`: `deploy.sh` rewrites it

@@ -1193,11 +1193,14 @@ if should_deploy "codex-router" || should_deploy "all"; then
   # The front is this stack's caddy container, identified by the label compose
   # gives only that service: the compose service name is reused by the legacy
   # router container until the cutover replaces it, so the name alone cannot say
-  # which one is up.
+  # which one is up. Same error convention as colour_container below: a failed
+  # `docker ps` returns 2, so callers can tell it from a front that is not there.
   front_running() {
-    [ -n "$(docker ps --filter status=running \
+    local names
+    names="$(docker ps --filter status=running \
       --filter label=com.docker.compose.project=modules \
-      --filter label=modules.role=codex-router-front -q || true)" ]
+      --filter label=modules.role=codex-router-front -q)" || return 2
+    [ -n "$names" ]
   }
 
   # The front is created when it is absent and otherwise only reconciled by the
@@ -1208,8 +1211,18 @@ if should_deploy "codex-router" || should_deploy "all"; then
   # healthcheck), which now needs an explicit FORCE_ALL=true deploy; the upgrade
   # path is to compare the running container's config hash here and recreate only
   # when it really moved.
+  #
+  # A failed lookup is not an absent front either: `up -d` would recreate the one
+  # container that owns 0.0.0.0:4100 and close every in-flight stream, for a
+  # transient `docker ps` failure, and the recreate is silent. So an inconclusive
+  # read never starts the front, not even for FORCE_ALL: the reload below still
+  # runs and is the check in that case, failing on a front that really is absent
+  # while leaving the previously serving colour up. The next deploy retries.
   front_needs_start() {
-    ! front_running || [ "${FORCE_ALL:-false}" = "true" ]
+    local state=0
+    front_running || state=$?
+    [ "$state" != 2 ] || return 1
+    [ "$state" = 1 ] || [ "${FORCE_ALL:-false}" = "true" ]
   }
 
   # Takes the container name, never the colour: a second lookup here would be a
