@@ -30,7 +30,6 @@ only the files they need.
 | [013-manual-tests](../specs/013-manual-tests/spec.md) | Manual Pipeline Tests |
 | [016-telegram-link-preview](../specs/016-telegram-link-preview/spec.md) | Telegram Link Preview Disable |
 | [021-three-phase-refactor](../specs/021-three-phase-refactor/spec.md) | Three-Phase Orchestrator Refactor |
-| [023-ktmb-mcp](../specs/023-ktmb-mcp/spec.md) | KTMB MCP Conversion |
 | [030-spec-drift](../specs/030-spec-drift/audit.md) | Spec drift audit, consolidation plan, and code notes |
 
 ## Design notes and plans

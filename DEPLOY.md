@@ -74,7 +74,7 @@ for a local deploy — and redeploy.
 
 ### `modules/build.sh`
 
-Builds Docker images with no downtime. Accepts repeatable `--component <name>`; with no component it defaults to `all`. Runs `docker-compose --project-name modules build <services>`. When `portfolio-tracker` (or `all`) is included it first builds `pp-cli.jar` (installs the vendored `pp-cli/lib/name.abuchen.portfolio-0.84.1.jar` into local Maven, then `mvn package`). Retired `ktmb-booking` is excluded from `all` and refused if requested explicitly.
+Builds Docker images with no downtime. Accepts repeatable `--component <name>`; with no component it defaults to `all`. Runs `docker-compose --project-name modules build <services>`. When `portfolio-tracker` (or `all`) is included it first builds `pp-cli.jar` (installs the vendored `pp-cli/lib/name.abuchen.portfolio-0.84.1.jar` into local Maven, then `mvn package`).
 
 ```bash
 ./modules/build.sh --component hermes --component portfolio-tracker

@@ -25,17 +25,9 @@ export COMPOSE_DOCKER_CLI_BUILD=1 DOCKER_BUILDKIT=1
 COMPOSE="docker-compose --project-name modules"
 
 if [[ " ${COMPONENTS[*]} " =~ " all " ]]; then
-  ALL_SERVICES=$($COMPOSE config --services 2>/dev/null | tr '\n' ' ')
-  # ktmb-booking is retired: the module targets mcp 1.x and is unused.
-  SERVICES=$(echo "$ALL_SERVICES" | tr ' ' '\n' | grep -vx ktmb-booking | tr '\n' ' ')
+  SERVICES=$($COMPOSE config --services 2>/dev/null | tr '\n' ' ')
 else
   SERVICES="${COMPONENTS[*]}"
-fi
-
-# ktmb-booking is retired: refuse an explicit request before hitting compose.
-if [[ " ${COMPONENTS[*]} " =~ " ktmb-booking " ]]; then
-  echo "ktmb-booking is retired and no longer deployable" >&2
-  exit 1
 fi
 
 echo "Building: $SERVICES"

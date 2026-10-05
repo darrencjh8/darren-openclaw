@@ -521,6 +521,11 @@ memory:
   user_profile_enabled: true
 approvals:
   mode: custom-preserved
+mcp_servers:
+  ktmb-booking:
+    url: http://ktmb-booking:8082/mcp
+  expense-tracker:
+    url: http://expense-tracker:8080/mcp
 YAML
 migration_block=${migration_block//\/opt\/hermes-defaults/$TMPDIR/hermes-defaults}
 migration_block=${migration_block//\/opt\/data/$TMPDIR/data}
@@ -544,7 +549,12 @@ escalating = config["fallback_providers"] == [
 # bumped effort stays on disk at its old value and the change never takes effect.
 effort = config["agent"]["reasoning_effort"] == "high"
 agent_preserved = config["agent"]["disabled_toolsets"] == ["user-owned"]
-print("pass" if isolated and preserved and routed and escalating and effort and agent_preserved else "fail")
+# A retired MCP server (ktmb-booking) must leave the live profile file, or its
+# connection fails on every boot; a server the profile still ships must stay.
+servers = config.get("mcp_servers") or {}
+retired_dropped = "ktmb-booking" not in servers
+live_kept = "expense-tracker" in servers
+print("pass" if isolated and preserved and routed and escalating and effort and agent_preserved and retired_dropped and live_kept else "fail")
 PY
 )
 if [ "$migration_result" = "pass" ]; then

@@ -216,7 +216,7 @@ Other workflows:
 | [SETUP.md](SETUP.md) | Host, users, directory, volume, and cron layout for the production server. |
 | [SPECKIT.md](SPECKIT.md) | Spec-Kit usage for this repository. |
 | [AGENTS.md](AGENTS.md) | Instructions for AI agents working in this repository. |
-| [specs/](specs/) | Feature specs: `001-gateway`, `002-expense-tracking`, `003-portfolio-tracker`, `004-statement-reconciliation`, `006-portfolio-cpf-sync`, `008-portfolio-poems-sync`, `013-manual-tests`, `016-telegram-link-preview`, `021-three-phase-refactor`, `023-ktmb-mcp`, `030-spec-drift`. |
+| [specs/](specs/) | Feature specs: `001-gateway`, `002-expense-tracking`, `003-portfolio-tracker`, `004-statement-reconciliation`, `006-portfolio-cpf-sync`, `008-portfolio-poems-sync`, `013-manual-tests`, `016-telegram-link-preview`, `021-three-phase-refactor`, `030-spec-drift`. |
 | [docs/](docs/) | `docs/expense-tracker/` drift verification and `docs/plans/` design notes. |
 | [modules/hermes/SLACK.md](modules/hermes/SLACK.md) | Slack app setup, Socket Mode, and token/scopes. |
 | [modules/portfolio-tracker/README.md](modules/portfolio-tracker/README.md) | Portfolio tracker details and local run instructions. |
