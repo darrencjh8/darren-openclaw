@@ -1,6 +1,6 @@
 ---
 name: full-deploy
-description: Full production redeploy — sync .env, backup ktmb_jobs.db + OneDrive token, git pull, rebuild all containers, health check, OneDrive sync test, non-destructive API audit, log audit, report.
+description: Full production redeploy — sync .env, backup OneDrive token and app data, git pull, rebuild all containers, health check, OneDrive sync test, non-destructive API audit, log audit, report.
 ---
 
 # Full Deploy
@@ -25,20 +25,19 @@ Note which services are running, their status, and uptime. Report this to the us
 
 ## Phase 1 — Sync .env Files
 
-`scp` these 4 files from local to production:
+`scp` these 3 files from local to production:
 
 | Local Path | Production Path |
 |---|---|
 | `gateway/.env` | `~/darren-openclaw/gateway/.env` |
 | `modules/portfolio-tracker/.env` | `~/darren-openclaw/modules/portfolio-tracker/.env` |
 | `modules/expense-tracker/.env` | `~/darren-openclaw/modules/expense-tracker/.env` |
-| `modules/ktmb/.env` | `~/darren-openclaw/modules/ktmb/.env` |
 
-Run all 4 `scp` commands in parallel.
+Run all 3 `scp` commands in parallel.
 
 ## Phase 2 — Backup (production host only)
 
-Back up all persistent data: KTMB booking DB, OneDrive token, expense-tracker state (memory, dedup, statements), and portfolio-tracker state (dedup, learned mappings).
+Back up all persistent data: OneDrive token, expense-tracker state (memory, dedup, statements), and portfolio-tracker state (dedup, learned mappings).
 
 **IMPORTANT**: Compute the timestamp LOCALLY first. Do NOT embed `$(date ...)` inside a remote single-quoted command.
 
@@ -58,10 +57,10 @@ TS=`date -u +%s 2>/dev/null` && echo "Backup timestamp: $TS"
 [ -z "$TS" ] && TS="manual-$$"
 ```
 
-### 2b. Create backup dir and copy ktmb_jobs.db
+### 2b. Create the backup directory
 
 ```bash
-ssh <user>@<server> "mkdir -p /home/darren/backups/full-deploy-$TS && cp /home/darren/darren-openclaw/modules/ktmb/data/ktmb_jobs.db /home/darren/backups/full-deploy-$TS/ && echo 'ktmb_jobs.db backed up'"
+ssh <user>@<server> "mkdir -p /home/darren/backups/full-deploy-$TS && echo 'backup dir ready'"
 ```
 
 ### 2c. Copy refresh_token via Docker (root-owned file)
@@ -116,7 +115,7 @@ spawn_agent label="Redeploy" message="SSH to <user>@<server> and run: cd ~/darre
 
 Wait for the agent to complete.
 
-**Note about deploy.sh**: It only checks health endpoints 3000, 8080, 8081, 8082. It does NOT check 8083 (image-gen). A non-zero exit code may come from warp-cli or chrome-daemon setup, not from container failures. Read the actual output to judge success. Proceed to Phase 5 for full verification regardless.
+**Note about deploy.sh**: It health-checks actual-api (3000), expense-tracker (8080), portfolio-tracker (8081), codex-router (4100), and each discovered pluggable module. It does NOT check 8083 (image-gen). A non-zero exit code may come from warp-cli or chrome-daemon setup, not from container failures. Read the actual output to judge success. Proceed to Phase 5 for full verification regardless.
 
 ## Phase 5 — Health Verification
 
@@ -128,14 +127,13 @@ After the deploy agent finishes, verify everything:
 ssh <user>@<server> 'cd ~/darren-openclaw/gateway && docker compose ps'
 ```
 
-All 6 services must show `Up`:
+All 5 services must show `Up`:
 
 - `openclaw`
 - `expense-tracker`
 - `actual-api`
 - `portfolio-tracker`
 - `image-gen`
-- `ktmb-booking`
 
 If any service is not Up, check its logs: `docker compose logs --tail=30 <service>`.
 
@@ -147,7 +145,6 @@ for url in \
   http://localhost:3000/health \
   http://localhost:8080/health \
   http://localhost:8081/health \
-  http://localhost:8082/health \
   http://localhost:8083/health; do
   code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 "$url" 2>/dev/null || echo "000")
   echo "$url -> $code"
@@ -212,7 +209,7 @@ If `scripts/sync-onedrive.sh` does not exist on production yet, create it first 
 
 ## Phase 7 — Non-Destructive API Audit
 
-Run these 12 read-only API calls. None of them mutate data. Run independent calls in parallel:
+Run these 9 read-only API calls. None of them mutate data. Run independent calls in parallel:
 
 ### actual-api (port 3000)
 
@@ -253,28 +250,7 @@ curl -s -X POST http://localhost:8081/tools/pp-status -H "Content-Type: applicat
 curl -s -X POST http://localhost:8081/tools/pp-taxonomies -H "Content-Type: application/json" -d '{"taxonomy_names":["Regions (Liquid)"]}' | head -c 200
 ```
 
-### ktmb-booking (port 8082)
-
-```bash
-# 10. Get schedules
-curl -s -X POST http://localhost:8082/tools/get-schedules -H "Content-Type: application/json" -d '{}' | head -c 200
-
-# 11. Booking window
-curl -s -X POST http://localhost:8082/tools/booking-window -H "Content-Type: application/json" -d '{}' | head -c 200
-
-# 12. System status
-curl -s -X POST http://localhost:8082/tools/system-status -H "Content-Type: application/json" -d '{}' | head -c 200
-```
-
 For each call, check that the HTTP response is valid JSON (not a connection error or empty). Report any failures.
-
-If ktmb-booking returns an error about a missing database (because we didn't restore ktmb_jobs.db), that's expected if the db was empty/new. Only flag it if the old db had data. If the old ktmb_jobs.db had content and the new one doesn't, restore it:
-
-```bash
-ssh <user>@<server> 'cp /home/darren/backups/full-deploy-<TIMESTAMP>/ktmb_jobs.db ~/darren-openclaw/modules/ktmb/data/ktmb_jobs.db && cd ~/darren-openclaw/gateway && docker compose restart ktmb-booking'
-```
-
-Then re-run the ktmb API calls.
 
 ## Phase 8 — Log Audit
 
@@ -287,7 +263,7 @@ ssh <user>@<server> 'cd ~/darren-openclaw/gateway && docker compose logs --tail=
 Then get the last 30 lines of each service for a manual scan:
 
 ```bash
-ssh <user>@<server> 'cd ~/darren-openclaw/gateway && for svc in openclaw expense-tracker actual-api portfolio-tracker image-gen ktmb-booking; do echo "=== $svc ===" && docker compose logs --tail=30 "$svc" --no-log-prefix 2>&1; echo; done'
+ssh <user>@<server> 'cd ~/darren-openclaw/gateway && for svc in openclaw expense-tracker actual-api portfolio-tracker image-gen; do echo "=== $svc ===" && docker compose logs --tail=30 "$svc" --no-log-prefix 2>&1; echo; done'
 ```
 
 Look for:
@@ -310,11 +286,10 @@ Summarize everything in a structured report:
 - Services before: X up, Y down
 
 ### .env Sync
-- All 4 files copied successfully
+- All 3 files copied successfully
 
 ### Backup
 - Path: /home/darren/backups/full-deploy-<TIMESTAMP>/
-- ktmb_jobs.db: <size>
 - refresh_token: <size>
 - Expense tracker: MEMORY.md <size>, dedup.db <size>, statement.db <size>
 - Portfolio tracker: dedup.db <size>, mappings.json <size>
@@ -327,8 +302,8 @@ Summarize everything in a structured report:
 - Result: success / failed
 
 ### Health
-- All 6 services: Up / (list failures)
-- All 5 health endpoints: 200 / (list failures)
+- All 5 services: Up / (list failures)
+- All 4 health endpoints: 200 / (list failures)
 - CDP ports 9222/9223: listening / not
 
 ### OneDrive Sync
@@ -336,7 +311,7 @@ Summarize everything in a structured report:
 - pp-pull: success / failed / restored-from-backup
 
 ### API Audit
-- 12/12 passed / (list failures)
+- 9/9 passed / (list failures)
 
 ### Logs
 - Errors found: (list) / none
