@@ -136,12 +136,6 @@ services:
             # always pre-empt the lane. Forwarded from the deploy workflow's
             # environment; this default applies when it is not set there.
             - CODEX_ROUTER_AUTO_THINKING_TIMEOUT_SECONDS=${CODEX_ROUTER_AUTO_THINKING_TIMEOUT_SECONDS:-300}
-            # OpenCode free-tier sidecar, resolved on the compose network only.
-            # The sidecar publishes no port, so this is reachable from the
-            # internal network and nowhere else. An unset value or an
-            # unreachable sidecar leaves the opencode-free/ lane unpublished and
-            # every other lane unchanged.
-            - CODEX_ROUTER_OPENCODE_FREE_URL=${CODEX_ROUTER_OPENCODE_FREE_URL:-http://opencode-sidecar:18788}
         restart: unless-stopped
         mem_limit: 1536m
         volumes:
@@ -156,36 +150,6 @@ services:
             timeout: 10s
             retries: 3
             start_period: 60s
-        logging: *default-logging
-
-    # OpenCode free-tier sidecar for the router's opencode-free/ lane.
-    #
-    # The free tier answers only the opencode binary's own identity, and no
-    # header combination reproduces it, so the router cannot reach those models
-    # with its own HTTP client and delegates to a sidecar that already is that
-    # binary. The lane itself shipped in darrencjh8/codex-router#209.
-    #
-    # Do not give this service a `ports:` stanza. Its API includes /pty,
-    # /session/{id}/shell and /file routes with no authentication; it is only
-    # safe because it is unreachable from outside the compose network. If the
-    # sidecar is ever published, it becomes an unauthenticated shell server.
-    #
-    # The CLI version is pinned because the committed fixtures in codex-router
-    # (tests/fixtures/opencode_free_events.jsonl and
-    # tests/fixtures/opencode_free_providers.json) were recorded against
-    # opencode-ai 1.18.32. Bumping it is a coordinated change: re-record the
-    # fixtures in the codex-router PR that moves the pin.
-    #
-    # No volume: the CLI database and logs grow in the writable layer until the
-    # container is recreated. No env: the sidecar is stock and keyless, and its
-    # own OpenCode keys must not leak into a container with a shell API.
-    opencode-sidecar:
-        image: node:22-slim
-        command: >-
-            sh -c "npm install -g opencode-ai@1.18.32 &&
-            opencode serve --hostname 0.0.0.0 --port 18788"
-        restart: unless-stopped
-        mem_limit: 1024m
         logging: *default-logging
 
     hermes:

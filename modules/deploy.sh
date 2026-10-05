@@ -940,10 +940,13 @@ if [[ " ${COMPONENTS[*]} " =~ " all " ]]; then
   docker stop hermes modules-portfolio-tracker-1 modules-expense-tracker-1 modules-actual-api-1 kokoro-tts 2>/dev/null; true
 fi
 
+# --remove-orphans retires the container of a service this revision deleted.
+# Without it, `up` leaves the old container running forever: compose only ever
+# adds and updates services, it never sweeps one that left the file.
 if [ "${FORCE_ALL:-false}" = "true" ]; then
-    $COMPOSE up -d --force-recreate $TARGETS
+    $COMPOSE up -d --remove-orphans --force-recreate $TARGETS
 else
-    $COMPOSE up -d $TARGETS
+    $COMPOSE up -d --remove-orphans $TARGETS
 fi
 
 # ---- health checks ----
