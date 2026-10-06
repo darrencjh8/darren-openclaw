@@ -203,7 +203,7 @@ jobs:
 
             - name: Ensure Hermes container tooling
               if: >-
-                  success() &&
+                  always() &&
                   (steps.changes.outputs.components == 'all' || contains(format(' {0} ', steps.changes.outputs.components), ' hermes '))
               env:
                   # Authenticates the release lookup below; unauthenticated
