@@ -1032,7 +1032,7 @@ export class AgentOrchestrator {
         // account as a plain `Misc` row with NO transfer payee and NO `_transfer`.
         // That is exactly the shape `find_link_candidate` recognises, so the
         // existing #598 pairing machinery links it to the outgoing leg from the
-        // outgoing side (`_findExistingFarSide` at :2014). Setting a transfer
+        // outgoing side (`_findExistingFarSide` at :2021). Setting a transfer
         // payee here would make Actual create its own counterpart at insert and
         // the row would then be skipped. Placed AFTER the one-sided deposit
         // branch (:1004) so a `!counterparty` credit keeps booking
@@ -1052,8 +1052,8 @@ export class AgentOrchestrator {
         //
         // `_is_paynow` is deliberately NOT propagated (code review round 1, M1).
         // This credit has already been resolved onto a KNOWN own account, so the
-        // PayNow identity re-check in Phase 2 (:2149) can only refuse it: it would
-        // set `_hold_unresolved_paynow` (:2239), whose branch (:2641) notifies and
+        // PayNow identity re-check in Phase 2 (:2156) can only refuse it: it would
+        // set `_hold_unresolved_paynow` (:2246), whose branch (:2648) notifies and
         // logs but never calls `mark_email_read`, leaving the alert to be
         // re-fetched unseen forever (`imap.js:86`) — the exact loop this change
         // removes. PayNow is a payment rail, not a reason to distrust an

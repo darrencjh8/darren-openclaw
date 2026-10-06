@@ -111,8 +111,12 @@ function makeTools(spy, { linkCandidate = null, holderFacts = false } = {}) {
             if (name === "fetch_context")
                 return { accounts: ACCOUNTS, categories: [], payees: PAYEES };
             if (name === "search_memory") {
-                const query = String(args?.query ?? "");
-                return { results: facts.filter((f) => f.includes(query)).map((text) => ({ text })) };
+                const query = String(args?.query ?? "").toLowerCase();
+                // Case-insensitive, matching the real MemoryStore._substringSearch
+                // (src/memory.js lowercases both operands). A case-sensitive stub
+                // here made a holder-named credit look bookable when production
+                // holds it (code review round 2 R2-1 / round 3 M1).
+                return { results: facts.filter((f) => f.toLowerCase().includes(query)).map((text) => ({ text })) };
             }
             if (name === "list_facts") return { facts: facts.map((text) => ({ text })) };
             if (name === "check_duplicate") return false;
@@ -263,16 +267,19 @@ describe("incoming credit into a resolvable account (issue #680)", () => {
         expect(names(calls)).toContain("insert_transaction");
     });
 
-    it("books a holder-named received credit and marks it read (L1)", async () => {
-        // Code review round 1, L1: pin what a credit whose sender is the
-        // holder's own legal name actually does. uid 1028 (DBS received
-        // SGD 1557.24 into …5750, From: CHONG JIN HENG) is that shape with the
-        // live `Legal name: …` fact present. Measured on the real route: the
-        // person hold does NOT fire (the counterparty does not resolve to a
-        // tracked account but `person_transfer` is not set for this DBS body),
-        // so the arm books it and the email is marked read — the loop #680
-        // removes is closed for this row too. Pinned so the boundary between
-        // the person hold and this arm is asserted rather than implied.
+    it("holds a holder-named received credit and still marks it read (L1/R2-1/M1)", async () => {
+        // Code review round 1 L1 asked what a credit whose sender is the
+        // holder's own legal name does; round 2 (R2-1) and round 3 (M1) showed
+        // the first version of this test passed only because its search_memory
+        // stub was case-SENSITIVE while the production MemoryStore lowercases
+        // both operands (src/memory.js). With a faithful stub the holder's
+        // `Legal name: …` fact IS found, so `knownOwnIdentity` is true, the
+        // counterparty resolves to no tracked account, and the person hold
+        // (`person_identity_unverified`) fires — the credit is HELD, not booked.
+        // That hold branch DOES mark the email read, so the #680 re-fetch loop
+        // is closed for this class too. Pinned so the #654 boundary is asserted
+        // rather than misrepresented (this test previously asserted a booking
+        // that does not occur in production).
         const calls = [];
         const orch = await makeOrchestrator(makeTools(calls, { holderFacts: true }));
 
@@ -291,11 +298,10 @@ describe("incoming credit into a resolvable account (issue #680)", () => {
             "digibank Alerts - You've received a transfer",
         );
 
-        const insert = calls.find((c) => c.name === "insert_transaction");
-        expect(insert).toBeTruthy();
-        expect(insert.args.account_id).toBe("acc-dbs");
-        expect(insert.args.amount_cents).toBe(155724);
-        expect(result.action).not.toBe("notified");
+        // Held as an unverified person credit, never booked as a merchant or
+        // income, and the email is marked read so it is not re-fetched.
+        expect(result.action).toBe("notified");
+        expect(names(calls)).not.toContain("insert_transaction");
         expect(names(calls)).toContain("mark_email_read");
     });
 

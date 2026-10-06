@@ -43,7 +43,7 @@ It books the credited leg on `resolved.destination_account`:
 - `account_id` / `account_name` = the credited account; `amount_cents: Math.abs(...)` (credit is positive).
 - `payee_name: "Misc"`, `category_id: null`, `raw_description: "Transfer from <counterparty>"`.
 - `_structured_movement: true`.
-- `_is_paynow` / `_paynow_merchant` mirrored from the movement, so the inbound-PayNow credit hold at `:2092` still fires for this body class.
+- `_is_paynow` / `_paynow_merchant` are deliberately **NOT** propagated onto the booked leg (removed in code review round 1, M1). The credit has already resolved onto a known own account, so the Phase-2 PayNow identity re-check can only *refuse* it: propagating `_is_paynow` set `_hold_unresolved_paynow`, whose branch notifies and logs but never calls `mark_email_read`, leaving the alert to be re-fetched unseen forever (`imap.js:86`) — the exact loop this change removes.
 - **No** `_transfer`, **no** `_is_transfer`, **no** `payee_id` — so the row is the plain unlinked `Misc` row that `find_link_candidate` (`tools.js:1567-1572`) later matches from the outgoing side, and Actual does not create a competing counterpart at insert.
 
 Pairing then runs on the outgoing leg's pass, unchanged: `if (llmOutput._transfer)` (`:2754`) → `_findExistingFarSide` (`:2761`, `:1957`) → `_linkExistingFarSide` (`:2868`, `:2022`), matching the credited row by account, opposite sign, `Misc` payee, unlinked.
@@ -83,7 +83,7 @@ The recorded mutation control for the new file links `node_modules` before runni
 - **Double-counting a self-transfer.** The received leg books `Misc`, not income, and pairs to the outgoing leg via #598; the outgoing leg is unchanged.
 - **Widening the pinned #654 person boundary.** The arm requires `person_transfer !== true`; test 4 asserts the released person credit and the one-sided deposit both still behave.
 - **Stealing the one-sided deposit.** The arm sits after `:1024`, so `!counterparty` deposits still book `Unidentified deposit`.
-- **Dropping the inbound PayNow hold.** `_is_paynow`/`_paynow_merchant` are mirrored, so `:2092` still gates the hold.
+- **Dropping the inbound PayNow hold.** `_is_paynow`/`_paynow_merchant` are deliberately **NOT** mirrored; the resolved credited leg never enters the Phase-2 PayNow hold (M1).
 - **Received leg stays unpaired (accepted).** If no later leg names the far account, the row is a plain `Misc` credit on the credited account and is marked read, so it does not loop. There is no re-attempt from the receiving side; accepted, and a candidate follow-up.
 - **uid 942 still drops (accepted).** `4380` has no account and no live fact; scoped out because holding it needs the `:657` gate change. It books correctly the moment a fact maps `4380` AND the credited leg is bookable — no further change here.
 
