@@ -58,7 +58,9 @@ There is no `gateway/` directory in the repository (`git ls-files gateway` retur
 codex-router is served by three containers: the caddy front `codex-router`, which owns
 `0.0.0.0:4100`, and the two identical router colours `codex-router-a` and `codex-router-b`, which
 publish no ports. `modules/build.sh` builds the colours and skips the front, which is a stock
-`caddy:2-alpine` image. `deploy.sh` never brings the colours up as a group; after the generic
+`caddy:2.11.7-alpine` image (pinned: `deploy.sh` never pulls, so a floating tag would keep the
+stale local image, and 2.11.6 cut HTTP/1.1 POST streams off 60s after the body was read).
+`deploy.sh` never brings the colours up as a group; after the generic
 `compose up` it rolls them:
 
 1. Pick the running colour that is not serving, defaulting to `codex-router-a`. A colour counts as

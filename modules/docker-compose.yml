@@ -167,7 +167,11 @@ services:
     # detail of the roll. `lb_policy first` plus the fixed upstream order below
     # means a healthy codex-router-a wins whenever it is available.
     codex-router:
-        image: caddy:2-alpine
+        # Pinned, not floating: deploy.sh only runs `compose up -d`, so a
+        # floating tag would keep using whatever caddy image is already local.
+        # 2.11.6 cut every HTTP/1.1 POST with a body off exactly 60s after the
+        # body was read (caddy #8103, fixed in #8107, released in 2.11.7).
+        image: caddy:2.11.7-alpine
         ports:
             - "0.0.0.0:4100:4100"
         # The directory, not the Caddyfile itself: a checkout that replaces the
@@ -181,7 +185,7 @@ services:
         labels:
             - modules.role=codex-router-front
         restart: unless-stopped
-        # caddy:2-alpine ships no curl, so the healthcheck uses wget.
+        # The caddy alpine image ships no curl, so the healthcheck uses wget.
         healthcheck:
             test:
                 [
