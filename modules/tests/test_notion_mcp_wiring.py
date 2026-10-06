@@ -81,6 +81,21 @@ class NotionMcpWiringTests(unittest.TestCase):
         dockerfile = HERMES_DOCKERFILE.read_text(encoding="utf-8")
         self.assertNotIn("npm install --global", dockerfile)
 
+    def test_tooling_step_still_installs_when_the_deploy_failed(self):
+        workflow = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
+        steps = workflow["jobs"]["deploy"]["steps"]
+        step = next(
+            s for s in steps if s.get("name") == "Ensure Hermes container tooling"
+        )
+
+        # Deploy services runs first and exits non-zero when a service is
+        # unhealthy. A `success() &&` guard would then skip this step forever, so
+        # the pinned server would never reach the volume and every retry would
+        # fail identically. `always() &&` keeps the install reachable from the
+        # red state, so the next deploy converges.
+        condition = " ".join(str(step["if"]).split())
+        self.assertTrue(condition.startswith("always() &&"), condition)
+
     def test_config_registers_read_and_gated_write_servers(self):
         config = yaml.safe_load(HERMES_CONFIG.read_text(encoding="utf-8"))
         servers = config["mcp_servers"]
