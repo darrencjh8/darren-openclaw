@@ -151,7 +151,10 @@ class CodexRouterRollingUpdateTests(unittest.TestCase):
         # A stock caddy image, so nothing here to build and no router env to pass.
         self.assertNotIn("build", front)
         self.assertNotIn("environment", front)
-        self.assertEqual("caddy:2-alpine", front["image"])
+        # Pinned on purpose: deploy.sh only runs `compose up -d`, so a floating
+        # tag would keep using whatever caddy image is already local, and 2.11.6
+        # cut HTTP/1.1 POST streams off 60s after the body was read (caddy #8103).
+        self.assertEqual("caddy:2.11.7-alpine", front["image"])
         # The directory, not the file: `git checkout` can replace the Caddyfile's
         # inode, and a bind-mounted file keeps the old one, so a reload would read
         # the configuration the container booted with.
