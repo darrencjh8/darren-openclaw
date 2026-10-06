@@ -4,6 +4,7 @@ q: Where must the MCP server be installed so that both an image rebuild and a co
 q: Is `/opt/data/.local/bin` on the PATH Hermes uses when it spawns a stdio MCP server? | a: Yes. Measured in the running container: `PATH=/opt/hermes/bin:/opt/hermes/.venv/bin:/opt/data/.local/bin:...`, and Hermes passes `PATH` through to stdio servers.
 q: Does the new MCP server conflict with the `productivity/notion` skill already on the volume? | a: No. That skill is a hub skill on the data volume, not a file in this repository, so this change neither edits nor removes it.
 q: Does insurance need its own database? | a: No. Insurance already lives as rows inside databases that are shared with the integration; the only search match is the page `CIMB eCard (Insurance)`, whose parent is a data source row.
+q: Is a failed stdio MCP spawn non-fatal, so the introducing deploy goes green while the notion tools are absent? | assumption: yes. Hermes registers a server's tools at connect time and the docs describe a failed remote server as logging and leaving the other servers running, but no doc line states the stdio case outright, so this is an assumption rather than a citation. If it is backwards — a missing `notion-mcp-server` makes Hermes treat the server as fatal — the symptom is loud rather than silent: `deploy.sh`'s post-`up` checks or the container health check fail, the deploy goes red, and the operator skips the reload and waits for the tooling step to be re-ordered. Either way the activation steps in this plan remain the correct next action once the binary is on the volume.
 
 ## Intent
 
@@ -92,7 +93,23 @@ Append two entries under `mcp_servers:` (`:143`). Both spawn the same stdio serv
             prompts: false
 ```
 
-The split is the whole point of the second entry: `include` cannot be conditioned on approval, and `trust: untrusted` gates every tool without `readOnlyHint: true`. A single entry would either expose writes ungated or demand approval for every read, because search and query are POSTs. No delete, archive, schema-change or page-move tool is exposed.
+The split is the whole point of the second entry: `include` cannot be conditioned on approval, and `trust: untrusted` gates every tool without `readOnlyHint: true`. A single entry would either expose writes ungated or demand approval for every read, because search and query are POSTs. No dedicated delete, archive, schema-change or page-move tool is exposed; archiving stays reachable through the gated `API-patch-page` (a page PATCH accepts `archived` / `in_trash`), so the property that holds is "no ungated destructive capability", not "no destructive capability".
+
+### Which approval policy decides a write (finding P1)
+
+`trust: untrusted` only routes a non-`readOnlyHint` tool call into the approval surface; what happens next is `modules/hermes/config.yaml:41-44`:
+
+```yaml
+approvals:
+    mode: smart
+    timeout: 60
+    cron_mode: allow
+```
+
+with an LLM judge configured at `auxiliary.approval` (`:104-109`, provider `custom:codex-router`, model `auto-thinking`). Two consequences the plan states rather than leaves implicit:
+
+- In an interactive session, `mode: smart` sends the write to the approval judge first; a judge that cannot reach a decision falls through to the human surface, and `timeout: 60` bounds the wait. So a Notion write is deliberate and visible, which is the whole purpose of the second server entry.
+- **`cron_mode: allow` means an unattended (cron-initiated) turn does not wait for approval at all.** A scheduled job that calls a write tool proceeds. This is the existing policy for every MCP server in this deployment, not something this change introduces, and it is named here so the gate is not described as stronger than it is.
 
 ### `modules/tests/test_notion_mcp_wiring.py` (new)
 
@@ -104,30 +121,33 @@ One `unittest` file in the established `modules/tests` style, guarding the wirin
 
 ## Validation
 
-No production behaviour changes in this repository: the change is a workflow line, one install block, and YAML config. TDD's RED/GREEN still applies to the new guard test, which is the one piece of logic worth pinning:
+No production behaviour changes in this repository: the change is a workflow line, one install block, and YAML config. Per the dev-loop policy's config/workflow exception, the gate is a green check plus the applicable parse validation, and no base RED is claimed:
 
-- RED: `python3 -m unittest discover -s modules/tests -p 'test_notion_mcp_wiring.py'` fails at the base commit, because neither the workflow nor the config contains the wiring.
-- GREEN: the same command passes at HEAD.
-- Regression: `python3 -m unittest discover -s modules/tests -p 'test_*.py'` — measured green at base, 75 tests in 16.7 s.
+- GREEN: `python3 -m unittest discover -s modules/tests -p 'test_notion_mcp_wiring.py'` passes at HEAD, and `python3 -m unittest discover -s modules/tests -p 'test_*.py'` passes in full — measured green at base, 75 tests in 16.7 s, and the new file adds three more.
+- Parse validation: the changed YAML is exercised by the new test, which `yaml.safe_load`s `modules/hermes/config.yaml` and reads `.github/workflows/deploy.yml` as text.
+- **No `--mutation-command` is offered (finding P3).** A base replay of the new test cannot be assertion evidence: `modules/tests/test_notion_mcp_wiring.py` does not exist at base, so `unittest discover` collects nothing, exits 5 with `NO TESTS RAN` on Python 3.12+ (measured on 3.13.5), and would exit 0 on an older interpreter. That is a missing-file signal, not a failing assertion, and the driver's `_FailedTest|ModuleNotFoundError|AttributeError` warning does not cover it. The RED this change can honestly claim is "the file is absent at base, so no guard runs"; the assertions themselves are first exercised at HEAD.
 
 ### Activation: the introducing deploy does not converge (finding M3)
 
-The step that installs the tool runs *after* `Deploy services`, and `modules/tests/test_deploy_workflow_router.py:426` pins that order (`Deploy services` before `Ensure Hermes container tooling`). The recreated container therefore boots with the new config while `notion-mcp-server` is still absent, and Hermes registers MCP servers at boot. So the first deploy after merge reports green while exposing no `mcp__notion__*` tool. The tooling step cannot simply move earlier: it `docker exec`s into the running container, so it requires the container to exist.
+The step that installs the tool runs *after* `Deploy services`, and `modules/tests/test_deploy_workflow_router.py:426` pins that order (`Deploy services` before `Ensure Hermes container tooling`). The recreated container therefore boots with the new config while `notion-mcp-server` is still absent, and Hermes registers MCP servers at boot. So the introducing deploy is expected to report green while exposing no `mcp__notion__*` tool (assumption recorded in the QUESTIONS block). The tooling step cannot simply move earlier: it `docker exec`s into the running container, so it requires the container to exist.
 
-Required activation, once, after the introducing deploy — production commands, each needing explicit operator approval first:
+Required activation, once, after the introducing deploy — production commands, each needing explicit operator approval first. No step here restarts, rebuilds, pulls, or deploys anything on production; the repo forbids those as manual actions (finding P2):
 
 1. `docker exec hermes sh -c 'command -v notion-mcp-server && npm ls --global --prefix /opt/data/.local --depth=0 @notionhq/notion-mcp-server'` — confirm the pinned binary landed.
-2. Restart the container (`docker restart hermes`) so boot re-reads the seeded config with the binary present. `/reload-mcp` from a gateway chat is the equivalent in-session path; `hermes mcp` has no `reload` subcommand (`hermes mcp --help` lists only serve, add, remove, list, test, configure, login, reauth, picker, catalog, install).
-3. `docker exec hermes hermes mcp test notion` — expect a successful connection.
-4. Ask Hermes for the `Accounts` data source and confirm `mcp__notion__*` tools are listed.
+2. `/reload-mcp` from a gateway chat. This is the primary and only planned activation path: Hermes reloads `mcp_servers` from the config it already seeded, so no container restart is needed. `hermes mcp` has no `reload` subcommand (`hermes mcp --help` lists only serve, add, remove, list, test, configure, login, reauth, picker, catalog, install), which is why the reload goes through the chat surface. If the reload does not register the server, the fallback is a normal re-deploy through CI/CD — never a manual restart on production.
+3. `docker exec hermes hermes mcp test notion` and confirm the server's tools are registered. Note this checks the connection, not the token: the Notion server answers `initialize` without validating `NOTION_API_KEY`.
+4. Read check: ask Hermes for the `Accounts` data source and confirm a real `mcp__notion__*` result.
+5. Write check (the safety property, finding P1): have Hermes call `mcp__notion-write__API-create-a-comment`, which adds a comment and mutates no finance data. Record which surface decided — an approval prompt in the interactive session, or the smart judge answering on its own — and that the comment landed in Notion. A write that silently succeeds with no prompt, or one that fails closed, is a finding against this change, not a pass.
 
-Every later deploy that recreates the hermes container converges on its own, because the tool is already on the persisted volume. Verification after step 2 is part of this plan, not an optional follow-up.
+Every later deploy that recreates the hermes container converges on its own, because the tool is already on the persisted volume. Steps 3-5 are part of this plan, not optional follow-ups.
 
 ## Risks and non-goals
 
 - **Token mismatch.** If the GitHub secret holds a different or revoked token, the deploy succeeds and Notion answers 401. Fallback is documented in the QUESTIONS block. This change never reads, copies, or rotates the value.
 - **The approval gate is not a credential boundary (finding M2).** `trust: untrusted` gates MCP tool calls. It does not gate the agent's shell, which runs in the hermes container (`terminal.backend: local`, `persistent_shell: true`) and therefore inherits `NOTION_API_KEY` from `modules/docker-compose.yml:263`. `curl -X PATCH https://api.notion.com/v1/pages/<id> -H "Authorization: Bearer $NOTION_API_KEY"` writes to Notion with no approval prompt. Accepted rather than fixed: the same is already true of every other container secret this agent holds (`IMAP_PASSWORD`, `ACTUAL_BUDGET_PASSWORD`, `FRIDAY_PAT`), and the gate's purpose here is to make an MCP write deliberate and visible, not to contain the agent against itself. A future change could mount the token as a file read only by the server process, which would make the claim unqualified; that is out of scope here.
-- **Introducing deploy is inert until activated (finding M3).** See the Activation section: the first deploy green-lights the wiring but exposes no notion tool until the container is restarted once.
+- **Introducing deploy is inert until activated (finding M3).** See the Activation section: the first deploy green-lights the wiring but exposes no notion tool until `/reload-mcp` runs once. Watch item: if that assumption about non-fatal stdio spawn is wrong, the deploy fails loudly instead, which is still detectable.
+- **Unattended writes are not gated (finding P1).** `approvals.cron_mode: allow` (`modules/hermes/config.yaml:44`) means a cron-initiated turn bypasses the approval surface, so a scheduled Notion write proceeds without a human. Existing policy for every MCP server here; named so the gate is not overstated.
+- **Archive is reachable through the gated patch tool (finding P4).** `API-patch-page` accepts `archived` / `in_trash`, so a page can be trashed after approval. There is no dedicated delete or archive tool, and no ungated destructive path.
 - **Pinned server version.** `2.5.2` is pinned, and the install is gated on the installed version rather than on binary presence, so a later bump actually replaces the volume copy instead of silently no-opping. Unpinned `latest` was rejected because a silent behaviour change in a tool that writes to a financial record store is worse than an explicit bump.
 - **Two stdio servers** are spawned instead of one, each a small Node process. Accepted: it is the only way to gate writes without gating reads.
 - Non-goal: the `productivity/notion` hub skill on the volume, the `ntn` workspace problem, and the insurance data model are all out of scope.
