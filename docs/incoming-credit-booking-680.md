@@ -1,93 +1,91 @@
 QUESTIONS
-q: Is the defect a missing `incoming` branch, or a wrong `direction` value? | a: a missing branch. `parseBankMovement` returns `direction: "incoming"` for all three real bodies, and `resolveMovementAccounts` returns the correct account. Measured at `3ccf684`: uid 1030 parses with `own_account.suffix "5750"` and resolves `own = destination = source = DBS Account`, then the route returns null.
-q: Why does uid 1030 drop when its account resolves? | a: `src/orchestrator.js:1026` opens the booking/holding block with `if (movement.direction === "outgoing")`. The incoming movement skips it, and there is no incoming counterpart, so control reaches the final `return null` at `:1097` with no candidate left. This is the whole defect for a resolvable credit.
-q: Why does uid 942 drop, and does it reach `:1097`? | a: no — a different exit. Its `own` is null (no account, no fact for 4380) and its counterparty resolves to nothing, so `source = other || own` is null and the guard at `:774` returns at `:870` via the `return null` on that path. Its hold therefore has to live INSIDE that guard, not beside `:1026`. (Corrected after review round 1 finding H1.)
-q: Should an incoming credit with a resolved account BOOK, or be HELD? | a: book. It is a real credit the tracker can attribute to a real account; holding it would keep every received transfer out of the budget forever. The hold stays for a credit whose credited account cannot be resolved (uid 942's `4380`), mirroring the outgoing `destination_unresolved` hold.
-q: Which account is the credited one, `source` or `destination`? | a: `destination`. `resolveMovementAccounts` (`bank-movement.js:736`) computes `destination = own` and `source = other || own` for an incoming movement, so the credited own account is `destination` and `source` may be the SENDER's account. The branch keys on `destination_account` being truthy, exactly as the internal-transfer arm at `:951` already does. This is also what keeps uid 895 out: its `own` is null, so `destination_account` is null and the branch does not fire, instead of booking the credit to OCBC 360, the sender. (Corrected after round 1 finding M2.)
-q: Does booking an incoming credit risk re-opening the pinned #654 person boundary? | a: yes, and the branch is scoped to avoid it. `production-incidents.test.js:857-870` pins `expect(phase1).toBeNull()` for `RYT_RECEIVED_FROM_PERSON` once a `maps to … payee` fact releases it, and `:841-845` says closing that "means adding an incoming person arm, which is its own change with its own reproduction". So the book arm requires `movement.person_transfer !== true`. The DBS/Trust parser branches do not set `person_transfer` (only the Ryt sentence form at `bank-movement.js:309`/`:355` do), so uid 1030 books and the released Ryt person credit still drops — the pinned boundary is preserved by construction, not by luck. (Corrected after round 1 findings H2 and L1.)
-q: Which counterparty side is the other party on an incoming movement? | assumption: the deterministic parser's own convention, not the LLM-extractor route's. On this route the other party is `movement.counterparty`. The extractor route at `:1229-1230` assigns the fields the other way round, and `:1201-1221` documents why that route keys its person flag per direction instead; this change does not touch that route.
-q: Should the incoming row be positive, and what payee/category? | assumption: positive (`Math.abs`), `payee_name: "Misc"`, `category_id: null`. Money received is not spend, and the one-sided deposit branch at `:1004` uses `Misc`. No income category is inferred, because the alert names no payer to categorise.
-q: Does the one-sided deposit branch at `:1004` already cover this? | a: no. It requires `!movement.counterparty`. uid 1030 names `ACCOUNT HOLDER`, so it falls past `:1004` and reaches `:1097`.
-q: Can uid 942's `4380` ever resolve? | assumption: not until the user teaches it. There is no `DBS/ POSB account ending 4380` account in `Darren SGD` and no suffix fact naming 4380, so it is genuinely unresolvable today. It is held with `destination_unresolved`, and it books the moment a fact maps 4380, with no further change.
-q: Is the uid 895 Trust/OCBC row in scope? | a: no. `own` is null and the counterparty is a bank, so `destination_account` is null and the new branch does not fire; it keeps dropping exactly as before. Its own cause is tracked on #680.
-q: Will the full suite regress? | a: measured, not assumed. The suites that assert resolver outcomes for inbound movements are `production-incidents.test.js` and `ocbc-trust-transfer-hold.test.js`, not the parser-only ones. The `person_transfer !== true` scope is what keeps `:811-825` and `:857-870` green, and both are re-run rather than assumed.
+q: Is the defect a missing `incoming` branch, or a wrong `direction` value? | a: a missing branch. `parseBankMovement` returns `direction: "incoming"` for the real received bodies and `resolveMovementAccounts` resolves the credited account (measured: uid 1030 resolves `source = destination = DBS Account`, `internal=false`). The route has no incoming counterpart, so control reaches the final `return null` at `:1097`.
+q: What is a received credit into an owned account — income, or a transfer? | a: the credited half of an OWN transfer, not income. uid 1030 DBS (`…ending 5750`, SGD 1000.00, ref `0126100100114350`) and uid 1029 OCBC (`360 Account (-869001)` → `Darren DBS (-665750)`, SGD 1000.00, ref `2610010011435015`) are the two legs of one transfer in the same minute; the sender on the DBS received body is the holder (`ACCOUNT HOLDER`). uid 1028 (DBS received SGD 1557.24 into 5750 from `CHONG JIN HENG`) is the same shape.
+q: So should the received leg book as income? | a: no. Booking `+1000` as `Misc` income while the outgoing leg books `-1000` spend counts the same money twice and inflates income. It must book as a transfer leg.
+q: Can the received leg pair itself, like the internal arm at `:949`? | a: no. The received body names no sender bank or suffix, so the far account is unknowable from it; `resolveMovementAccounts` sets `source = other || own = own = destination`. The pair is linked from the OTHER side's pass through the existing #598 machinery (`_findExistingFarSide` at `:1957`, `_linkExistingFarSide` at `:2022`); the received leg only has to be the shape `find_link_candidate` recognises (a plain unlinked `Misc` row on the credited account).
+q: Which account is the credited one, `source` or `destination`? | a: `destination`. `resolveMovementAccounts` (`bank-movement.js:736`) computes `destination = own` and `source = other || own`, and the internal arm at `:951` already reads `bookedAccount = incoming ? destination : source`. The arm keys on `destination_account`.
+q: What must the received leg carry for `find_link_candidate` to match it? | a: `account_id` = the credited account, `amount_cents` = `+Math.abs(...)`, payee = `Misc`, **no** transfer payee and **not** linked. `find_link_candidate` matches the opposite sign, uncleared, `!transfer_id`, payee `Misc` (`tools.js:1564-1572`). A transfer payee would make Actual create its own counterpart at insert and the row would then be skipped.
+q: Does the received leg set `_transfer` / `_is_transfer`? | a: no. `_findExistingFarSide` derives the far account from `_transfer.source_account_id`/`destination_account_id` (`:1958`), and `reserveTransfer` needs a real far account id; the received leg has neither, so it must not set them. It sets `_structured_movement: true` only.
+q: Where must the arm go, exactly? | a: after the one-sided deposit branch (after `:1024`) and before the `:1026` outgoing gate. After `:1024` so the `!counterparty` deposit branch still wins for a one-sided credit (`bank-movement.test.js:1035`). Before `:1026` because that gate is the defect the incoming movement skips. After the person-hold arm (`:913`) and after `resolved.internal` (`:949`) so a person/unverified credit keeps its hold and an own-to-own leg keeps its pairing.
+q: Does an unresolvable credited account (`4380`) book or hold? | a: scoped out of this change. With no account and no live fact for `4380`, `source` is null and the movement exits at `:870`; giving it a hold needs a change to the `:657` no-account gate (a hold with `account_id: ""` is swallowed there, so the alert would still loop). That shared-gate change is its own risk and is not taken here. `4380` therefore still drops until a fact maps it. (Corrected after review round 2 finding H1.)
+q: Which account is the OTHER party on an incoming movement? | assumption: the deterministic parser's convention, `movement.counterparty`. The extractor route assigns fields the other way round (`:1229-1230`); this change does not touch that route.
+q: Does booking the credit as a transfer risk the pinned #654 person boundary? | a: yes, and the arm is scoped against it. `production-incidents.test.js:811-825` and `:857-870` pin `expect(phase1).toBeNull()` for a two-account-ambiguous and a released incoming person credit. The arm requires `movement.person_transfer !== true` and `resolved.destination_account` truthy, so those two keep dropping.
+q: Is the uid 895 Trust/OCBC row in scope? | a: no. `own` is null and the counterparty is a bank, so `destination_account` is null and the arm does not fire.
+q: Will the full suite regress? | assumption: measured, not assumed. The arm is placed to preserve `bank-movement.test.js:1035-1074` (one-sided deposit), `:266-311` (PayNow credit as transfer), and the two #654 pins; all are re-run rather than assumed.
+q: What if only the received leg ever arrives? | assumption: it books unpaired (a plain `Misc` row on the credited account) and is marked read, so it does not loop. It links later when an outgoing leg's pass finds it, or not at all if no leg ever names the far account. Accepted and stated in Risks.
 
 ## Intent
 
-A bank alert saying money was **received** into an account the tracker can already identify is parsed correctly, matched to a real account, and then thrown away. The alert is never booked and never marked read, so `imap.js:86` re-fetches it as `{ unseen: true }` on every idle poll and the user is notified "Couldn't understand email" forever. Tracked by issue #680.
+A bank alert saying money was **received** into an account the tracker can identify is parsed, matched, and then thrown away: never booked and never marked read, so `imap.js:86` re-fetches it `{ unseen: true }` on every idle poll and the user is told "Couldn't understand email" forever. Tracked by issue #680.
 
-One harm, one fix: give the incoming direction the counterparts of the two blocks that already exist for outgoing.
+The received money is the holder's **own transfer**, not income (uid 1030 + uid 1029 are one transfer). So the fix gives the incoming direction the counterpart of the outgoing booking block, and books the received leg as a **transfer leg on the credited account** — a plain `Misc` row that the existing #598 pairing machinery links to the outgoing leg from the outgoing side.
 
-## Current behaviour (measured at `3ccf684`, real accounts and the real 253-fact store)
+## Current behaviour (measured at `3ccf684`, real accounts and the live 253-fact store)
 
-| Body | parsed suffix | `own`/`destination` | outcome | exit |
+| Body | parsed | `own`/`destination` | outcome | exit |
 |---|---|---|---|---|
-| uid 942 DBS `…ending 4380` | 4380 | **null** (no account, no fact) | dropped | `return null` at `:870` |
-| uid 1030 DBS `…ending 5750` | 5750 | **DBS Account** (fact `Account ending 5750 belongs to DBS Account`) | dropped | `return null` at `:1097` |
-| uid 895 Trust OCBC `…ending 9001` | — | null (`source` = OCBC 360, the sender) | dropped, different cause, out of scope | `:1097` |
+| uid 1030 DBS `…ending 5750` | suffix 5750, `direction:"incoming"` | **DBS Account** | dropped | `return null` at `:1097` |
+| uid 942 DBS `…ending 4380` | suffix 4380, `direction:"incoming"` | **null** (no account, no live fact) | dropped | `return null` at `:870` |
+| uid 895 Trust OCBC `…ending 9001` | — | null (`source` = OCBC 360, the sender) | dropped, out of scope | `:1097` |
 
 End to end through `processEmail`, uid 1030: `action=notified`, no `insert_transaction`, **no** `mark_email_read`, message `Couldn't understand email from "no-reply@dbs" re: "digibank Alerts - You've received a transfer".`
 
-Two exits, two fixes:
-
-- **Resolvable credit.** `:1026` opens the booking/holding block with `direction === "outgoing"`; there is no incoming counterpart. The one-sided deposit branch at `:1004` needs `!counterparty`, which uid 1030 has. Control reaches `return null` at `:1097`.
-- **Unresolvable credit.** The guard at `:774` (`if (!source || !date)`) contains two holds, both keyed `direction === "outgoing"` (`:782`, `:842`), so an incoming `!source` movement matches neither and falls to the `return null` at `:870`.
-
-`processEmail:633` treats either null as "could not understand": it notifies and returns without `mark_email_read`.
-
-Why no test caught it: `tests/own-account-fast-transfer-598.test.js` and `tests/transfer-shape-resilience.test.js` carry these bodies but assert only on `parseBankMovement`. The resolver and the `processEmail` path were untested for a resolvable inbound movement, which is exactly the broken region.
+Why no test caught it: the existing tests carry these bodies but assert only on `parseBankMovement` (`own-account-fast-transfer-598.test.js`, `transfer-shape-resilience.test.js`). The resolver and `processEmail` path for a resolvable inbound credit were untested — the broken region.
 
 ## Target design
 
-Two insertions, because the two bodies exit at two different lines.
+One insertion: a sibling `if (movement.direction === "incoming" …)` arm, after the one-sided deposit branch (after `:1024`) and immediately before `if (movement.direction === "outgoing")` at `:1026`.
 
-**1. Unresolvable credited account — inside the `!source || !date` guard, before the `return null` at `:870`.**
-Condition: `!source && date && movement.direction === "incoming"`. Returns the same shape as the outgoing `destination_unresolved` twin at `:1049` — `account_id: ""`, `account_name: ""`, `payee_name: "Misc"`, `category_id: null`, `amount_cents: Math.abs(...)`, `_hold_unresolved_transfer: true`, `_hold_cause: "destination_unresolved"` — so the notification path is the existing one and needs no new text.
+Condition: `movement.direction === "incoming"` ∧ `resolved.destination_account` truthy ∧ a `date` ∧ `movement.person_transfer !== true`.
 
-**2. Resolvable credited account — after the `resolved.internal` arm (`:949`) and before the `:1026` outgoing gate.**
-Condition: `movement.direction === "incoming"`, `resolved.destination_account` truthy, a `date`, and `movement.person_transfer !== true`.
-Books to `resolved.destination_account` with `amount_cents: Math.abs(...)`, `payee_name: "Misc"`, `category_id: null`, `raw_description: "Transfer from <counterparty>"`, `reasoning: "Deterministic incoming bank credit"`, `_structured_movement: true`, and `_is_paynow` / `_paynow_merchant` mirroring `:1093-1094` so the inbound PayNow hold at `:2092` still fires for this body class.
+It books the credited leg on `resolved.destination_account`:
 
-Both are gated on `incoming` and change no existing line. Outgoing behaviour is untouched.
+- `account_id` / `account_name` = the credited account; `amount_cents: Math.abs(...)` (credit is positive).
+- `payee_name: "Misc"`, `category_id: null`, `raw_description: "Transfer from <counterparty>"`.
+- `_structured_movement: true`.
+- `_is_paynow` / `_paynow_merchant` mirrored from the movement, so the inbound-PayNow credit hold at `:2092` still fires for this body class.
+- **No** `_transfer`, **no** `_is_transfer`, **no** `payee_id` — so the row is the plain unlinked `Misc` row that `find_link_candidate` (`tools.js:1567-1572`) later matches from the outgoing side, and Actual does not create a competing counterpart at insert.
 
-Placement is load-bearing in three ways, each from a different pinned test:
-- **After `:949`** so an own-to-own leg is still paired as a transfer rather than booked as a plain credit.
-- **On `destination_account`, not `source`** so uid 895 keeps dropping instead of booking to the sender's account.
-- **On `person_transfer !== true`** so `production-incidents.test.js:857-870` keeps pinning the released person credit as dropped.
+Pairing then runs on the outgoing leg's pass, unchanged: `if (llmOutput._transfer)` (`:2754`) → `_findExistingFarSide` (`:2761`, `:1957`) → `_linkExistingFarSide` (`:2868`, `:2022`), matching the credited row by account, opposite sign, `Misc` payee, unlinked.
 
-Deliberately **not** changed: the person-identity hold (`:913`), the LLM-extractor route (`:1201-1230`), `resolveMovementAccounts`, and the parser.
+Placement is load-bearing, each from a pinned test:
+- **After `:1024`** so the `!counterparty` one-sided deposit branch still books `Unidentified deposit` (`bank-movement.test.js:1035-1074`).
+- **After `:913`** so a person/unverified incoming credit keeps its `person_identity_unverified` hold (`production-incidents.test.js:793-809`, `:872-888`).
+- **After `:949`** so an own-to-own leg is still paired as a transfer by the internal arm.
+- **`person_transfer !== true`** so the released incoming person credit still drops (`production-incidents.test.js:857-870`).
+
+Deliberately **not** changed: the `:657`/`:552` no-account gate, the person hold (`:913`), the LLM-extractor route, and the parser.
 
 ## Test plan (TDD; RED at base, GREEN at HEAD)
 
-Named RED control: `modules/expense-tracker/tests/incoming-credit-booking-680.test.js` → `incoming credit into a resolvable account (issue #680) > books the credit on the resolved account instead of dropping it`. Fails at base with `expected null not to be null`.
+RED control: `modules/expense-tracker/tests/incoming-credit-booking-680.test.js` → `incoming credit into a resolvable account (issue #680) > books the credit on the credited account as a transfer leg, not income`. Fails at base with `expected null not to be null` (measured at `3ccf684`).
 
-The file carries the two real production bodies, PII-redacted the way this repository redacts elsewhere (`tests/bank-movement.test.js:373` cites the convention; suffixes kept so suffix-to-account pairing still resolves, names and amounts shortened), with the live `Darren SGD` account list and the real suffix facts:
+The file carries the real production bodies (uid 1030, uid 1029) and the real suffix facts, PII-redacted the way this repository redacts (suffixes kept so suffix-to-account pairing still resolves; names and amounts left as the alerts carry them), with the live `Darren SGD` account list. Assertions:
 
-1. uid 1030 books on `DBS Account`, `amount_cents` positive `100000`, `action: "insert"`. (RED at base: null.)
+1. uid 1030 books on `DBS Account`, `amount_cents` positive `100000`, `action: "insert"`, `payee_name: "Misc"`, `_structured_movement: true`, and **no** `_transfer`/`_is_transfer`/`payee_id`. (RED at base: null.)
 2. `processEmail` on uid 1030 does not return `notified`, and calls both `insert_transaction` and `mark_email_read`. (RED at base: `notified`, neither call.)
-3. uid 942 (`4380`, unresolvable) is held with `_hold_cause: "destination_unresolved"` rather than dropped. (RED at base: null.)
-4. **Boundary guard:** a person-flagged incoming credit released by a `maps to … payee` fact still returns null — the `production-incidents.test.js:857-870` shape, asserted here so the scope cannot be widened silently.
+3. A one-sided credit with **no** counterparty still books `Unidentified deposit` (`bank-movement.test.js:1035` shape), asserted here so the arm cannot steal it.
+4. **Pairing** is exercised by the existing `own-account-fast-transfer-598.test.js:436-471` suite, which is re-run unchanged: the received leg is the plain unlinked `Misc` row on the credited account that `find_link_candidate` matches, so the outgoing leg's `_findExistingFarSide` links it. This change deliberately adds no second pairing test that would duplicate and could diverge from #598's.
+5. **#654 person boundary** is guarded by `production-incidents.test.js:811-825` and `:857-870` (the released incoming person credit must still drop) and `:793-809` (the unreleased one must still hold) — re-run unchanged, not re-asserted here.
 
-No LLM is stubbed to a plausible answer: `orch._llm.chat` is a bare `vi.fn()`, so if the deterministic route returned null the full Phase-1 extractor would be asked and the assertion would fail — the defect cannot be masked by a stubbed fallback.
+No LLM is stubbed to a plausible answer: `orch._llm.chat` is a bare `vi.fn()`, so a null deterministic route would fall through to the extractor and fail the assertion.
 
-Tests gate command, run in full (the pack's scaffold command is a Python `unittest` discovery that matches no file in this module, so it is a misfire and is not used):
+Tests gate command, run in full (the pack's scaffold command is a Python `unittest` discovery matching no file in this module — a misfire, not used):
 
 ```
 cd modules/expense-tracker && npx vitest run
 ```
 
-plus the two resolver suites by name, `production-incidents.test.js` and `ocbc-trust-transfer-hold.test.js`.
-
-The recorded mutation control for the new file links `node_modules` before running, because the driver's throwaway worktree is populated with tracked files only.
+The recorded mutation control for the new file links `node_modules` before running, because the driver's throwaway worktree carries tracked files only.
 
 ## Risks and how they are handled
 
-- **Widening the pinned #654 person boundary.** The book arm requires `person_transfer !== true`, and test 4 asserts the released person credit still drops. `production-incidents.test.js:811-825` and `:857-870` are re-run as part of the gate.
-- **Booking a sender's account as the destination.** The branch keys on `destination_account`, never `source`; uid 895 has a null `destination_account` and is re-measured to confirm it still drops.
-- **Dropping the inbound PayNow hold.** `_is_paynow`/`_paynow_merchant` are carried as `:1093-1094` sets them, so `:2092` still gates the hold at `:2143-2184`.
-- **Double-booking a leg that is part of an own-to-own pair.** `resolved.internal` at `:949` is evaluated on the same accounts this branch uses and sits between the new arm and `:1026`.
-- **The unresolvable hold double-notifying.** It reuses `_hold_unresolved_transfer`, whose notification path already exists and is pinned by `production-incidents.test.js:728`, `:744` and `:770`.
-- **uid 942 staying held.** Correct and intended: `4380` has no account and no fact. It books as soon as a fact maps it, with no further change.
+- **Double-counting a self-transfer.** The received leg books `Misc`, not income, and pairs to the outgoing leg via #598; the outgoing leg is unchanged.
+- **Widening the pinned #654 person boundary.** The arm requires `person_transfer !== true`; test 4 asserts the released person credit and the one-sided deposit both still behave.
+- **Stealing the one-sided deposit.** The arm sits after `:1024`, so `!counterparty` deposits still book `Unidentified deposit`.
+- **Dropping the inbound PayNow hold.** `_is_paynow`/`_paynow_merchant` are mirrored, so `:2092` still gates the hold.
+- **Received leg stays unpaired (accepted).** If no later leg names the far account, the row is a plain `Misc` credit on the credited account and is marked read, so it does not loop. There is no re-attempt from the receiving side; accepted, and a candidate follow-up.
+- **uid 942 still drops (accepted).** `4380` has no account and no live fact; scoped out because holding it needs the `:657` gate change. It books correctly the moment a fact maps `4380` AND the credited leg is bookable — no further change here.
 
 ## Rollout
 
@@ -95,7 +93,6 @@ No manual production action; the change reaches production through the PR and `d
 
 ## Non-goals
 
-- Not the uid 895 Trust/OCBC row (different cause; tracked on #680).
-- Not the incoming **person** arm — `production-incidents.test.js:857-870` pins it as its own change with its own reproduction.
-- Not the LLM-extractor route's field convention, the person hold, `resolveMovementAccounts`, or the parser.
-- No change to `mark_email_read` behaviour or to `imap.js` polling.
+- Not the uid 895 Trust/OCBC row, and not the uid 942 unresolvable `4380` hold (both need the shared-gate change; tracked on #680).
+- Not the incoming **person** arm — `production-incidents.test.js:857-870` pins it as its own change.
+- Not the LLM-extractor field convention, the person hold, `resolveMovementAccounts`, the parser, or `mark_email_read`/`imap.js`.
