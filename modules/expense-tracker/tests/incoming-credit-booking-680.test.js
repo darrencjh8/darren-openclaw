@@ -103,7 +103,8 @@ function makeOrchestrator(tools) {
     });
 }
 
-function makeTools(spy, { linkCandidate = null } = {}) {
+function makeTools(spy, { linkCandidate = null, holderFacts = false } = {}) {
+    const facts = holderFacts ? [...FACTS, "Legal name: Chong Jin Heng"] : FACTS;
     return {
         executeTool: vi.fn(async (name, args) => {
             spy.push({ name, args });
@@ -111,9 +112,9 @@ function makeTools(spy, { linkCandidate = null } = {}) {
                 return { accounts: ACCOUNTS, categories: [], payees: PAYEES };
             if (name === "search_memory") {
                 const query = String(args?.query ?? "");
-                return { results: FACTS.filter((f) => f.includes(query)).map((text) => ({ text })) };
+                return { results: facts.filter((f) => f.includes(query)).map((text) => ({ text })) };
             }
-            if (name === "list_facts") return { facts: FACTS.map((text) => ({ text })) };
+            if (name === "list_facts") return { facts: facts.map((text) => ({ text })) };
             if (name === "check_duplicate") return false;
             if (name === "check_schedule_collision") return false;
             if (name === "find_link_candidate") return linkCandidate || { candidate: null, matches: 0 };
@@ -230,11 +231,82 @@ describe("incoming credit into a resolvable account (issue #680)", () => {
         expect(names(calls)).toContain("mark_email_read");
     });
 
+    it("books a PayNow-labelled inbound credit and marks it read (M1)", async () => {
+        // Code review round 1, M1: the arm propagated `_is_paynow`, so a
+        // PayNow-labelled received credit resolved onto a known account was
+        // diverted by Phase 2 into `_hold_unresolved_paynow`, whose branch never
+        // calls `mark_email_read` — the exact re-fetch loop issue #680 removes.
+        // The credit is already resolved onto a known own account, so the PayNow
+        // identity re-check can only refuse it; this arm must therefore not
+        // propagate `_is_paynow` and the row must book and be marked read.
+        const calls = [];
+        const orch = await makeOrchestrator(makeTools(calls));
+
+        const paynowDeposit =
+            "PayNow transfer from JANE VENDOR PTE LTD\n" +
+            "Time of deposit : 19:34 PM SGT\n" +
+            "Amount : SGD 250.00\n" +
+            "Account that money was deposited in : OCBC 360 (-869001)\n";
+
+        const result = await orch.processEmail(
+            "uid-9001",
+            paynowDeposit,
+            null,
+            "no-reply@ocbc",
+            "PayNow transfer",
+        );
+
+        // RED at HEAD before the fix: `notified` ("Held an unresolved PayNow
+        // credit") with no `mark_email_read`, so imap.js re-fetches it forever.
+        expect(result.action).not.toBe("notified");
+        expect(names(calls)).toContain("mark_email_read");
+        expect(names(calls)).toContain("insert_transaction");
+    });
+
+    it("books a holder-named received credit and marks it read (L1)", async () => {
+        // Code review round 1, L1: pin what a credit whose sender is the
+        // holder's own legal name actually does. uid 1028 (DBS received
+        // SGD 1557.24 into …5750, From: CHONG JIN HENG) is that shape with the
+        // live `Legal name: …` fact present. Measured on the real route: the
+        // person hold does NOT fire (the counterparty does not resolve to a
+        // tracked account but `person_transfer` is not set for this DBS body),
+        // so the arm books it and the email is marked read — the loop #680
+        // removes is closed for this row too. Pinned so the boundary between
+        // the person hold and this arm is asserted rather than implied.
+        const calls = [];
+        const orch = await makeOrchestrator(makeTools(calls, { holderFacts: true }));
+
+        const holderNamed =
+            "digibank Alerts - You've received a transfer Problems viewing this email? " +
+            'Select "always display images" Transaction Ref: 0126100100114460 ' +
+            "Dear Customer, You have received SGD 1557.24 via FAST transfer on 03 Oct 2026 09:00 SGT. " +
+            "From: CHONG JIN HENG To: Your DBS/ POSB account ending 5750 " +
+            "Didn't expect these funds?";
+
+        const result = await orch.processEmail(
+            "uid-1028",
+            holderNamed,
+            null,
+            "no-reply@dbs",
+            "digibank Alerts - You've received a transfer",
+        );
+
+        const insert = calls.find((c) => c.name === "insert_transaction");
+        expect(insert).toBeTruthy();
+        expect(insert.args.account_id).toBe("acc-dbs");
+        expect(insert.args.amount_cents).toBe(155724);
+        expect(result.action).not.toBe("notified");
+        expect(names(calls)).toContain("mark_email_read");
+    });
+
     it("the booked credit is the row find_link_candidate matches (real matcher)", async () => {
         // F-2: assert positively that the received row is the shape the real
-        // #598 matcher links, not merely that the outgoing #598 suite is re-run.
-        // Drives the real ToolRegistry handler with a stubbed Actual read: the
-        // matcher must return the row the arm books, for the outgoing leg's
+        // #598 matcher links. This drives the REAL ToolRegistry handler against a
+        // stubbed Actual read, so it proves the row's account/sign/payee/
+        // cleared/unlinked shape is what the matcher selects; it does not need the
+        // #598 suite, which exercises the surrounding link flow with the matcher
+        // itself stubbed.
+        // The matcher must return the row the arm books, for the outgoing leg's
         // opposite-sign, uncleared, unlinked Misc lookup.
         const reg = new ToolRegistry({}, null);
         reg._get = async (path) => {
