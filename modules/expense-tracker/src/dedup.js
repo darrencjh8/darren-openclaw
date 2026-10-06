@@ -40,6 +40,28 @@ export class DedupJournal {
     constructor(dbPath = "data/dedup.db") {
         mkdirSync(dirname(dbPath), { recursive: true });
         this._db = new Database(dbPath);
+        // Test-only fast mode. better-sqlite3 fsyncs on every commit, and on
+        // this container's overlay filesystem a single fsync costs ~300ms, so
+        // opening a fresh file-backed journal costs ~0.9s (vs 3ms in-memory).
+        // Tests open a throwaway DB per test case and never assert
+        // crash-durability, so the fsync buys them nothing. Production must
+        // never set this flag: the dedup journal is the durable store that
+        // stops a crash from re-booking an already-booked transaction, and
+        // synchronous=OFF would let a crash lose the reservation.
+        if (process.env.EXPENSE_DEDUP_TEST_FAST === "1") {
+            this._db.pragma("synchronous = OFF");
+        }
+        // Schema setup is 11 separate statements, and better-sqlite3 runs each
+        // `exec` in its own implicit transaction, so every one of them is a
+        // separate durable commit (fsync) against the journal. Measured on this
+        // host: opening a fresh journal took 0.8-2.8s, which is what made the
+        // DB-backed cases in orchestrator.test.js exceed the 5s default
+        // testTimeout under parallel load. One explicit transaction collapses
+        // them into a single fsync (measured 3.9s -> 1.3s here). This is a
+        // production win too, not just a test fix: both production call sites
+        // (src/index.js, src/tools.js) construct once at startup and were
+        // paying ~11 fsyncs to create the schema.
+        this._db.exec("BEGIN");
         this._db.exec(`
       CREATE TABLE IF NOT EXISTS dedup (
         hash TEXT PRIMARY KEY,
@@ -110,6 +132,7 @@ export class DedupJournal {
         this._stmtInsertUid = this._db.prepare(
             "INSERT OR REPLACE INTO processed_uids (uid, processed_at) VALUES (?, ?)",
         );
+        this._db.exec("COMMIT");
     }
 
     _makeHash(date, amountCents, accountId, payeeName) {

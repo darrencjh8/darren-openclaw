@@ -592,3 +592,36 @@ describe("DedupJournal cleanupOldEntries", () => {
         expect(removed).toBe(0);
     });
 });
+
+// The suite runs with EXPENSE_DEDUP_TEST_FAST=1 (see vitest.config.js), which
+// turns off fsync. That speed-up must never leak into production: the dedup
+// journal is the durable store that stops a crash from re-booking an already
+// booked transaction. These two cases pin both sides of the switch.
+describe("DedupJournal durability contract", () => {
+    it("keeps synchronous=FULL when the test fast flag is absent", () => {
+        const saved = process.env.EXPENSE_DEDUP_TEST_FAST;
+        delete process.env.EXPENSE_DEDUP_TEST_FAST;
+        const prod = new DedupJournal(":memory:");
+        try {
+            // 2 === FULL. Anything lower means a crash can lose a reservation.
+            expect(prod._db.pragma("synchronous", { simple: true })).toBe(2);
+        } finally {
+            if (saved === undefined) delete process.env.EXPENSE_DEDUP_TEST_FAST;
+            else process.env.EXPENSE_DEDUP_TEST_FAST = saved;
+            prod.close();
+        }
+    });
+
+    it("only drops to synchronous=OFF when the fast flag is set", () => {
+        const saved = process.env.EXPENSE_DEDUP_TEST_FAST;
+        process.env.EXPENSE_DEDUP_TEST_FAST = "1";
+        const fast = new DedupJournal(":memory:");
+        try {
+            expect(fast._db.pragma("synchronous", { simple: true })).toBe(0);
+        } finally {
+            if (saved === undefined) delete process.env.EXPENSE_DEDUP_TEST_FAST;
+            else process.env.EXPENSE_DEDUP_TEST_FAST = saved;
+            fast.close();
+        }
+    });
+});
