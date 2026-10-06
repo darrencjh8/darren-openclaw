@@ -1023,6 +1023,63 @@ export class AgentOrchestrator {
             };
         }
 
+        // An incoming credit into one of the holder's own tracked accounts: a
+        // received transfer is its own transfer, not income (issue #680). The
+        // DBS/Trust received body names the sender only as a holder name with no
+        // bank or suffix, so the far (debited) account is unknowable from this
+        // alert alone; `resolveMovementAccounts` sets `source = other || own =
+        // own = destination`. So this books the CREDITED leg on the credited
+        // account as a plain `Misc` row with NO transfer payee and NO `_transfer`.
+        // That is exactly the shape `find_link_candidate` recognises, so the
+        // existing #598 pairing machinery links it to the outgoing leg from the
+        // outgoing side (`_findExistingFarSide` at :1957). Setting a transfer
+        // payee here would make Actual create its own counterpart at insert and
+        // the row would then be skipped. Placed AFTER the one-sided deposit
+        // branch (:1004) so a `!counterparty` credit keeps booking
+        // "Unidentified deposit" (`bank-movement.test.js:1035`), and after the
+        // person hold (:913) and the internal arm (:949) so a person/unverified
+        // credit keeps its hold and an own-to-own leg keeps its pairing.
+        //
+        // Scoped to exclude EVERY person-flagged movement (`person_transfer ===
+        // true`), not just the unreleased ones. A released person credit (one a
+        // `maps to … payee` fact frees) is the #654 boundary the repository
+        // deliberately leaves open: `production-incidents.test.js:857` pins that
+        // it is still DROPPED, and the comment there says closing it "is its own
+        // change with its own reproduction". An arm gated only on `destination`
+        // would book it and silently widen a pinned boundary. So an incoming
+        // person credit keeps its hold (:913) or its drop (:870); this arm books
+        // only non-person incoming credits.
+        if (
+            movement.direction === "incoming" &&
+            destination &&
+            date &&
+            movement.counterparty &&
+            movement.person_transfer !== true
+        ) {
+            const namedFrom = movement.counterparty?.name || "an unverified counterparty";
+            return {
+                merchant: namedFrom,
+                amount_cents: Math.abs(movement.amount_cents),
+                date,
+                currency: movement.currency,
+                account_id: destination.id,
+                account_name: destination.name,
+                budget_id: budgetId,
+                action: "insert",
+                payee_name: "Misc",
+                category_id: null,
+                raw_description: `Transfer from ${namedFrom}`,
+                raw_merchant_descriptor: "",
+                notes: movement.reference_number ? `Statement: ${movement.reference_number}` : "",
+                reasoning: "Deterministic incoming bank credit",
+                notify_message: "",
+                _suffix_mappings: suffixMappings,
+                _structured_movement: true,
+                _is_paynow: movement.is_paynow === true,
+                _paynow_merchant: movement.is_paynow_merchant === true,
+            };
+        }
+
         if (movement.direction === "outgoing") {
             const named = movement.counterparty?.name;
             // An outgoing movement naming an account by its masked suffix that
