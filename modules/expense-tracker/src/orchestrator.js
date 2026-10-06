@@ -1056,7 +1056,7 @@ export class AgentOrchestrator {
         // exactly the pinned #654 boundary and every route that flags a person,
         // and nothing wider. A person-NAMED
         // credit on another rail carries no flag and books as the broad-arm
-        // `Misc` above — the deliberate convention this change adopts for every
+        // `Misc` below — the deliberate convention this change adopts for every
         // named inbound credit, because gating on the counterparty's identity
         // would leave an external named credit falling to `return null` (:1172)
         // and re-open the endless re-fetch loop #680 exists to close.
