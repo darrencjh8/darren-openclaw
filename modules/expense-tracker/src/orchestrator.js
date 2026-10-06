@@ -1023,6 +1023,81 @@ export class AgentOrchestrator {
             };
         }
 
+        // An incoming credit into one of the holder's own tracked accounts: a
+        // received transfer is its own transfer, not income (issue #680). The
+        // DBS/Trust received body names the sender only as a holder name with no
+        // bank or suffix, so the far (debited) account is unknowable from this
+        // alert alone; `resolveMovementAccounts` sets `source = other || own =
+        // own = destination`. So this books the CREDITED leg on the credited
+        // account as a plain `Misc` row with NO transfer payee and NO `_transfer`.
+        // That is exactly the shape `find_link_candidate` recognises, so the
+        // existing #598 pairing machinery links it to the outgoing leg from the
+        // outgoing side (`_findExistingFarSide` at :2032). Setting a transfer
+        // payee here would make Actual create its own counterpart at insert and
+        // the row would then be skipped. Placed AFTER the one-sided deposit
+        // branch (:1004) so a `!counterparty` credit keeps booking
+        // "Unidentified deposit" (`bank-movement.test.js:1035`), and after the
+        // person hold (:913) and the internal arm (:949) so a person/unverified
+        // credit keeps its hold and an own-to-own leg keeps its pairing.
+        //
+        // Scoped to exclude every person-FLAGGED movement (`person_transfer ===
+        // true`), not just the unreleased ones. A released person credit (one a
+        // `maps to … payee` fact frees) is the #654 boundary the repository
+        // deliberately leaves open: `production-incidents.test.js:857` pins that
+        // it is still DROPPED, and the comment there says closing it "is its own
+        // change with its own reproduction". An arm gated only on `destination`
+        // would book it and silently widen a pinned boundary. So a FLAGGED
+        // incoming person credit keeps its hold (:913) or its drop (:870).
+        //
+        // The flag is set by the Ryt parser branches (`bank-movement.js:309`
+        // and `:355`) and by the LLM-extractor route (`orchestrator.js:1311`);
+        // the DBS/OCBC branches build their movement through `baseMovement`
+        // (`bank-movement.js:170`), which never sets it. So this guard covers
+        // exactly the pinned #654 boundary and every route that flags a person,
+        // and nothing wider. A person-NAMED
+        // credit on another rail carries no flag and books as the broad-arm
+        // `Misc` below — the deliberate convention this change adopts for every
+        // named inbound credit, because gating on the counterparty's identity
+        // would leave an external named credit falling to `return null` (:1172)
+        // and re-open the endless re-fetch loop #680 exists to close.
+        //
+        // `_is_paynow` is deliberately NOT propagated (code review round 1, M1).
+        // This credit has already been resolved onto a KNOWN own account, so the
+        // PayNow identity re-check in Phase 2 (:2167) can only refuse it: it would
+        // set `_hold_unresolved_paynow` (:2257), whose branch (:2659) notifies and
+        // logs but never calls `mark_email_read`, leaving the alert to be
+        // re-fetched unseen forever (`imap.js:86`) — the exact loop this change
+        // removes. PayNow is a payment rail, not a reason to distrust an
+        // already-resolved credited leg.
+        if (
+            movement.direction === "incoming" &&
+            destination &&
+            date &&
+            movement.counterparty &&
+            movement.person_transfer !== true
+        ) {
+            const namedFrom = movement.counterparty?.name || "an unverified counterparty";
+            return {
+                merchant: namedFrom,
+                amount_cents: Math.abs(movement.amount_cents),
+                date,
+                currency: movement.currency,
+                account_id: destination.id,
+                account_name: destination.name,
+                budget_id: budgetId,
+                action: "insert",
+                payee_name: "Misc",
+                category_id: null,
+                raw_description: `Transfer from ${namedFrom}`,
+                raw_merchant_descriptor: "",
+                notes: movement.reference_number ? `Statement: ${movement.reference_number}` : "",
+                reasoning: "Deterministic incoming bank credit",
+                notify_message: "",
+                _suffix_mappings: suffixMappings,
+                _structured_movement: true,
+            };
+        }
+
         if (movement.direction === "outgoing") {
             const named = movement.counterparty?.name;
             // An outgoing movement naming an account by its masked suffix that
