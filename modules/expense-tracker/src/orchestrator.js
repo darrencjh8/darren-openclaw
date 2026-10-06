@@ -1032,7 +1032,7 @@ export class AgentOrchestrator {
         // account as a plain `Misc` row with NO transfer payee and NO `_transfer`.
         // That is exactly the shape `find_link_candidate` recognises, so the
         // existing #598 pairing machinery links it to the outgoing leg from the
-        // outgoing side (`_findExistingFarSide` at :2030). Setting a transfer
+        // outgoing side (`_findExistingFarSide` at :2032). Setting a transfer
         // payee here would make Actual create its own counterpart at insert and
         // the row would then be skipped. Placed AFTER the one-sided deposit
         // branch (:1004) so a `!counterparty` credit keeps booking
@@ -1049,20 +1049,22 @@ export class AgentOrchestrator {
         // would book it and silently widen a pinned boundary. So a FLAGGED
         // incoming person credit keeps its hold (:913) or its drop (:870).
         //
-        // The flag is set by the Ryt parser branches only (`bank-movement.js:309`
-        // and `:355`); the DBS/OCBC branches build their movement through
-        // `baseMovement` (`:170`), which never sets it. So this guard covers
-        // exactly the pinned #654 boundary and nothing wider. A person-NAMED
+        // The flag is set by the Ryt parser branches (`bank-movement.js:309`
+        // and `:355`) and by the LLM-extractor route (`orchestrator.js:1311`);
+        // the DBS/OCBC branches build their movement through `baseMovement`
+        // (`bank-movement.js:170`), which never sets it. So this guard covers
+        // exactly the pinned #654 boundary and every route that flags a person,
+        // and nothing wider. A person-NAMED
         // credit on another rail carries no flag and books as the broad-arm
         // `Misc` above — the deliberate convention this change adopts for every
         // named inbound credit, because gating on the counterparty's identity
-        // would leave an external named credit falling to `return null` (:1170)
+        // would leave an external named credit falling to `return null` (:1172)
         // and re-open the endless re-fetch loop #680 exists to close.
         //
         // `_is_paynow` is deliberately NOT propagated (code review round 1, M1).
         // This credit has already been resolved onto a KNOWN own account, so the
-        // PayNow identity re-check in Phase 2 (:2165) can only refuse it: it would
-        // set `_hold_unresolved_paynow` (:2255), whose branch (:2657) notifies and
+        // PayNow identity re-check in Phase 2 (:2167) can only refuse it: it would
+        // set `_hold_unresolved_paynow` (:2257), whose branch (:2659) notifies and
         // logs but never calls `mark_email_read`, leaving the alert to be
         // re-fetched unseen forever (`imap.js:86`) — the exact loop this change
         // removes. PayNow is a payment rail, not a reason to distrust an
