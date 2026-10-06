@@ -156,7 +156,7 @@ jobs:
                   LLM_FINAL_FALLBACK_PROVIDER: ${{ vars.LLM_FINAL_FALLBACK_PROVIDER || 'deepseek' }}
                   LLM_FINAL_FALLBACK_MODEL: ${{ vars.LLM_FINAL_FALLBACK_MODEL || 'deepseek-flash' }}
                   FIRECRAWL_API_KEY: ${{ secrets.FIRECRAWL_API_KEY }}
-                  NOTION_API_KEY: ${{ secrets.NOTION_API_KEY }}
+                  NOTION_API_KEY: ${{ secrets.NOTION_API_TOKEN }}
                   POLLINATIONS_API_KEY: ${{ secrets.POLLINATIONS_API_KEY }}
                   TELEGRAM_ALLOWED_USERS: ${{ vars.TELEGRAM_ALLOWED_USERS }}
                   TELEGRAM_HOME_CHANNEL: ${{ vars.TELEGRAM_HOME_CHANNEL }}
@@ -203,7 +203,7 @@ jobs:
 
             - name: Ensure Hermes container tooling
               if: >-
-                  success() &&
+                  always() &&
                   (steps.changes.outputs.components == 'all' || contains(format(' {0} ', steps.changes.outputs.components), ' hermes '))
               env:
                   # Authenticates the release lookup below; unauthenticated
@@ -230,7 +230,13 @@ jobs:
                   if ! docker exec hermes sh -c 'command -v ntn' >/dev/null 2>&1; then
                       docker exec hermes npm install --global --prefix /opt/data/.local ntn
                   fi
-                  docker exec hermes sh -c 'gh --version && ntn --version'
+                  # Gated on the installed version rather than on binary presence, so a
+                  # later bump of the pin replaces the volume copy instead of no-opping.
+                  # The match is anchored: the pin is a prefix of a longer version.
+                  if ! docker exec hermes npm ls --global --prefix /opt/data/.local --depth=0 @notionhq/notion-mcp-server 2>/dev/null | grep -qE '@notionhq/notion-mcp-server@2\.5\.2([[:space:]]|$)'; then
+                      docker exec hermes npm install --global --prefix /opt/data/.local @notionhq/notion-mcp-server@2.5.2
+                  fi
+                  docker exec hermes sh -c 'gh --version && ntn --version && command -v notion-mcp-server'
 
             - name: Record deployed Codex Router revision
               if: >-
