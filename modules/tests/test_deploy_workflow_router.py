@@ -426,5 +426,29 @@ class DeployWorkflowRouterTests(unittest.TestCase):
         self.assertLess(names.index("Deploy services"), names.index("Ensure Hermes container tooling"))
 
 
+    def test_manual_deploy_smokes_the_ref_it_will_deploy(self):
+        """The deploy job checks out inputs.ref, so the reusable test workflow has
+        to smoke that same tree; otherwise a manual deploy of another branch or
+        commit builds the image with the smoke gate skipped or aimed elsewhere."""
+        workflow = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
+        test_workflow = yaml.safe_load(TEST_WORKFLOW.read_text(encoding="utf-8"))
+
+        call = workflow["jobs"]["test"]
+        self.assertEqual(
+            call.get("with", {}).get("ref"),
+            "${{ github.event.inputs.ref || github.sha }}",
+        )
+
+        inputs = test_workflow[True]["workflow_call"]["inputs"]
+        self.assertIn("ref", inputs)
+
+        steps = test_workflow["jobs"]["hermes-webui-image"]["steps"]
+        self.assertEqual(steps[0]["with"]["ref"], "${{ inputs.ref }}")
+        resolver = next(
+            step for step in steps if step.get("name") == "Resolve changed image inputs"
+        )["run"]
+        self.assertIn("git merge-base origin/main", resolver)
+
+
 if __name__ == "__main__":
     unittest.main()
