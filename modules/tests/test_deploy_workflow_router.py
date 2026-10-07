@@ -166,11 +166,11 @@ class DeployWorkflowRouterTests(unittest.TestCase):
         workflow = TEST_WORKFLOW.read_text(encoding="utf-8")
         self.assertIn("python -m unittest discover -s modules/tests -p 'test_*.py'", workflow)
 
-    def test_hermes_custom_endpoint_contract_remains_chat_completions(self):
+    def test_hermes_custom_endpoint_contract_uses_responses_transport(self):
         config = yaml.safe_load(HERMES_CONFIG.read_text(encoding="utf-8"))
         provider = config["providers"]["codex-router"]
         self.assertEqual(provider["api"], "http://codex-router:4100/v1")
-        self.assertEqual(provider["transport"], "chat_completions")
+        self.assertEqual(provider["transport"], "responses")
         self.assertEqual(config["model"]["provider"], "custom:codex-router")
 
     def test_hermes_deploy_health_gate_checks_gateway_not_retired_dashboard(self):
