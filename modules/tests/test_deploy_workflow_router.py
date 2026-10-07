@@ -428,10 +428,16 @@ class DeployWorkflowRouterTests(unittest.TestCase):
         requirements = HERMES_DOCKERFILE.parent / "requirements-codex-router.txt"
         self.assertTrue(requirements.is_file())
         self.assertIn("COPY requirements-codex-router.txt /tmp/requirements-codex-router.txt", dockerfile)
+        # The Hermes venv is sealed and has no pip, and these pins would downgrade
+        # its core packages (mcp, uvicorn, rich), so they get their own venv.
+        self.assertNotIn("/opt/hermes/.venv/bin/pip", dockerfile)
+        self.assertIn("uv venv /opt/codex-router-venv", dockerfile)
         self.assertIn(
-            "/opt/hermes/.venv/bin/pip install --no-cache-dir \\\n    --requirement /tmp/requirements-codex-router.txt",
+            "uv pip install --no-cache --python /opt/codex-router-venv/bin/python \\\n"
+            "        --requirement /tmp/requirements-codex-router.txt",
             dockerfile,
         )
+        self.assertIn("/usr/local/bin/codex-router-python", dockerfile)
         self.assertNotIn("docker exec hermes", dockerfile)
         self.assertLess(
             dockerfile.index("requirements-codex-router.txt"),
