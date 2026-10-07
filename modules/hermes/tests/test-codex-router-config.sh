@@ -17,7 +17,7 @@ has_provider() {
 
 has_provider && ok "named Codex Router provider exists" || nope "named Codex Router provider" "missing"
 grep -Eq '^        api: http://codex-router:4100/v1$' "$CONFIG" && ok "provider uses internal router URL" || nope "provider URL" "missing or wrong"
-grep -Eq '^        transport: chat_completions$' "$CONFIG" && ok "provider pins Chat Completions transport" || nope "provider transport" "missing"
+grep -Eq '^        transport: responses$' "$CONFIG" && ok "provider pins Responses transport" || nope "provider transport" "missing"
 grep -Eq '^    provider: custom:codex-router$' "$CONFIG" && ok "Hermes uses named Codex Router provider" || nope "Hermes provider" "missing"
 grep -Eq '^    default: auto-thinking$' "$CONFIG" && ok "main model routes via auto-thinking" || nope "main model" "missing"
 grep -Eq '^        model: commandcode/deepseek/deepseek-v4\.1-flash$' "$CONFIG" && ok "auxiliary slots use the Command Code DeepSeek Flash route" || nope "auxiliary model" "missing"

@@ -3,7 +3,7 @@ providers:
         name: Codex Router
         api: http://codex-router:4100/v1
         api_key: local
-        transport: chat_completions
+        transport: responses
         default_model: auto-thinking
 
 model:
