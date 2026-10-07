@@ -485,18 +485,21 @@ class DeployWorkflowRouterTests(unittest.TestCase):
         )
         self.assertIn("wait_for_health published-port curl", boot)
 
-    def test_image_job_shadows_the_agent_source_with_the_stub(self):
-        """The agent venv binds /opt/hermes onto sys.path, and api/config.py
-        only appends HERMES_WEBUI_AGENT_DIR, so a stub agent dir cannot win by
-        that variable alone: without PYTHONPATH the smoke chat calls the real
-        provider instead of the stub."""
+    def test_image_job_smokes_the_chat_path_through_the_service(self):
+        """The agent venv resolves the real agent whatever the launcher's agent
+        dir says, so the chat smoke replaces the resolved module inside the
+        throwaway container and restarts the supervised service, then talks to
+        the port the deploy publishes instead of a second WebUI."""
         workflow = yaml.safe_load(TEST_WORKFLOW.read_text(encoding="utf-8"))
         steps = workflow["jobs"]["hermes-webui-image"]["steps"]
         boot = next(
             step for step in steps if step.get("name") == "Boot the image and probe the WebUI"
         )["run"]
 
-        self.assertIn("PYTHONPATH=/tmp/fake-agent", boot)
+        self.assertIn("import run_agent; print(run_agent.__file__)", boot)
+        self.assertIn("/command/s6-svc -r /run/service/hermes-webui", boot)
+        self.assertIn("http://127.0.0.1:8787/api/chat", boot)
+        self.assertNotIn("8788", boot)
 
 
 if __name__ == "__main__":
