@@ -425,6 +425,21 @@ class DeployWorkflowRouterTests(unittest.TestCase):
         names = [s.get("name") for s in steps]
         self.assertLess(names.index("Deploy services"), names.index("Ensure Hermes container tooling"))
 
+    def test_hermes_build_installs_codex_router_dependencies(self):
+        dockerfile = HERMES_DOCKERFILE.read_text(encoding="utf-8")
+        requirements = HERMES_DOCKERFILE.parent / "requirements-codex-router.txt"
+        self.assertTrue(requirements.is_file())
+        self.assertIn("COPY requirements-codex-router.txt /tmp/requirements-codex-router.txt", dockerfile)
+        self.assertIn(
+            "/opt/hermes/.venv/bin/pip install --no-cache-dir \\\n    --requirement /tmp/requirements-codex-router.txt",
+            dockerfile,
+        )
+        self.assertNotIn("docker exec hermes", dockerfile)
+        self.assertLess(
+            dockerfile.index("requirements-codex-router.txt"),
+            dockerfile.index("COPY config.yaml"),
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

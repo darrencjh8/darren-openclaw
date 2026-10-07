@@ -6,6 +6,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     poppler-utils \
     qpdf \
     && rm -rf /var/lib/apt/lists/*
+# The dev-loop checkout is refreshed at runtime, but its Python imports must be
+# available in the image before gateway startup. Keep this manifest local to the
+# Hermes image so the build does not depend on a runtime-mounted checkout.
+COPY requirements-codex-router.txt /tmp/requirements-codex-router.txt
+RUN /opt/hermes/.venv/bin/pip install --no-cache-dir \
+    --requirement /tmp/requirements-codex-router.txt \
+    && rm /tmp/requirements-codex-router.txt
 COPY config.yaml SOUL.md.template /opt/hermes-defaults/
 COPY skills/ /opt/hermes-defaults/skills/
 COPY scripts/ /opt/hermes-defaults/scripts/
