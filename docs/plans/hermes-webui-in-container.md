@@ -6,6 +6,8 @@ q: How does the WebUI locate the agent, when its own launcher would otherwise in
 q: Does the s6-overlay v3 runtime database accept a new service added at image build time? | a: Yes. Read-only inspection on 2026-10-07 shows `/etc/s6-overlay/s6-rc.d/` holds the service source directories, `/etc/s6-overlay/s6-rc.d/user/contents.d/` lists the enabled services (`dashboard`, `main-hermes`), and `/run/s6/db/` is the compiled database produced at container start, so a service directory plus a `contents.d` entry added in the Dockerfile is compiled on the next boot.
 q: Which WebUI revision, and how is drift prevented? | a: Commit `c67fd2dd270a1128c2754200406bca58e9d9a25a` (the commit behind tag `v0.52.113`, read from the upstream annotated tag object on 2026-10-07). `ARG HERMES_WEBUI_REF` defaults to that 40-hex commit, and the build fetches exactly that commit rather than checking out a tag, so a moved or re-pointed tag cannot change what a rebuild produces; a missing commit fails the build instead of silently building another revision. The tag survives only as a comment, and the new test asserts the ref is a 40-hex commit, so a WebUI upgrade is one visible line in review.
 q: Is TDD applicable to this change? | a: Yes, and no docs-only exception is claimed. The change is executable behaviour in the Dockerfile, the compose port stanza, and the s6 run script, and the new test `modules/hermes/tests/test-webui-container.sh` pins each of them: it fails at base because the files it reads do not exist, and passes at HEAD.
+q: Which address does the WebUI bind inside the container, given compose publishes only `127.0.0.1:8787`? | a: `0.0.0.0`. Docker's published port forwards to the container's interface address, not its loopback, so a `127.0.0.1` listener inside the container is unreachable from the host and the Tailscale route would have no backend while every in-container check passed. The host side stays loopback-only, so the wildcard bind adds no exposure. The run script sets `HERMES_WEBUI_HOST=0.0.0.0` explicitly and the test pins that exact value.
+q: How does the new CI image job get a diff base, when `deploy.yml` reaches `test.yml` through `workflow_call` and no pull-request base exists there? | a: The job checks out with `fetch-depth: 0` and resolves its base per event: `github.event.pull_request.base.sha` for a pull request, and `github.sha` for `workflow_call` (the commit the caller already checked out, `main` or the dispatch `ref` input). If neither resolves to a commit present in the checkout the job fails closed, so a broken gate can never silently skip the image evidence.
 
 # Serve Hermes WebUI from inside the hermes container
 
@@ -42,7 +44,23 @@ state directory are already the ones the gateway uses.
    with `s6-setuidgid`, and sets the launcher's discovery variables explicitly instead of
    relying on `~/.hermes` defaults that do not exist in this image.
 3. **Publish loopback only**: `127.0.0.1:8787:8787` on the `hermes` service, alongside the
-   existing gateway ports. No password (Darren's decision), and no LAN exposure.
+   existing gateway ports. No password (Darren's decision), and no LAN exposure. The
+   container-side listener is `HERMES_WEBUI_HOST=0.0.0.0`, not `127.0.0.1`: the host
+   publishes only loopback, so a loopback-only listener inside the container would be
+   unreachable through the published port and the Tailscale route would have no backend
+   while every health check still passed. The run script sets every launcher variable
+   explicitly, so nothing falls back to the launcher's own `127.0.0.1` default
+   (`start.sh:84`, `bootstrap.py` `WEBUI_HOST`): `HERMES_WEBUI_AGENT_DIR=/opt/hermes`,
+   `HERMES_WEBUI_PYTHON=/opt/hermes/.venv/bin/python3`, `HERMES_WEBUI_HOST=0.0.0.0`,
+   `HERMES_WEBUI_PORT=8787`, `HERMES_WEBUI_STATE_DIR=/opt/data/webui`,
+   `HERMES_WEBUI_DEFAULT_WORKSPACE=/workspace`, `HERMES_WEBUI_SERVER_CWD=/workspace`, and
+   `HERMES_WEBUI_FOREGROUND=1` (without it `bootstrap.py` double-forks, because s6 sets
+   none of the supervisor variables it auto-detects). The
+   container-side listener is `HERMES_WEBUI_HOST=0.0.0.0`, not `127.0.0.1`: the host
+   publishes only loopback, so a loopback-only listener inside the container would be
+   unreachable through Docker's published address and the Tailscale route would have no
+   backend. The run script sets every launcher variable explicitly, so the bind is one
+   visible line rather than a default inherited from a host that does not exist here.
 4. **Gate the deploy on the WebUI answering**: extend the existing hermes block in
    `modules/deploy.sh` with a bounded `/health` poll over `docker exec`, the same shape as
    the gateway `s6-svstat` poll it already runs.
@@ -72,7 +90,7 @@ state directory are already the ones the gateway uses.
 | `modules/hermes/webui/s6-rc.d/hermes-webui/type` | `longrun` |
 | `modules/hermes/webui/s6-rc.d/hermes-webui/run` | `with-contenv` shell script that drops to `hermes` and execs the WebUI launcher |
 | `modules/docker-compose.yml` | `- "127.0.0.1:8787:8787"` on the `hermes` service |
-| `modules/deploy.sh` | WebUI `/health` poll in the existing `should_deploy "hermes"` block |
+| `modules/deploy.sh` | bounded WebUI `/health` poll in the existing `should_deploy "hermes"` block |
 | `modules/hermes/tests/test-webui-container.sh` | new test (below) |
 | `.github/workflows/test.yml` | run the new test in the `hermes-scripts` job; add the change-gated `hermes-webui-image` build + boot smoke job |
 | `docs/operations.md` | health-endpoint row, ports row, tailscale serve commands |
@@ -89,12 +107,17 @@ New test id: `modules/hermes/tests/test-webui-container.sh` (bash, run by the
 2. the Dockerfile installs the service tree under `/etc/s6-overlay/s6-rc.d/hermes-webui`
    and enables it in `user/contents.d`;
 3. `type` is `longrun` and `run` is executable-with-shebang, uses `with-contenv`, drops to
-   `hermes` via `s6-setuidgid`, and sets `HERMES_WEBUI_AGENT_DIR`, `HERMES_WEBUI_PYTHON`,
-   `HERMES_WEBUI_HOST`, `HERMES_WEBUI_PORT`, `HERMES_WEBUI_STATE_DIR`,
-   `HERMES_WEBUI_DEFAULT_WORKSPACE`;
+   `hermes` via `s6-setuidgid`, and sets `HERMES_WEBUI_AGENT_DIR=/opt/hermes`,
+   `HERMES_WEBUI_PYTHON=/opt/hermes/.venv/bin/python3`, `HERMES_WEBUI_HOST=0.0.0.0`,
+   `HERMES_WEBUI_PORT=8787`, `HERMES_WEBUI_STATE_DIR=/opt/data/webui`,
+   `HERMES_WEBUI_DEFAULT_WORKSPACE=/workspace`, `HERMES_WEBUI_SERVER_CWD=/workspace`, and
+   `HERMES_WEBUI_FOREGROUND=1`;
 4. the compose `hermes` service publishes `127.0.0.1:8787:8787` and does not publish a
    wildcard `8787`;
-5. `deploy.sh` polls the WebUI health endpoint inside the `hermes` component block.
+5. `deploy.sh` polls the WebUI health endpoint inside the `hermes` component block with a
+   bounded loop: at most 10 attempts, `curl --max-time 10`, `sleep 6` between attempts, and
+   a failed poll increments the same `failed` counter the gateway poll uses, so a WebUI that
+   never answers fails the deploy instead of hanging it.
 
 RED/GREEN: at base the test exits non-zero (the Dockerfile arg, the service tree, the port
 stanza, and the deploy poll are all absent); at HEAD it exits 0.
@@ -120,7 +143,10 @@ service tree exists — so the RED/GREEN pair lives in the bash test above.
   plus `docker exec <container> curl -fsS http://127.0.0.1:8787/health` to succeed. The
   container is started from the image's own entrypoint with no provider credentials, so
   only the WebUI service and its health route are asserted; a crash-looping gateway service
-  is not part of the gate.
+  is not part of the gate. The job also proves the bind: it publishes the container port on
+  the runner's loopback (`docker run -p 127.0.0.1:8787:8787`) and curls
+  `http://127.0.0.1:8787/health` from the runner, so a run script that binds the container's
+  own loopback fails the job while the in-container probe still passes.
 - Post-deploy evidence (CI owns it): `deploy.sh` fails if `curl 127.0.0.1:8787/health` does
   not answer inside the container, and `docker exec hermes curl -fsS
   http://127.0.0.1:8787/health` is the manual equivalent recorded in `docs/operations.md`.
@@ -152,3 +178,16 @@ service tree exists — so the RED/GREEN pair lives in the bash test above.
   `https://darren.taila8e105.ts.net/v1` must move to `/router/v1`. No repository file
   references that hostname (checked), so the exposure is only external clients the operator
   points at it.
+- **A loopback-only listener would pass every check and still be unreachable.** The
+  container must bind `0.0.0.0` because compose publishes `127.0.0.1:8787` on the host; a
+  listener on the container's own loopback is not reachable through the published port, so
+  the tailnet route would have no backend while the in-container health checks all pass. The
+  plan pins `HERMES_WEBUI_HOST=0.0.0.0` in the run script, the test asserts that value, and the
+  CI smoke job curls the published host port from the runner, which is the only check that
+  exercises the bind the operator actually uses.
+- **A loopback-only listener would pass every check and still be unreachable.** The
+  container must bind `0.0.0.0` because the host publishes `127.0.0.1:8787` and Docker
+  forwards to the container interface, not to its loopback. The run script pins
+  `HERMES_WEBUI_HOST=0.0.0.0`, the test asserts that value, and the CI smoke job curls the
+  published host port from the runner, so a loopback bind fails the gate instead of the
+  tailnet.
