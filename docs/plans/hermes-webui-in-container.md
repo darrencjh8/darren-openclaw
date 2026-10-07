@@ -4,7 +4,7 @@ q: Is the WebUI password-protected? | a: No. Darren chose no password on 2026-10
 q: How is the WebUI exposed on the tailnet, given `tailscale serve --https=443` root already proxies to the codex-router caddy front on `127.0.0.1:4100`? | a: Replace the root. Confirmed by Darren 2026-10-07: `https://darren.taila8e105.ts.net` serves the WebUI, and the caddy front moves to the path `/router` on the same port, so the router keeps an address. The `--set-path /router` mount strips the prefix before proxying, so the router still sees `/v1/...`. The operator applies this once over SSH because the CI runner user has no tailscale operator rights; the exact commands are recorded in `docs/operations.md`.
 q: How does the WebUI locate the agent, when its own launcher would otherwise install one under `~/.hermes/hermes-agent`? | a: `HERMES_WEBUI_AGENT_DIR=/opt/hermes` plus `HERMES_WEBUI_PYTHON=/opt/hermes/.venv/bin/python3`, set by the s6 run script. Verified read-only in the production container on 2026-10-07: that venv already imports PyYAML 6.0.3 and cryptography 50.0.0, which are the WebUI's only two pinned dependencies, so no install step runs and `HERMES_WEBUI_AUTO_INSTALL` stays at its default (off).
 q: Does the s6-overlay v3 runtime database accept a new service added at image build time? | a: Yes. Read-only inspection on 2026-10-07 shows `/etc/s6-overlay/s6-rc.d/` holds the service source directories, `/etc/s6-overlay/s6-rc.d/user/contents.d/` lists the enabled services (`dashboard`, `main-hermes`), and `/run/s6/db/` is the compiled database produced at container start, so a service directory plus a `contents.d` entry added in the Dockerfile is compiled on the next boot.
-q: Which WebUI revision, and how is drift prevented? | a: Tag `v0.52.113`, pinned as the Dockerfile `ARG HERMES_WEBUI_REF` and asserted by the new test, so a WebUI upgrade is one visible line in review.
+q: Which WebUI revision, and how is drift prevented? | a: Commit `c67fd2dd270a1128c2754200406bca58e9d9a25a` (the commit behind tag `v0.52.113`, read from the upstream annotated tag object on 2026-10-07). `ARG HERMES_WEBUI_REF` defaults to that 40-hex commit, and the build fetches exactly that commit rather than checking out a tag, so a moved or re-pointed tag cannot change what a rebuild produces; a missing commit fails the build instead of silently building another revision. The tag survives only as a comment, and the new test asserts the ref is a 40-hex commit, so a WebUI upgrade is one visible line in review.
 q: Is TDD applicable to this change? | a: Yes, and no docs-only exception is claimed. The change is executable behaviour in the Dockerfile, the compose port stanza, and the s6 run script, and the new test `modules/hermes/tests/test-webui-container.sh` pins each of them: it fails at base because the files it reads do not exist, and passes at HEAD.
 
 # Serve Hermes WebUI from inside the hermes container
@@ -28,9 +28,12 @@ state directory are already the ones the gateway uses.
 
 ## Approach
 
-1. **Bake the WebUI into the existing hermes image** (`modules/hermes/Dockerfile`): clone
-   `nesquena/hermes-webui` at `HERMES_WEBUI_REF` (default `v0.52.113`) into
-   `/opt/hermes-webui`, and copy the service tree in.
+1. **Bake the WebUI into the existing hermes image** (`modules/hermes/Dockerfile`): fetch
+   `HERMES_WEBUI_REF` (default `c67fd2dd270a1128c2754200406bca58e9d9a25a`, the commit behind
+   tag `v0.52.113`, named in a comment) into `/opt/hermes-webui` with
+   `git init` + `git fetch --depth 1 origin "$HERMES_WEBUI_REF"` + `checkout --detach
+   FETCH_HEAD`, so the build pins a commit and not a mutable tag, and copy the service tree
+   in. `git` is already in the base image (verified read-only: `/usr/bin/git`, 2.47.3).
 2. **Supervise it with s6**, not with a hand-rolled background process: add
    `/etc/s6-overlay/s6-rc.d/hermes-webui/{type,run}` and enable it by touching
    `/etc/s6-overlay/s6-rc.d/user/contents.d/hermes-webui`, so the WebUI restarts with the
@@ -46,6 +49,20 @@ state directory are already the ones the gateway uses.
 5. **Record the tailnet exposure** in `docs/operations.md` (ports table + the two
    `tailscale serve` commands) so the host-side state is reproducible after a rebuild; the
    operator runs them once, because CI cannot.
+6. **Build the image and boot it in CI**, because no test in this repository currently
+   builds the Hermes image and every proposed check above is text-only: a new
+   `hermes-webui-image` job in `.github/workflows/test.yml` builds `modules/hermes`, starts
+   a disposable container from it with a temporary `HERMES_HOME`, asserts the supervised
+   service is up (`s6-svstat -o up /run/service/hermes-webui`) and that
+   `curl -fsS http://127.0.0.1:8787/health` answers from inside the container, and prints
+   `docker logs` on failure. The job runs only when the image's inputs change
+   (`git diff --name-only "${{ github.event.pull_request.base.sha }}" HEAD` limited to
+   `modules/hermes/` and `.github/workflows/test.yml`), so an unrelated PR does not pay for
+   a base-image pull. The post-deploy health gate stays as defence in depth.
+7. **Delete the duplicate operations tables from `README.md`** and point at
+   `docs/operations.md` instead: the README repeats the health-endpoint and ports tables and
+   both would be stale the moment 8787 exists, so the fix is one pointer rather than a
+   second copy to maintain.
 
 ## Files
 
@@ -57,16 +74,18 @@ state directory are already the ones the gateway uses.
 | `modules/docker-compose.yml` | `- "127.0.0.1:8787:8787"` on the `hermes` service |
 | `modules/deploy.sh` | WebUI `/health` poll in the existing `should_deploy "hermes"` block |
 | `modules/hermes/tests/test-webui-container.sh` | new test (below) |
-| `.github/workflows/test.yml` | run the new test in the `hermes-scripts` job |
+| `.github/workflows/test.yml` | run the new test in the `hermes-scripts` job; add the change-gated `hermes-webui-image` build + boot smoke job |
 | `docs/operations.md` | health-endpoint row, ports row, tailscale serve commands |
+| `README.md` | replace the duplicated health-endpoint and ports tables with a pointer to `docs/operations.md` |
 
 ## Test
 
 New test id: `modules/hermes/tests/test-webui-container.sh` (bash, run by the
 `hermes-scripts` job). It asserts, with no network and no container:
 
-1. the Dockerfile pins a `v`-prefixed `HERMES_WEBUI_REF` and clones that ref into
-   `/opt/hermes-webui`;
+1. the Dockerfile declares `ARG HERMES_WEBUI_REF` with a default matching `^[0-9a-f]{40}$`,
+   fetches exactly that value (so a tag cannot substitute for it), and copies the checkout
+   into `/opt/hermes-webui`;
 2. the Dockerfile installs the service tree under `/etc/s6-overlay/s6-rc.d/hermes-webui`
    and enables it in `user/contents.d`;
 3. `type` is `longrun` and `run` is executable-with-shebang, uses `with-contenv`, drops to
@@ -80,6 +99,12 @@ New test id: `modules/hermes/tests/test-webui-container.sh` (bash, run by the
 RED/GREEN: at base the test exits non-zero (the Dockerfile arg, the service tree, the port
 stanza, and the deploy poll are all absent); at HEAD it exits 0.
 
+The CI smoke job is the pre-merge execution evidence for the same files: it builds the
+image and boots it, which is the only check that can catch an unreachable commit, a wrong
+launcher path, a wrong `COPY` destination, or a run script that exits immediately. It has
+no repository-test RED state of its own — it fails closed on the base image only after the
+service tree exists — so the RED/GREEN pair lives in the bash test above.
+
 ## Validation
 
 - `bash modules/hermes/tests/test-webui-container.sh`
@@ -89,6 +114,13 @@ stanza, and the deploy poll are all absent); at HEAD it exits 0.
   (no Docker daemon on the authoring host).
 - Existing Hermes script tests stay green: `bash modules/hermes/tests/test-deploy.sh`,
   `test-docker-compose-env.sh`, `test-50-seed-defaults.sh`.
+- Pre-merge image evidence (CI owns it): the `hermes-webui-image` job builds the image at
+  the pinned commit, boots a disposable container, and requires
+  `docker exec <container> /package/admin/s6/command/s6-svstat -o up /run/service/hermes-webui`
+  plus `docker exec <container> curl -fsS http://127.0.0.1:8787/health` to succeed. The
+  container is started from the image's own entrypoint with no provider credentials, so
+  only the WebUI service and its health route are asserted; a crash-looping gateway service
+  is not part of the gate.
 - Post-deploy evidence (CI owns it): `deploy.sh` fails if `curl 127.0.0.1:8787/health` does
   not answer inside the container, and `docker exec hermes curl -fsS
   http://127.0.0.1:8787/health` is the manual equivalent recorded in `docs/operations.md`.
@@ -109,8 +141,13 @@ stanza, and the deploy poll are all absent); at HEAD it exits 0.
   two-container layout's own assumption, and the reason the change is a single container is
   that it removes the second agent-source writer; the residual risk is concurrent file
   writes to unrelated subdirectories of `/opt/data`.
-- **Rebuild drift.** `HERMES_WEBUI_REF` is a pinned tag, so the WebUI only changes when the
-  pin does.
+- **Rebuild drift.** `HERMES_WEBUI_REF` is an immutable commit, so the WebUI only changes
+  when the pin does, and a tag moved upstream cannot change an unchanged Dockerfile.
+- **CI cost and a credential-less boot.** The `hermes-webui-image` job pulls the
+  `nousresearch/hermes-agent` base image and builds, so it is gated on changes under
+  `modules/hermes/`; the boot smoke test runs with no provider credentials and asserts the
+  WebUI service and its `/health` route only, so a gateway service that cannot authenticate
+  does not fail the gate.
 - **Path-prefix move for the router.** Any client that hardcodes
   `https://darren.taila8e105.ts.net/v1` must move to `/router/v1`. No repository file
   references that hostname (checked), so the exposure is only external clients the operator
