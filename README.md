@@ -177,15 +177,7 @@ To deploy a single component:
 
 ### Health endpoints
 
-| Service | Check |
-|---|---|
-| expense-tracker | `curl http://localhost:8080/health` |
-| portfolio-tracker | `curl http://localhost:8081/health` |
-| actual-api | `curl http://localhost:3000/health` |
-| codex-router | `curl http://localhost:4100/health/liveliness` (caddy front; each colour has its own copy) |
-| hermes | `docker exec hermes /package/admin/s6/command/s6-svstat -o up /run/service/gateway-default` |
-
-`deploy.sh` performs these checks itself after `compose up` and exits non-zero if any fails. The Hermes dashboard is disabled (`HERMES_DASHBOARD=0`), so it has no health port of its own. After a successful deploy the script also runs `hermes mcp test expense-tracker` and `hermes mcp test portfolio-tracker` to confirm the MCP connections.
+See the health-endpoint table in [docs/operations.md](docs/operations.md#health-endpoints); that file is the single copy.
 
 ### Deploys happen through CI, not by hand
 
@@ -226,12 +218,4 @@ Other workflows:
 
 ## Ports
 
-| Service | Host binding | Container port | Purpose |
-|---|---|---|---|
-| expense-tracker | `127.0.0.1:8080` | 8080 | REST `/tools/*`, MCP `/mcp`, `/health` |
-| portfolio-tracker | `127.0.0.1:8081` | 8081 | REST `/tools/*` (plus `GET /tools`), MCP `/mcp`, `/health` |
-| actual-api | `127.0.0.1:3000` | 3000 | Actual Budget proxy, `/health` |
-| codex-router | `0.0.0.0:4100` | 4100 | caddy front for the two router colours: OpenAI-compatible `/v1`, `/health/liveliness` |
-| hermes | `8642`, `9119`, `8644` | same | Hermes gateway ports; the webhook platform listens on 8644 |
-
-All services except `codex-router` publish to `127.0.0.1` only. `codex-router` binds `0.0.0.0:4100` so the `hermes_shared` network and external clients can reach it. The front sits in front of two interchangeable router colours (`codex-router-a`, `codex-router-b`), which publish no ports of their own; a deploy rolls one colour at a time, so `4100` never goes dark.
+See the ports table in [docs/operations.md](docs/operations.md#ports); that file is the single copy.

@@ -1159,6 +1159,24 @@ if should_deploy "hermes" || should_deploy "all"; then
     echo -e "  ${RED}✗ hermes gateway (s6 service not up)${NC}"
     failed=$((failed + 1))
   fi
+
+  # Hermes WebUI: the s6 service starts with the container and listens inside it,
+  # so poll its health endpoint with the same bounded budget the gateway check
+  # uses. A WebUI that never answers must fail the deploy, not hang the runner.
+  webui_up=false
+  for _ in $(seq 1 10); do
+    if docker exec hermes curl -fsS --max-time 10 http://127.0.0.1:8787/health >/dev/null 2>&1; then
+      webui_up=true
+      break
+    fi
+    sleep 6
+  done
+  if $webui_up; then
+    echo -e "  ${GREEN}✓ hermes webui${NC}"
+  else
+    echo -e "  ${RED}✗ hermes webui (health endpoint not answering)${NC}"
+    failed=$((failed + 1))
+  fi
 fi
 
 if should_deploy "actual-api" || should_deploy "all"; then

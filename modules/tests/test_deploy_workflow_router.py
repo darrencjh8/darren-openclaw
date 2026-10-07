@@ -445,5 +445,62 @@ class DeployWorkflowRouterTests(unittest.TestCase):
         )
 
 
+    def test_manual_deploy_smokes_the_ref_it_will_deploy(self):
+        """The deploy job checks out inputs.ref, so the reusable test workflow has
+        to smoke that same tree; otherwise a manual deploy of another branch or
+        commit builds the image with the smoke gate skipped or aimed elsewhere."""
+        workflow = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
+        test_workflow = yaml.safe_load(TEST_WORKFLOW.read_text(encoding="utf-8"))
+
+        call = workflow["jobs"]["test"]
+        self.assertEqual(
+            call.get("with", {}).get("ref"),
+            "${{ github.event.inputs.ref || github.sha }}",
+        )
+
+        inputs = test_workflow[True]["workflow_call"]["inputs"]
+        self.assertIn("ref", inputs)
+
+        steps = test_workflow["jobs"]["hermes-webui-image"]["steps"]
+        self.assertEqual(steps[0]["with"]["ref"], "${{ inputs.ref }}")
+        resolver = next(
+            step for step in steps if step.get("name") == "Resolve changed image inputs"
+        )["run"]
+        self.assertIn("git merge-base origin/main", resolver)
+
+    def test_image_job_waits_for_the_webui_port_before_failing(self):
+        """s6 reports the service up as soon as its run script starts, which is
+        before the WebUI binds 8787, so a single probe fails on a healthy image.
+        Both probes must retry on a bounded budget."""
+        workflow = yaml.safe_load(TEST_WORKFLOW.read_text(encoding="utf-8"))
+        steps = workflow["jobs"]["hermes-webui-image"]["steps"]
+        boot = next(
+            step for step in steps if step.get("name") == "Boot the image and probe the WebUI"
+        )["run"]
+
+        self.assertRegex(boot, r"wait_for_health\(\) \{")
+        self.assertIn("for _ in $(seq 1 30)", boot)
+        self.assertIn(
+            "wait_for_health in-container docker exec hermes-webui-test curl", boot
+        )
+        self.assertIn("wait_for_health published-port curl", boot)
+
+    def test_image_job_smokes_the_chat_path_through_the_service(self):
+        """The agent venv resolves the real agent whatever the launcher's agent
+        dir says, so the chat smoke replaces the resolved module inside the
+        throwaway container and restarts the supervised service, then talks to
+        the port the deploy publishes instead of a second WebUI."""
+        workflow = yaml.safe_load(TEST_WORKFLOW.read_text(encoding="utf-8"))
+        steps = workflow["jobs"]["hermes-webui-image"]["steps"]
+        boot = next(
+            step for step in steps if step.get("name") == "Boot the image and probe the WebUI"
+        )["run"]
+
+        self.assertIn("import run_agent; print(run_agent.__file__)", boot)
+        self.assertIn("/command/s6-svc -r /run/service/hermes-webui", boot)
+        self.assertIn("http://127.0.0.1:8787/api/chat", boot)
+        self.assertNotIn("8788", boot)
+
+
 if __name__ == "__main__":
     unittest.main()

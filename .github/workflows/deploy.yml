@@ -41,6 +41,11 @@ jobs:
     test:
         if: github.event_name != 'push'
         uses: ./.github/workflows/test.yml
+        with:
+            # The deploy job checks this same ref out below, so the reusable
+            # workflow's image smoke has to test that tree and not the ref that
+            # happened to dispatch the run.
+            ref: ${{ github.event.inputs.ref || github.sha }}
         secrets:
             ONEDRIVE_CLIENT_ID: ${{ secrets.ONEDRIVE_CLIENT_ID }}
             SUBMODULE_PAT: ${{ secrets.SUBMODULE_PAT }}
