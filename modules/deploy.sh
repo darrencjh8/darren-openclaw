@@ -731,6 +731,7 @@ echo "--- Codex Router ---"
   check_var_optional "OPENCODE_GO_API_KEY" ""
   check_var_optional "OPENCODE_ZEN_API_KEY" ""
   check_var_optional "OPENCODE_API_KEY" ""
+  check_var_optional "CLINE_API_KEY" ""
   check_var_optional "CODEX_ROUTER_OPENCODE_ZEN_MODELS" ""
 fi
 

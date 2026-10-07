@@ -140,6 +140,7 @@ jobs:
                   OPENCODE_GO_API_KEY: ${{ secrets.OPENCODE_GO_API_KEY }}
                   OPENCODE_ZEN_API_KEY: ${{ secrets.OPENCODE_ZEN_API_KEY }}
                   OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
+                  CLINE_API_KEY: ${{ secrets.CLINE_API_KEY }}
                   CODEX_ROUTER_OPENCODE_ZEN_MODELS: ${{ vars.CODEX_ROUTER_OPENCODE_ZEN_MODELS || 'space-bunny-free' }}
                   # Per-hop budget for the auto-thinking pool. The router's own
                   # default is 120, which is short for a reasoning model, and it is
