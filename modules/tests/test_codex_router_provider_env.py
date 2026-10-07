@@ -1,5 +1,3 @@
-# Copyright © 2022 Dell Inc. or its subsidiaries. All Rights Reserved.
-
 """The codex-router service must receive the external provider credentials.
 
 Discovery skips a provider whose key is absent, so a key that never reaches the
@@ -71,6 +69,16 @@ class CodexRouterProviderEnvTests(unittest.TestCase):
         # not exist, so the driver's file fallback never finds the key either: the
         # environment variable is the only source that reaches it.
         self.assertIn("COMMANDCODE_API_KEY=${COMMANDCODE_API_KEY}", environment)
+
+    def test_hermes_service_forwards_the_jev_key(self):
+        # The adjudicator's primary route is TypeSafe's official jev endpoint, keyed
+        # by JEV_API_KEY, and it is called from inside this container. The key is
+        # optional: without it the adjudicator falls back to auto-thinking.
+        config = yaml.safe_load(COMPOSE_FILE.read_text(encoding="utf-8"))
+        environment = config["services"]["hermes"]["environment"]
+        self.assertIn("JEV_API_KEY=${JEV_API_KEY:-}", environment)
+        self.assertIn("JEV_API_KEY: ${{ secrets.JEV_API_KEY }}", WORKFLOW.read_text(encoding="utf-8"))
+        self.assertIn('check_var_optional "JEV_API_KEY"', DEPLOY_SCRIPT.read_text(encoding="utf-8"))
 
     def test_deploy_script_treats_opencode_provider_keys_as_optional(self):
         script = DEPLOY_SCRIPT.read_text(encoding="utf-8")

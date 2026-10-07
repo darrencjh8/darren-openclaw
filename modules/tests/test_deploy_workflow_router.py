@@ -1,5 +1,3 @@
-# Copyright © 2022 Dell Inc. or its subsidiaries. All Rights Reserved.
-
 from pathlib import Path
 import subprocess
 import unittest
@@ -424,6 +422,27 @@ class DeployWorkflowRouterTests(unittest.TestCase):
         self.assertIn("hermes", step["if"])
         names = [s.get("name") for s in steps]
         self.assertLess(names.index("Deploy services"), names.index("Ensure Hermes container tooling"))
+
+    def test_hermes_build_installs_codex_router_dependencies(self):
+        dockerfile = HERMES_DOCKERFILE.read_text(encoding="utf-8")
+        requirements = HERMES_DOCKERFILE.parent / "requirements-codex-router.txt"
+        self.assertTrue(requirements.is_file())
+        self.assertIn("COPY requirements-codex-router.txt /tmp/requirements-codex-router.txt", dockerfile)
+        # The Hermes venv is sealed and has no pip, and these pins would downgrade
+        # its core packages (mcp, uvicorn, rich), so they get their own venv.
+        self.assertNotIn("/opt/hermes/.venv/bin/pip", dockerfile)
+        self.assertIn("uv venv /opt/codex-router-venv", dockerfile)
+        self.assertIn(
+            "uv pip install --no-cache --python /opt/codex-router-venv/bin/python \\\n"
+            "        --requirement /tmp/requirements-codex-router.txt",
+            dockerfile,
+        )
+        self.assertIn("/usr/local/bin/codex-router-python", dockerfile)
+        self.assertNotIn("docker exec hermes", dockerfile)
+        self.assertLess(
+            dockerfile.index("requirements-codex-router.txt"),
+            dockerfile.index("COPY config.yaml"),
+        )
 
 
     def test_manual_deploy_smokes_the_ref_it_will_deploy(self):

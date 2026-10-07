@@ -1,6 +1,4 @@
 #!/bin/bash
-# Copyright © 2022 Dell Inc. or its subsidiaries. All Rights Reserved.
-
 # Contract tests for the Hermes skill roots.
 #
 # codex-router owns the skills it publishes (dev-loop, code-reviewer, ...). The

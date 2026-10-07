@@ -349,10 +349,6 @@ echo "$cmd" | grep -q "force-recreate" && ok "all + FORCE_ALL=true -> --force-re
 echo "$cmd" | grep -q "hermes" && ok "compose command includes hermes" || nope "compose command includes hermes" "not in: $cmd"
 echo "$cmd" | grep -q "up -d" && ok "compose command uses up -d" || nope "compose command uses up -d" "not in: $cmd"
 
-# Test 3: all + FORCE_ALL=false -> NO --force-recreate
-cmd_no="docker-compose --project-name modules up -d $TARGETS"
-echo "$cmd_no" | grep -qv "force-recreate" && ok "all + FORCE_ALL=false -> NO --force-recreate" || nope "all + FORCE_ALL=false -> NO --force-recreate" "unexpected flag"
-
 # Test 4: single component + FORCE_ALL=true -> still uses --force-recreate
 TARGETS="hermes"
 cmd_single="docker-compose --project-name modules up -d --force-recreate $TARGETS"
@@ -370,6 +366,51 @@ if [ -n "$config_line" ] && [ -n "$stop_line" ] && [ "$config_line" -lt "$stop_l
     ok "compose config validated before containers stop"
 else
     nope "compose config validated before containers stop" "config_line=$config_line stop_line=$stop_line"
+fi
+
+echo ""
+echo "=== deploy.sh: containers stopped by the script are recreated ==="
+
+# A full deploy stops hermes, the trackers and actual-api itself, then runs
+# `compose up`. Without --force-recreate, compose can report a container it has
+# just seen killed (exit 137) as `Running`, never start it, and fail hermes on
+# `dependency failed to start` (run 37558770396). The block is lifted from
+# deploy.sh and run against stubbed docker/compose so the shipped logic is
+# what gets exercised.
+deploy_block=$(sed -n '/^# Deploy$/,/^# ---- health checks ----$/p' "$DEPLOY_SCRIPT")
+probe_deploy_up() {
+    local force_all="$1"; shift
+    DEPLOY_BLOCK="$deploy_block" FORCE_ALL="$force_all" bash -c '
+        set -euo pipefail
+        COMPONENTS=("$@")
+        UP_TARGETS="expense-tracker actual-api portfolio-tracker hermes"
+        COMPOSE="compose_stub"
+        docker() { :; }
+        compose_stub() { printf "%s\n" "$*"; }
+        eval "$DEPLOY_BLOCK"
+    ' probe "$@" | grep '^up '
+}
+if [ -z "$deploy_block" ]; then
+    nope "deploy block is extractable for a behavioural check" "no '# Deploy' block found in $DEPLOY_SCRIPT"
+else
+    up_all=$(probe_deploy_up false all) || up_all="probe failed"
+    up_single=$(probe_deploy_up false hermes) || up_single="probe failed"
+    up_single_forced=$(probe_deploy_up true hermes) || up_single_forced="probe failed"
+    if grep -q -- '--force-recreate' <<<"$up_all"; then
+        ok "full deploy recreates the containers it stopped"
+    else
+        nope "full deploy recreates the containers it stopped" "got: $up_all"
+    fi
+    if [ -n "$up_single" ] && ! grep -q -- '--force-recreate' <<<"$up_single"; then
+        ok "component deploy without FORCE_ALL does not force-recreate"
+    else
+        nope "component deploy without FORCE_ALL does not force-recreate" "got: $up_single"
+    fi
+    if grep -q -- '--force-recreate' <<<"$up_single_forced"; then
+        ok "component deploy with FORCE_ALL force-recreates"
+    else
+        nope "component deploy with FORCE_ALL force-recreates" "got: $up_single_forced"
+    fi
 fi
 
 echo ""

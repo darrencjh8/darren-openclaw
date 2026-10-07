@@ -27,6 +27,9 @@ x-codex-router-color: &codex-router-color
         - OPENCODE_GO_API_KEY=${OPENCODE_GO_API_KEY:-}
         - OPENCODE_ZEN_API_KEY=${OPENCODE_ZEN_API_KEY:-}
         - OPENCODE_API_KEY=${OPENCODE_API_KEY:-}
+        # ClinePass lane: discovery skips it while the key is absent, so an
+        # unset value simply leaves clinepass/* unpublished.
+        - CLINE_API_KEY=${CLINE_API_KEY:-}
         - CODEX_ROUTER_OPENCODE_ZEN_MODELS=${CODEX_ROUTER_OPENCODE_ZEN_MODELS:-space-bunny-free}
         # Per-hop budget for the auto-thinking pool. The router's own default
         # is 120, which is short for a reasoning model and sits below the
@@ -90,6 +93,9 @@ services:
             # No IPv6 route in the container; see issue #553.
             - NODE_OPTIONS=--no-network-family-autoselection
         restart: unless-stopped
+        # node is PID 1 with no SIGTERM handler; tini forwards the stop signal so
+        # `docker stop` exits cleanly instead of SIGKILLing after the timeout.
+        init: true
         healthcheck:
             test:
                 [
@@ -116,6 +122,7 @@ services:
             # No IPv6 route in the container; see issue #553.
             - NODE_OPTIONS=--no-network-family-autoselection
         restart: unless-stopped
+        init: true
         logging: *default-logging
 
     portfolio-tracker:
@@ -150,6 +157,7 @@ services:
             - NODE_OPTIONS=--no-network-family-autoselection
         mem_limit: 512m
         restart: unless-stopped
+        init: true
         healthcheck:
             test:
                 [
@@ -167,7 +175,11 @@ services:
     # detail of the roll. `lb_policy first` plus the fixed upstream order below
     # means a healthy codex-router-a wins whenever it is available.
     codex-router:
-        image: caddy:2-alpine
+        # Pinned, not floating: deploy.sh only runs `compose up -d`, so a
+        # floating tag would keep using whatever caddy image is already local.
+        # 2.11.6 cut every HTTP/1.1 POST with a body off exactly 60s after the
+        # body was read (caddy #8103, fixed in #8107, released in 2.11.7).
+        image: caddy:2.11.7-alpine
         ports:
             - "0.0.0.0:4100:4100"
         # The directory, not the Caddyfile itself: a checkout that replaces the
@@ -181,7 +193,7 @@ services:
         labels:
             - modules.role=codex-router-front
         restart: unless-stopped
-        # caddy:2-alpine ships no curl, so the healthcheck uses wget.
+        # The caddy alpine image ships no curl, so the healthcheck uses wget.
         healthcheck:
             test:
                 [
@@ -234,6 +246,9 @@ services:
             # Hermes and not only codex-router. HOME here is /root and there is no
             # ~/.env, so the driver's file fallback cannot supply it either.
             - COMMANDCODE_API_KEY=${COMMANDCODE_API_KEY}
+            # The adjudicator's primary route is TypeSafe's official jev endpoint,
+            # keyed by this. Optional: without it the adjudicator uses auto-thinking.
+            - JEV_API_KEY=${JEV_API_KEY:-}
             - GEMINI_API_KEY=${GEMINI_API_KEY}
             - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
             - TELEGRAM_ALLOWED_USERS=${TELEGRAM_ALLOWED_USERS}

@@ -1,5 +1,4 @@
 #!/bin/sh
-# Copyright © 2022 Dell Inc. or its subsidiaries. All Rights Reserved.
 #
 # Advance the Hermes container's own codex-router checkout.
 #

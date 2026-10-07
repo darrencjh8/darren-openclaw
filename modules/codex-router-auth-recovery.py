@@ -1,5 +1,3 @@
-# Copyright © 2022 Dell Inc. or its subsidiaries. All Rights Reserved.
-
 """Run one Router-owned ChatGPT device login from inside its container."""
 
 import asyncio
