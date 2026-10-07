@@ -7,7 +7,8 @@ q: Does the s6-overlay v3 runtime database accept a new service added at image b
 q: Which WebUI revision, and how is drift prevented? | a: Commit `c67fd2dd270a1128c2754200406bca58e9d9a25a` (the commit behind tag `v0.52.113`, read from the upstream annotated tag object on 2026-10-07). `ARG HERMES_WEBUI_REF` defaults to that 40-hex commit, and the build fetches exactly that commit rather than checking out a tag, so a moved or re-pointed tag cannot change what a rebuild produces; a missing commit fails the build instead of silently building another revision. The tag survives only as a comment, and the new test asserts the ref is a 40-hex commit, so a WebUI upgrade is one visible line in review.
 q: Is TDD applicable to this change? | a: Yes, and no docs-only exception is claimed. The change is executable behaviour in the Dockerfile, the compose port stanza, and the s6 run script, and the new test `modules/hermes/tests/test-webui-container.sh` pins each of them: it fails at base because the files it reads do not exist, and passes at HEAD.
 q: Which address does the WebUI bind inside the container, given compose publishes only `127.0.0.1:8787`? | a: `0.0.0.0`. Docker's published port forwards to the container's interface address, not its loopback, so a `127.0.0.1` listener inside the container is unreachable from the host and the Tailscale route would have no backend while every in-container check passed. The host side stays loopback-only, so the wildcard bind adds no exposure. The run script sets `HERMES_WEBUI_HOST=0.0.0.0` explicitly and the test pins that exact value.
-q: How does the new CI image job get a diff base, when `deploy.yml` reaches `test.yml` through `workflow_call` and no pull-request base exists there? | a: The job checks out with `fetch-depth: 0` and resolves its base per event: `github.event.pull_request.base.sha` for a pull request, and `github.sha` for `workflow_call` (the commit the caller already checked out, `main` or the dispatch `ref` input). If neither resolves to a commit present in the checkout the job fails closed, so a broken gate can never silently skip the image evidence.
+q: How does the new CI image job get a diff base, when `deploy.yml` reaches `test.yml` through `workflow_call` and no pull-request base exists there? | a: One resolver step, written once in the job, branches on the event: `pull_request` uses `github.event.pull_request.base.sha`; `workflow_call` uses `github.event.workflow_run.head_sha` when the caller supplies one and `github.sha` otherwise (the commit the reusable workflow was called on, `main` or the dispatch `ref` input); `push` uses `github.event.before`. The checkout uses `fetch-depth: 0`, and the step verifies the chosen SHA with `git cat-file -e "$base^{commit}"` and exits non-zero when that fails, before any path filtering, so an unresolvable base fails the job closed instead of skipping the image evidence.
+q: How does the CI smoke test reach the chat path with no provider credentials? | a: With a stub agent. The job writes a minimal `run_agent.py` exporting `AIAgent` into `/tmp/fake-agent`, starts a second WebUI process in the same container on port 8788 with `HERMES_WEBUI_AGENT_DIR=/tmp/fake-agent`, `HERMES_WEBUI_PYTHON` pointed at the image's python, and `HERMES_WEBUI_FOREGROUND=1`, then `POST`s one `/api/chat` through the published port and requires the stub's fixed answer in the response. `api/agent_runtime.py:require_ai_agent_class` imports `AIAgent` from `run_agent` on the agent-dir `sys.path`, and its revision guard binds only when the module's directory is a Git checkout (`_read_agent_revision` returns `None` for a plain directory), so a stub directory is imported without tripping the guard. The job also imports the real class the way the service does — `docker exec <container> /opt/hermes/.venv/bin/python3 -c "import sys; sys.path.append('/opt/hermes'); from run_agent import AIAgent"` — so the declared `HERMES_WEBUI_AGENT_DIR`/`HERMES_WEBUI_PYTHON` pair is proven to resolve the real agent. The stub proves the launcher → chat route → agent-import wiring, not Hermes inference: CI has no provider credentials, and the real agent is proven by the operator's first chat after the image deploys.
 
 # Serve Hermes WebUI from inside the hermes container
 
@@ -32,10 +33,13 @@ state directory are already the ones the gateway uses.
 
 1. **Bake the WebUI into the existing hermes image** (`modules/hermes/Dockerfile`): fetch
    `HERMES_WEBUI_REF` (default `c67fd2dd270a1128c2754200406bca58e9d9a25a`, the commit behind
-   tag `v0.52.113`, named in a comment) into `/opt/hermes-webui` with
-   `git init` + `git fetch --depth 1 origin "$HERMES_WEBUI_REF"` + `checkout --detach
-   FETCH_HEAD`, so the build pins a commit and not a mutable tag, and copy the service tree
-   in. `git` is already in the base image (verified read-only: `/usr/bin/git`, 2.47.3).
+   tag `v0.52.113`, named in a comment) into `/opt/hermes-webui` with `git init` +
+   `git remote add origin https://github.com/nesquena/hermes-webui.git` +
+   `git fetch --depth 1 origin "$HERMES_WEBUI_REF"` + `git checkout --detach FETCH_HEAD`, so
+   the remote is named before the fetch, the build pins a commit rather than a mutable tag,
+   and a missing commit fails the build instead of silently building another revision. `git`
+   is already in the base image (verified read-only: `/usr/bin/git`, 2.47.3). Then copy the
+   service tree in.
 2. **Supervise it with s6**, not with a hand-rolled background process: add
    `/etc/s6-overlay/s6-rc.d/hermes-webui/{type,run}` and enable it by touching
    `/etc/s6-overlay/s6-rc.d/user/contents.d/hermes-webui`, so the WebUI restarts with the
@@ -55,18 +59,7 @@ state directory are already the ones the gateway uses.
    `HERMES_WEBUI_PORT=8787`, `HERMES_WEBUI_STATE_DIR=/opt/data/webui`,
    `HERMES_WEBUI_DEFAULT_WORKSPACE=/workspace`, `HERMES_WEBUI_SERVER_CWD=/workspace`, and
    `HERMES_WEBUI_FOREGROUND=1` (without it `bootstrap.py` double-forks, because s6 sets
-   none of the supervisor variables it auto-detects). The Dockerfile fetch is
-   `git init` + `git remote add origin https://github.com/nesquena/hermes-webui.git` +
-   `git fetch --depth 1 origin "$HERMES_WEBUI_REF"` + `git checkout --detach FETCH_HEAD`,
-   so the remote is named before the fetch and the build cannot fail on a missing `origin`. The Dockerfile fetch is
-   `git init` + `git remote add origin https://github.com/nesquena/hermes-webui.git` +
-   `git fetch --depth 1 origin "$HERMES_WEBUI_REF"` + `git checkout --detach FETCH_HEAD`,
-   so the remote is named before the fetch and the build cannot fail on a missing
-   `origin`. The Dockerfile fetch is
-   `git init` + `git remote add origin https://github.com/nesquena/hermes-webui.git` +
-   `git fetch --depth 1 origin "$HERMES_WEBUI_REF"` + `git checkout --detach FETCH_HEAD`,
-   so the remote is named before the fetch and the build cannot fail on a missing
-   `origin`.
+   none of the supervisor variables it auto-detects).
 4. **Gate the deploy on the WebUI answering**: extend the existing hermes block in
    `modules/deploy.sh` with a bounded `/health` poll over `docker exec`, the same shape as
    the gateway `s6-svstat` poll it already runs.
@@ -77,12 +70,20 @@ state directory are already the ones the gateway uses.
    builds the Hermes image and every proposed check above is text-only: a new
    `hermes-webui-image` job in `.github/workflows/test.yml` builds `modules/hermes`, starts
    a disposable container from it with a temporary `HERMES_HOME`, asserts the supervised
-   service is up (`s6-svstat -o up /run/service/hermes-webui`) and that
-   `curl -fsS http://127.0.0.1:8787/health` answers from inside the container, and prints
-   `docker logs` on failure. The job runs only when the image's inputs change
-   (`git diff --name-only "${{ github.event.pull_request.base.sha }}" HEAD` limited to
-   `modules/hermes/` and `.github/workflows/test.yml`), so an unrelated PR does not pay for
-   a base-image pull. The post-deploy health gate stays as defence in depth.
+   service is up (`s6-svstat -o up /run/service/hermes-webui`), that
+   `curl -fsS http://127.0.0.1:8787/health` answers from inside the container, and that the
+   same route answers from the runner through the published port; then starts the stub-agent
+   WebUI described in the QUESTIONS block and asserts one `/api/chat` round trip. It prints
+   `docker logs` on failure.
+   The job runs only when the image's inputs change. Its first step resolves the diff base
+   from the event (`pull_request` → `github.event.pull_request.base.sha`; `workflow_call` →
+   `github.event.workflow_run.head_sha` or `github.sha`; `push` → `github.event.before`),
+   the checkout uses `fetch-depth: 0`, and the step fails closed with a non-zero exit when
+   `git cat-file -e "$base^{commit}"` cannot resolve that base — a gate that cannot name
+   its base must not report success. The changed-path set is `modules/hermes/`,
+   `modules/docker-compose.yml`, and `.github/workflows/test.yml`, so a later edit to the
+   port stanza alone still pays for the smoke test that guards it, and an unrelated PR does
+   not pay for a base-image pull. The post-deploy health gate stays as defence in depth.
 7. **Delete the duplicate operations tables from `README.md`** and point at
    `docs/operations.md` instead: the README repeats the health-endpoint and ports tables and
    both would be stale the moment 8787 exists, so the fix is one pointer rather than a
@@ -98,7 +99,7 @@ state directory are already the ones the gateway uses.
 | `modules/docker-compose.yml` | `- "127.0.0.1:8787:8787"` on the `hermes` service |
 | `modules/deploy.sh` | bounded WebUI `/health` poll in the existing `should_deploy "hermes"` block |
 | `modules/hermes/tests/test-webui-container.sh` | new test (below) |
-| `.github/workflows/test.yml` | run the new test in the `hermes-scripts` job; add the change-gated `hermes-webui-image` build + boot smoke job |
+| `.github/workflows/test.yml` | run the new test in the `hermes-scripts` job; add the input-gated `hermes-webui-image` build + boot + chat smoke job |
 | `docs/operations.md` | health-endpoint row, ports row, tailscale serve commands |
 | `README.md` | replace the duplicated health-endpoint and ports tables with a pointer to `docs/operations.md` |
 
@@ -108,8 +109,8 @@ New test id: `modules/hermes/tests/test-webui-container.sh` (bash, run by the
 `hermes-scripts` job). It asserts, with no network and no container:
 
 1. the Dockerfile declares `ARG HERMES_WEBUI_REF` with a default matching `^[0-9a-f]{40}$`,
-   fetches exactly that value (so a tag cannot substitute for it), and copies the checkout
-   into `/opt/hermes-webui`;
+   fetches exactly that value (so a tag cannot substitute for it), names the upstream
+   remote URL before fetching, and copies the checkout into `/opt/hermes-webui`;
 2. the Dockerfile installs the service tree under `/etc/s6-overlay/s6-rc.d/hermes-webui`
    and enables it in `user/contents.d`;
 3. `type` is `longrun` and `run` is executable-with-shebang, uses `with-contenv`, drops to
@@ -152,7 +153,12 @@ service tree exists — so the RED/GREEN pair lives in the bash test above.
   is not part of the gate. The job also proves the bind: it publishes the container port on
   the runner's loopback (`docker run -p 127.0.0.1:8787:8787`) and curls
   `http://127.0.0.1:8787/health` from the runner, so a run script that binds the container's
-  own loopback fails the job while the in-container probe still passes.
+  own loopback fails the job while the in-container probe still passes. It then proves the
+  chat path: `docker exec` imports `run_agent.AIAgent` through the declared
+  `/opt/hermes/.venv/bin/python3` and `HERMES_WEBUI_AGENT_DIR`, and a stub-agent WebUI on
+  port 8788 answers one `/api/chat` POST with the stub's fixed text through the published
+  port. The stub is the documented limit of this check: it proves wiring, not Hermes
+  inference, because CI holds no provider credentials.
 - Post-deploy evidence (CI owns it): `deploy.sh` fails if `curl 127.0.0.1:8787/health` does
   not answer inside the container, and `docker exec hermes curl -fsS
   http://127.0.0.1:8787/health` is the manual equivalent recorded in `docs/operations.md`.
@@ -176,10 +182,13 @@ service tree exists — so the RED/GREEN pair lives in the bash test above.
 - **Rebuild drift.** `HERMES_WEBUI_REF` is an immutable commit, so the WebUI only changes
   when the pin does, and a tag moved upstream cannot change an unchanged Dockerfile.
 - **CI cost and a credential-less boot.** The `hermes-webui-image` job pulls the
-  `nousresearch/hermes-agent` base image and builds, so it is gated on changes under
-  `modules/hermes/`; the boot smoke test runs with no provider credentials and asserts the
-  WebUI service and its `/health` route only, so a gateway service that cannot authenticate
-  does not fail the gate.
+  `nousresearch/hermes-agent` base image and builds, so it runs only when its inputs change
+  (`modules/hermes/`, `modules/docker-compose.yml`, or the workflow itself) and fails closed
+  when it cannot resolve the diff base. The boot smoke test runs with no provider
+  credentials: it asserts the WebUI service, its `/health` route from inside the container
+  and through the published port, and one chat round trip against a stub agent, so a gateway
+  or agent that cannot authenticate does not fail the gate. The real agent is proven after
+  deployment by the operator's first chat, which is the only check that can use credentials.
 - **Path-prefix move for the router.** Any client that hardcodes
   `https://darren.taila8e105.ts.net/v1` must move to `/router/v1`. No repository file
   references that hostname (checked), so the exposure is only external clients the operator
@@ -191,9 +200,3 @@ service tree exists — so the RED/GREEN pair lives in the bash test above.
   plan pins `HERMES_WEBUI_HOST=0.0.0.0` in the run script, the test asserts that value, and the
   CI smoke job curls the published host port from the runner, which is the only check that
   exercises the bind the operator actually uses.
-- **A loopback-only listener would pass every check and still be unreachable.** The
-  container must bind `0.0.0.0` because the host publishes `127.0.0.1:8787` and Docker
-  forwards to the container interface, not to its loopback. The run script pins
-  `HERMES_WEBUI_HOST=0.0.0.0`, the test asserts that value, and the CI smoke job curls the
-  published host port from the runner, so a loopback bind fails the gate instead of the
-  tailnet.
