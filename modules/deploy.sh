@@ -977,6 +977,7 @@ if ! $SKIP_BUILD; then
 fi
 
 # Deploy
+FORCE_RECREATE="${FORCE_ALL:-false}"
 if [[ " ${COMPONENTS[*]} " =~ " all " ]]; then
   # `|| true` rather than `; true`: under `set -e` a command followed by `; true`
   # still ends the script before the guard runs. Both stops are best-effort —
@@ -984,6 +985,11 @@ if [[ " ${COMPONENTS[*]} " =~ " all " ]]; then
   # on some hosts, which aborted three deploys before `compose up` ran.
   docker ps -q --filter name=gateway | xargs -r docker stop 2>/dev/null || true
   docker stop hermes modules-portfolio-tracker-1 modules-expense-tracker-1 modules-actual-api-1 kokoro-tts 2>/dev/null || true
+  # The containers stopped above must be recreated, not merely started: compose
+  # can still report a container it has just seen stopped as `Running`, skip
+  # starting it, and fail hermes with `dependency failed to start ... exited
+  # (137)`. Recreating does not depend on that state.
+  FORCE_RECREATE=true
 fi
 
 # --remove-orphans retires the container of a service this revision deleted.
@@ -995,7 +1001,7 @@ fi
 # argument reconciles the whole project, which is not what a router deploy is
 # asking for.
 if [ -n "$UP_TARGETS" ]; then
-    if [ "${FORCE_ALL:-false}" = "true" ]; then
+    if [ "$FORCE_RECREATE" = "true" ]; then
         $COMPOSE up -d --remove-orphans --force-recreate $UP_TARGETS
     else
         $COMPOSE up -d --remove-orphans $UP_TARGETS

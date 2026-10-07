@@ -121,6 +121,20 @@ test_memory_scripts_do_not_read_pat() {
     fi
 }
 
+# The node services run node as PID 1 with no signal handler, so SIGTERM is
+# ignored and every `docker stop` waits out the timeout and SIGKILLs them
+# (exit 137). An init process forwards SIGTERM so they stop cleanly.
+test_node_services_have_init() {
+    local svc
+    for svc in expense-tracker actual-api portfolio-tracker; do
+        if python3 -c 'import sys,yaml; s=yaml.safe_load(open(sys.argv[1]))["services"][sys.argv[2]]; sys.exit(0 if s.get("init") is True else 1)' "$COMPOSE_FILE" "$svc"; then
+            ok "$svc runs under an init process"
+        else
+            nope "$svc runs under an init process" "init: true not set"
+        fi
+    done
+}
+
 test_has_safe_root
 test_has_opt_data
 test_has_workspace
@@ -130,6 +144,7 @@ test_app_auth_not_shadowed
 test_pat_secret_not_in_compose_environment
 test_pat_secret_mounted_read_only
 test_memory_scripts_do_not_read_pat
+test_node_services_have_init
 
 echo ""
 echo "========================================="
