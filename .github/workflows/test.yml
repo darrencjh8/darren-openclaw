@@ -149,7 +149,7 @@ jobs:
             - name: Lint bash scripts
               run: |
                   sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck
-                  shellcheck modules/hermes/scripts/*.sh modules/hermes/50-seed-defaults
+                  shellcheck modules/hermes/scripts/*.sh modules/hermes/50-seed-defaults modules/hermes/webui/s6-rc.d/hermes-webui/run
             - name: Test github-auth.sh
               run: bash modules/hermes/tests/test-github-auth.sh
             - name: Test 50-seed-defaults cron jobs
@@ -173,6 +173,8 @@ jobs:
               run: bash modules/hermes/tests/test-refresh-codex-router-checkout.sh
             - name: Test docker-compose hermes env vars
               run: bash modules/hermes/tests/test-docker-compose-env.sh
+            - name: Test Hermes WebUI container wiring
+              run: bash modules/hermes/tests/test-webui-container.sh
             - name: Test portfolio-sync output
               run: bash modules/hermes/tests/test-portfolio-sync-output.sh
             - name: Test Hermes Slack platform wiring
@@ -183,6 +185,171 @@ jobs:
                   modules.hermes.tests.test_log_issue_triage_collect \
                   modules.hermes.tests.test_log_issue_triage_cron \
                   -v
+
+    # The Hermes image is the only artifact the new WebUI ships inside, and every
+    # other check in this workflow is text-only: an unreachable pinned commit, a
+    # wrong launcher path, a wrong COPY destination, or a service that crashes on
+    # boot would all pass them. So build the image and boot it.
+    #
+    # The job runs only when the image's own inputs change, and it fails closed
+    # when it cannot resolve the commit it should compare against, because a gate
+    # that cannot say what it compared must not report success. Writable mounts
+    # stand in for the production volumes: the WebUI runs as the hermes user and
+    # writes its state under /opt/data.
+    hermes-webui-image:
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v4
+              with:
+                  fetch-depth: 0
+            - name: Resolve changed image inputs
+              id: changed
+              run: |
+                  set -euo pipefail
+                  paths='^(modules/hermes/|modules/docker-compose\.yml$|\.github/workflows/test\.yml$)'
+                  run=false
+                  if [ "${{ github.event_name }}" = "pull_request" ]; then
+                      base="${{ github.event.pull_request.base.sha }}"
+                      if ! git cat-file -e "${base}^{commit}" 2>/dev/null; then
+                          echo "cannot resolve the pull request base '${base}' in this checkout" >&2
+                          exit 1
+                      fi
+                      if git diff --name-only "$base" HEAD | grep -qE "$paths"; then
+                          run=true
+                      fi
+                  else
+                      # workflow_call (deploy.yml) and workflow_dispatch have no
+                      # pull-request base. Compare the named commit with its parent.
+                      sha="${{ github.sha }}"
+                      if ! git cat-file -e "${sha}^{commit}" 2>/dev/null; then
+                          echo "cannot resolve '${sha}' in this checkout" >&2
+                          exit 1
+                      fi
+                      if ! git rev-parse --verify "${sha}^" >/dev/null 2>&1; then
+                          run=true
+                      elif git diff --name-only "${sha}^" "$sha" | grep -qE "$paths"; then
+                          run=true
+                      fi
+                  fi
+                  echo "run=$run" >> "$GITHUB_OUTPUT"
+                  echo "image smoke test will $([ "$run" = true ] && echo run || echo 'not run')"
+            - name: Build the Hermes image
+              if: steps.changed.outputs.run == 'true'
+              run: docker build --tag hermes-webui-test modules/hermes
+            - name: Boot the image and probe the WebUI
+              if: steps.changed.outputs.run == 'true'
+              run: |
+                  set -euo pipefail
+                  data="$RUNNER_TEMP/hermes-data"
+                  workspace="$RUNNER_TEMP/hermes-workspace"
+                  mkdir -p "$data" "$workspace"
+                  chmod 777 "$data" "$workspace"
+                  docker run -d --name hermes-webui-test \
+                      -v "$data:/opt/data" \
+                      -v "$workspace:/workspace" \
+                      -p 127.0.0.1:8787:8787 \
+                      -p 127.0.0.1:8788:8788 \
+                      -e HERMES_DASHBOARD=0 \
+                      -e HERMES_WRITE_SAFE_ROOT=/opt/data:/workspace:/tmp \
+                      hermes-webui-test gateway run
+
+                  # The supervised service must come up. The gateway itself may
+                  # crash-loop: this container has no provider credentials, and
+                  # the gate is the WebUI, not the gateway.
+                  service_up=false
+                  for _ in $(seq 1 30); do
+                      if docker exec hermes-webui-test \
+                          /command/s6-svstat -o up /run/service/hermes-webui 2>/dev/null | grep -qx true; then
+                          service_up=true
+                          break
+                      fi
+                      sleep 5
+                  done
+                  if [ "$service_up" != true ]; then
+                      echo "hermes-webui s6 service did not come up" >&2
+                      docker exec hermes-webui-test /command/s6-svstat /run/service/hermes-webui >&2 || true
+                      exit 1
+                  fi
+
+                  # /health must answer inside the container and through the
+                  # published port. The published probe is what catches a run
+                  # script that binds the container's own loopback: Docker
+                  # forwards a published port to the container interface.
+                  curl -fsS --max-time 10 http://127.0.0.1:8787/health >/dev/null
+                  echo "published-port /health answered"
+
+                  # The launcher's declared agent dir and interpreter must resolve
+                  # the real agent class, not just a healthy process.
+                  docker exec hermes-webui-test /opt/hermes/.venv/bin/python3 -c \
+                      "import sys; sys.path.append('/opt/hermes'); from run_agent import AIAgent; print('AIAgent', AIAgent.__module__)"
+
+                  # Chat path against a stub agent: CI holds no provider
+                  # credentials, so a deterministic stub proves the wiring
+                  # (route -> AIAgent import -> response), not Hermes inference.
+                  mkdir -p "$RUNNER_TEMP/fake-agent"
+                  cat > "$RUNNER_TEMP/fake-agent/run_agent.py" <<'PY'
+                  class AIAgent:
+                      """Deterministic stand-in for the Hermes agent."""
+
+                      def __init__(self, **kwargs):
+                          self.kwargs = kwargs
+
+                      def run_conversation(self, **kwargs):
+                          return {"final_response": "pong from the stub agent", "completed": True}
+                  PY
+                  docker exec hermes-webui-test mkdir -p /tmp/fake-agent /tmp/fake-agent-state /tmp/fake-agent-home
+                  docker cp "$RUNNER_TEMP/fake-agent/run_agent.py" hermes-webui-test:/tmp/fake-agent/run_agent.py
+                  docker exec hermes-webui-test chmod -R 777 /tmp/fake-agent /tmp/fake-agent-state /tmp/fake-agent-home
+                  docker exec -d hermes-webui-test /command/s6-setuidgid hermes \
+                      env HOME=/tmp/fake-agent-home \
+                          HERMES_WEBUI_AGENT_DIR=/tmp/fake-agent \
+                          HERMES_WEBUI_PYTHON=/opt/hermes/.venv/bin/python3 \
+                          HERMES_WEBUI_HOST=0.0.0.0 \
+                          HERMES_WEBUI_PORT=8788 \
+                          HERMES_WEBUI_STATE_DIR=/tmp/fake-agent-state \
+                          HERMES_WEBUI_SERVER_CWD=/tmp \
+                          HERMES_WEBUI_DEFAULT_WORKSPACE=/tmp \
+                          HERMES_WEBUI_FOREGROUND=1 \
+                          HERMES_WRITE_SAFE_ROOT=/tmp \
+                          /opt/hermes/.venv/bin/python3 /opt/hermes-webui/bootstrap.py --foreground
+
+                  stub_up=false
+                  for _ in $(seq 1 30); do
+                      if curl -fsS --max-time 5 http://127.0.0.1:8788/health >/dev/null 2>&1; then
+                          stub_up=true
+                          break
+                      fi
+                      sleep 2
+                  done
+                  if [ "$stub_up" != true ]; then
+                      echo "stub-agent WebUI did not answer on 8788" >&2
+                      docker exec hermes-webui-test cat /tmp/fake-agent-state/*.log 2>/dev/null >&2 || true
+                      exit 1
+                  fi
+
+                  session_id=$(curl -fsS -X POST http://127.0.0.1:8788/api/session/new \
+                      -H 'Content-Type: application/json' \
+                      -d '{"workspace":"/tmp"}' \
+                      | python3 -c 'import json,sys; d=json.load(sys.stdin); print((d.get("session") or {}).get("session_id") or d.get("session_id") or "")')
+                  if [ -z "$session_id" ]; then
+                      echo "no session id from /api/session/new" >&2
+                      exit 1
+                  fi
+                  answer=$(curl -fsS -X POST http://127.0.0.1:8788/api/chat \
+                      -H 'Content-Type: application/json' \
+                      -d "{\"session_id\":\"$session_id\",\"message\":\"ping\"}")
+                  echo "$answer"
+                  echo "$answer" | grep -q 'pong from the stub agent'
+                  echo "chat path answered through the stub agent"
+            - name: Hermes image logs on failure
+              if: failure() && steps.changed.outputs.run == 'true'
+              run: |
+                  docker logs hermes-webui-test 2>&1 | tail -200 || true
+                  docker exec hermes-webui-test /command/s6-svstat /run/service/hermes-webui || true
+                  docker exec hermes-webui-test sh -c 'tail -100 /opt/data/webui/*.log 2>/dev/null' || true
+            - name: Remove the test container
+              if: always() && steps.changed.outputs.run == 'true'
+              run: docker rm -f hermes-webui-test || true
 
     image-gen:
         runs-on: ubuntu-latest

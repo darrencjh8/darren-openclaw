@@ -177,15 +177,7 @@ To deploy a single component:
 
 ### Health endpoints
 
-| Service | Check |
-|---|---|
-| expense-tracker | `curl http://localhost:8080/health` |
-| portfolio-tracker | `curl http://localhost:8081/health` |
-| actual-api | `curl http://localhost:3000/health` |
-| codex-router | `curl http://localhost:4100/health/liveliness` (caddy front; each colour has its own copy) |
-| hermes | `docker exec hermes /package/admin/s6/command/s6-svstat -o up /run/service/gateway-default` |
-
-`deploy.sh` performs these checks itself after `compose up` and exits non-zero if any fails. The Hermes dashboard is disabled (`HERMES_DASHBOARD=0`), so it has no health port of its own. After a successful deploy the script also runs `hermes mcp test expense-tracker` and `hermes mcp test portfolio-tracker` to confirm the MCP connections.
+See the health-endpoint table in [docs/operations.md](docs/operations.md#health-endpoints); that file is the single copy.
 
 ### Deploys happen through CI, not by hand
 
@@ -226,12 +218,21 @@ Other workflows:
 
 ## Ports
 
-| Service | Host binding | Container port | Purpose |
-|---|---|---|---|
-| expense-tracker | `127.0.0.1:8080` | 8080 | REST `/tools/*`, MCP `/mcp`, `/health` |
-| portfolio-tracker | `127.0.0.1:8081` | 8081 | REST `/tools/*` (plus `GET /tools`), MCP `/mcp`, `/health` |
-| actual-api | `127.0.0.1:3000` | 3000 | Actual Budget proxy, `/health` |
-| codex-router | `0.0.0.0:4100` | 4100 | caddy front for the two router colours: OpenAI-compatible `/v1`, `/health/liveliness` |
-| hermes | `8642`, `9119`, `8644` | same | Hermes gateway ports; the webhook platform listens on 8644 |
+See the ports table in [docs/operations.md](docs/operations.md#ports); that file is the single copy.
 
-All services except `codex-router` publish to `127.0.0.1` only. `codex-router` binds `0.0.0.0:4100` so the `hermes_shared` network and external clients can reach it. The front sits in front of two interchangeable router colours (`codex-router-a`, `codex-router-b`), which publish no ports of their own; a deploy rolls one colour at a time, so `4100` never goes dark.
+## Documentation index
+
+| Document | Contents |
+|---|---|
+| [design.md](design.md) | Current architecture document (Hermes migration, module breakdown, hosting topology). |
+| [DEPLOY.md](DEPLOY.md) | Deployment flow, entry points, module registration, production host details. |
+| [SETUP.md](SETUP.md) | Host, users, directory, volume, and cron layout for the production server. |
+| [SPECKIT.md](SPECKIT.md) | Spec-Kit usage for this repository. |
+| [AGENTS.md](AGENTS.md) | Instructions for AI agents working in this repository. |
+| [specs/](specs/) | Feature specs: `001-gateway`, `002-expense-tracking`, `003-portfolio-tracker`, `004-statement-reconciliation`, `006-portfolio-cpf-sync`, `008-portfolio-poems-sync`, `013-manual-tests`, `016-telegram-link-preview`, `021-three-phase-refactor`, `030-spec-drift`. |
+| [docs/](docs/) | `docs/expense-tracker/` drift verification and `docs/plans/` design notes. |
+| [modules/hermes/SLACK.md](modules/hermes/SLACK.md) | Slack app setup, Socket Mode, and token/scopes. |
+| [modules/portfolio-tracker/README.md](modules/portfolio-tracker/README.md) | Portfolio tracker details and local run instructions. |
+| [modules/expense-tracker/docs/design.md](modules/expense-tracker/docs/design.md) | Expense tracker design. |
+| [modules/hermes/skills/](modules/hermes/skills/) | Skill packs: `expense-tracker`, `image-gen`, `spec-auditor`, `hermes-troubleshooting`. |
+| [.agents/skills/full-deploy/SKILL.md](.agents/skills/full-deploy/SKILL.md) | Full-deploy operator runbook. |

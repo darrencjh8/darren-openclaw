@@ -217,6 +217,9 @@ services:
             - "8642:8642"
             - "9119:9119"
             - "8644:8644"
+            # Hermes WebUI. Host loopback only: Tailscale serve terminates TLS on
+            # the tailnet and proxies to 127.0.0.1:8787, so nothing binds the LAN.
+            - "127.0.0.1:8787:8787"
         volumes:
             - /home/runner/data/hermes/data:/opt/data
             - /home/runner/data/hermes/workspace:/workspace
