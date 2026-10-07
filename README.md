@@ -32,7 +32,7 @@ graph TB
 
     HERMES -->|"MCP http://expense-tracker:8080/mcp"| ET
     HERMES -->|"MCP http://portfolio-tracker:8081/mcp"| PT
-    HERMES -->|"LLM chat_completions http://codex-router:4100/v1"| ROUTER
+    HERMES -->|"LLM responses http://codex-router:4100/v1"| ROUTER
 
     ET -->|"REST"| ACT
     PT -->|"REST"| ACT

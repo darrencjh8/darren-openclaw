@@ -19,7 +19,7 @@ router_provider = {
     "name": "Codex Router",
     "api": "http://codex-router:4100/v1",
     "api_key": "local",
-    "transport": "chat_completions",
+    "transport": "responses",
 }
 router_route = "custom:codex-router"
 deepseek_fallback = {
