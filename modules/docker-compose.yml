@@ -93,6 +93,9 @@ services:
             # No IPv6 route in the container; see issue #553.
             - NODE_OPTIONS=--no-network-family-autoselection
         restart: unless-stopped
+        # node is PID 1 with no SIGTERM handler; tini forwards the stop signal so
+        # `docker stop` exits cleanly instead of SIGKILLing after the timeout.
+        init: true
         healthcheck:
             test:
                 [
@@ -119,6 +122,7 @@ services:
             # No IPv6 route in the container; see issue #553.
             - NODE_OPTIONS=--no-network-family-autoselection
         restart: unless-stopped
+        init: true
         logging: *default-logging
 
     portfolio-tracker:
@@ -153,6 +157,7 @@ services:
             - NODE_OPTIONS=--no-network-family-autoselection
         mem_limit: 512m
         restart: unless-stopped
+        init: true
         healthcheck:
             test:
                 [
