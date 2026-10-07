@@ -485,6 +485,19 @@ class DeployWorkflowRouterTests(unittest.TestCase):
         )
         self.assertIn("wait_for_health published-port curl", boot)
 
+    def test_image_job_shadows_the_agent_source_with_the_stub(self):
+        """The agent venv binds /opt/hermes onto sys.path, and api/config.py
+        only appends HERMES_WEBUI_AGENT_DIR, so a stub agent dir cannot win by
+        that variable alone: without PYTHONPATH the smoke chat calls the real
+        provider instead of the stub."""
+        workflow = yaml.safe_load(TEST_WORKFLOW.read_text(encoding="utf-8"))
+        steps = workflow["jobs"]["hermes-webui-image"]["steps"]
+        boot = next(
+            step for step in steps if step.get("name") == "Boot the image and probe the WebUI"
+        )["run"]
+
+        self.assertIn("PYTHONPATH=/tmp/fake-agent", boot)
+
 
 if __name__ == "__main__":
     unittest.main()

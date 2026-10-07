@@ -340,9 +340,14 @@ jobs:
                   docker exec hermes-webui-test mkdir -p /tmp/fake-agent /tmp/fake-agent-state /tmp/fake-agent-home
                   docker cp "$RUNNER_TEMP/fake-agent/run_agent.py" hermes-webui-test:/tmp/fake-agent/run_agent.py
                   docker exec hermes-webui-test chmod -R 777 /tmp/fake-agent /tmp/fake-agent-state /tmp/fake-agent-home
+                  # The agent venv binds /opt/hermes onto sys.path and
+                  # api/config.py only appends HERMES_WEBUI_AGENT_DIR, so the
+                  # stub must arrive ahead of site-packages on PYTHONPATH;
+                  # otherwise this chat reaches the real agent and its provider.
                   docker exec -d hermes-webui-test /command/s6-setuidgid hermes \
                       env HOME=/tmp/fake-agent-home \
                           HERMES_WEBUI_AGENT_DIR=/tmp/fake-agent \
+                          PYTHONPATH=/tmp/fake-agent \
                           HERMES_WEBUI_PYTHON=/opt/hermes/.venv/bin/python3 \
                           HERMES_WEBUI_HOST=0.0.0.0 \
                           HERMES_WEBUI_PORT=8788 \
