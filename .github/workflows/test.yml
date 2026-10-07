@@ -349,9 +349,12 @@ jobs:
                   docker exec hermes-webui-test /command/s6-svc -r /run/service/hermes-webui
                   wait_for_health restarted-in-container docker exec hermes-webui-test curl -fsS --max-time 5 http://127.0.0.1:8787/health
 
+                  # No workspace in the body: the service runs with HOME=/opt/data,
+                  # so an explicit /tmp is rejected as untrusted, while an absent
+                  # key falls back to the boot-time default workspace.
                   session_id=$(curl -fsS -X POST http://127.0.0.1:8787/api/session/new \
                       -H 'Content-Type: application/json' \
-                      -d '{"workspace":"/tmp"}' \
+                      -d '{}' \
                       | python3 -c 'import json,sys; d=json.load(sys.stdin); print((d.get("session") or {}).get("session_id") or d.get("session_id") or "")')
                   if [ -z "$session_id" ]; then
                       echo "no session id from /api/session/new" >&2
