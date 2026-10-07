@@ -1,5 +1,4 @@
 #!/bin/sh
-# Copyright © 2022 Dell Inc. or its subsidiaries. All Rights Reserved.
 #
 # Reconcile codex-router's canonical skills into every skill root the Hermes
 # container reads. `darrencjh8/codex-router` `codex/skills` is the single source

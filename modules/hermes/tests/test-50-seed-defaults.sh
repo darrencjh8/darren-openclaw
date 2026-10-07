@@ -1,6 +1,4 @@
 #!/bin/bash
-# Copyright © 2022 Dell Inc. or its subsidiaries. All Rights Reserved.
-
 # Unit tests for 50-seed-defaults cron job seeding.
 # Tests that jobs are seeded with proper parsed schedule dicts, not raw strings.
 set -euo pipefail

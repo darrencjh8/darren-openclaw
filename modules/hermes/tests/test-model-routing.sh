@@ -1,6 +1,4 @@
 #!/bin/bash
-# Copyright © 2022 Dell Inc. or its subsidiaries. All Rights Reserved.
-
 # Contract test for durable Hermes model routing defaults.
 set -euo pipefail
 

@@ -1,5 +1,3 @@
-# Copyright © 2022 Dell Inc. or its subsidiaries. All Rights Reserved.
-
 """codex-router must roll with no downtime.
 
 The router is split into a published caddy front and two interchangeable colour

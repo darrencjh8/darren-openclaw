@@ -1,5 +1,3 @@
-# Copyright © 2022 Dell Inc. or its subsidiaries. All Rights Reserved.
-
 import importlib.util
 from pathlib import Path
 import sys

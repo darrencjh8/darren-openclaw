@@ -1,6 +1,4 @@
 #!/bin/bash
-# Copyright © 2022 Dell Inc. or its subsidiaries. All Rights Reserved.
-
 # Tests for modules/hermes/scripts/sync-codex-router-skills.sh — the single
 # writer for codex-router-owned skills in the Hermes container.
 # No `set -e`: an unexpected failure must print a FAIL line and let the rest of

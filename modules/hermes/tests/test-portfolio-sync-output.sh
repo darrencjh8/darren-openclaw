@@ -1,6 +1,4 @@
 #!/bin/bash
-# Copyright © 2022 Dell Inc. or its subsidiaries. All Rights Reserved.
-
 # Regression test for the round-trip status lines in portfolio-sync.sh.
 #
 # The defect this covers: a dead OneDrive grant was reported as a successful pull,
