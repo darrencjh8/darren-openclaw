@@ -55,12 +55,18 @@ state directory are already the ones the gateway uses.
    `HERMES_WEBUI_PORT=8787`, `HERMES_WEBUI_STATE_DIR=/opt/data/webui`,
    `HERMES_WEBUI_DEFAULT_WORKSPACE=/workspace`, `HERMES_WEBUI_SERVER_CWD=/workspace`, and
    `HERMES_WEBUI_FOREGROUND=1` (without it `bootstrap.py` double-forks, because s6 sets
-   none of the supervisor variables it auto-detects). The
-   container-side listener is `HERMES_WEBUI_HOST=0.0.0.0`, not `127.0.0.1`: the host
-   publishes only loopback, so a loopback-only listener inside the container would be
-   unreachable through Docker's published address and the Tailscale route would have no
-   backend. The run script sets every launcher variable explicitly, so the bind is one
-   visible line rather than a default inherited from a host that does not exist here.
+   none of the supervisor variables it auto-detects). The Dockerfile fetch is
+   `git init` + `git remote add origin https://github.com/nesquena/hermes-webui.git` +
+   `git fetch --depth 1 origin "$HERMES_WEBUI_REF"` + `git checkout --detach FETCH_HEAD`,
+   so the remote is named before the fetch and the build cannot fail on a missing `origin`. The Dockerfile fetch is
+   `git init` + `git remote add origin https://github.com/nesquena/hermes-webui.git` +
+   `git fetch --depth 1 origin "$HERMES_WEBUI_REF"` + `git checkout --detach FETCH_HEAD`,
+   so the remote is named before the fetch and the build cannot fail on a missing
+   `origin`. The Dockerfile fetch is
+   `git init` + `git remote add origin https://github.com/nesquena/hermes-webui.git` +
+   `git fetch --depth 1 origin "$HERMES_WEBUI_REF"` + `git checkout --detach FETCH_HEAD`,
+   so the remote is named before the fetch and the build cannot fail on a missing
+   `origin`.
 4. **Gate the deploy on the WebUI answering**: extend the existing hermes block in
    `modules/deploy.sh` with a bounded `/health` poll over `docker exec`, the same shape as
    the gateway `s6-svstat` poll it already runs.
