@@ -449,6 +449,23 @@ class DeployWorkflowRouterTests(unittest.TestCase):
         )["run"]
         self.assertIn("git merge-base origin/main", resolver)
 
+    def test_image_job_waits_for_the_webui_port_before_failing(self):
+        """s6 reports the service up as soon as its run script starts, which is
+        before the WebUI binds 8787, so a single probe fails on a healthy image.
+        Both probes must retry on a bounded budget."""
+        workflow = yaml.safe_load(TEST_WORKFLOW.read_text(encoding="utf-8"))
+        steps = workflow["jobs"]["hermes-webui-image"]["steps"]
+        boot = next(
+            step for step in steps if step.get("name") == "Boot the image and probe the WebUI"
+        )["run"]
+
+        self.assertRegex(boot, r"wait_for_health\(\) \{")
+        self.assertIn("for _ in $(seq 1 30)", boot)
+        self.assertIn(
+            "wait_for_health in-container docker exec hermes-webui-test curl", boot
+        )
+        self.assertIn("wait_for_health published-port curl", boot)
+
 
 if __name__ == "__main__":
     unittest.main()
