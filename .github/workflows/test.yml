@@ -208,6 +208,9 @@ jobs:
                   set -euo pipefail
                   paths='^(modules/hermes/|modules/docker-compose\.yml$|\.github/workflows/test\.yml$)'
                   run=false
+                  # This workflow triggers on pull_request and workflow_call only
+                  # (deploy.yml calls it for non-push events), so there are exactly
+                  # two ways to name the commit the change is compared against.
                   if [ "${{ github.event_name }}" = "pull_request" ]; then
                       base="${{ github.event.pull_request.base.sha }}"
                       if ! git cat-file -e "${base}^{commit}" 2>/dev/null; then
@@ -218,8 +221,10 @@ jobs:
                           run=true
                       fi
                   else
-                      # workflow_call (deploy.yml) and workflow_dispatch have no
-                      # pull-request base. Compare the named commit with its parent.
+                      # A reusable-workflow call has no pull-request base, so the
+                      # commit the caller checked out is the change under test;
+                      # compare it with its first parent. A root commit has no
+                      # parent, so it counts as changed.
                       sha="${{ github.sha }}"
                       if ! git cat-file -e "${sha}^{commit}" 2>/dev/null; then
                           echo "cannot resolve '${sha}' in this checkout" >&2
@@ -249,6 +254,7 @@ jobs:
                       -v "$workspace:/workspace" \
                       -p 127.0.0.1:8787:8787 \
                       -p 127.0.0.1:8788:8788 \
+                      -e HERMES_HOME=/opt/data \
                       -e HERMES_DASHBOARD=0 \
                       -e HERMES_WRITE_SAFE_ROOT=/opt/data:/workspace:/tmp \
                       hermes-webui-test gateway run
@@ -272,9 +278,12 @@ jobs:
                   fi
 
                   # /health must answer inside the container and through the
-                  # published port. The published probe is what catches a run
-                  # script that binds the container's own loopback: Docker
+                  # published port. The in-container probe proves the service
+                  # itself is listening; the published probe is what catches a run
+                  # script that binds the container's own loopback, because Docker
                   # forwards a published port to the container interface.
+                  docker exec hermes-webui-test curl -fsS --max-time 10 http://127.0.0.1:8787/health >/dev/null
+                  echo "in-container /health answered"
                   curl -fsS --max-time 10 http://127.0.0.1:8787/health >/dev/null
                   echo "published-port /health answered"
 

@@ -219,20 +219,3 @@ Other workflows:
 ## Ports
 
 See the ports table in [docs/operations.md](docs/operations.md#ports); that file is the single copy.
-
-## Documentation index
-
-| Document | Contents |
-|---|---|
-| [design.md](design.md) | Current architecture document (Hermes migration, module breakdown, hosting topology). |
-| [DEPLOY.md](DEPLOY.md) | Deployment flow, entry points, module registration, production host details. |
-| [SETUP.md](SETUP.md) | Host, users, directory, volume, and cron layout for the production server. |
-| [SPECKIT.md](SPECKIT.md) | Spec-Kit usage for this repository. |
-| [AGENTS.md](AGENTS.md) | Instructions for AI agents working in this repository. |
-| [specs/](specs/) | Feature specs: `001-gateway`, `002-expense-tracking`, `003-portfolio-tracker`, `004-statement-reconciliation`, `006-portfolio-cpf-sync`, `008-portfolio-poems-sync`, `013-manual-tests`, `016-telegram-link-preview`, `021-three-phase-refactor`, `030-spec-drift`. |
-| [docs/](docs/) | `docs/expense-tracker/` drift verification and `docs/plans/` design notes. |
-| [modules/hermes/SLACK.md](modules/hermes/SLACK.md) | Slack app setup, Socket Mode, and token/scopes. |
-| [modules/portfolio-tracker/README.md](modules/portfolio-tracker/README.md) | Portfolio tracker details and local run instructions. |
-| [modules/expense-tracker/docs/design.md](modules/expense-tracker/docs/design.md) | Expense tracker design. |
-| [modules/hermes/skills/](modules/hermes/skills/) | Skill packs: `expense-tracker`, `image-gen`, `spec-auditor`, `hermes-troubleshooting`. |
-| [.agents/skills/full-deploy/SKILL.md](.agents/skills/full-deploy/SKILL.md) | Full-deploy operator runbook. |
