@@ -20,8 +20,13 @@
 # JOURNAL_STREAM, NOTIFY_SOCKET, XPC_SERVICE_NAME, SUPERVISOR_ENABLED), so
 # without this the launcher forks, the longrun's child exits, and s6
 # crash-loops the service.
+#
+# PYTHONUNBUFFERED keeps the launcher's startup lines in `docker logs` as they
+# happen. Python block-buffers stdout on a pipe, so without this the service
+# looks silent for its whole startup, which is exactly when the log is needed.
 
 export HOME=/opt/data
+export PYTHONUNBUFFERED=1
 
 export HERMES_WEBUI_AGENT_DIR=/opt/hermes
 export HERMES_WEBUI_PYTHON=/opt/hermes/.venv/bin/python3

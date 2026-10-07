@@ -165,14 +165,23 @@ class HermesSlackComposeTests(unittest.TestCase):
                 self._assert_env_mapping(name)
 
     def test_hermes_publishes_only_its_gateway_ports(self) -> None:
-        """Socket Mode is outbound-only, so no additional inbound port may appear."""
+        """Socket Mode is outbound-only, so no additional inbound port may appear.
+
+        The Hermes WebUI on 8787 is the one addition since then, and it is
+        published on host loopback only, so it adds no LAN-reachable port.
+        """
         compose = yaml.safe_load(COMPOSE_FILE.read_text(encoding="utf-8"))
         ports = compose["services"]["hermes"].get("ports") or []
 
         self.assertEqual(
-            {"8642", "9119", "8644"},
+            {"8642", "9119", "8644", "8787"},
             {str(p).rsplit(":", 1)[-1] for p in ports},
-            "hermes must publish exactly its gateway/dashboard/webhook ports",
+            "hermes must publish exactly its gateway/dashboard/webhook ports and the WebUI",
+        )
+        self.assertIn(
+            "127.0.0.1:8787:8787",
+            [str(p) for p in ports],
+            "the WebUI must stay on host loopback; Tailscale serves it",
         )
 
 

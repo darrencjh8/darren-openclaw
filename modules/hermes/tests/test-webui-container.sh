@@ -129,6 +129,7 @@ test_launcher_env_values() {
         'HERMES_WEBUI_DEFAULT_WORKSPACE=/workspace'
         'HERMES_WEBUI_SERVER_CWD=/workspace'
         'HERMES_WEBUI_FOREGROUND=1'
+        'PYTHONUNBUFFERED=1'
     )
     local pair
     for pair in "${expected[@]}"; do

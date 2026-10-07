@@ -298,10 +298,25 @@ jobs:
                   # itself is listening; the published probe is what catches a run
                   # script that binds the container's own loopback, because Docker
                   # forwards a published port to the container interface.
-                  docker exec hermes-webui-test curl -fsS --max-time 10 http://127.0.0.1:8787/health >/dev/null
-                  echo "in-container /health answered"
-                  curl -fsS --max-time 10 http://127.0.0.1:8787/health >/dev/null
-                  echo "published-port /health answered"
+                  #
+                  # s6 reports the service up as soon as its run script starts,
+                  # which is before the WebUI binds the port, so both probes retry
+                  # on a bounded budget instead of racing the listen call.
+                  wait_for_health() {
+                      label="$1"
+                      shift
+                      for _ in $(seq 1 30); do
+                          if "$@" >/dev/null 2>&1; then
+                              echo "$label /health answered"
+                              return 0
+                          fi
+                          sleep 2
+                      done
+                      echo "$label /health never answered" >&2
+                      return 1
+                  }
+                  wait_for_health in-container docker exec hermes-webui-test curl -fsS --max-time 5 http://127.0.0.1:8787/health
+                  wait_for_health published-port curl -fsS --max-time 5 http://127.0.0.1:8787/health
 
                   # The launcher's declared agent dir and interpreter must resolve
                   # the real agent class, not just a healthy process.
