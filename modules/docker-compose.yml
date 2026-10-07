@@ -27,6 +27,9 @@ x-codex-router-color: &codex-router-color
         - OPENCODE_GO_API_KEY=${OPENCODE_GO_API_KEY:-}
         - OPENCODE_ZEN_API_KEY=${OPENCODE_ZEN_API_KEY:-}
         - OPENCODE_API_KEY=${OPENCODE_API_KEY:-}
+        # ClinePass lane: discovery skips it while the key is absent, so an
+        # unset value simply leaves clinepass/* unpublished.
+        - CLINE_API_KEY=${CLINE_API_KEY:-}
         - CODEX_ROUTER_OPENCODE_ZEN_MODELS=${CODEX_ROUTER_OPENCODE_ZEN_MODELS:-space-bunny-free}
         # Per-hop budget for the auto-thinking pool. The router's own default
         # is 120, which is short for a reasoning model and sits below the
