@@ -243,6 +243,9 @@ services:
             # Hermes and not only codex-router. HOME here is /root and there is no
             # ~/.env, so the driver's file fallback cannot supply it either.
             - COMMANDCODE_API_KEY=${COMMANDCODE_API_KEY}
+            # The adjudicator's primary route is TypeSafe's official jev endpoint,
+            # keyed by this. Optional: without it the adjudicator uses auto-thinking.
+            - JEV_API_KEY=${JEV_API_KEY:-}
             - GEMINI_API_KEY=${GEMINI_API_KEY}
             - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
             - TELEGRAM_ALLOWED_USERS=${TELEGRAM_ALLOWED_USERS}

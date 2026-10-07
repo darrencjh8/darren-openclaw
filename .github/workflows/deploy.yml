@@ -159,6 +159,7 @@ jobs:
                   FIRECRAWL_API_KEY: ${{ secrets.FIRECRAWL_API_KEY }}
                   NOTION_API_KEY: ${{ secrets.NOTION_API_TOKEN }}
                   POLLINATIONS_API_KEY: ${{ secrets.POLLINATIONS_API_KEY }}
+                  JEV_API_KEY: ${{ secrets.JEV_API_KEY }}
                   TELEGRAM_ALLOWED_USERS: ${{ vars.TELEGRAM_ALLOWED_USERS }}
                   TELEGRAM_HOME_CHANNEL: ${{ vars.TELEGRAM_HOME_CHANNEL }}
                   SLACK_ALLOWED_USERS: ${{ vars.SLACK_ALLOWED_USERS }}

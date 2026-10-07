@@ -1,6 +1,4 @@
 #!/bin/bash
-# Copyright © 2022 Dell Inc. or its subsidiaries. All Rights Reserved.
-
 # Contract + behaviour tests for scripts/refresh-codex-router-checkout.sh.
 #
 # Dev-loop sessions inside the Hermes container drive the gate from the
