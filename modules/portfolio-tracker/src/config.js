@@ -24,6 +24,13 @@ export class Config {
 
         // Required
         this.deepseekApiKey = env.DEEPSEEK_API_KEY || "";
+
+        // LLM: the codex-router's auto-thinking (Responses API), with direct
+        // DeepSeek as the fallback (#695)
+        this.llmBaseUrl = env.LLM_BASE_URL || "http://codex-router:4100/v1";
+        this.llmModel = env.LLM_MODEL || "auto-thinking";
+        this.llmApiKey = env.LLM_API_KEY || "";
+        this.llmReasoningEffort = env.LLM_REASONING_EFFORT || "low";
         this.actualBudgetUrl = env.ACTUAL_BUDGET_URL || "";
         this.actualBudgetPassword = env.ACTUAL_BUDGET_PASSWORD || "";
         this.primaryBudgetFile = env.ACTUAL_PRIMARY_BUDGET_FILE || "";

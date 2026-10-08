@@ -13,7 +13,7 @@ Hermes Agent  (Telegram, Slack, cron, IMAP)
         └────────────────┬───────────────────┘
                          ▼
         Portfolio Tracker (Node.js, port 8081)
-          ├─ LLM orchestrator (DeepSeek) — PDF trade confirmations only
+          ├─ LLM orchestrator (router auto-thinking via Responses API, DeepSeek fallback) — PDF trade confirmations only
           ├─ Java CLI bridge → pp-cli.jar → Portfolio Performance XML
           ├─ OneDrive (Microsoft Graph OAuth) pull/push
           ├─ IBKR Flex Web Service
@@ -29,7 +29,7 @@ Hermes registers the module in `modules/hermes/config.yaml` under `mcp_servers:`
 - Maven (to build `pp-cli`)
 - Tesseract OCR + Poppler + qpdf (PDF processing; installed in the Docker image)
 - Portfolio Performance 0.84.1 model JAR (vendored at `pp-cli/lib/`, not on Maven Central)
-- DeepSeek API key (LLM orchestrator for PDF trade confirmations)
+- DeepSeek API key (fallback LLM for PDF trade confirmations) and, for the primary route, the codex-router `LLM_BASE_URL` / `LLM_MODEL` (default `auto-thinking`) / `LLM_API_KEY` / `LLM_REASONING_EFFORT`. The router serves `auto-thinking` on the Responses API only; DeepSeek stays on Chat Completions.
 - Google Cloud service account (Sheets)
 - OneDrive OAuth client ID (Microsoft Graph)
 

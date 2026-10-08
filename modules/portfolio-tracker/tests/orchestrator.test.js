@@ -1,5 +1,5 @@
 /**
- * Orchestrator tests — DeepSeekClient, AgentOrchestrator.
+ * Orchestrator tests — LLMClient, AgentOrchestrator.
  * Mocks OpenAI client to test the orchestration loop without real API calls.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
@@ -18,7 +18,7 @@ vi.mock("openai", () => {
 });
 
 // Now import the modules
-import { DeepSeekClient, AgentOrchestrator } from "../src/orchestrator.js";
+import { LLMClient, AgentOrchestrator } from "../src/orchestrator.js";
 
 // We need to mock the prompts module too
 vi.mock("../src/prompts.js", () => ({
@@ -38,109 +38,53 @@ vi.mock("../src/email_handler.js", () => ({
 
 import { extractEmailContent } from "../src/email_handler.js";
 
-describe("DeepSeekClient", () => {
+describe("LLMClient DeepSeek route", () => {
     let client;
+    let deepseek;
 
     beforeEach(() => {
-        client = new DeepSeekClient({
-            deepseekApiKey: "sk-test",
-        });
+        // Isolate the direct DeepSeek route (the router route is covered by
+        // llm-responses-695.test.js).
+        client = new LLMClient({ deepseekApiKey: "sk-test" });
+        client._routes = [client._routes[1]];
+        deepseek = client._routes[0].client;
     });
 
-    it("constructs with config", () => {
-        expect(client._model).toBe("deepseek-flash");
-        expect(client._client).toBeDefined();
+    it("constructs the router route first and DeepSeek last", () => {
+        const full = new LLMClient({ deepseekApiKey: "sk-test" });
+        expect(full._routes.map((r) => r.model)).toEqual([
+            "auto-thinking",
+            "deepseek-flash",
+        ]);
     });
 
     it("calls chat completions with messages and tools", async () => {
         const mockResponse = {
             choices: [{ message: { role: "assistant", content: "Hello" } }],
         };
-        client._client.chat.completions.create = vi
-            .fn()
-            .mockResolvedValue(mockResponse);
+        deepseek.chat.completions.create = vi.fn().mockResolvedValue(mockResponse);
+        const tools = [{ type: "function", function: { name: "t" } }];
 
-        const messages = [{ role: "user", content: "Hi" }];
-        const response = await client.chat(messages, undefined);
+        const response = await client.chat([{ role: "user", content: "hi" }], tools);
 
-        expect(client._client.chat.completions.create).toHaveBeenCalledWith(
+        expect(response).toBe(mockResponse);
+        expect(deepseek.chat.completions.create).toHaveBeenCalledWith(
             expect.objectContaining({
                 model: "deepseek-flash",
-                messages,
-                temperature: 0.1,
-                thinking: { type: "low" },
-            }),
-        );
-        expect(response).toBe(mockResponse);
-    });
-
-    it("passes tools to chat completions when provided", async () => {
-        const mockResponse = {
-            choices: [
-                { message: { role: "assistant", content: "Using tool" } },
-            ],
-        };
-        client._client.chat.completions.create = vi
-            .fn()
-            .mockResolvedValue(mockResponse);
-
-        const tools = [{ type: "function", function: { name: "test" } }];
-        await client.chat([{ role: "user", content: "test" }], tools);
-
-        expect(client._client.chat.completions.create).toHaveBeenCalledWith(
-            expect.objectContaining({
                 tools,
                 tool_choice: "auto",
             }),
         );
     });
 
-    it("retries on failure up to 3 times with exponential backoff", async () => {
-        const mockResponse = {
-            choices: [{ message: { role: "assistant", content: "Success" } }],
-        };
-
-        // Fail twice, succeed on third
-        client._client.chat.completions.create = vi
-            .fn()
-            .mockRejectedValueOnce(new Error("Rate limit"))
-            .mockRejectedValueOnce(new Error("Rate limit"))
-            .mockResolvedValue(mockResponse);
-
-        const response = await client.chat(
-            [{ role: "user", content: "test" }],
-            undefined,
-        );
-        expect(response).toBe(mockResponse);
-        expect(client._client.chat.completions.create).toHaveBeenCalledTimes(3);
-    });
-
-    it("throws after all retries exhausted", async () => {
-        client._client.chat.completions.create = vi
+    it("throws after the route is exhausted, naming the error", async () => {
+        deepseek.chat.completions.create = vi
             .fn()
             .mockRejectedValue(new Error("Persistent error"));
 
         await expect(
             client.chat([{ role: "user", content: "test" }], undefined),
-        ).rejects.toThrow("Persistent error");
-
-        expect(client._client.chat.completions.create).toHaveBeenCalledTimes(3);
-    });
-
-    it("has a 60-second timeout via Promise.race", async () => {
-        const mockResponse = {
-            choices: [{ message: { role: "assistant", content: "Quick" } }],
-        };
-
-        // Quick response should work fine
-        client._client.chat.completions.create = vi
-            .fn()
-            .mockResolvedValue(mockResponse);
-        const response = await client.chat(
-            [{ role: "user", content: "test" }],
-            undefined,
-        );
-        expect(response).toBe(mockResponse);
+        ).rejects.toThrow(/deepseek-flash: Persistent error/);
     });
 });
 

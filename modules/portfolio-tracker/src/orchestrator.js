@@ -6,55 +6,93 @@
 import OpenAI from "openai";
 import { SYSTEM_PROMPT, FEW_SHOT_EXAMPLES } from "./prompts.js";
 import { extractEmailContent } from "./email_handler.js";
+import { fromResponses, toResponsesInput, toResponsesTools } from "./llm-responses.js";
 
 const MAX_TOOL_ITERATIONS = 5;
 
-export class DeepSeekClient {
+export class LLMClient {
     constructor(config) {
-        this._client = new OpenAI({
-            apiKey: config.deepseekApiKey,
-            baseURL: "https://api.deepseek.com/v1",
-        });
-        this._model = "deepseek-flash";
+        this._reasoningEffort = config.llmReasoningEffort || "low";
+        // The router serves auto-thinking on /v1/responses only; the direct
+        // DeepSeek API has no Responses endpoint, so it stays on chat (#695).
+        this._routes = [
+            {
+                responses: true,
+                model: config.llmModel || "auto-thinking",
+                apiKey: config.llmApiKey || config.deepseekApiKey,
+                baseURL: config.llmBaseUrl || "http://codex-router:4100/v1",
+                retries: 3,
+            },
+            {
+                responses: false,
+                model: "deepseek-flash",
+                apiKey: config.deepseekApiKey,
+                baseURL: "https://api.deepseek.com/v1",
+                retries: 1,
+            },
+        ];
+        for (const route of this._routes) {
+            route.client = new OpenAI({
+                apiKey: route.apiKey || "",
+                baseURL: route.baseURL,
+            });
+        }
     }
 
     async chat(messages, tools) {
-        const kwargs = {
-            model: this._model,
-            messages,
-            temperature: 0.1,
-            thinking: { type: "low" },
-        };
-        if (tools) {
-            kwargs.tools = tools;
-            kwargs.tool_choice = "auto";
-        }
-
         const retryDelays = [1000, 2000, 4000];
-        for (let attempt = 0; attempt < 3; attempt++) {
-            try {
-                const response = await Promise.race([
-                    this._client.chat.completions.create(kwargs),
-                    new Promise((_, reject) =>
-                        setTimeout(() => reject(new Error("timeout")), 60000),
-                    ),
-                ]);
-                return response;
-            } catch (e) {
-                if (attempt < 2)
-                    await new Promise((r) =>
-                        setTimeout(r, retryDelays[attempt]),
-                    );
-                else throw e;
+        const failures = [];
+        for (const route of this._routes) {
+            let kwargs;
+            if (route.responses) {
+                kwargs = {
+                    model: route.model,
+                    input: toResponsesInput(messages),
+                    reasoning: { effort: this._reasoningEffort },
+                };
+                if (tools) {
+                    kwargs.tools = toResponsesTools(tools);
+                    kwargs.tool_choice = "auto";
+                }
+            } else {
+                kwargs = {
+                    model: route.model,
+                    messages,
+                    temperature: 0.1,
+                    thinking: { type: "low" },
+                };
+                if (tools) {
+                    kwargs.tools = tools;
+                    kwargs.tool_choice = "auto";
+                }
+            }
+
+            for (let attempt = 0; attempt < route.retries; attempt++) {
+                try {
+                    const raw = await Promise.race([
+                        route.responses
+                            ? route.client.responses.create(kwargs)
+                            : route.client.chat.completions.create(kwargs),
+                        new Promise((_, reject) =>
+                            setTimeout(() => reject(new Error("timeout")), 60000),
+                        ),
+                    ]);
+                    return route.responses ? fromResponses(raw) : raw;
+                } catch (e) {
+                    if (attempt < route.retries - 1)
+                        await new Promise((r) => setTimeout(r, retryDelays[attempt]));
+                    else failures.push(`${route.model}: ${e.message}`);
+                }
             }
         }
+        throw new Error(`All LLM routes failed: ${failures.join("; ")}`);
     }
 }
 
 export class AgentOrchestrator {
     constructor(config, tools) {
         this._config = config;
-        this._llm = new DeepSeekClient(config);
+        this._llm = new LLMClient(config);
         this._tools = tools;
     }
 

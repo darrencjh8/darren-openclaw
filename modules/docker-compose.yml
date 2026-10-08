@@ -138,6 +138,10 @@ services:
             - /home/runner/data/portfolio-tracker/google-service-account.json:/app/config/google-service-account.json:ro
         environment:
             - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
+            - LLM_BASE_URL=${LLM_BASE_URL:-http://codex-router:4100/v1}
+            - LLM_MODEL=${LLM_MODEL:-auto-thinking}
+            - LLM_API_KEY=${LLM_API_KEY:-}
+            - LLM_REASONING_EFFORT=${LLM_REASONING_EFFORT:-low}
             - ACTUAL_BUDGET_URL=${ACTUAL_BUDGET_URL}
             - ACTUAL_BUDGET_PASSWORD=${ACTUAL_BUDGET_PASSWORD}
             - ACTUAL_PRIMARY_BUDGET_FILE=${ACTUAL_PRIMARY_BUDGET_FILE}
