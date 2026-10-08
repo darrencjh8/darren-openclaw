@@ -1525,7 +1525,9 @@ describe("bill payment pre-parser", () => {
         });
 
         const orch = new AgentOrchestrator(config, tools);
-        orch._llm = { chat: vi.fn(() => { llmCalled = true; throw new Error("LLM should not be called"); }) };
+        // A deterministic failure stands in for "the LLM answered unusably";
+        // a bare Error escaping chat() now counts as an outage (#694).
+        orch._llm = { chat: vi.fn(() => { llmCalled = true; throw Object.assign(new Error("LLM unusable"), { deterministic: true }); }) };
 
         const result = await orch._runPhase1(dbsBillPaymentEmail, { senderBank: "DBS" });
 

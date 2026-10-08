@@ -2,7 +2,7 @@
 
 **Module:** `modules/expense-tracker`  
 **Last Updated:** 2026-06-10
-**Runtime:** Node.js 22 (ESM) | **LLM:** DeepSeek `deepseek-flash` | **Budget:** Actual Budget REST API
+**Runtime:** Node.js 22 (ESM) | **LLM:** `auto-thinking` on the codex-router over the Responses API (DeepSeek `deepseek-flash` over Chat Completions as the final fallback) | **Budget:** Actual Budget REST API
 
 For workflow, tool schemas, and deployment, see `.speckit/features/expense-tracking/plan.md` and `.speckit/agent.md`.
 
@@ -205,6 +205,12 @@ Pinned by `tests/memory.test.js`: key anchoring (a partial query must not select
 | **Setup Validation** | Config file consistency, Dockerfile validity, .env safety |
 
 ---
+
+## LLM Transport and Outages
+
+The router serves `auto-thinking` on `/v1/responses` only and no longer translates Chat Completions (#694), so `LLMClient` (`src/orchestrator.js`) and `classifyEmail` (`src/classify.js`) call `responses.create` for every non-DeepSeek route and map messages, tools and results through `src/llm-responses.js`. The direct DeepSeek final fallback stays on `chat.completions` because that API has no Responses endpoint. `LLM_FALLBACK_MODEL` is unset by default; the retired `gpt-5.6-terra` default is gone.
+
+When every route fails with an outage-shaped error (an HTTP status, a connection error or the local timeout), `chat()` throws `LLMUnavailableError`. Truncated, incomplete or empty responses are deterministic for that email and stay a plain error. An `LLMUnavailableError` makes `processEmail` return `llm_unavailable`: the email stays unread, the user gets one notice per email, and `imap.js` records it with a 5 minute retry instead of the 12 hour `RETRY_COOLDOWN_MINUTES`. After 12 consecutive outage retries of one email in a process, the ordinary 12 hour cooldown applies.
 
 ## LLM Cost Estimate
 

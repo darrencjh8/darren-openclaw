@@ -326,8 +326,21 @@ export class DedupJournal {
         return !!this._stmtCheckRecent.get(uid, cutoff);
     }
 
-    recordProcessed(uid) {
-        this._stmtInsertUid.run(uid, new Date().toISOString());
+    /**
+     * @param {string} uid
+     * @param {number} [retryAfterMinutes] - back-date the row so the normal
+     *   cooldown ends after this many minutes instead of the full window; used
+     *   when the email could not be processed for a transient reason (#694).
+     */
+    recordProcessed(uid, retryAfterMinutes) {
+        const shorten =
+            retryAfterMinutes === undefined
+                ? 0
+                : Math.max(0, RETRY_COOLDOWN_MINUTES - retryAfterMinutes);
+        this._stmtInsertUid.run(
+            uid,
+            new Date(Date.now() - shorten * 60 * 1000).toISOString(),
+        );
     }
 
     /** True once this message has produced a booking; deleted by cleanup()

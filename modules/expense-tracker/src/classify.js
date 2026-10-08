@@ -6,6 +6,7 @@
 import OpenAI from "openai";
 import { extractEmailContent } from "./extractors.js";
 import { logger } from "./logging.js";
+import { fromResponses, toResponsesInput } from "./llm-responses.js";
 
 export const CLASSIFICATION_PROMPT = `\
 Classify this email as "statement", "transaction", or "skip". Respond with ONLY one word.
@@ -67,6 +68,8 @@ export async function classifyEmail(rawEmail, subject, sender, config) {
         }];
         if (provider !== "deepseek" && config.llmFallbackModel) {
             routes.push({ ...routes[0], model: config.llmFallbackModel });
+        }
+        if (provider !== "deepseek") {
             routes.push({
                 provider: config.llmFinalFallbackProvider || "deepseek",
                 model: config.llmFinalFallbackModel || "deepseek-flash",
@@ -80,16 +83,41 @@ export async function classifyEmail(rawEmail, subject, sender, config) {
         for (const route of routes) {
             try {
                 const client = new OpenAI({ apiKey: route.apiKey, baseURL: route.baseURL });
+                const messages = [
+                    { role: "system", content: CLASSIFICATION_PROMPT },
+                    { role: "user", content: text },
+                ];
+                // The router serves its pool on Responses only (#694); the
+                // direct DeepSeek API stays on Chat Completions.
+                const call =
+                    route.provider === "deepseek"
+                        ? client.chat.completions.create({
+                            model: route.model,
+                            messages,
+                            temperature: 0,
+                            max_tokens: 5,
+                        })
+                        : client.responses
+                            .create({
+                                model: route.model,
+                                input: toResponsesInput(messages),
+                                // Reasoning tokens count against the cap, so a
+                                // tiny cap returns `incomplete` with no answer.
+                                reasoning: { effort: "low" },
+                                max_output_tokens: 128,
+                            })
+                            .then((raw) => {
+                                const answer = fromResponses(raw);
+                                const choice = answer.choices[0];
+                                // An unfinished or empty answer is a failed route,
+                                // not "transaction": try the next route.
+                                if (choice.finish_reason === "length" || !choice.message.content) {
+                                    throw new Error("classification response incomplete");
+                                }
+                                return answer;
+                            });
                 response = await Promise.race([
-                    client.chat.completions.create({
-                        model: route.model,
-                        messages: [
-                            { role: "system", content: CLASSIFICATION_PROMPT },
-                            { role: "user", content: text },
-                        ],
-                        temperature: route.provider === "deepseek" ? 0 : 1,
-                        max_tokens: 5,
-                    }),
+                    call,
                     new Promise((_, reject) =>
                         setTimeout(() => reject(new Error("timeout")), 10000),
                     ),
