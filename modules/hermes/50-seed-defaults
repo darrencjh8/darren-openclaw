@@ -95,9 +95,29 @@ if true 2>/opt/data/logs/codex-router-skills-sync.log; then
 else
     /opt/hermes-defaults/scripts/sync-codex-router-skills.sh 2>/dev/null || true
 fi
+# seed-scripts:begin
+# Prune scripts that were seeded earlier but are no longer baked into the image,
+# using a manifest of what the seed installed (same idea as MANAGED_FILE in
+# sync-codex-router-skills.sh). Only names listed in the previous manifest can be
+# removed, so operator-added scripts survive; a first boot with no manifest
+# prunes nothing; an empty baked set never prunes (looks like a broken image).
 mkdir -p /opt/data/scripts
+SEED_MANIFEST=/opt/data/.hermes-seeded-scripts
+: > "$SEED_MANIFEST.new"
+for seed_f in /opt/hermes-defaults/scripts/*; do
+    [ -e "$seed_f" ] || continue
+    echo "${seed_f##*/}" >> "$SEED_MANIFEST.new"
+done
+if [ -s "$SEED_MANIFEST.new" ] && [ -f "$SEED_MANIFEST" ]; then
+    while IFS= read -r seed_old || [ -n "$seed_old" ]; do
+        case "$seed_old" in ''|.|..|*/*) continue ;; esac
+        grep -qxF -- "$seed_old" "$SEED_MANIFEST.new" || rm -rf -- "/opt/data/scripts/$seed_old"
+    done < "$SEED_MANIFEST"
+fi
 cp -r /opt/hermes-defaults/scripts/* /opt/data/scripts/
 chmod +x /opt/data/scripts/*.sh
+mv "$SEED_MANIFEST.new" "$SEED_MANIFEST"
+# seed-scripts:end
 
 # Tier-2 topic files: durable facts that do not fit the always-on memory core.
 # The agent reads them with the file tools, and the memory-triage judge appends to
