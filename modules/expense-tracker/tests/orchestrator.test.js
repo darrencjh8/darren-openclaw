@@ -3098,6 +3098,46 @@ describe("_resolvePhase2 transfer detection", () => {
         expect(seen).toEqual(["101", null]);
     });
 
+    // #580 L3: a row's own event time wins over the parser clock on `_transfer`.
+    it("anchors on top-level occurred_at before _transfer.occurred_at (#580)", async () => {
+        const seen = [];
+        const tools = makeTools({
+            executeTool: vi.fn(async (name, args) => {
+                if (name === "find_inserted_transfer") seen.push(args.at);
+                return null;
+            }),
+        });
+        const orch = new AgentOrchestrator(makeConfig({ USER_NAME: "there" }), tools);
+        await orch._findBookedTransferLeg({
+            budget_id: "budget-sgd",
+            account_id: "sc-bonus",
+            amount_cents: 100,
+            currency: "SGD",
+            occurred_at: "2026-09-15T23:20:02.000Z",
+            _transfer: { occurred_at: "2026-09-15T23:20:09.000Z" },
+        });
+        expect(seen).toEqual(["2026-09-15T23:20:02.000Z"]);
+    });
+
+    // #580 L2: a date-only value is midnight UTC, not the alert's event time,
+    // so it must never anchor the window (the #574 review bug).
+    it("skips the lookup for a date-only timestamp (#580)", async () => {
+        const executeTool = vi.fn(async () => null);
+        const orch = new AgentOrchestrator(
+            makeConfig({ USER_NAME: "there" }),
+            makeTools({ executeTool }),
+        );
+        const leg = await orch._findBookedTransferLeg({
+            budget_id: "budget-sgd",
+            account_id: "sc-bonus",
+            amount_cents: 100,
+            currency: "SGD",
+            occurred_at: "2026-09-15",
+        });
+        expect(leg).toBeNull();
+        expect(executeTool).not.toHaveBeenCalledWith("find_inserted_transfer", expect.anything());
+    });
+
     it("finds the booked leg for a structured internal credit (#574)", async () => {
         const config = makeConfig({ USER_NAME: "there" });
         const dbPath = join(
