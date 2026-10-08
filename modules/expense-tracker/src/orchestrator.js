@@ -207,7 +207,7 @@ export class LLMClient {
         if (failures.some(({ error }) => isOutageShaped(error))) {
             throw new LLMUnavailableError(`All LLM routes failed (${summary})`);
         }
-        const error = new Error(`All LLM routes failed (${summary})`);
+        const error = deterministicError(`All LLM routes failed (${summary})`);
         error.cause = lastError;
         throw error;
     }
@@ -633,6 +633,21 @@ export class AgentOrchestrator {
                 });
             }
             throw e;
+        }
+    }
+
+    /**
+     * LLM call with outage classification at the orchestrator boundary (#694).
+     * `LLMClient.chat` already separates outages from deterministic failures; an
+     * error that still escapes it untagged is an unclassified provider failure,
+     * so it is treated as an outage (capped by MAX_LLM_OUTAGE_RETRIES).
+     */
+    async _chat(...args) {
+        try {
+            return await this._llm.chat(...args);
+        } catch (error) {
+            if (error instanceof LLMUnavailableError || error?.deterministic) throw error;
+            throw new LLMUnavailableError(`LLM call failed: ${error?.message}`);
         }
     }
 
@@ -1316,7 +1331,7 @@ export class AgentOrchestrator {
     async _llmExtractMovement(emailText, senderBank, receivedAt) {
         const prompt = getMovementExtractorPrompt();
         try {
-            const response = await this._llm.chat(
+            const response = await this._chat(
                 [{ role: "user", content: `${prompt}\n\nEMAIL:\n${String(emailText).slice(0, 4000)}` }],
                 undefined,
                 undefined,
@@ -1464,7 +1479,7 @@ export class AgentOrchestrator {
                 : [];
 
             try {
-                let response = await this._llm.chat(messages, tools, "auto", {
+                let response = await this._chat(messages, tools, "auto", {
                     reasoning: "low",
                 });
                 let choice = (response.choices || [{}])[0];
@@ -1491,7 +1506,7 @@ export class AgentOrchestrator {
                             content:
                                 "Tool budget exhausted. Respond ONLY with valid JSON now, no tool calls.",
                         });
-                        response = await this._llm.chat(
+                        response = await this._chat(
                             messages,
                             undefined,
                             undefined,
@@ -1570,7 +1585,7 @@ export class AgentOrchestrator {
                         if (name === "fetch_context") cachedLiveData = result;
                     }
 
-                    response = await this._llm.chat(messages, tools, "auto", {
+                    response = await this._chat(messages, tools, "auto", {
                         reasoning: "low",
                     });
                     choice = (response.choices || [{}])[0];
@@ -2657,7 +2672,7 @@ export class AgentOrchestrator {
                         output.payee_name,
                         liveCategories,
                     );
-                    const response = await this._llm.chat(
+                    const response = await this._chat(
                         [{ role: "user", content: pickerPrompt }],
                         undefined,
                         undefined,

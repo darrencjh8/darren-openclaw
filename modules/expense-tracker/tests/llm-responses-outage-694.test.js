@@ -255,14 +255,14 @@ describe("outage discriminator (#694)", () => {
         await expect(client.chat([{ role: "user", content: "hi" }])).rejects.toBeInstanceOf(LLMUnavailableError);
     }, 30000);
 
-    it("a non-LLM exception in Phase 1 still yields the old not-understood path", async () => {
+    it("a deterministic LLM failure in Phase 1 still yields the old not-understood path", async () => {
         const tools = {
             setEmailContext: vi.fn(),
             getToolSchemas: vi.fn(() => []),
             executeTool: vi.fn(async () => true),
         };
         const orch = new AgentOrchestrator(routerConfig(), tools);
-        orch._llm.chat = vi.fn().mockRejectedValue(new TypeError("boom"));
+        orch._llm.chat = vi.fn().mockRejectedValue(deterministicError("LLM response truncated"));
 
         const result = await orch.processEmail("7", "Card Transaction Alert\nS$5.00 at SHOP", null, "a@dbs.com", "Card Transaction Alert");
 
