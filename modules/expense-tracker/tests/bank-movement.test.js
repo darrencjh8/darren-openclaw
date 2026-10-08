@@ -568,6 +568,24 @@ Time : 10:00 AM SGT`,
   });
 });
 
+describe("SC FAST advice scoping (#639)", () => {
+  const SC = `Dear Customer, Your FAST transaction has been successful: Transaction reference: SG26050200693178180005 From account: ******6445 To account: ******5750 Amount: 1,275.00 Currency: SGD Transaction due date: 28/09/2026 10:08:02 Transaction type: FAST Payee Bank: Transaction message: Thank you for using Standard Chartered Online Banking. Yours Sincerely`;
+  const FOREIGN = `---------- Forwarded message --------- From: <alerts@examplebank.com> Subject: Debit Card Alert Transaction type: Debit Card Transaction From account: ******1111 To account: ******9999 Amount: 4,321.00 Currency: SGD Transaction due date: 28/09/2026 09:00:00 Thank you for using Standard Chartered Online Banking. Yours Sincerely, `;
+  const opts = { senderBank: "UOB", receivedAt: "2026-10-01T09:00:00.000Z" };
+
+  it("does not pair a foreign advice's accounts or amount", () => {
+    expect(parseBankMovement(`${FOREIGN} ${SC}`, opts)).toBeNull();
+    expect(parseBankMovement(`${SC} ${FOREIGN}`, opts)).toBeNull();
+  });
+
+  it("still parses a single advice", () => {
+    const m = parseBankMovement(SC, opts);
+    expect(m.own_account.suffix).toBe("6445");
+    expect(m.counterparty.suffix).toBe("5750");
+    expect(m.amount_cents).toBe(-127500);
+  });
+});
+
 describe("identityMappingsFromFacts", () => {
   // Issue #569: an OCBC transfer alert masks both account numbers, so the only
   // evidence is the trailing digits after the asterisks. A bare digit run is

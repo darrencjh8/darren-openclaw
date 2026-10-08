@@ -514,6 +514,16 @@ export function parseBankMovement(text, { senderBank = null, receivedAt } = {}) 
   // vocabulary, so this is also what stops another bank's inbound advice in the
   // same shape being booked outgoing from the recipient's account.
   if (scFast && /Standard\s+Chartered\s+Online\s+Banking/i.test(scFlat)) {
+    // One advice only (#639). The account pair and the digits-only `Amount:`
+    // are generic FAST vocabulary, so a forward carrying a second advice can
+    // supply them from the wrong one. The span cannot be recovered reliably
+    // (a foreign advice may also quote the SC signature), so when more than
+    // one pair or amount is present refuse rather than guess.
+    const pairCount = (
+      scFlat.match(/From account\s*:\s*\*+\d+\s+To account\s*:\s*\*+\d+/gi) || []
+    ).length;
+    const amountCount = (scFlat.match(/Amount\s*:\s*[\d,.]+/gi) || []).length;
+    if (pairCount !== 1 || amountCount !== 1) return null;
     const [, fromValue, toValue] = scFast;
     const amountText = scFlat.match(/Amount\s*:\s*([\d,.]+)/i)?.[1] || "";
     // No fallback. Every other branch takes its currency from an explicit
