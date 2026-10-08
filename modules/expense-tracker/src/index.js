@@ -98,6 +98,8 @@ async function main() {
                 imapHandler,
                 statementProcessor,
             );
+            // The idle loop keys retries and booked marking off this result.
+            return result;
         } catch (err) {
             registry.setEmailContext(msg.msg_id, msg.raw_email, imapHandler);
             const notified = await registry.executeTool("notify_user", {
