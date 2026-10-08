@@ -907,6 +907,13 @@ const TOOL_MAP = Object.fromEntries(TOOLS.map((t) => [t.name, t]));
 
 // ── ToolRegistry ─────────────────────────────────────────────────
 
+function shiftIsoDay(iso, days) {
+  const d = new Date(`${String(iso).slice(0, 10)}T00:00:00Z`);
+  if (Number.isNaN(d.getTime())) return iso;
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
 export class ToolRegistry {
   constructor(config, memory) {
     this._config = config;
@@ -1563,8 +1570,12 @@ export class ToolRegistry {
     try {
       const [rows, payees] = await Promise.all([
         this._get("/transactions", budget_id, {
-          since_date: on_date,
-          until_date: on_date,
+          // ±1 day: the far row's date may come from the UTC (LLM) or SGT
+          // (deterministic) basis, which differ by a day for 00:00-08:00 SGT
+          // alerts (#619). The wider window only feeds the fail-closed check;
+          // linking still requires the exact day.
+          since_date: shiftIsoDay(on_date, -1),
+          until_date: shiftIsoDay(on_date, 1),
           account_id,
         }),
         this._get("/payees", budget_id),
@@ -1573,15 +1584,22 @@ export class ToolRegistry {
         ? payees.find((p) => p.name === "Misc" && !p.transfer_acct)
         : null;
       const wanted = -Math.sign(amount_cents) * Math.abs(amount_cents);
-      const matches = (Array.isArray(rows) ? rows : []).filter(
+      const plausible = (Array.isArray(rows) ? rows : []).filter(
+        (tx) => tx.account === account_id && tx.amount === wanted && !tx.transfer_id,
+      );
+      const matches = plausible.filter(
         (tx) =>
-          tx.account === account_id &&
-          tx.amount === wanted &&
-          !tx.transfer_id &&
+          (!tx.date || tx.date === on_date) &&
           tx.cleared === false &&
           misc &&
           tx.payee === misc.id,
       );
+      if (matches.length === 0 && plausible.length > 0) {
+        // A far row plausibly exists (same account, opposite amount, unlinked)
+        // but is not the exact shape: not "no far side". Caller must hold
+        // rather than book a duplicate counterpart (#619).
+        return { candidate: null, matches: 0, unmatched: plausible.length };
+      }
       if (matches.length !== 1) return { candidate: null, matches: matches.length };
       return { candidate: { id: matches[0].id, account_id }, matches: 1 };
     } catch (error) {

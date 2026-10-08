@@ -2306,6 +2306,15 @@ export class AgentOrchestrator {
                 });
                 return { hold: true, reason: "ambiguous" };
             }
+            if (Number(found.unmatched) > 0) {
+                // A plausible far row exists but is not the exact shape (#619).
+                logger.warn({
+                    event: "far_side_unmatched",
+                    account_id: farAccountId,
+                    unmatched: found.unmatched,
+                });
+                return { hold: true, reason: "unmatched" };
+            }
             return { farRowId: null };
         } catch (error) {
             logger.warn({ event: "find_existing_far_side_failed", error: error.message });
@@ -3070,16 +3079,21 @@ export class AgentOrchestrator {
                     // because booking it would create the duplicate counterpart.
                     // Nothing is reserved, so a later alert retries this read
                     // instead of being stuck behind a pending transfer (#598).
+                    const unmatched = existingFarSide.reason === "unmatched";
                     const ambiguous = existingFarSide.reason === "ambiguous";
                     if (!silent) {
                         await this._tools.executeTool("notify_user", {
-                            message: ambiguous
+                            message: unmatched
+                                ? `Held: ${bookableAmountPrefix(llmOutput.amount_cents, llmOutput.currency)}transfer ${llmOutput.date || "today"} has a similar row on the far account that does not match exactly (payee, cleared state or date differs), so nothing was booked. Link or fix the rows in Actual.`
+                                : ambiguous
                                 ? `Held: ${bookableAmountPrefix(llmOutput.amount_cents, llmOutput.currency)}transfer ${llmOutput.date || "today"} has more than one uncleared row on the far account, so the two legs were left unlinked. Resolve the duplicate rows in Actual.`
                                 : `Held: could not read the far account for the ${bookableAmountPrefix(llmOutput.amount_cents, llmOutput.currency)}transfer ${llmOutput.date || "today"}, so the destination leg was not booked and the transfer was left unlinked.`,
                         });
                     }
                     await this._tools.executeTool("log_decision", {
-                        action: ambiguous
+                        action: unmatched
+                            ? "held_unmatched_far_side"
+                            : ambiguous
                             ? "held_ambiguous_far_side"
                             : "held_unreadable_far_side",
                         reasoning: llmOutput.reasoning || "",
@@ -3087,7 +3101,9 @@ export class AgentOrchestrator {
                     });
                     return {
                         action: "notified",
-                        details: ambiguous
+                        details: unmatched
+                            ? "Held a transfer whose far side row does not match exactly"
+                            : ambiguous
                             ? "Held a transfer whose far side has several candidates"
                             : "Held a transfer whose far account could not be read",
                     };
