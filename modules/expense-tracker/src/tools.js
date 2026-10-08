@@ -1427,7 +1427,16 @@ export class ToolRegistry {
    * hallucinated tool call supplies, as it already does for reserve_transfer).
    */
   async _handle_find_inserted_transfer(args) {
-    return this._dedup.findInsertedTransferInto(args);
+    // Only the email being processed may claim a leg (issue #578). The
+    // orchestrator names it; pasted text names none and so never claims, even
+    // though the last email's uid is still in context. Any other id (a
+    // hallucinated call) falls back to the read-only match.
+    const current = this._emailMsgId == null ? "" : String(this._emailMsgId);
+    const claim =
+      current && args?.alert_id != null && String(args.alert_id) === current
+        ? current
+        : null;
+    return this._dedup.findInsertedTransferInto({ ...args, alert_id: claim });
   }
 
   /**

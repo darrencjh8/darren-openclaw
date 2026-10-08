@@ -764,7 +764,10 @@ export class AgentOrchestrator {
             };
         }
 
-        // Phase 2: Resolution
+        // Phase 2: Resolution. The email's uid lets the transfer-leg lookup
+        // claim a booked leg for this alert only (issue #578); set after the
+        // Phase-1 sanitiser, so LLM output cannot supply it.
+        phase1._alert_id = msgId;
         const phase2 = await this._resolvePhase2(phase1);
 
         // Phase 3: Execute
@@ -1659,6 +1662,9 @@ export class AgentOrchestrator {
                 // repayment into the holder's own credit line). Phase-1 LLM output
                 // must not be able to assert it and skip that gate.
                 delete output._card_repayment;
+                // `_alert_id` keys the transfer-leg claim (issue #578); only the
+                // email path sets it, after this sanitiser.
+                delete output._alert_id;
 
                 // Date fallback: if the email body contains no recognisable
                 // date and the LLM returned a date that differs from today,
@@ -2080,6 +2086,7 @@ export class AgentOrchestrator {
                 // destination (issue #574 review: matching the source side too
                 // would let an unrelated outgoing leg swallow a real credit).
                 destination_account_id: output.account_id || "",
+                alert_id: output._alert_id ?? null,
                 amount_cents: output.amount_cents,
                 currency: output.currency || this._config.primaryCurrency,
                 at,

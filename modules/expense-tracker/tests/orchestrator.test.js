@@ -3077,6 +3077,27 @@ describe("_resolvePhase2 transfer detection", () => {
     // Review round 1 on #574: the deterministic movement parser carries its
     // clock on `_transfer`, not on a top-level field, so a structured internal
     // PayNow credit must still reach the journal lookup.
+    it("passes the email uid as the claim key, and none for pasted text (#578)", async () => {
+        const seen = [];
+        const tools = makeTools({
+            executeTool: vi.fn(async (name, args) => {
+                if (name === "find_inserted_transfer") seen.push(args.alert_id);
+                return null;
+            }),
+        });
+        const orch = new AgentOrchestrator(makeConfig({ USER_NAME: "there" }), tools);
+        const output = {
+            budget_id: "budget-sgd",
+            account_id: "sc-bonus",
+            amount_cents: 100,
+            currency: "SGD",
+            occurred_at: "2026-09-15T23:20:02.000Z",
+        };
+        await orch._findBookedTransferLeg({ ...output, _alert_id: "101" });
+        await orch._findBookedTransferLeg(output);
+        expect(seen).toEqual(["101", null]);
+    });
+
     it("finds the booked leg for a structured internal credit (#574)", async () => {
         const config = makeConfig({ USER_NAME: "there" });
         const dbPath = join(
