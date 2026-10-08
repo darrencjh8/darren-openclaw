@@ -141,6 +141,20 @@ test_launcher_env_values() {
     done
 }
 
+# Test: the CSP frame-ancestors allowlist is forwarded end to end.
+test_csp_frame_extra_forwarded() {
+    if grep -qF 'HERMES_WEBUI_CSP_FRAME_EXTRA=${HERMES_WEBUI_CSP_FRAME_EXTRA:-}' "$COMPOSE_FILE"; then
+        ok "compose forwards HERMES_WEBUI_CSP_FRAME_EXTRA"
+    else
+        nope "compose forwards HERMES_WEBUI_CSP_FRAME_EXTRA" "passthrough not found"
+    fi
+    if grep -qF 'HERMES_WEBUI_CSP_FRAME_EXTRA=' "$SERVICE_DIR/run"; then
+        ok "run script forwards HERMES_WEBUI_CSP_FRAME_EXTRA"
+    else
+        nope "run script forwards HERMES_WEBUI_CSP_FRAME_EXTRA" "not found in run script"
+    fi
+}
+
 echo ""
 echo "=== hermes WebUI: compose port ==="
 
@@ -200,6 +214,7 @@ test_s6_service_installed
 test_service_type
 test_run_script_shape
 test_launcher_env_values
+test_csp_frame_extra_forwarded
 test_compose_publishes_loopback
 test_deploy_poll_is_bounded
 
