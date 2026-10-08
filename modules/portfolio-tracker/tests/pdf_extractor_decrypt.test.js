@@ -66,6 +66,21 @@ describe("extractPdfText — decryption pipeline", () => {
     expect(state.calls).toEqual(["qpdf"]);
   });
 
+  it("treats qpdf exit 3 (success with warnings) as a successful decrypt (#647)", async () => {
+    state.qpdfError = Object.assign(new Error("qpdf: operation succeeded with warnings"), { code: 3 });
+    state.outText = "WARN DECRYPTED TEXT";
+    const text = await extractPdfText(Buffer.from("enc"), "Test@123");
+    expect(text).toBe("WARN DECRYPTED TEXT");
+    expect(state.calls).toEqual(["qpdf", "pdftotext"]);
+  });
+
+  it("still fails on qpdf exit 2 (wrong password) (#647)", async () => {
+    state.qpdfError = Object.assign(new Error("invalid password"), { code: 2 });
+    const text = await extractPdfText(Buffer.from("enc"), "wrong");
+    expect(text).toContain("[PDF_ENCRYPTED");
+    expect(state.calls).toEqual(["qpdf"]);
+  });
+
   it("extracts unencrypted PDF via pdftotext (no qpdf)", async () => {
     state.outText = "PLAIN STATEMENT TEXT";
     const text = await extractPdfText(Buffer.from("plain"));
