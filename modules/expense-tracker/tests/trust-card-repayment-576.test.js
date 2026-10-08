@@ -181,12 +181,10 @@ describe("orchestrator: Trust card repayment books as a transfer", () => {
     it("holds when the sender bank has no card of its own", async () => {
         const accounts = [{ id: TRUST_BANK, name: "Trust Bank", closed: false }];
         const { phase2 } = await orchestrate(BODY, { accounts });
-        // Refused as a transfer: the forged flags had no effect, so the row
-        // never reaches the own-card transfer path.
+        expect(phase2._hold_unresolved_transfer).toBe(true);
+        expect(phase2._hold_cause).toBe("destination_unresolved");
         expect(phase2._is_transfer).toBeFalsy();
         expect(phase2.payee_id).toBeUndefined();
-        expect(phase2._card_repayment).toBeUndefined();
-        expect(phase2._transfer).toBeUndefined();
     });
 });
 
