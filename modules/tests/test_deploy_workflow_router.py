@@ -77,6 +77,15 @@ class DeployWorkflowRouterTests(unittest.TestCase):
         self.assertIn("LLM_FINAL_FALLBACK_PROVIDER=${LLM_FINAL_FALLBACK_PROVIDER:-deepseek}", env_list)
         self.assertIn("LLM_FINAL_FALLBACK_MODEL=${LLM_FINAL_FALLBACK_MODEL:-deepseek-flash}", env_list)
 
+    def test_compose_passes_portfolio_tracker_router_env_vars(self):
+        compose = yaml.safe_load(COMPOSE_FILE.read_text(encoding="utf-8"))
+        env_list = compose["services"]["portfolio-tracker"]["environment"]
+
+        self.assertIn("LLM_BASE_URL=${LLM_BASE_URL:-http://codex-router:4100/v1}", env_list)
+        self.assertIn("LLM_MODEL=${LLM_MODEL:-auto-thinking}", env_list)
+        self.assertIn("LLM_API_KEY=${LLM_API_KEY:-}", env_list)
+        self.assertIn("LLM_REASONING_EFFORT=${LLM_REASONING_EFFORT:-low}", env_list)
+
     def test_external_provider_keys_reach_the_router_and_not_hermes(self):
         # codex-router owns these providers. PR #443 retired the Zen key while
         # the router had no Zen route; the router routes to Zen, Go and Command

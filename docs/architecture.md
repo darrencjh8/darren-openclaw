@@ -24,7 +24,7 @@ graph TB
     ET -->|"REST"| ACT
     PT -->|"REST"| ACT
     ET -->|"LLM responses via LLM_BASE_URL"| ROUTER
-    PT -->|"LLM"| ROUTER
+    PT -->|"LLM responses via LLM_BASE_URL"| ROUTER
 
     MAIL["Bank / broker email<br/>IMAP :993"]
     MAIL -->|"IMAP IDLE"| ET
