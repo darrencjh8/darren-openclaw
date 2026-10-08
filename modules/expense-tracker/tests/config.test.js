@@ -49,7 +49,7 @@ describe("Config", () => {
         });
 
         expect(config.llmModel).toBe("auto-thinking");
-        expect(config.llmFallbackModel).toBe("gpt-5.6-terra");
+        expect(config.llmFallbackModel).toBe("");
         expect(config.llmFinalFallbackProvider).toBe("deepseek");
         expect(config.llmFinalFallbackModel).toBe("deepseek-flash");
     });

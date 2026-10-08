@@ -11,10 +11,12 @@ import {
 
 // ── Mock openai ──────────────────────────────────────────────────────────
 const mockCreate = vi.fn();
+const mockResponsesCreate = vi.fn();
 
 vi.mock("openai", () => ({
   default: vi.fn(() => ({
     chat: { completions: { create: mockCreate } },
+    responses: { create: mockResponsesCreate },
   })),
 }));
 
@@ -86,15 +88,16 @@ describe("classifyEmail", () => {
     expect(result).toBe("statement");
   });
 
-  it("uses GPT-5-compatible temperature through LiteLLM", async () => {
+  it("calls the router route over the Responses API, then falls back to DeepSeek chat", async () => {
     const routerConfig = {
       llmProvider: "litellm",
       llmApiKey: "router-key",
       llmBaseUrl: "http://codex-router:4100/v1",
-      llmModel: "gpt-5.6-luna",
-      llmFallbackModel: "gpt-5.6-terra",
+      llmModel: "auto-thinking",
+      llmFallbackModel: "",
       deepseekApiKey: "deepseek-key",
     };
+    mockResponsesCreate.mockRejectedValueOnce(new Error("router down"));
     mockCreate.mockResolvedValueOnce({
       choices: [{ message: { content: "transaction" } }],
     });
@@ -106,9 +109,11 @@ describe("classifyEmail", () => {
       routerConfig,
     );
 
+    expect(mockResponsesCreate.mock.calls[0][0].model).toBe("auto-thinking");
+    expect(mockResponsesCreate.mock.calls[0][0].input[0].role).toBe("system");
     const call = mockCreate.mock.calls[0][0];
-    expect(call.model).toBe("gpt-5.6-luna");
-    expect(call.temperature).toBe(1);
+    expect(call.model).toBe("deepseek-flash");
+    expect(call.temperature).toBe(0);
   });
 
   it.each([

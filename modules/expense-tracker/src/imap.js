@@ -9,6 +9,9 @@ import { simpleParser } from "mailparser";
 import { logger } from "./logging.js";
 import { extractPdfFromBuffer } from "./extractors.js";
 
+/** Minutes before an email the LLM could not read is tried again (#694). */
+const LLM_RETRY_MINUTES = 5;
+
 export class ImapIdleHandler {
     IDLE_TIMEOUT = 15; // fast retry, dedup prevents re-processing
     RECONNECT_DELAY = 5;
@@ -164,7 +167,16 @@ export class ImapIdleHandler {
                         });
                         const result = await callback(msg);
                         if (this._dedup) {
-                            this._dedup.recordProcessed(msg.msg_id);
+                            // An LLM outage leaves the email unread and retries it
+                            // soon instead of waiting out the full cooldown (#694).
+                            if (result?.action === "llm_unavailable") {
+                                this._dedup.recordProcessed(
+                                    msg.msg_id,
+                                    LLM_RETRY_MINUTES,
+                                );
+                            } else {
+                                this._dedup.recordProcessed(msg.msg_id);
+                            }
                             // A message that reached a verdict must book nothing
                             // on a later pass, even after the retry cooldown
                             // expires (issue #557). An uncertain outcome stays

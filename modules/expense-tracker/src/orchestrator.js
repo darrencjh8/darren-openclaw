@@ -35,6 +35,18 @@ import {
     isBookableAmountCents,
 } from "./amounts.js";
 import { logger } from "./logging.js";
+import {
+    LLMUnavailableError,
+    deterministicError,
+    isOutageShaped,
+    toResponsesInput,
+    toResponsesTools,
+    toResponsesToolChoice,
+    fromResponses,
+} from "./llm-responses.js";
+
+/** Consecutive LLM-outage retries of one email per process before the 12h cooldown applies (#694). */
+const MAX_LLM_OUTAGE_RETRIES = 12;
 
 export class LLMClient {
     constructor(config) {
@@ -91,6 +103,7 @@ export class LLMClient {
     async chat(messages, tools, toolChoice, opts = {}) {
         const retryDelays = [1000, 2000, 4000];
         let lastError;
+        const failures = [];
         for (const route of this._routes) {
             const client = route === this._routes[0]
                 ? this._client
@@ -98,16 +111,23 @@ export class LLMClient {
                     apiKey: route.apiKey || "",
                     baseURL: route.baseURL,
                 });
-            const kwargs = {
-                model: route.model,
-                messages,
-                temperature: route.provider === "deepseek" ? (opts.temperature ?? 0.1) : 1,
-            };
-            if (tools) {
-                kwargs.tools = tools;
-                kwargs.tool_choice = toolChoice || "auto";
-            }
+            const useResponses = route.provider !== "deepseek";
             const reasoning = opts.reasoning || "auto";
+            // The router serves its pool on /v1/responses only (#694); the
+            // direct DeepSeek API has no Responses endpoint, so it stays on chat.
+            const kwargs = useResponses
+                ? { model: route.model, input: toResponsesInput(messages) }
+                : {
+                    model: route.model,
+                    messages,
+                    temperature: opts.temperature ?? 0.1,
+                };
+            if (tools) {
+                kwargs.tools = useResponses ? toResponsesTools(tools) : tools;
+                kwargs.tool_choice = useResponses
+                    ? toResponsesToolChoice(toolChoice || "auto")
+                    : toolChoice || "auto";
+            }
             if (route.provider === "deepseek") {
                 if (reasoning !== "disabled" && (reasoning === "adaptive" || !toolChoice || toolChoice === "auto")) {
                     // This route rejects any other `thinking.type` with
@@ -124,15 +144,18 @@ export class LLMClient {
                     };
                 }
             } else if (reasoning !== "disabled") {
-                kwargs.reasoning_effort = this._reasoningEffort;
+                kwargs.reasoning = { effort: this._reasoningEffort };
             }
             for (let attempt = 0; attempt < route.retries; attempt++) {
                 try {
-                    const response = await Promise.race([
-                        client.chat.completions.create(kwargs),
+                    const raw = await Promise.race([
+                        useResponses
+                            ? client.responses.create(kwargs)
+                            : client.chat.completions.create(kwargs),
                         new Promise((_, reject) =>
                             setTimeout(() => reject(new Error("timeout")), 60000),
                     )]);
+                    const response = useResponses ? fromResponses(raw) : raw;
                     this._mergeReasoning(response, route.provider);
 
                     // Detect a truncated/incomplete response (e.g. DeepSeek's
@@ -156,7 +179,7 @@ export class LLMClient {
                             finishReason !== "stop" &&
                             finishReason !== "tool_calls")
                     ) {
-                        throw new Error(
+                        throw deterministicError(
                             `LLM response truncated or incomplete (finish_reason: ${finishReason || "none"})`,
                         );
                     }
@@ -169,8 +192,24 @@ export class LLMClient {
                     }
                 }
             }
+            failures.push({ route, error: lastError });
+            logger.warn({
+                event: "llm_route_failed",
+                provider: route.provider,
+                model: route.model,
+                status: lastError?.status,
+                error: lastError?.message,
+            });
         }
-        throw lastError;
+        const summary = failures
+            .map(({ route, error }) => `${route.model}: ${error?.message}`)
+            .join("; ");
+        if (failures.some(({ error }) => isOutageShaped(error))) {
+            throw new LLMUnavailableError(`All LLM routes failed (${summary})`);
+        }
+        const error = new Error(`All LLM routes failed (${summary})`);
+        error.cause = lastError;
+        throw error;
     }
 }
 
@@ -511,6 +550,7 @@ export class AgentOrchestrator {
     constructor(config, tools) {
         this._config = config;
         this._llm = new LLMClient(config);
+        this._llmOutageTries = new Map();
         this._tools = tools;
     }
 
@@ -596,6 +636,28 @@ export class AgentOrchestrator {
         }
     }
 
+    /**
+     * Every LLM route failed for a reason that may clear up (#694). The email is
+     * left retryable with a short cooldown; the user hears about it once per
+     * email, and after MAX_LLM_OUTAGE_RETRIES the ordinary 12h cooldown applies
+     * so a request every route rejects cannot loop forever.
+     */
+    async _llmUnavailableResult(msgId, from, subject, error) {
+        logger.error({ event: "llm_unavailable", error: error.message });
+        const tries = (this._llmOutageTries.get(msgId) || 0) + 1;
+        this._llmOutageTries.set(msgId, tries);
+        if (tries === 1) {
+            await this._tools.executeTool("notify_user", {
+                message: `LLM unavailable for email from "${from || "unknown"}" re: "${subject || "unknown"}"; it stays unread and will be retried.`,
+            });
+        }
+        if (tries > MAX_LLM_OUTAGE_RETRIES) {
+            this._llmOutageTries.delete(msgId);
+            return { action: "notified", details: "LLM unavailable; retry cap reached" };
+        }
+        return { action: "llm_unavailable", details: error.message };
+    }
+
     async _processEmailInternal(msgId, rawEmail, imapHandler, from, subject) {
         this._tools.setEmailContext(msgId, rawEmail, imapHandler);
 
@@ -626,10 +688,16 @@ export class AgentOrchestrator {
 
         // Phase 1: LLM Analysis
         const senderBank = bankFromSender(from);
-        const phase1 = await this._runPhase1(emailText, {
-            senderBank,
-            receivedAt: this._emailReceivedAt(rawEmail),
-        });
+        let phase1;
+        try {
+            phase1 = await this._runPhase1(emailText, {
+                senderBank,
+                receivedAt: this._emailReceivedAt(rawEmail),
+            });
+        } catch (error) {
+            if (!(error instanceof LLMUnavailableError)) throw error;
+            return this._llmUnavailableResult(msgId, from, subject, error);
+        }
         if (!phase1) {
             const notified = await this._tools.executeTool("notify_user", {
                 message: `Couldn't understand email from "${from || "unknown"}" re: "${subject || "unknown"}".`,
@@ -1315,7 +1383,8 @@ export class AgentOrchestrator {
                 raw_merchant_descriptor: String(parsed?.merchant || ""),
             };
             return this._resolveMovementToOutput(movement);
-        } catch {
+        } catch (error) {
+            if (error instanceof LLMUnavailableError) throw error;
             return null;
         }
     }
@@ -1893,6 +1962,9 @@ export class AgentOrchestrator {
 
                 return output;
             } catch (e) {
+                // A provider outage is not a parse failure: surface it so the
+                // email is retried instead of reported as not understood (#694).
+                if (e instanceof LLMUnavailableError) throw e;
                 logger.error({
                     event: "phase1_error",
                     error: e.message,

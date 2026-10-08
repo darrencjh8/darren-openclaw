@@ -35,9 +35,7 @@ export class Config {
       (this.llmProvider === "deepseek" ? "deepseek-flash" : "auto-thinking");
     this.llmApiKey = env.LLM_API_KEY || env.DEEPSEEK_API_KEY || "";
     this.llmReasoningEffort = env.LLM_REASONING_EFFORT || "low";
-    this.llmFallbackModel =
-      env.LLM_FALLBACK_MODEL ||
-      (this.llmProvider === "deepseek" ? "" : "gpt-5.6-terra");
+    this.llmFallbackModel = env.LLM_FALLBACK_MODEL || "";
     this.llmFinalFallbackProvider = env.LLM_FINAL_FALLBACK_PROVIDER || "deepseek";
     this.llmFinalFallbackModel =
       env.LLM_FINAL_FALLBACK_MODEL || "deepseek-flash";
