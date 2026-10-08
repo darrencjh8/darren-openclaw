@@ -1299,11 +1299,14 @@ export class AgentOrchestrator {
                 currency: movement.currency,
                 occurred_at: movement.occurred_at,
             });
-            funding = leg
-                ? accounts.find((a) => a.id === leg.source_account_id && !a.closed) || null
-                : null;
-            // (b) the holder's only open cash account at this bank
-            if (!funding && cashAccounts.length === 1) funding = cashAccounts[0];
+            if (leg) {
+                // A booked leg is authoritative: an unusable source holds
+                // rather than falling back, or the pair is booked twice.
+                funding = accounts.find((a) => a.id === leg.source_account_id && !a.closed) || null;
+            } else if (cashAccounts.length === 1) {
+                // (b) the holder's only open cash account at this bank
+                funding = cashAccounts[0];
+            }
         }
         if (!card || !cardPayee || !funding || funding.id === card.id) {
             return {
@@ -2593,13 +2596,13 @@ export class AgentOrchestrator {
                 // destination wording alone ("... CREDIT CARDS") identifies a
                 // card PRODUCT, not one of the holder's own accounts, and the
                 // same wording is used for cards that are not the holder's.
-                const cardPayee = output._card_repayment === true && !output._transfer?.destination_account_id
+                const cardPayee = output._card_repayment === true
                     ? payees.find((payee) =>
                         !payee.transfer_acct &&
                         payee.name?.toLowerCase() === output.payee_name.toLowerCase(),
                     )
                     : null;
-                if (output._card_repayment === true && !output._transfer?.destination_account_id) {
+                if (output._card_repayment === true) {
                     if (!cardPayee || !output.account_id) {
                         // Either the card cannot be linked to a payee, or the
                         // funding side is unknown. Both mean the money cannot

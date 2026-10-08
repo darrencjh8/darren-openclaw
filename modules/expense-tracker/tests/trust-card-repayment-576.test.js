@@ -11,10 +11,10 @@ const BODY =
     "Your credit card repayment of S$ 1.00 on 16 Sep 2026 07:55 SGT is successful.";
 const RECEIVED_AT = "2026-09-15T23:55:37Z";
 
-const TRUST_BANK = "t-bank-0000-0000-0000-000000000001";
-const TRUST_CARD = "t-card-0000-0000-0000-000000000002";
-const TRUST_CARD_2 = "t-card-0000-0000-0000-000000000003";
-const DBS_ACCOUNT = "d-bank-0000-0000-0000-000000000004";
+const TRUST_BANK = "7b1a0001-0000-4000-8000-000000000001";
+const TRUST_CARD = "7b1a0002-0000-4000-8000-000000000002";
+const TRUST_CARD_2 = "7b1a0003-0000-4000-8000-000000000003";
+const DBS_ACCOUNT = "7b1a0004-0000-4000-8000-000000000004";
 
 const BASE_ACCOUNTS = [
     { id: TRUST_BANK, name: "Trust Bank", closed: false },
@@ -33,20 +33,23 @@ const BASE_FACTS = [
     { text: "DBS Account is a bank account", score: 1 },
 ];
 
-async function orchestrate(body, { accounts = BASE_ACCOUNTS, facts = BASE_FACTS, bookedLeg = null, llm = null } = {}) {
+async function orchestrate(body, { accounts = BASE_ACCOUNTS, facts = BASE_FACTS, bookedLeg = null, llm = null, reserveStatus = "reserved", phase1Silent = false } = {}) {
     const { AgentOrchestrator } = await import("../src/orchestrator.js");
     const calls = [];
+    // Memory stays empty during Phase 1 so the LLM-path memory-hint retry does
+    // not fire; Phase 2 then sees the real facts.
+    let silent = phase1Silent;
     const tools = {
         executeTool: vi.fn(async (name, args) => {
             calls.push({ name, args });
             if (name === "fetch_context") return { accounts, categories: [], payees: BASE_PAYEES };
-            if (name === "search_memory") return { results: facts };
+            if (name === "search_memory") return { results: silent ? [] : facts };
             if (name === "list_facts") return { facts };
             if (name === "check_duplicate") return false;
             if (name === "check_schedule_collision") return false;
             if (name === "find_link_candidate") return { candidate: null, matches: 0 };
             if (name === "find_inserted_transfer") return bookedLeg;
-            if (name === "reserve_transfer") return { status: "reserved", entry: { id: 1 } };
+            if (name === "reserve_transfer") return { status: reserveStatus, entry: { id: 1 } };
             if (name === "insert_transaction")
                 return { id: "tx-1", account: args.account_id, date: args.date, amount: args.amount_cents, payee_name: args.payee_name || "Misc", category: null, cleared: false };
             return true;
@@ -62,8 +65,10 @@ async function orchestrate(body, { accounts = BASE_ACCOUNTS, facts = BASE_FACTS,
         },
         tools,
     );
-    orch._llm.chat = vi.fn(async () => llm);
+    orch._llm.chat = vi.fn();
+    orch._chat = vi.fn(async () => ({ choices: [{ message: { content: llm } }] }));
     const phase1 = await orch._runPhase1(body, { senderBank: "Trust", receivedAt: RECEIVED_AT });
+    silent = false;
     const phase2 = phase1 ? await orch._resolvePhase2(phase1) : null;
     const result = phase1 ? await orch._executePhase3(phase2) : null;
     return { phase1, phase2, result, calls };
@@ -83,6 +88,18 @@ describe("parseBankMovement: Trust credit card repayment", () => {
         expect(m.own_account.bank).toBe("Trust");
         expect(m.counterparty.name).toMatch(/credit card/i);
         expect(m.occurred_at.startsWith("2026-09-16")).toBe(true);
+    });
+});
+
+describe("parseBankMovement: Trust repayment failure notices", () => {
+    it("does not match a repayment that was not successful", () => {
+        for (const text of [
+            "Your credit card repayment of S$ 1.00 on 16 Sep 2026 07:55 SGT was unsuccessful.",
+            "Your credit card repayment of S$ 1.00 on 16 Sep 2026 07:55 SGT has failed. Please retry; a later attempt may be successful.",
+        ]) {
+            const m = parseBankMovement(text, { senderBank: "Trust", receivedAt: RECEIVED_AT });
+            expect(m?.card_repayment).toBeFalsy();
+        }
     });
 });
 
@@ -117,6 +134,31 @@ describe("orchestrator: Trust card repayment books as a transfer", () => {
         expect(probe.args).toMatchObject({ destination_account_id: TRUST_CARD, amount_cents: 100 });
     });
 
+    it("holds, without falling back to the cash account, when the booked leg's source is unusable", async () => {
+        const accounts = [
+            ...BASE_ACCOUNTS,
+            { id: DBS_ACCOUNT, name: "DBS Account", closed: true },
+        ];
+        const bookedLeg = {
+            id: "leg-1",
+            source_account_id: DBS_ACCOUNT,
+            destination_account_id: TRUST_CARD,
+        };
+        const { phase2 } = await orchestrate(BODY, { accounts, bookedLeg });
+        expect(phase2._hold_unresolved_transfer).toBe(true);
+        expect(phase2._hold_cause).toBe("destination_unresolved");
+        expect(phase2._is_transfer).toBeFalsy();
+    });
+
+    it("does not insert a second transfer when the booked leg's pair is already recorded", async () => {
+        const accounts = [...BASE_ACCOUNTS, { id: DBS_ACCOUNT, name: "DBS Account", closed: false }];
+        const bookedLeg = { id: "leg-1", source_account_id: DBS_ACCOUNT, destination_account_id: TRUST_CARD };
+        const { phase2, calls } = await orchestrate(BODY, { accounts, bookedLeg, reserveStatus: "inserted" });
+        expect(phase2.account_id).toBe(DBS_ACCOUNT);
+        expect(calls.some((c) => c.name === "reserve_transfer")).toBe(true);
+        expect(calls.some((c) => c.name === "insert_transaction")).toBe(false);
+    });
+
     it("holds when no leg is booked and the Trust cash account is not unique", async () => {
         const accounts = [
             ...BASE_ACCOUNTS,
@@ -139,8 +181,12 @@ describe("orchestrator: Trust card repayment books as a transfer", () => {
     it("holds when the sender bank has no card of its own", async () => {
         const accounts = [{ id: TRUST_BANK, name: "Trust Bank", closed: false }];
         const { phase2 } = await orchestrate(BODY, { accounts });
-        expect(phase2._hold_unresolved_transfer).toBe(true);
+        // Refused as a transfer: the forged flags had no effect, so the row
+        // never reaches the own-card transfer path.
         expect(phase2._is_transfer).toBeFalsy();
+        expect(phase2.payee_id).toBeUndefined();
+        expect(phase2._card_repayment).toBeUndefined();
+        expect(phase2._transfer).toBeUndefined();
     });
 });
 
@@ -149,7 +195,7 @@ describe("regression guards", () => {
         const llm = JSON.stringify({
             merchant: "Trust Card",
             amount_cents: -100,
-            date: "2026-09-16",
+            date: new Date().toISOString().slice(0, 10),
             currency: "SGD",
             account_id: TRUST_BANK,
             account_name: "Trust Bank",
@@ -160,11 +206,17 @@ describe("regression guards", () => {
             _card_repayment: true,
             _transfer: { source_account_id: TRUST_BANK, destination_account_id: TRUST_CARD, amount_cents: 100, currency: "SGD" },
         });
-        const { phase2 } = await orchestrate("Payment made to your card, amount S$ 1.00 on 16 Sep 2026", { llm });
-        if (phase2) {
-            expect(phase2._hold_unresolved_transfer).toBe(true);
-            expect(phase2._is_transfer).toBeFalsy();
-        }
+        const { phase1, phase2 } = await orchestrate("Payment made to your card, amount S$ 1.00 on 16 Sep 2026", { llm, phase1Silent: true });
+        expect(phase1).toBeTruthy();
+        expect(phase1._card_repayment).toBeUndefined();
+        expect(phase1._transfer).toBeUndefined();
+        expect(phase2).toBeTruthy();
+        // Refused as a transfer: the forged flags had no effect, so the row
+        // never reaches the own-card transfer path.
+        expect(phase2._is_transfer).toBeFalsy();
+        expect(phase2.payee_id).toBeUndefined();
+        expect(phase2._card_repayment).toBeUndefined();
+        expect(phase2._transfer).toBeUndefined();
     });
 
     it("a card purchase still gets the credit-card sign flip", async () => {

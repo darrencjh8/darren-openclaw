@@ -365,7 +365,7 @@ export function parseBankMovement(text, { senderBank = null, receivedAt } = {}) 
   // orchestrator to resolve both legs from the holder's accounts and to hold
   // when it cannot do so unambiguously (issue #576).
   const trustRepayment = body.replace(/\s+/g, " ").match(
-    /credit\s+card\s+repayment\s+of\s+(SGD|S\$)\s*([\d,.]+)\s+on\s+(\d{1,2}\s+[A-Za-z]{3}\s+\d{4})\s+(\d{1,2}[:.]\d{2}\s*(?:AM|PM)?)\s*SGT\b.*?\bsuccessful/i,
+    /credit\s+card\s+repayment\s+of\s+(SGD|S\$)\s*([\d,.]+)\s+on\s+(\d{1,2}\s+[A-Za-z]{3}\s+\d{4})\s+(\d{1,2}[:.]\d{2}\s*(?:AM|PM)?)\s*SGT\s+is\s+successful\b/i,
   );
   if (trustRepayment && /^trust$/i.test(senderBank || "")) {
     const occurredAt = isoDateTime(trustRepayment[3], trustRepayment[4], receivedAt);
