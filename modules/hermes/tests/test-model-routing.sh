@@ -57,8 +57,8 @@ assert config["agent"]["reasoning_effort"] == "high"
 assert config["compression"]["threshold_tokens"] == 300000, (
     f"compression.threshold_tokens: expected 300000, got {config['compression'].get('threshold_tokens')!r}"
 )
-assert config["compression"]["threshold"] == 0.50, (
-    f"compression.threshold: expected 0.50, got {config['compression'].get('threshold')!r}"
+assert config["compression"]["threshold"] == 0.90, (
+    f"compression.threshold: expected 0.90, got {config['compression'].get('threshold')!r}"
 )
 assert config["compression"]["enabled"] is True, (
     f"compression.enabled: expected True, got {config['compression'].get('enabled')!r}"
