@@ -470,8 +470,12 @@ export function parseBankMovement(text, { senderBank = null, receivedAt } = {}) 
   // SC states the currency and the amount on SEPARATE labels, so the
   // `Amount : <CCY> <n>` guard below never matches and the whole alert used to
   // fall through to the LLM extractor. That is not cosmetic: this is the only
-  // alert that names the SOURCE account of an own-account transfer, and a
-  // receiving-bank alert never can (it names the sender as a person). Losing it
+  // alert that names the SOURCE account of an own-account transfer as a bare
+  // masked suffix, with no account name or bank on the value (which is why this
+  // branch reads `From account:` / `To account:` directly rather than via
+  // `field()`); a receiving-bank alert names the sender as a person instead,
+  // never an account. (OCBC also names a source account, but with a name and
+  // bank attached.) Losing it
   // means the pair cannot link — the receiving side holds and this side books
   // unlinked, so the transfer is booked twice or not at all. That is the
   // source-account-alert half of #598, tracked on its own at #641.
