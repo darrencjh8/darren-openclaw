@@ -1028,6 +1028,44 @@ case "$mt_migrate_out" in
     *) nope "migration report" "got: $mt_migrate_out" ;;
 esac
 
+# An install created under the old 09:00 default moves to 08:00 once (#579).
+# Only the exact legacy value is rewritten; a custom time is kept (above).
+echo ""
+echo "=== memory-triage legacy 09:00 schedule migration (#579) ==="
+rm -rf "$TMPDIR/cron-0900"
+mkdir -p "$TMPDIR/cron-0900"
+python3 - "$TMPDIR/cron-0900/jobs.json" <<'PY'
+import json, sys
+json.dump({"jobs": [{
+    "id": "old0900job", "name": "memory-triage", "prompt": "old",
+    "skills": ["hermes-troubleshooting"], "skill": "hermes-troubleshooting",
+    "schedule": {"kind": "cron", "expr": "0 9 * * *", "display": "0 9 * * *"},
+    "schedule_display": "0 9 * * *", "enabled": False, "deliver": "local",
+}]}, open(sys.argv[1], "w"))
+PY
+mt_0900=${mt_block//\/opt\/data\/cron\/jobs.json/$TMPDIR\/cron-0900\/jobs.json}
+mt_0900=${mt_0900//\/opt\/data\/config.yaml/$TMPDIR\/triage-config.yaml}
+mt_0900_out=$(python3 -c "$mt_0900" 2>&1)
+mt_0900_res=$(python3 - "$TMPDIR/cron-0900/jobs.json" <<'PY'
+import json, sys
+j = json.load(open(sys.argv[1]))["jobs"][0]
+ok = (j["schedule"].get("expr") == "0 8 * * *" and j["schedule"].get("display") == "0 8 * * *"
+      and j.get("schedule_display") == "0 8 * * *" and j.get("enabled") is False
+      and j.get("deliver") == "local")
+print("pass" if ok else "fail " + json.dumps(j.get("schedule")) + " " + str(j.get("schedule_display")))
+PY
+)
+[ "$mt_0900_res" = "pass" ] && ok "legacy 0 9 * * * schedule migrated to 0 8 * * *" || nope "legacy schedule migration" "$mt_0900_res"
+case "$mt_0900_out" in
+    *migrated*schedule*) ok "schedule migration is reported" ;;
+    *) nope "schedule migration report" "got: $mt_0900_out" ;;
+esac
+mt_0900_again=$(python3 -c "$mt_0900" 2>&1)
+case "$mt_0900_again" in
+    *unchanged*) ok "schedule migration is idempotent" ;;
+    *) nope "schedule migration idempotent" "got: $mt_0900_again" ;;
+esac
+
 # The routing rule must name the topic-file directory the seed creates.
 grep -q "/opt/data/memories/topics" "$SEED_SCRIPT" \
     && ok "seed creates the topic-file directory" \

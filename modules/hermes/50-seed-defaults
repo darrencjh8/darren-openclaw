@@ -722,6 +722,19 @@ else:
     changed = [key for key, value in MANAGED.items() if existing.get(key) != value]
     for key in changed:
         existing[key] = MANAGED[key]
+    # One-time move off the old 09:00 default (#577/#579). Only the exact legacy
+    # value is rewritten, so a dashboard-chosen time is never reverted. A later
+    # default change needs its own entry here.
+    LEGACY_SCHEDULE = "0 9 * * *"
+    schedule = existing.get("schedule")
+    if (
+        isinstance(schedule, dict)
+        and schedule.get("expr") == LEGACY_SCHEDULE
+        and existing.get("schedule_display", LEGACY_SCHEDULE) == LEGACY_SCHEDULE
+    ):
+        existing["schedule"] = dict(DEFAULTS["schedule"])
+        existing["schedule_display"] = DEFAULTS["schedule_display"]
+        changed.append("schedule")
     if changed:
         print("cron: memory-triage migrated: " + ", ".join(sorted(changed)))
     else:
