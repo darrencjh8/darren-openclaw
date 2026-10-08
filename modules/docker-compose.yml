@@ -281,6 +281,9 @@ services:
             - SOUL_VOICE_RULES=${SOUL_VOICE_RULES}
             - SOUL_DELEGATION=${SOUL_DELEGATION}
             - HERMES_DASHBOARD=0
+            # WebUI CSP frame-ancestors allowlist for Tailscale-serve framing.
+            # Empty default preserves upstream locked-down behaviour locally.
+            - HERMES_WEBUI_CSP_FRAME_EXTRA=${HERMES_WEBUI_CSP_FRAME_EXTRA:-}
             - FIRECRAWL_API_KEY=${FIRECRAWL_API_KEY}
             - NOTION_API_KEY=${NOTION_API_KEY}
             - POLLINATIONS_API_KEY=${POLLINATIONS_API_KEY}
