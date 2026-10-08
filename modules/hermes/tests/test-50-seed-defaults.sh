@@ -788,10 +788,10 @@ config = yaml.safe_load(open(sys.argv[1], encoding="utf-8"))
 print((config.get("compression") or {}).get("threshold"))
 PY
 )
-if [ "$seeded_threshold" = "0.5" ]; then
-    ok "config: compression.threshold is 0.50"
+if [ "$seeded_threshold" = "0.9" ]; then
+    ok "config: compression.threshold is 0.90"
 else
-    nope "compression.threshold" "expected 0.5, got $seeded_threshold"
+    nope "compression.threshold" "expected 0.9, got $seeded_threshold"
 fi
 
 # The merge must write the baked bytes unchanged, not re-serialise the parsed
@@ -862,7 +862,7 @@ def trigger(window):
 
 
 failures = []
-for window, expected in ((272_000, 204_000), (400_000, 300_000), (1_048_576, 300_000)):
+for window, expected in ((272_000, 244_800), (400_000, 300_000), (1_048_576, 300_000)):
     try:
         got = trigger(window)
     except ValueError as exc:
