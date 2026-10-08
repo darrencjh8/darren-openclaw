@@ -857,6 +857,15 @@ export class AgentOrchestrator {
             ? this._collectSuffixMappings(movement, resolved, accounts, mappings)
             : [];
         const date = movement.occurred_at?.slice(0, 10);
+        // Trust-style card repayment (issue #576): the alert names neither
+        // account, so the destination is the sender bank's ONLY open credit card
+        // and the funding side is a booked journal leg, else the bank's only
+        // open cash account. Anything less certain is held.
+        if (movement.card_repayment === true && movement.direction === "outgoing" && date) {
+            return this._resolveCardRepaymentMovement(movement, {
+                accounts, budgetId, date, suffixMappings, payees: ctx?.payees || [],
+            });
+        }
         if (!source || !date) {
             // An outgoing movement whose counterparty resolves to another of the
             // user's own accounts is an internal transfer, not a merchant
@@ -1256,6 +1265,99 @@ export class AgentOrchestrator {
             };
         }
         return null;
+    }
+
+    /**
+     * Resolve a parser-flagged card repayment that names no account. Returns a
+     * transfer booked on the funding account, or a destination_unresolved hold.
+     */
+    async _resolveCardRepaymentMovement(movement, { accounts, budgetId, date, suffixMappings, payees }) {
+        const bank = movement.own_account?.bank;
+        const atBank = accounts.filter(
+            (account) => !account.closed && bankFromText(account.name) === bank,
+        );
+        const typed = await Promise.all(
+            atBank.map(async (account) => ({
+                account,
+                isCard: (await this._detectAccountType(account.name)) === "credit card",
+            })),
+        );
+        const cards = typed.filter((t) => t.isCard).map((t) => t.account);
+        const cashAccounts = typed.filter((t) => !t.isCard).map((t) => t.account);
+        const card = cards.length === 1 ? cards[0] : null;
+        const cardPayee = card
+            ? payees.find((payee) => payee.transfer_acct === card.id) || null
+            : null;
+        const amount = Math.abs(movement.amount_cents);
+        let funding = null;
+        if (card && cardPayee) {
+            // (a) a journal leg the other side already booked into the card
+            const leg = await this._findBookedTransferLeg({
+                budget_id: budgetId,
+                account_id: card.id,
+                amount_cents: amount,
+                currency: movement.currency,
+                occurred_at: movement.occurred_at,
+            });
+            funding = leg
+                ? accounts.find((a) => a.id === leg.source_account_id && !a.closed) || null
+                : null;
+            // (b) the holder's only open cash account at this bank
+            if (!funding && cashAccounts.length === 1) funding = cashAccounts[0];
+        }
+        if (!card || !cardPayee || !funding || funding.id === card.id) {
+            return {
+                merchant: movement.counterparty?.name || "Credit card repayment",
+                amount_cents: -amount,
+                date,
+                currency: movement.currency,
+                account_id: "",
+                account_name: "",
+                budget_id: budgetId,
+                action: "insert",
+                payee_name: "Misc",
+                category_id: null,
+                raw_description: `Transfer to ${movement.counterparty?.name || "an unverified account"}`,
+                raw_merchant_descriptor: "",
+                notes: "",
+                reasoning: "Held: card repayment could not be matched to exactly one own card and funding account",
+                notify_message: "",
+                _suffix_mappings: suffixMappings,
+                _hold_unresolved_transfer: true,
+                _hold_cause: "destination_unresolved",
+            };
+        }
+        return {
+            merchant: card.name,
+            amount_cents: -amount,
+            date,
+            currency: movement.currency,
+            account_id: funding.id,
+            account_name: funding.name,
+            budget_id: budgetId,
+            action: "insert",
+            payee_name: card.name,
+            payee_id: cardPayee.id,
+            category_id: null,
+            raw_description: `Transfer to ${card.name}`,
+            raw_merchant_descriptor: "",
+            notes: "",
+            reasoning: "Deterministic card repayment to the holder's own card",
+            notify_message: "",
+            _suffix_mappings: suffixMappings,
+            _structured_movement: true,
+            _is_transfer: true,
+            _card_repayment: true,
+            _transfer: {
+                budget_id: budgetId,
+                source_account_id: funding.id,
+                destination_account_id: card.id,
+                currency: movement.currency,
+                amount_cents: amount,
+                occurred_at: movement.occurred_at,
+                payee_id: cardPayee.id,
+            },
+        };
     }
 
     /**
@@ -2491,13 +2593,13 @@ export class AgentOrchestrator {
                 // destination wording alone ("... CREDIT CARDS") identifies a
                 // card PRODUCT, not one of the holder's own accounts, and the
                 // same wording is used for cards that are not the holder's.
-                const cardPayee = output._card_repayment === true
+                const cardPayee = output._card_repayment === true && !output._transfer?.destination_account_id
                     ? payees.find((payee) =>
                         !payee.transfer_acct &&
                         payee.name?.toLowerCase() === output.payee_name.toLowerCase(),
                     )
                     : null;
-                if (output._card_repayment === true) {
+                if (output._card_repayment === true && !output._transfer?.destination_account_id) {
                     if (!cardPayee || !output.account_id) {
                         // Either the card cannot be linked to a payee, or the
                         // funding side is unknown. Both mean the money cannot
