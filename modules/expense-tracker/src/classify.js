@@ -101,9 +101,21 @@ export async function classifyEmail(rawEmail, subject, sender, config) {
                             .create({
                                 model: route.model,
                                 input: toResponsesInput(messages),
-                                max_output_tokens: 16,
+                                // Reasoning tokens count against the cap, so a
+                                // tiny cap returns `incomplete` with no answer.
+                                reasoning: { effort: "low" },
+                                max_output_tokens: 128,
                             })
-                            .then(fromResponses);
+                            .then((raw) => {
+                                const answer = fromResponses(raw);
+                                const choice = answer.choices[0];
+                                // An unfinished or empty answer is a failed route,
+                                // not "transaction": try the next route.
+                                if (choice.finish_reason === "length" || !choice.message.content) {
+                                    throw new Error("classification response incomplete");
+                                }
+                                return answer;
+                            });
                 response = await Promise.race([
                     call,
                     new Promise((_, reject) =>
