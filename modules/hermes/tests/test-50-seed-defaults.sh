@@ -1241,6 +1241,40 @@ probe_fallback_litter=$(ls -A "$probe_log" 2>/dev/null || true)
     || nope "boot probe: log path is a directory" \
         "rc=$probe_fallback_rc ran='$probe_fallback_ran' hook_stderr='$probe_fallback_stderr'"
 
+echo "--- seeded script pruning (#605) ---"
+seed_scripts_run() {
+    # Run the real seed-scripts block with /opt paths rewritten into $TMPDIR/sp.
+    local blk="$TMPDIR/seed-scripts-block.sh"
+    awk '/# seed-scripts:begin/{f=1} f{print} /# seed-scripts:end/{f=0}' "$SEED_SCRIPT" \
+        | sed "s#/opt/data#$TMPDIR/sp/data#g; s#/opt/hermes-defaults#$TMPDIR/sp/defaults#g" > "$blk"
+    [ -s "$blk" ] || return 1
+    sh "$blk"
+}
+SP="$TMPDIR/sp"
+rm -rf "$SP"; mkdir -p "$SP/defaults/scripts" "$SP/data/scripts"
+echo a > "$SP/defaults/scripts/keep.sh"; echo b > "$SP/defaults/scripts/old.sh"
+echo op > "$SP/data/scripts/operator.sh"
+echo stale > "$SP/data/scripts/preexisting-orphan.sh"
+
+seed_scripts_run || nope "seed-scripts block runs (first boot)" "extract or run failed"
+[ -f "$SP/data/scripts/preexisting-orphan.sh" ] && [ -f "$SP/data/scripts/operator.sh" ] \
+    && ok "first boot with no manifest prunes nothing" || nope "first boot prune" "files removed"
+[ -f "$SP/data/.hermes-seeded-scripts" ] && grep -qx old.sh "$SP/data/.hermes-seeded-scripts" \
+    && ok "first boot writes manifest" || nope "first boot manifest" "missing or incomplete"
+
+rm "$SP/defaults/scripts/old.sh"
+seed_scripts_run || true
+[ ! -e "$SP/data/scripts/old.sh" ] && ok "script removed from image is pruned" || nope "prune removed" "old.sh still present"
+[ -f "$SP/data/scripts/operator.sh" ] && [ -f "$SP/data/scripts/preexisting-orphan.sh" ] \
+    && ok "operator and pre-manifest files are kept" || nope "keep operator file" "removed"
+[ -f "$SP/data/scripts/keep.sh" ] && ! grep -qx old.sh "$SP/data/.hermes-seeded-scripts" \
+    && ok "manifest rewritten without pruned name" || nope "manifest rewrite" "$(cat "$SP/data/.hermes-seeded-scripts" 2>/dev/null)"
+
+before=$(cat "$SP/data/.hermes-seeded-scripts")
+seed_scripts_run || true
+[ "$before" = "$(cat "$SP/data/.hermes-seeded-scripts")" ] && [ -f "$SP/data/scripts/keep.sh" ] && [ -f "$SP/data/scripts/operator.sh" ] \
+    && ok "re-running is idempotent" || nope "idempotence" "state changed"
+
 echo ""
 echo "========================================="
 echo -e " Results: ${GREEN}$pass passed${NC}, ${RED}$fail failed${NC}"
