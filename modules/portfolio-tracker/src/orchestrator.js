@@ -10,6 +10,23 @@ import { fromResponses, toResponsesInput, toResponsesTools } from "./llm-respons
 
 const MAX_TOOL_ITERATIONS = 5;
 
+/**
+ * Run `fn(signal)` and abort the underlying request if it outlives `ms`,
+ * so a timed-out call is cancelled rather than left running (#697).
+ */
+async function withAbortTimeout(ms, fn) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(new Error("timeout")), ms);
+    try {
+        return await fn(controller.signal);
+    } catch (error) {
+        if (controller.signal.aborted) throw new Error("timeout");
+        throw error;
+    } finally {
+        clearTimeout(timer);
+    }
+}
+
 export class LLMClient {
     constructor(config) {
         this._reasoningEffort = config.llmReasoningEffort || "low";
@@ -21,7 +38,10 @@ export class LLMClient {
                 model: config.llmModel || "auto-thinking",
                 apiKey: config.llmApiKey || config.deepseekApiKey,
                 baseURL: config.llmBaseUrl || "http://codex-router:4100/v1",
-                retries: 3,
+                // Router per-hop budget is 300s: wait once, don't re-send a
+                // slow answer 3x (#697).
+                retries: 1,
+                timeoutMs: 300000,
             },
             {
                 responses: false,
@@ -29,6 +49,7 @@ export class LLMClient {
                 apiKey: config.deepseekApiKey,
                 baseURL: "https://api.deepseek.com/v1",
                 retries: 1,
+                timeoutMs: 60000,
             },
         ];
         for (const route of this._routes) {
@@ -69,14 +90,11 @@ export class LLMClient {
 
             for (let attempt = 0; attempt < route.retries; attempt++) {
                 try {
-                    const raw = await Promise.race([
+                    const raw = await withAbortTimeout(route.timeoutMs, (signal) =>
                         route.responses
-                            ? route.client.responses.create(kwargs)
-                            : route.client.chat.completions.create(kwargs),
-                        new Promise((_, reject) =>
-                            setTimeout(() => reject(new Error("timeout")), 60000),
-                        ),
-                    ]);
+                            ? route.client.responses.create(kwargs, { signal })
+                            : route.client.chat.completions.create(kwargs, { signal }),
+                    );
                     return route.responses ? fromResponses(raw) : raw;
                 } catch (e) {
                     if (attempt < route.retries - 1)
