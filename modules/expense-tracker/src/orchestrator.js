@@ -48,6 +48,28 @@ import {
 /** Consecutive LLM-outage retries of one email per process before the 12h cooldown applies (#694). */
 const MAX_LLM_OUTAGE_RETRIES = 12;
 
+/** Per-request budget for the direct DeepSeek API. */
+const DIRECT_TIMEOUT_MS = 60000;
+/** The router's auto-thinking per-hop budget (#697). */
+const ROUTER_TIMEOUT_MS = 300000;
+
+/**
+ * Run `fn(signal)` and abort the underlying request if it outlives `ms`,
+ * so a timed-out call is cancelled rather than left running (#697).
+ */
+async function withAbortTimeout(ms, fn) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(new Error("timeout")), ms);
+    try {
+        return await fn(controller.signal);
+    } catch (error) {
+        if (controller.signal.aborted) throw new Error("timeout");
+        throw error;
+    } finally {
+        clearTimeout(timer);
+    }
+}
+
 export class LLMClient {
     constructor(config) {
         this._provider = config.llmProvider || "deepseek";
@@ -58,7 +80,11 @@ export class LLMClient {
             model: this._model,
             apiKey: config.llmApiKey || config.deepseekApiKey,
             baseURL: config.llmBaseUrl || "https://api.deepseek.com/v1",
-            retries: 3,
+            // The router has a 300s per-hop budget: wait for it once rather
+            // than re-sending a slow answer 3x (#697).
+            ...(this._provider !== "deepseek"
+                ? { retries: 1, timeoutMs: ROUTER_TIMEOUT_MS }
+                : { retries: 3, timeoutMs: DIRECT_TIMEOUT_MS }),
         }];
         this._client = new OpenAI({
             apiKey: this._routes[0].apiKey || "",
@@ -71,6 +97,7 @@ export class LLMClient {
                 apiKey: config.llmApiKey || config.deepseekApiKey,
                 baseURL: config.llmBaseUrl,
                 retries: 1,
+                timeoutMs: ROUTER_TIMEOUT_MS,
             });
         }
         if (this._provider !== "deepseek") {
@@ -80,6 +107,7 @@ export class LLMClient {
                 apiKey: config.deepseekApiKey,
                 baseURL: "https://api.deepseek.com/v1",
                 retries: 1,
+                timeoutMs: DIRECT_TIMEOUT_MS,
             });
         }
     }
@@ -148,13 +176,11 @@ export class LLMClient {
             }
             for (let attempt = 0; attempt < route.retries; attempt++) {
                 try {
-                    const raw = await Promise.race([
+                    const raw = await withAbortTimeout(route.timeoutMs ?? DIRECT_TIMEOUT_MS, (signal) =>
                         useResponses
-                            ? client.responses.create(kwargs)
-                            : client.chat.completions.create(kwargs),
-                        new Promise((_, reject) =>
-                            setTimeout(() => reject(new Error("timeout")), 60000),
-                    )]);
+                            ? client.responses.create(kwargs, { signal })
+                            : client.chat.completions.create(kwargs, { signal }),
+                    );
                     const response = useResponses ? fromResponses(raw) : raw;
                     this._mergeReasoning(response, route.provider);
 

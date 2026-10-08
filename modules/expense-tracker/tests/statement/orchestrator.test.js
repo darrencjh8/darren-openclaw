@@ -544,7 +544,8 @@ describe("DeepSeekClient API format", () => {
     await client.chat([{ role: "user", content: "hello" }], null);
 
     const callArgs = mockCreate.mock.calls[0];
-    expect(callArgs).toHaveLength(1);
+    // Second arg carries only the abort signal (#697), never `thinking`.
+    expect(Object.keys(callArgs[1] || {})).toEqual(["signal"]);
     const kwargs = callArgs[0];
     expect(kwargs.messages).toBeDefined();
     expect(kwargs.messages[0].content).toBe("hello");
