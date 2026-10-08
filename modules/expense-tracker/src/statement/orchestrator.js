@@ -17,13 +17,123 @@ const MAX_TOOL_ITERATIONS = 20;
 // Re-export for backward compat with tests that import from here
 export { DeepSeekClient };
 
-export function extractPasswordFromFacts(facts) {
-  if (!Array.isArray(facts)) return null;
-  const passwordFact = facts.find(
-    (f) => typeof f === "string" && /password\s*(is|=|:)\s*\S+/i.test(f),
+const PASSWORD_RE = /password\s*(?:is|=|:)\s*(\S+)/i;
+const GENERIC_TOKENS = new Set([
+  "com",
+  "net",
+  "org",
+  "edu",
+  "gov",
+  "www",
+  "sg",
+  "my",
+  "co",
+  "mail",
+  "email",
+  "emails",
+  "noreply",
+  "no",
+  "reply",
+  "donotreply",
+  "alerts",
+  "alert",
+  "statement",
+  "statements",
+  "estatement",
+  "credit",
+  "card",
+  "cards",
+  "bank",
+  "banking",
+  "your",
+  "monthly",
+  "account",
+  "the",
+  "for",
+  "and",
+  "of",
+  "pdf",
+  "notification",
+  "notifications",
+  "service",
+  "services",
+  "customer",
+  "online",
+  "digital",
+  "secure",
+  "message",
+  "info",
+  "support",
+  "billing",
+  "payments",
+  "payment",
+  "fwd",
+  "re",
+  "fw",
+]);
+
+function headerValue(rawText, name) {
+  const headerBlock = rawText
+    .split(/\r?\n\r?\n/, 1)[0]
+    .replace(/\r?\n[ \t]+/g, " ");
+  const m = headerBlock.match(new RegExp(`^${name}:[ \\t]*(.*)$`, "im"));
+  return m ? m[1] : "";
+}
+
+/**
+ * Issuer hint tokens (lowercase) derived from the email's From and Subject
+ * headers — the issuer is only known to the pipeline via the raw email.
+ */
+export function deriveIssuerHints(raw) {
+  const text = Buffer.isBuffer(raw) ? raw.toString("utf8") : String(raw || "");
+  const source = `${headerValue(text, "From")} ${headerValue(text, "Subject")}`;
+  const tokens = new Set();
+  for (const t of source.toLowerCase().split(/[^a-z0-9]+/)) {
+    if (t.length >= 3 && !GENERIC_TOKENS.has(t) && !/^\d+$/.test(t)) {
+      tokens.add(t);
+    }
+  }
+  return [...tokens];
+}
+
+function isFormatFact(fact, value) {
+  if (
+    /^[dmy]{4,}$/i.test(value.replace(/[^a-z]/gi, "")) &&
+    /^[a-z]+$/i.test(value)
+  ) {
+    return true;
+  }
+  return /\b(format|pattern|ddmm\w*|mmdd\w*|yyyy\w*|combination|digits? of|characters? of|first \d+|last \d+)\b/i.test(
+    fact,
   );
-  if (!passwordFact) return null;
-  return passwordFact.match(/password\s*(?:is|=|:)\s*(\S+)/i)?.[1] || null;
+}
+
+/**
+ * Ordered, de-duplicated password candidates. Ranking is independent of the
+ * input order: issuer-matching concrete facts, then other concrete facts, then
+ * format-description facts; ties broken by value.
+ */
+export function extractPasswordCandidates(facts, opts = {}) {
+  if (!Array.isArray(facts)) return [];
+  const hints = (opts.issuerHints || []).map((h) => h.toLowerCase());
+  const exclude = new Set(opts.exclude || []);
+  const best = new Map();
+  for (const f of facts) {
+    if (typeof f !== "string") continue;
+    const value = f.match(PASSWORD_RE)?.[1];
+    if (!value || exclude.has(value)) continue;
+    const lower = f.toLowerCase();
+    const issuerMatch = hints.some((h) => lower.includes(h));
+    const rank = isFormatFact(f, value) ? 0 : issuerMatch ? 2 : 1;
+    if (!best.has(value) || best.get(value) < rank) best.set(value, rank);
+  }
+  return [...best.entries()]
+    .sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0))
+    .map(([v]) => v);
+}
+
+export function extractPasswordFromFacts(facts, opts = {}) {
+  return extractPasswordCandidates(facts, opts)[0] || null;
 }
 
 export class StatementProcessor {
@@ -58,40 +168,40 @@ export class StatementProcessor {
       ? rawEmail
       : Buffer.from(rawEmail || "");
 
-    // Extract content, retrying with password if encrypted PDF detected
+    // Extract content, retrying with a different password candidate each time
     let emailText = "";
     const MAX_PASSWORD_RETRIES = 2;
-    for (let attempt = 0; attempt <= MAX_PASSWORD_RETRIES; attempt++) {
-      try {
-        emailText = await extractEmailContent(raw);
-      } catch {
-        emailText = String(rawEmail || "");
-      }
+    const issuerHints = deriveIssuerHints(raw);
+    const tried = [];
+    let facts = null;
+    try {
+      emailText = await extractEmailContent(raw);
+    } catch {
+      emailText = String(rawEmail || "");
+    }
 
-      // Check if extraction hit an encrypted PDF
-      if (emailText.includes("[PDF_ENCRYPTED]")) {
-        // Try memory for password
+    for (
+      let attempt = 0;
+      attempt < MAX_PASSWORD_RETRIES && emailText.includes("[PDF_ENCRYPTED");
+      attempt++
+    ) {
+      if (facts === null) {
         const memResult = await this._tools.executeTool("search_memory", {
-          query: "statement password",
+          query: [...issuerHints, "statement password"].join(" "),
         });
-        const facts = (memResult && memResult.results) || [];
-        const password = extractPasswordFromFacts(facts);
-        if (password && attempt < MAX_PASSWORD_RETRIES) {
-          // Retry extraction with password
-          try {
-            emailText = await extractEmailContent(raw, password);
-            if (!emailText.includes("[PDF_ENCRYPTED]")) {
-              break; // Success — got decrypted content
-            }
-          } catch {
-            // Password didn't work, continue loop
-          }
-        }
-        // If we're here, either no password found or it didn't work
-        // Leave [PDF_ENCRYPTED] in the text for the LLM to handle
-        break;
+        facts = (memResult && memResult.results) || [];
       }
-      break; // No encrypted PDF — done
+      const password = extractPasswordFromFacts(facts, {
+        issuerHints,
+        exclude: tried,
+      });
+      if (!password) break;
+      tried.push(password);
+      try {
+        emailText = await extractEmailContent(raw, password);
+      } catch {
+        // Password didn't work; next iteration tries another candidate
+      }
     }
 
     const messages = this._buildMessages(emailText);

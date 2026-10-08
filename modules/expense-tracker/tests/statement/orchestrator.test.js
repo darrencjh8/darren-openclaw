@@ -602,3 +602,101 @@ describe("DeepSeekClient API format", () => {
     expect(result.choices[0].message.content).toBe("ok");
   });
 });
+
+describe("issuer-scoped statement password selection (#646)", () => {
+  const ENC =
+    "Body. [PDF_ENCRYPTED: use search-memory for password or ask user]";
+  const FACTS = [
+    "Alphabank statement password is AlphaKey-111",
+    "Betacard statement password is BetaKey-222",
+    "Gammatrust statement password is GammaKey-333",
+  ];
+  const permutations = (arr) =>
+    arr.length <= 1
+      ? [arr]
+      : arr.flatMap((x, i) =>
+          permutations([...arr.slice(0, i), ...arr.slice(i + 1)]).map((p) => [
+            x,
+            ...p,
+          ]),
+        );
+  const emailFrom = (name) =>
+    Buffer.from(
+      `From: ${name} <statements@${name.toLowerCase()}.example>\r\nSubject: ${name} credit card statement\r\n\r\nx`,
+    );
+
+  function setup(facts, decryptWith) {
+    const tools = {
+      setEmailContext: vi.fn(),
+      getToolSchemas: vi.fn().mockReturnValue([]),
+      executeTool: vi
+        .fn()
+        .mockImplementation((name) =>
+          Promise.resolve(name === "search_memory" ? { results: facts } : true),
+        ),
+    };
+    const p = new StatementProcessor(makeConfig(), tools);
+    p._llm.chat = vi.fn().mockResolvedValue({
+      choices: [{ finish_reason: "stop", message: { content: "ok" } }],
+    });
+    extractEmailContent.mockReset();
+    extractEmailContent.mockImplementation((_raw, pw) =>
+      Promise.resolve(pw && decryptWith.includes(pw) ? "decrypted" : ENC),
+    );
+    return { p, tools };
+  }
+
+  it("picks issuer A's key across all 6 fact orderings", () => {
+    for (const perm of permutations(FACTS)) {
+      expect(
+        extractPasswordFromFacts(perm, { issuerHints: ["alphabank"] }),
+      ).toBe("AlphaKey-111");
+    }
+  });
+
+  it("uses issuer A's key and queries memory with the issuer", async () => {
+    for (const perm of permutations(FACTS)) {
+      const { p, tools } = setup(perm, ["AlphaKey-111"]);
+      await p.processStatement("m", emailFrom("Alphabank"), null);
+      const q = tools.executeTool.mock.calls.find(
+        ([n]) => n === "search_memory",
+      )[1].query;
+      expect(q.toLowerCase()).toContain("alphabank");
+      expect(extractEmailContent).toHaveBeenCalledWith(
+        expect.anything(),
+        "AlphaKey-111",
+      );
+      expect(extractEmailContent).not.toHaveBeenCalledWith(
+        expect.anything(),
+        "BetaKey-222",
+      );
+    }
+  });
+
+  it("a retry tries a different candidate after a failed one", async () => {
+    const { p } = setup(
+      [
+        "Alphabank statement password is Bad-1",
+        "Alphabank PDF password: Good-2",
+      ],
+      ["Good-2"],
+    );
+    await p.processStatement("m", emailFrom("Alphabank"), null);
+    const pws = extractEmailContent.mock.calls.map((c) => c[1]).filter(Boolean);
+    expect(pws).toHaveLength(2);
+    expect(new Set(pws).size).toBe(2);
+    expect(pws).toContain("Good-2");
+  });
+
+  it("a format-description fact does not outrank a concrete issuer fact", () => {
+    const facts = [
+      "Alphabank statement password is DDMMYYYY (format: date of birth)",
+      "Alphabank statement password is AlphaKey-111",
+    ];
+    for (const perm of permutations(facts)) {
+      expect(
+        extractPasswordFromFacts(perm, { issuerHints: ["alphabank"] }),
+      ).toBe("AlphaKey-111");
+    }
+  });
+});
