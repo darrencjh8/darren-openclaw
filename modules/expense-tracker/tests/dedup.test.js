@@ -3,6 +3,7 @@
  */
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { DedupJournal, RETRY_COOLDOWN_MINUTES } from "../src/dedup.js";
+import Database from "better-sqlite3";
 import { unlinkSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
@@ -438,6 +439,100 @@ describe("DedupJournal transfer journal", () => {
                 at,
             }),
         ).toBeNull();
+    });
+
+    // Issue #578: one booked leg is the counterpart of ONE credit alert. Without
+    // a claim it silently absorbed every same-amount credit inside the window.
+    describe("counterpart claim (#578)", () => {
+        const at = "2026-09-15T23:20:51.000Z";
+        let leg;
+        const lookup = (overrides = {}) =>
+            journal.findInsertedTransferInto({
+                budget_id: "budget-sgd",
+                destination_account_id: "sc-bonus",
+                amount_cents: 100,
+                currency: "SGD",
+                at,
+                ...overrides,
+            });
+
+        beforeEach(() => {
+            leg = journal.reserveTransfer({
+                ...transfer,
+                budget_id: "budget-sgd",
+                source_account_id: "trust-893",
+                destination_account_id: "sc-bonus",
+                amount_cents: 100,
+                occurred_at: "2026-09-15T23:20:02.000Z",
+            });
+            journal.markTransferInserted(leg.entry.id, "actual-transfer-7");
+        });
+
+        it("hands a leg to the first alert only", () => {
+            expect(lookup({ alert_id: "101" })?.id).toBe(leg.entry.id);
+            expect(lookup({ alert_id: "102" })).toBeNull();
+        });
+
+        it("returns the leg again for the alert that already claimed it", () => {
+            expect(lookup({ alert_id: "101" })?.id).toBe(leg.entry.id);
+            expect(lookup({ alert_id: "101" })?.id).toBe(leg.entry.id);
+        });
+
+        it("lets a new alert claim the leg after a mailbox epoch change", () => {
+            journal.noteMailboxUidValidity(1);
+            expect(lookup({ alert_id: "A" })?.id).toBe(leg.entry.id);
+            expect(lookup({ alert_id: "B" })).toBeNull();
+            expect(journal.noteMailboxUidValidity(2)).toBe(true);
+            expect(lookup({ alert_id: "B" })?.id).toBe(leg.entry.id);
+        });
+
+        it("matches without claiming when no alert_id is given", () => {
+            expect(lookup()?.id).toBe(leg.entry.id);
+            expect(lookup({ alert_id: "" })?.id).toBe(leg.entry.id);
+            expect(lookup()?.id).toBe(leg.entry.id);
+            expect(lookup({ alert_id: "101" })?.id).toBe(leg.entry.id);
+        });
+
+        it("adds the claim column to a journal created before it existed", () => {
+            const legacyPath = join(tmpdir(), `dedup-legacy-${Date.now()}.sqlite`);
+            const legacy = new Database(legacyPath);
+            legacy.exec(`CREATE TABLE transfer_journal (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                budget_id TEXT NOT NULL,
+                source_account_id TEXT NOT NULL,
+                destination_account_id TEXT NOT NULL,
+                currency TEXT NOT NULL,
+                amount_cents INTEGER NOT NULL,
+                occurred_at TEXT NOT NULL,
+                status TEXT NOT NULL CHECK(status IN ('pending', 'inserted', 'failed')),
+                actual_transaction_id TEXT,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+            )`);
+            legacy.close();
+            const migrated = new DedupJournal(legacyPath);
+            const reserved = migrated.reserveTransfer({
+                ...transfer,
+                budget_id: "budget-sgd",
+                destination_account_id: "sc-bonus",
+                amount_cents: 100,
+                occurred_at: "2026-09-15T23:20:02.000Z",
+            });
+            migrated.markTransferInserted(reserved.entry.id, "x");
+            const args = {
+                budget_id: "budget-sgd",
+                destination_account_id: "sc-bonus",
+                amount_cents: 100,
+                currency: "SGD",
+                at,
+            };
+            expect(migrated.findInsertedTransferInto({ ...args, alert_id: "1" })).not.toBeNull();
+            expect(migrated.findInsertedTransferInto({ ...args, alert_id: "2" })).toBeNull();
+            migrated.close();
+            try {
+                unlinkSync(legacyPath);
+            } catch {}
+        });
     });
 });
 
