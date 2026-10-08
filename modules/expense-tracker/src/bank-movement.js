@@ -358,6 +358,30 @@ export function parseBankMovement(text, { senderBank = null, receivedAt } = {}) 
     };
   }
 
+  // Trust credit-card repayment confirmation — names neither account:
+  //   "Your credit card repayment of S$ 1.00 on 16 Sep 2026 07:55 SGT is successful."
+  // The destination is the sender bank's own credit card and the funding
+  // account is unstated, so neither carries a suffix. `card_repayment` tells the
+  // orchestrator to resolve both legs from the holder's accounts and to hold
+  // when it cannot do so unambiguously (issue #576).
+  const trustRepayment = body.replace(/\s+/g, " ").match(
+    /credit\s+card\s+repayment\s+of\s+(SGD|S\$)\s*([\d,.]+)\s+on\s+(\d{1,2}\s+[A-Za-z]{3}\s+\d{4})\s+(\d{1,2}[:.]\d{2}\s*(?:AM|PM)?)\s*SGT\s+is\s+successful\b/i,
+  );
+  if (trustRepayment && /^trust$/i.test(senderBank || "")) {
+    const occurredAt = isoDateTime(trustRepayment[3], trustRepayment[4], receivedAt);
+    if (!occurredAt) return null;
+    return {
+      kind: "bank_movement", direction: "outgoing",
+      amount_cents: cents("SGD", trustRepayment[2], "outgoing"), currency: "SGD",
+      occurred_at: occurredAt,
+      own_account: { name: null, bank: "Trust", suffix: null },
+      counterparty: { name: "Trust Credit Card", bank: "Trust", suffix: null },
+      reference_number: "", recipient_bank: null,
+      card_repayment: true,
+      merchant_display_name: null, raw_merchant_descriptor: "",
+    };
+  }
+
   // Trust's text/plain part can wrap the counterparty name at a column
   // boundary. Matching on collapsed whitespace keeps the parser independent
   // of MIME line wrapping while preserving the original body for labels.
