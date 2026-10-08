@@ -1391,14 +1391,16 @@ export class ToolRegistry {
       }
     }
 
+    // A payee ID wins over a name, so an explicit ID is sent alone. Suppression
+    // overrides that: it nulls payeeId, so the name must go out (#621).
+    const sendPayeeName = suppressTransferPayee || !explicitId;
     const result = await this._post(
       "/transactions",
       {
         account: args.account_id,
         date: args.date,
         amount: amountCents,
-        // A payee ID wins over a name, so an explicit ID is sent alone.
-        ...(explicitId ? {} : { payee_name: payee_name || "Misc" }),
+        ...(sendPayeeName ? { payee_name: payee_name || "Misc" } : {}),
         notes: args.notes || "",
         cleared: false,
         ...(payeeId ? { payee: payeeId } : {}),

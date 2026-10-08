@@ -728,6 +728,9 @@ echo "--- Codex Router ---"
   # deepseek-flash fallback_chain, so an unset key breaks compression, vision,
   # web_extract, kanban_decomposer, triage_specifier, and profile_describer outright
   # instead of degrading. Fail the deploy loudly rather than ship that state.
+  # NOTE: the router-side premises (commandcode/* published only while the key is
+  # present; unpublished models do not fire fallback_chain) are not verifiable in
+  # this repo (modules/codex-router is checked out at deploy time); see #606.
   check_var "COMMANDCODE_API_KEY" ""
   check_var_optional "OPENCODE_GO_API_KEY" ""
   check_var_optional "OPENCODE_ZEN_API_KEY" ""

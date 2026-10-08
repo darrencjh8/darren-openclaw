@@ -1727,3 +1727,37 @@ describe.skip("removed web resolution timeout (#587)", () => {
     vi.unstubAllGlobals();
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────
+// suppress_transfer_payee is independent of the other insert arguments (#621)
+// ─────────────────────────────────────────────────────────────────────────
+
+describe("insert_transaction suppress_transfer_payee (#621)", () => {
+  it("posts payee_name Misc and no payee even when payee_id is also passed", async () => {
+    const registry = new ToolRegistry(mockConfig(), mockMemoryStore());
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ id: "tx-1" }),
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await registry._handle_insert_transaction({
+      date: "2026-06-16",
+      amount_cents: 1500,
+      account_id: "acc-1",
+      budget_id: "bud-1",
+      payee_id: "p-explicit",
+      suppress_transfer_payee: true,
+      imported_description: "Some shop",
+    });
+
+    const post = fetchMock.mock.calls
+      .map(([url, init]) => ({ url: String(url), init }))
+      .find((c) => c.url.includes("/transactions") && c.init?.method === "POST");
+    const body = JSON.parse(post.init.body);
+    expect(body.payee_name).toBe("Misc");
+    expect(body.payee).toBeUndefined();
+
+    vi.unstubAllGlobals();
+  });
+});

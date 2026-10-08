@@ -1,7 +1,9 @@
 """The codex-router service must receive the external provider credentials.
 
 Discovery skips a provider whose key is absent, so a key that never reaches the
-container silently disables every Command Code or OpenCode model.
+container disables that provider's models. A missing required Command Code key
+aborts the deploy before any container starts; the optional OpenCode keys instead
+leave their models unpublished silently.
 """
 
 from pathlib import Path
@@ -89,6 +91,9 @@ class CodexRouterProviderEnvTests(unittest.TestCase):
 
     def test_deploy_script_requires_the_commandcode_key(self):
         script = DEPLOY_SCRIPT.read_text(encoding="utf-8")
+        # Scope to the codex-router section, as the sibling test does, so moving
+        # the check to another section turns this red.
+        script = script.split("# ---- codex-router ----", 1)[1].split("# ---- pluggable modules", 1)[0]
 
         # The router only publishes commandcode/* while this key is present, and a
         # model the router never publishes does not fire an auxiliary slot's

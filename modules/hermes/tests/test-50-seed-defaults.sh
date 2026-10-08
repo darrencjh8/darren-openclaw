@@ -614,6 +614,32 @@ else
     nope "null reviewer memory migration" "status=$null_memory_status result=$null_memory_result output=$null_memory_output"
 fi
 
+# A scalar, null, list or absent `agent` block must not crash the boot migration
+# (the isinstance(agent, dict) guard) and must still end up pinned to high.
+for agent_shape in 'agent: scalar-string' 'agent:' 'agent: [a, b]' 'unrelated: true'; do
+    cat > "$migration_target/config.yaml" <<YAML
+model:
+  provider: stale
+$agent_shape
+YAML
+    agent_status=0
+    agent_output=$(python3 -c "$migration_block" 2>&1) || agent_status=$?
+    agent_result=$(python3 - "$migration_target/config.yaml" <<'PY'
+import sys
+import yaml
+
+config = yaml.safe_load(open(sys.argv[1], encoding="utf-8"))
+agent = config.get("agent")
+print("pass" if isinstance(agent, dict) and agent.get("reasoning_effort") == "high" else "fail")
+PY
+)
+    if [ "$agent_status" -eq 0 ] && [ "$agent_result" = "pass" ]; then
+        ok "malformed agent block migrates safely ($agent_shape)"
+    else
+        nope "malformed agent block ($agent_shape)" "status=$agent_status result=$agent_result output=$agent_output"
+    fi
+done
+
 echo ""
 echo "=== hermes config seeding ==="
 
