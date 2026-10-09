@@ -728,6 +728,9 @@ echo "--- Codex Router ---"
   # deepseek-flash fallback_chain, so an unset key breaks compression, vision,
   # web_extract, kanban_decomposer, triage_specifier, and profile_describer outright
   # instead of degrading. Fail the deploy loudly rather than ship that state.
+  # NOTE: the router-side premises (commandcode/* published only while the key is
+  # present; unpublished models do not fire fallback_chain) are not verifiable in
+  # this repo (modules/codex-router is checked out at deploy time); see #606.
   check_var "COMMANDCODE_API_KEY" ""
   check_var_optional "OPENCODE_GO_API_KEY" ""
   check_var_optional "OPENCODE_ZEN_API_KEY" ""
@@ -1269,11 +1272,30 @@ if should_deploy "codex-router" || should_deploy "all"; then
   # revision's image needs it.
   serving=""
   idle=""
+  running_count=0
   colour_probe_failed=false
   for colour in codex-router-a codex-router-b; do
     container="$(colour_container "$colour")" || { colour_probe_failed=true; continue; }
     [ -n "$container" ] || continue
-    if [ -z "$serving" ] && colour_ready "$container"; then
+    running_count=$((running_count + 1))
+    # One failed probe is not proof a colour is down (#691): the front's own
+    # 10s checks disagreed with a single 5s reading minutes before a roll
+    # destroyed a healthy colour. Confirm a negative before acting on it.
+    colour_answers=false
+    if [ -z "$serving" ]; then
+      probe_attempts="${ROUTER_PROBE_ATTEMPTS:-3}"
+      probe_n=1
+      while :; do
+        if colour_ready "$container"; then
+          colour_answers=true
+          break
+        fi
+        [ "$probe_n" -lt "$probe_attempts" ] || break
+        probe_n=$((probe_n + 1))
+        sleep "${ROUTER_PROBE_SLEEP:-5}"
+      done
+    fi
+    if $colour_answers; then
       serving="$colour"
     elif [ -z "$idle" ]; then
       idle="$colour"
@@ -1288,6 +1310,15 @@ if should_deploy "codex-router" || should_deploy "all"; then
     echo -e "  ${RED}✗ could not read this stack's containers; skipping the codex-router roll${NC}"
     failed=$((failed + 1))
   else
+    # Nothing answers but exactly one colour is running: that colour is the
+    # front's only upstream, serving or wedged, and recreating it would leave the
+    # front with nothing to retry against for a whole cold start (#691). Treat it
+    # as the old colour: the candidate becomes the other one, and this one is only
+    # stopped after the front has moved onto a ready replacement.
+    if [ -z "$serving" ] && [ "$running_count" -eq 1 ] && [ -n "$idle" ]; then
+      serving="$idle"
+      idle=""
+    fi
     # The candidate is never the serving colour: recreating that one would leave
     # the front with nothing to retry against. This is the state every second
     # deploy starts in — the cutover deploy starts colour a and has nothing to

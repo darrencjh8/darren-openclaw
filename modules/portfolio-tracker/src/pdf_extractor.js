@@ -44,6 +44,22 @@ function run(cmd, args) {
 }
 
 /**
+ * qpdf exit codes: 0 = success, 3 = success with warnings, 2 = error (e.g.
+ * wrong password). Exit 3 still writes a valid decrypted output (#647).
+ * NOTE: keep in sync with qpdfSucceeded() in
+ * modules/expense-tracker/src/extractors.js (separate packages).
+ */
+export function qpdfSucceeded(err) {
+  return !err || err.code === 3;
+}
+
+function runQpdf(args) {
+  return new Promise((resolve, reject) => {
+    execFile("qpdf", args, (err) => (qpdfSucceeded(err) ? resolve() : reject(err)));
+  });
+}
+
+/**
  * Extract text from PDF bytes via pdftotext, decrypting with qpdf first when a
  * password is supplied. Throws on failure (caller classifies the error).
  * @param {Buffer} pdfBytes
@@ -58,7 +74,7 @@ async function pdftotextExtract(pdfBytes, password = null) {
   if (password) {
     const decPath = inPath.replace(/\.pdf$/, "-dec.pdf");
     try {
-      await run("qpdf", [`--password=${password}`, "--decrypt", inPath, decPath]);
+      await runQpdf([`--password=${password}`, "--decrypt", inPath, decPath]);
       await run("pdftotext", ["-layout", decPath, outPath]);
       return readFileSync(outPath, "utf8");
     } finally {

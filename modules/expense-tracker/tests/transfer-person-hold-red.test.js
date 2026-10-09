@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { parseBankMovement } from "../src/bank-movement.js";
+import { OWN_LEGAL_NAME_FACT } from "./helpers/own-name.js";
 
 /**
  * RED evidence for the review findings on PR #654.
@@ -65,7 +66,7 @@ describe("Ryt scheduled transfer to a person is held, not spent", () => {
         // any counterparty other than the holder.
         const facts = [
             {
-                text: "Legal name: Chong Jin Heng -> CHON (statement password)",
+                text: `${OWN_LEGAL_NAME_FACT} -> ABCD (statement password)`,
                 score: 1,
             },
         ];

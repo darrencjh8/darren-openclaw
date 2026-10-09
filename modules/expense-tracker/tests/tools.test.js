@@ -745,3 +745,55 @@ describe("reserve_transfer far-side reconciliation (#557)", () => {
         expect(deleted).toEqual([]);
     });
 });
+
+describe("find_inserted_transfer claims only for the current email (#578)", () => {
+    const leg = (registry) => {
+        const reserved = registry._dedup.reserveTransfer({
+            budget_id: "b",
+            source_account_id: "src",
+            destination_account_id: "dst",
+            currency: "SGD",
+            amount_cents: 100,
+            occurred_at: "2026-09-15T10:00:00.000Z",
+        });
+        registry._dedup.markTransferInserted(reserved.entry.id, "tx-1");
+        return reserved.entry.id;
+    };
+    const lookup = (registry, extra = {}) =>
+        registry.executeTool("find_inserted_transfer", {
+            budget_id: "b",
+            destination_account_id: "dst",
+            amount_cents: 100,
+            currency: "SGD",
+            at: "2026-09-15T10:00:30.000Z",
+            ...extra,
+        });
+
+    it("claims the leg for the email being processed", async () => {
+        const registry = new ToolRegistry(new Config(testEnv));
+        const id = leg(registry);
+        registry.setEmailContext("101", null, null);
+        expect(await lookup(registry, { alert_id: "101" })).not.toBeNull();
+        expect(registry._dedup.getTransfer(id).counterpart_alert_id).toBe("101");
+        registry.setEmailContext("102", null, null);
+        expect(await lookup(registry, { alert_id: "102" })).toBeNull();
+    });
+
+    it("does not claim for an id that is not the current email", async () => {
+        const registry = new ToolRegistry(new Config(testEnv));
+        const id = leg(registry);
+        registry.setEmailContext("101", null, null);
+        expect(await lookup(registry, { alert_id: "evil" })).not.toBeNull();
+        expect(registry._dedup.getTransfer(id).counterpart_alert_id).toBeNull();
+    });
+
+    it("does not claim for pasted text while an email uid is still in context", async () => {
+        // processText (Telegram/MCP) never sets an email context, so the uid
+        // of the last email is still there; the text passes no alert_id.
+        const registry = new ToolRegistry(new Config(testEnv));
+        const id = leg(registry);
+        registry.setEmailContext("101", null, null);
+        expect(await lookup(registry)).not.toBeNull();
+        expect(registry._dedup.getTransfer(id).counterpart_alert_id).toBeNull();
+    });
+});

@@ -48,6 +48,28 @@ import {
 /** Consecutive LLM-outage retries of one email per process before the 12h cooldown applies (#694). */
 const MAX_LLM_OUTAGE_RETRIES = 12;
 
+/** Per-request budget for the direct DeepSeek API. */
+const DIRECT_TIMEOUT_MS = 60000;
+/** The router's auto-thinking per-hop budget (#697). */
+const ROUTER_TIMEOUT_MS = 300000;
+
+/**
+ * Run `fn(signal)` and abort the underlying request if it outlives `ms`,
+ * so a timed-out call is cancelled rather than left running (#697).
+ */
+async function withAbortTimeout(ms, fn) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(new Error("timeout")), ms);
+    try {
+        return await fn(controller.signal);
+    } catch (error) {
+        if (controller.signal.aborted) throw new Error("timeout");
+        throw error;
+    } finally {
+        clearTimeout(timer);
+    }
+}
+
 export class LLMClient {
     constructor(config) {
         this._provider = config.llmProvider || "deepseek";
@@ -58,7 +80,11 @@ export class LLMClient {
             model: this._model,
             apiKey: config.llmApiKey || config.deepseekApiKey,
             baseURL: config.llmBaseUrl || "https://api.deepseek.com/v1",
-            retries: 3,
+            // The router has a 300s per-hop budget: wait for it once rather
+            // than re-sending a slow answer 3x (#697).
+            ...(this._provider !== "deepseek"
+                ? { retries: 1, timeoutMs: ROUTER_TIMEOUT_MS }
+                : { retries: 3, timeoutMs: DIRECT_TIMEOUT_MS }),
         }];
         this._client = new OpenAI({
             apiKey: this._routes[0].apiKey || "",
@@ -71,6 +97,7 @@ export class LLMClient {
                 apiKey: config.llmApiKey || config.deepseekApiKey,
                 baseURL: config.llmBaseUrl,
                 retries: 1,
+                timeoutMs: ROUTER_TIMEOUT_MS,
             });
         }
         if (this._provider !== "deepseek") {
@@ -80,6 +107,7 @@ export class LLMClient {
                 apiKey: config.deepseekApiKey,
                 baseURL: "https://api.deepseek.com/v1",
                 retries: 1,
+                timeoutMs: DIRECT_TIMEOUT_MS,
             });
         }
     }
@@ -148,13 +176,11 @@ export class LLMClient {
             }
             for (let attempt = 0; attempt < route.retries; attempt++) {
                 try {
-                    const raw = await Promise.race([
+                    const raw = await withAbortTimeout(route.timeoutMs ?? DIRECT_TIMEOUT_MS, (signal) =>
                         useResponses
-                            ? client.responses.create(kwargs)
-                            : client.chat.completions.create(kwargs),
-                        new Promise((_, reject) =>
-                            setTimeout(() => reject(new Error("timeout")), 60000),
-                    )]);
+                            ? client.responses.create(kwargs, { signal })
+                            : client.chat.completions.create(kwargs, { signal }),
+                    );
                     const response = useResponses ? fromResponses(raw) : raw;
                     this._mergeReasoning(response, route.provider);
 
@@ -350,7 +376,7 @@ function normalizeIdentityName(value) {
  * none of them can release a person hold.
  *
  * The key is compared WHOLE after normalisation. A substring or token-overlap
- * match is forbidden: `Legal name: CHONG JIN HENG -> CHON (statement password)`
+ * match is forbidden: `Legal name: <holder> -> <MNEMONIC> (statement password)`
  * shares tokens with the counterparty, and an overlap rule would release a real
  * person transfer.
  *
@@ -378,7 +404,7 @@ export function counterpartyIsRememberedEntity(name, facts) {
  *
  * A bank NAME alone is a weak signal: "OverseaChinese Banking Corporation Ltd"
  * matches both OCBC 360 and OCBC 90N, so the name alone is ambiguous. The alert
- * body does carry a stronger signal in `A/C ending 9001`, and a row resolved
+ * body does carry a stronger signal in `A/C ending 6600`, and a row resolved
  * from such evidence comes back marked `_structured_movement`, which makes the
  * caller skip this ambiguity check. So the rows that reach this gate are the
  * unresolved ones, and for those the bank name is the best signal available —
@@ -427,7 +453,7 @@ export function transferDestinationIsAmbiguous(name, destination, accounts) {
 /**
  * True when `value` is a mask of one of the user's own account names: it stays
  * literal outside the masked run, and the run matches one or more letters.
- * `T*** U***` masks `Trust Bank`; `Chong *** Heng` masks `Chong Jin Heng`.
+ * `T*** U***` masks `Trust Bank`; `A*** B***` masks a two-part holder name.
  * Only account names are considered, so a masked merchant cannot be mistaken
  * for a self identity. Issue #561.
  */
@@ -764,7 +790,10 @@ export class AgentOrchestrator {
             };
         }
 
-        // Phase 2: Resolution
+        // Phase 2: Resolution. The email's uid lets the transfer-leg lookup
+        // claim a booked leg for this alert only (issue #578); set after the
+        // Phase-1 sanitiser, so LLM output cannot supply it.
+        phase1._alert_id = msgId;
         const phase2 = await this._resolvePhase2(phase1);
 
         // Phase 3: Execute
@@ -854,13 +883,22 @@ export class AgentOrchestrator {
             ? this._collectSuffixMappings(movement, resolved, accounts, mappings)
             : [];
         const date = movement.occurred_at?.slice(0, 10);
+        // Trust-style card repayment (issue #576): the alert names neither
+        // account, so the destination is the sender bank's ONLY open credit card
+        // and the funding side is a booked journal leg, else the bank's only
+        // open cash account. Anything less certain is held.
+        if (movement.card_repayment === true && movement.direction === "outgoing" && date) {
+            return this._resolveCardRepaymentMovement(movement, {
+                accounts, budgetId, date, suffixMappings, payees: ctx?.payees || [],
+            });
+        }
         if (!source || !date) {
             // An outgoing movement whose counterparty resolves to another of the
             // user's own accounts is an internal transfer, not a merchant
             // payment. When the source account cannot be resolved (its suffix
             // has no memory fact yet), the LLM fallback books the counterparty
             // name as a merchant and posts a phantom expense (issue #592: a DBS
-            // FAST transfer POSB ...4380 -> SC 6445 was booked as "Household
+            // FAST transfer POSB ...5500 -> SC 2555 was booked as "Household
             // stuffs"). Hold it for the user instead of guessing a purchase.
             if (
                 !source &&
@@ -964,7 +1002,7 @@ export class AgentOrchestrator {
             const match = text.match(/\b(?:legal|account\s+holder)\s+name\s*:\s*([^\n.]+)/i);
             if (!match) return false;
             // The live fact carries a statement-password mnemonic after the
-            // holder name, e.g. `Legal name: Chong Jin Heng -> CHON (statement
+            // holder name, e.g. `Legal name: <holder> -> <MNEMONIC> (statement
             // password)`. Everything after an arrow is metadata, not part of the
             // name, so trim it before comparing or the holder never matches.
             // Issue #592.
@@ -1064,7 +1102,7 @@ export class AgentOrchestrator {
                 // Phase-2 ambiguity gate below from re-deciding that settled
                 // destination from the counterparty's BANK NAME, which matches
                 // every account the holder owns at that bank. "OverseaChinese
-                // Banking Corporation Ltd A/C ending 9001" was judged ambiguous
+                // Banking Corporation Ltd A/C ending 6600" was judged ambiguous
                 // purely because two open accounts carry an OCBC token, and a
                 // correct transfer pair was flipped to Misc and held (issue
                 // #575, production incident 2026-09-27). The other four checks
@@ -1253,6 +1291,102 @@ export class AgentOrchestrator {
             };
         }
         return null;
+    }
+
+    /**
+     * Resolve a parser-flagged card repayment that names no account. Returns a
+     * transfer booked on the funding account, or a destination_unresolved hold.
+     */
+    async _resolveCardRepaymentMovement(movement, { accounts, budgetId, date, suffixMappings, payees }) {
+        const bank = movement.own_account?.bank;
+        const atBank = accounts.filter(
+            (account) => !account.closed && bankFromText(account.name) === bank,
+        );
+        const typed = await Promise.all(
+            atBank.map(async (account) => ({
+                account,
+                isCard: (await this._detectAccountType(account.name)) === "credit card",
+            })),
+        );
+        const cards = typed.filter((t) => t.isCard).map((t) => t.account);
+        const cashAccounts = typed.filter((t) => !t.isCard).map((t) => t.account);
+        const card = cards.length === 1 ? cards[0] : null;
+        const cardPayee = card
+            ? payees.find((payee) => payee.transfer_acct === card.id) || null
+            : null;
+        const amount = Math.abs(movement.amount_cents);
+        let funding = null;
+        if (card && cardPayee) {
+            // (a) a journal leg the other side already booked into the card
+            const leg = await this._findBookedTransferLeg({
+                budget_id: budgetId,
+                account_id: card.id,
+                amount_cents: amount,
+                currency: movement.currency,
+                occurred_at: movement.occurred_at,
+            });
+            if (leg) {
+                // A booked leg is authoritative: an unusable source holds
+                // rather than falling back, or the pair is booked twice.
+                funding = accounts.find((a) => a.id === leg.source_account_id && !a.closed) || null;
+            } else if (cashAccounts.length === 1) {
+                // (b) the holder's only open cash account at this bank
+                funding = cashAccounts[0];
+            }
+        }
+        if (!card || !cardPayee || !funding || funding.id === card.id) {
+            return {
+                merchant: movement.counterparty?.name || "Credit card repayment",
+                amount_cents: -amount,
+                date,
+                currency: movement.currency,
+                account_id: "",
+                account_name: "",
+                budget_id: budgetId,
+                action: "insert",
+                payee_name: "Misc",
+                category_id: null,
+                raw_description: `Transfer to ${movement.counterparty?.name || "an unverified account"}`,
+                raw_merchant_descriptor: "",
+                notes: "",
+                reasoning: "Held: card repayment could not be matched to exactly one own card and funding account",
+                notify_message: "",
+                _suffix_mappings: suffixMappings,
+                _hold_unresolved_transfer: true,
+                _hold_cause: "destination_unresolved",
+            };
+        }
+        return {
+            merchant: card.name,
+            amount_cents: -amount,
+            date,
+            currency: movement.currency,
+            account_id: funding.id,
+            account_name: funding.name,
+            budget_id: budgetId,
+            action: "insert",
+            payee_name: card.name,
+            payee_id: cardPayee.id,
+            category_id: null,
+            raw_description: `Transfer to ${card.name}`,
+            raw_merchant_descriptor: "",
+            notes: "",
+            reasoning: "Deterministic card repayment to the holder's own card",
+            notify_message: "",
+            _suffix_mappings: suffixMappings,
+            _structured_movement: true,
+            _is_transfer: true,
+            _card_repayment: true,
+            _transfer: {
+                budget_id: budgetId,
+                source_account_id: funding.id,
+                destination_account_id: card.id,
+                currency: movement.currency,
+                amount_cents: amount,
+                occurred_at: movement.occurred_at,
+                payee_id: cardPayee.id,
+            },
+        };
     }
 
     /**
@@ -1659,6 +1793,9 @@ export class AgentOrchestrator {
                 // repayment into the holder's own credit line). Phase-1 LLM output
                 // must not be able to assert it and skip that gate.
                 delete output._card_repayment;
+                // `_alert_id` keys the transfer-leg claim (issue #578); only the
+                // email path sets it, after this sanitiser.
+                delete output._alert_id;
 
                 // Date fallback: if the email body contains no recognisable
                 // date and the LLM returned a date that differs from today,
@@ -2080,6 +2217,7 @@ export class AgentOrchestrator {
                 // destination (issue #574 review: matching the source side too
                 // would let an unrelated outgoing leg swallow a real credit).
                 destination_account_id: output.account_id || "",
+                alert_id: output._alert_id ?? null,
                 amount_cents: output.amount_cents,
                 currency: output.currency || this._config.primaryCurrency,
                 at,
@@ -2167,6 +2305,15 @@ export class AgentOrchestrator {
                     matches: found.matches,
                 });
                 return { hold: true, reason: "ambiguous" };
+            }
+            if (Number(found.unmatched) > 0) {
+                // A plausible far row exists but is not the exact shape (#619).
+                logger.warn({
+                    event: "far_side_unmatched",
+                    account_id: farAccountId,
+                    unmatched: found.unmatched,
+                });
+                return { hold: true, reason: "unmatched" };
             }
             return { farRowId: null };
         } catch (error) {
@@ -2932,16 +3079,21 @@ export class AgentOrchestrator {
                     // because booking it would create the duplicate counterpart.
                     // Nothing is reserved, so a later alert retries this read
                     // instead of being stuck behind a pending transfer (#598).
+                    const unmatched = existingFarSide.reason === "unmatched";
                     const ambiguous = existingFarSide.reason === "ambiguous";
                     if (!silent) {
                         await this._tools.executeTool("notify_user", {
-                            message: ambiguous
+                            message: unmatched
+                                ? `Held: ${bookableAmountPrefix(llmOutput.amount_cents, llmOutput.currency)}transfer ${llmOutput.date || "today"} has a similar row on the far account that does not match exactly (payee, cleared state or date differs), so nothing was booked. Link or fix the rows in Actual.`
+                                : ambiguous
                                 ? `Held: ${bookableAmountPrefix(llmOutput.amount_cents, llmOutput.currency)}transfer ${llmOutput.date || "today"} has more than one uncleared row on the far account, so the two legs were left unlinked. Resolve the duplicate rows in Actual.`
                                 : `Held: could not read the far account for the ${bookableAmountPrefix(llmOutput.amount_cents, llmOutput.currency)}transfer ${llmOutput.date || "today"}, so the destination leg was not booked and the transfer was left unlinked.`,
                         });
                     }
                     await this._tools.executeTool("log_decision", {
-                        action: ambiguous
+                        action: unmatched
+                            ? "held_unmatched_far_side"
+                            : ambiguous
                             ? "held_ambiguous_far_side"
                             : "held_unreadable_far_side",
                         reasoning: llmOutput.reasoning || "",
@@ -2949,7 +3101,9 @@ export class AgentOrchestrator {
                     });
                     return {
                         action: "notified",
-                        details: ambiguous
+                        details: unmatched
+                            ? "Held a transfer whose far side row does not match exactly"
+                            : ambiguous
                             ? "Held a transfer whose far side has several candidates"
                             : "Held a transfer whose far account could not be read",
                     };

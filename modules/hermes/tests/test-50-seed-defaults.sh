@@ -614,6 +614,32 @@ else
     nope "null reviewer memory migration" "status=$null_memory_status result=$null_memory_result output=$null_memory_output"
 fi
 
+# A scalar, null, list or absent `agent` block must not crash the boot migration
+# (the isinstance(agent, dict) guard) and must still end up pinned to high.
+for agent_shape in 'agent: scalar-string' 'agent:' 'agent: [a, b]' 'unrelated: true'; do
+    cat > "$migration_target/config.yaml" <<YAML
+model:
+  provider: stale
+$agent_shape
+YAML
+    agent_status=0
+    agent_output=$(python3 -c "$migration_block" 2>&1) || agent_status=$?
+    agent_result=$(python3 - "$migration_target/config.yaml" <<'PY'
+import sys
+import yaml
+
+config = yaml.safe_load(open(sys.argv[1], encoding="utf-8"))
+agent = config.get("agent")
+print("pass" if isinstance(agent, dict) and agent.get("reasoning_effort") == "high" else "fail")
+PY
+)
+    if [ "$agent_status" -eq 0 ] && [ "$agent_result" = "pass" ]; then
+        ok "malformed agent block migrates safely ($agent_shape)"
+    else
+        nope "malformed agent block ($agent_shape)" "status=$agent_status result=$agent_result output=$agent_output"
+    fi
+done
+
 echo ""
 echo "=== hermes config seeding ==="
 
@@ -788,10 +814,10 @@ config = yaml.safe_load(open(sys.argv[1], encoding="utf-8"))
 print((config.get("compression") or {}).get("threshold"))
 PY
 )
-if [ "$seeded_threshold" = "0.5" ]; then
-    ok "config: compression.threshold is 0.50"
+if [ "$seeded_threshold" = "0.9" ]; then
+    ok "config: compression.threshold is 0.90"
 else
-    nope "compression.threshold" "expected 0.5, got $seeded_threshold"
+    nope "compression.threshold" "expected 0.9, got $seeded_threshold"
 fi
 
 # The merge must write the baked bytes unchanged, not re-serialise the parsed
@@ -862,7 +888,7 @@ def trigger(window):
 
 
 failures = []
-for window, expected in ((272_000, 204_000), (400_000, 300_000), (1_048_576, 300_000)):
+for window, expected in ((272_000, 244_800), (400_000, 300_000), (1_048_576, 300_000)):
     try:
         got = trigger(window)
     except ValueError as exc:
@@ -1028,6 +1054,44 @@ case "$mt_migrate_out" in
     *) nope "migration report" "got: $mt_migrate_out" ;;
 esac
 
+# An install created under the old 09:00 default moves to 08:00 once (#579).
+# Only the exact legacy value is rewritten; a custom time is kept (above).
+echo ""
+echo "=== memory-triage legacy 09:00 schedule migration (#579) ==="
+rm -rf "$TMPDIR/cron-0900"
+mkdir -p "$TMPDIR/cron-0900"
+python3 - "$TMPDIR/cron-0900/jobs.json" <<'PY'
+import json, sys
+json.dump({"jobs": [{
+    "id": "old0900job", "name": "memory-triage", "prompt": "old",
+    "skills": ["hermes-troubleshooting"], "skill": "hermes-troubleshooting",
+    "schedule": {"kind": "cron", "expr": "0 9 * * *", "display": "0 9 * * *"},
+    "schedule_display": "0 9 * * *", "enabled": False, "deliver": "local",
+}]}, open(sys.argv[1], "w"))
+PY
+mt_0900=${mt_block//\/opt\/data\/cron\/jobs.json/$TMPDIR\/cron-0900\/jobs.json}
+mt_0900=${mt_0900//\/opt\/data\/config.yaml/$TMPDIR\/triage-config.yaml}
+mt_0900_out=$(python3 -c "$mt_0900" 2>&1)
+mt_0900_res=$(python3 - "$TMPDIR/cron-0900/jobs.json" <<'PY'
+import json, sys
+j = json.load(open(sys.argv[1]))["jobs"][0]
+ok = (j["schedule"].get("expr") == "0 8 * * *" and j["schedule"].get("display") == "0 8 * * *"
+      and j.get("schedule_display") == "0 8 * * *" and j.get("enabled") is False
+      and j.get("deliver") == "local")
+print("pass" if ok else "fail " + json.dumps(j.get("schedule")) + " " + str(j.get("schedule_display")))
+PY
+)
+[ "$mt_0900_res" = "pass" ] && ok "legacy 0 9 * * * schedule migrated to 0 8 * * *" || nope "legacy schedule migration" "$mt_0900_res"
+case "$mt_0900_out" in
+    *migrated*schedule*) ok "schedule migration is reported" ;;
+    *) nope "schedule migration report" "got: $mt_0900_out" ;;
+esac
+mt_0900_again=$(python3 -c "$mt_0900" 2>&1)
+case "$mt_0900_again" in
+    *unchanged*) ok "schedule migration is idempotent" ;;
+    *) nope "schedule migration idempotent" "got: $mt_0900_again" ;;
+esac
+
 # The routing rule must name the topic-file directory the seed creates.
 grep -q "/opt/data/memories/topics" "$SEED_SCRIPT" \
     && ok "seed creates the topic-file directory" \
@@ -1176,6 +1240,40 @@ probe_fallback_litter=$(ls -A "$probe_log" 2>/dev/null || true)
     && ok "boot probe: reconcile still runs when the log path is a directory" \
     || nope "boot probe: log path is a directory" \
         "rc=$probe_fallback_rc ran='$probe_fallback_ran' hook_stderr='$probe_fallback_stderr'"
+
+echo "--- seeded script pruning (#605) ---"
+seed_scripts_run() {
+    # Run the real seed-scripts block with /opt paths rewritten into $TMPDIR/sp.
+    local blk="$TMPDIR/seed-scripts-block.sh"
+    awk '/# seed-scripts:begin/{f=1} f{print} /# seed-scripts:end/{f=0}' "$SEED_SCRIPT" \
+        | sed "s#/opt/data#$TMPDIR/sp/data#g; s#/opt/hermes-defaults#$TMPDIR/sp/defaults#g" > "$blk"
+    [ -s "$blk" ] || return 1
+    sh "$blk"
+}
+SP="$TMPDIR/sp"
+rm -rf "$SP"; mkdir -p "$SP/defaults/scripts" "$SP/data/scripts"
+echo a > "$SP/defaults/scripts/keep.sh"; echo b > "$SP/defaults/scripts/old.sh"
+echo op > "$SP/data/scripts/operator.sh"
+echo stale > "$SP/data/scripts/preexisting-orphan.sh"
+
+seed_scripts_run || nope "seed-scripts block runs (first boot)" "extract or run failed"
+[ -f "$SP/data/scripts/preexisting-orphan.sh" ] && [ -f "$SP/data/scripts/operator.sh" ] \
+    && ok "first boot with no manifest prunes nothing" || nope "first boot prune" "files removed"
+[ -f "$SP/data/.hermes-seeded-scripts" ] && grep -qx old.sh "$SP/data/.hermes-seeded-scripts" \
+    && ok "first boot writes manifest" || nope "first boot manifest" "missing or incomplete"
+
+rm "$SP/defaults/scripts/old.sh"
+seed_scripts_run || true
+[ ! -e "$SP/data/scripts/old.sh" ] && ok "script removed from image is pruned" || nope "prune removed" "old.sh still present"
+[ -f "$SP/data/scripts/operator.sh" ] && [ -f "$SP/data/scripts/preexisting-orphan.sh" ] \
+    && ok "operator and pre-manifest files are kept" || nope "keep operator file" "removed"
+[ -f "$SP/data/scripts/keep.sh" ] && ! grep -qx old.sh "$SP/data/.hermes-seeded-scripts" \
+    && ok "manifest rewritten without pruned name" || nope "manifest rewrite" "$(cat "$SP/data/.hermes-seeded-scripts" 2>/dev/null)"
+
+before=$(cat "$SP/data/.hermes-seeded-scripts")
+seed_scripts_run || true
+[ "$before" = "$(cat "$SP/data/.hermes-seeded-scripts")" ] && [ -f "$SP/data/scripts/keep.sh" ] && [ -f "$SP/data/scripts/operator.sh" ] \
+    && ok "re-running is idempotent" || nope "idempotence" "state changed"
 
 echo ""
 echo "========================================="

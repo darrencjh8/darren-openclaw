@@ -1,3 +1,11 @@
+# Model ownership (#608): this profile's model governs only the tasks Hermes
+# dispatches to the code-reviewer profile itself (kanban.default_assignee in
+# ../../config.yaml). A dev-loop review round never runs under this profile: on
+# Hermes it runs as a hermes-subagent through delegate_task, and a delegated child
+# takes delegation.provider / delegation.model from the main config.yaml, never
+# from a profile. So the per-round reservation in codex-router's
+# dev-loop/policy.json and this pin do not compete for the same run.
+
 providers:
     codex-router:
         name: Codex Router

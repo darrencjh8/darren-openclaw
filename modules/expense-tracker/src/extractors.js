@@ -97,6 +97,16 @@ export async function extractEmailContent(rawEmail, password = null) {
 }
 
 /**
+ * qpdf exit codes: 0 = success, 3 = success with warnings, 2 = error (e.g.
+ * wrong password). Exit 3 still writes a valid decrypted output (#647).
+ * NOTE: keep in sync with qpdfSucceeded() in
+ * modules/portfolio-tracker/src/pdf_extractor.js (separate packages).
+ */
+export function qpdfSucceeded(err) {
+    return !err || err.code === 3;
+}
+
+/**
  * Extract text from a PDF buffer using pdftotext.
  *
  * @param {Buffer} pdfBuffer - raw PDF bytes
@@ -122,7 +132,7 @@ export async function extractPdfFromBuffer(pdfBuffer, password = null) {
                     try {
                         unlinkSync(pdfPath);
                     } catch {}
-                    if (qpdfErr) {
+                    if (!qpdfSucceeded(qpdfErr)) {
                         try {
                             unlinkSync(decPath);
                         } catch {}

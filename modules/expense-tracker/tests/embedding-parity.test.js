@@ -22,7 +22,7 @@ function tempFile(content) {
 }
 
 const SEED_FACTS = [
-    "Card ending 4605 belongs to Delta Extra credit card",
+    "Card ending 1888 belongs to Delta Extra credit card",
     "Epsilon Nova is a debit card account",
     "Toast Box merchant maps to Food payee",
     "Grab merchant maps to Transport payee",
@@ -45,7 +45,7 @@ const SEED_FACTS = [
 ];
 
 const QUERIES = [
-    { query: "what account is card 4605", expected: "Delta Extra credit card" },
+    { query: "what account is card 1888", expected: "Delta Extra credit card" },
     { query: "Epsilon Nova account type", expected: "Epsilon Nova" },
     { query: "toast box payee", expected: "Toast Box" },
     { query: "grab transport mapping", expected: "Grab" },

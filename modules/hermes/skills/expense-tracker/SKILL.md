@@ -8,8 +8,8 @@ A "suffix fact" maps the card or account number in an alert to the account that
 should be booked. The tracker stores them in this shape:
 
 ```
-Card ending 3255 belongs to Epsilon Nova Card
-Account ending 5750 belongs to Epsilon Account
+Card ending 7111 belongs to Epsilon Nova Card
+Account ending 7222 belongs to Epsilon Account
 ```
 
 On every alert the tracker looks for a fact naming the number in the email. If it
@@ -19,9 +19,9 @@ LLM pick. If it finds none, or the fact cannot be resolved, the LLM's pick stand
 **Reading is tolerant.** All of these are understood, so a user can write a fact
 in ordinary words:
 
-- `Card/account ending 3255 belongs to Epsilon Nova Card.`
-- `card ending in 3255 belongs to Epsilon Nova`
-- `Account/card ending 9001 belongs to Beta 360`
+- `Card/account ending 7111 belongs to Epsilon Nova Card.`
+- `card ending in 7111 belongs to Epsilon Nova`
+- `Account/card ending 6600 belongs to Beta 360`
 
 **Writing is canonical.** The stored form always uses `Card` for a card-named
 account and `Account` otherwise. `Card/account` is accepted on input but never
@@ -35,10 +35,10 @@ live account from a different bank than the sender email is ignored.
 
 ### Diagnosing a wrong booking
 
-The user says something like "card 3255 went to the wrong account" or "why did
+The user says something like "card 7111 went to the wrong account" or "why did
 BUS/MRT book to Epsilon Account".
 
-1. `search_facts` with the card number, e.g. `search_facts("3255")`.
+1. `search_facts` with the card number, e.g. `search_facts("7111")`.
 2. Look for `belongs to` facts. Check whether the named account is the right one.
 3. `fetch_context` for both budgets to confirm the account exists, is open, and
    belongs to the bank that sends the alerts.
@@ -50,7 +50,7 @@ BUS/MRT book to Epsilon Account".
    - Ambiguous or missing → ask the user which account; do not guess.
 5. Confirm to the user exactly what was stored.
 
-When the user teaches a new card ("card 3255 is the Nova card"), `search_facts` and
+When the user teaches a new card ("card 7111 is the Nova card"), `search_facts` and
 `fetch_context` first to confirm the account, then `learn_fact` with the canonical
 fact, and say what you saved.
 
@@ -58,7 +58,7 @@ fact, and say what you saved.
 
 - One mapping per number. Two facts for one number mean the later line wins by
   file order, which is not a decision to leave implicit.
-- `9001` and `869001` pointing at the same account is correct, not a duplicate:
+- `6600` and `166600` pointing at the same account is correct, not a duplicate:
   one OCBC format prints the short number and another prints the long one.
 - The pipeline never overwrites an existing account-type fact (`X is a bank
   account`). A contradiction is logged. Fix a wrong type deliberately with

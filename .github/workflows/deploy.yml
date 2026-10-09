@@ -194,6 +194,9 @@ jobs:
                   TAXONOMY_SHEET_MAPPING: ${{ vars.TAXONOMY_SHEET_MAPPING }}
                   TAXONOMY_NAMES: ${{ vars.TAXONOMY_NAMES }}
                   PP_OFFSET_MAP: ${{ vars.PP_OFFSET_MAP }}
+                  # WebUI CSP frame-ancestors extra (Tailscale-serve URL). Repo
+                  # variable so framing can be allowed without a code change.
+                  HERMES_WEBUI_CSP_FRAME_EXTRA: ${{ vars.HERMES_WEBUI_CSP_FRAME_EXTRA }}
                   SUBMODULE_PAT: ${{ secrets.SUBMODULE_PAT }}
                   FRIDAY_PAT: ${{ secrets.FRIDAY_PAT }}
                   DEPLOY_COMPONENTS: ${{ steps.changes.outputs.components || 'all' }}

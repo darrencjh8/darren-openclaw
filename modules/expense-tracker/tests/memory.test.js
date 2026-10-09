@@ -727,10 +727,10 @@ describe("MemoryStore", () => {
     it("parses suffix->account pattern (Card ending)", () => {
       const store = new MemoryStore(emptyMemoryPath);
       const parsed = store._parseStructured(
-        "Card ending 3255 belongs to Epsilon Nova Card",
+        "Card ending 7111 belongs to Epsilon Nova Card",
       );
       expect(parsed).toEqual({
-        entity: "3255",
+        entity: "7111",
         relation: "suffix->account",
         value: "epsilon nova card",
       });
@@ -739,10 +739,10 @@ describe("MemoryStore", () => {
     it("parses suffix->account pattern (Account ending)", () => {
       const store = new MemoryStore(emptyMemoryPath);
       const parsed = store._parseStructured(
-        "Account ending 8901 belongs to Epsilon Account",
+        "Account ending 3888 belongs to Epsilon Account",
       );
       expect(parsed).toEqual({
-        entity: "8901",
+        entity: "3888",
         relation: "suffix->account",
         value: "epsilon",
       });
@@ -750,21 +750,21 @@ describe("MemoryStore", () => {
 
     it("blocks suffix->account contradiction (same suffix, different account)", async () => {
       const store = new MemoryStore(emptyMemoryPath);
-      await store.add("Card ending 3255 belongs to Epsilon Nova Card");
-      const r = await store.add("Card ending 3255 belongs to Epsilon Vista Card");
+      await store.add("Card ending 7111 belongs to Epsilon Nova Card");
+      const r = await store.add("Card ending 7111 belongs to Epsilon Vista Card");
       expect(r).toEqual({
         added: false,
         skipped: true,
         reason: "contradiction",
-        existing: "Card ending 3255 belongs to Epsilon Nova Card",
+        existing: "Card ending 7111 belongs to Epsilon Nova Card",
       });
     });
 
     it("allows different suffixes for different accounts", async () => {
       const store = new MemoryStore(emptyMemoryPath);
-      const r1 = await store.add("Card ending 3255 belongs to Epsilon Nova Card");
+      const r1 = await store.add("Card ending 7111 belongs to Epsilon Nova Card");
       expect(r1.added).toBe(true);
-      const r2 = await store.add("Card ending 4605 belongs to Delta Extra Card");
+      const r2 = await store.add("Card ending 1888 belongs to Delta Extra Card");
       expect(r2.added).toBe(true);
       expect(store.listFacts().length).toBe(2);
     });

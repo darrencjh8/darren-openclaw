@@ -119,6 +119,18 @@ export class DedupJournal {
         updated_at TEXT NOT NULL DEFAULT (datetime('now'))
       )
     `);
+        // Added after the table first shipped: CREATE TABLE IF NOT EXISTS leaves
+        // an existing journal without it (issue #578).
+        if (
+            !this._db
+                .prepare("PRAGMA table_info(transfer_journal)")
+                .all()
+                .some((c) => c.name === "counterpart_alert_id")
+        ) {
+            this._db.exec(
+                "ALTER TABLE transfer_journal ADD COLUMN counterpart_alert_id TEXT",
+            );
+        }
         this._db.exec(`
       CREATE INDEX IF NOT EXISTS idx_transfer_match
       ON transfer_journal (
@@ -237,13 +249,22 @@ export class DedupJournal {
      * booking. `at` is the alert's event time; the default window is the same
      * one the journal uses to tell a sibling alert from a real repeat transfer.
      *
+     * A leg is the counterpart of ONE credit alert: the first `alert_id` to
+     * match claims it, and a later alert with a different id gets null. The
+     * claiming alert asking again (an email reprocessed after a crash) still
+     * gets the leg. Without an `alert_id` the match is read-only, as before.
+     * A mailbox epoch change clears claims, since uids are reused.
+     *
      * ponytail: amount+account+window is all the journal can correlate on —
      * bank alerts share no reference number, so a genuinely separate transfer
      * of the same amount into the same account inside the window is
-     * indistinguishable and reads as the booked one. Same window, same accepted
-     * trade-off the debit side already makes in `reserveTransfer` (issue #556,
-     * real repeats 237 s apart). Upgrade path: a bank-reference column on
-     * `transfer_journal`. Tracked in issue #578.
+     * indistinguishable and reads as the booked one. If that separate credit
+     * arrives BEFORE the genuine counterpart it claims the leg, and the genuine
+     * counterpart is then held and notified: a false hold, the safe direction,
+     * instead of a silent loss. Same window, same accepted trade-off the debit
+     * side already makes in `reserveTransfer` (issue #556, real repeats 237 s
+     * apart). Upgrade path: a bank-reference column on `transfer_journal`.
+     * Tracked in issue #578.
      */
     findInsertedTransferInto({
         budget_id,
@@ -251,6 +272,7 @@ export class DedupJournal {
         amount_cents,
         currency,
         at,
+        alert_id,
         windowMs = TRANSFER_MATCH_WINDOW_MS,
     }) {
         const ts = at ? new Date(at).getTime() : NaN;
@@ -265,26 +287,44 @@ export class DedupJournal {
             return null;
         }
         const iso = (ms) => new Date(ms).toISOString();
-        return (
-            this._db
-                .prepare(`
-              SELECT * FROM transfer_journal
+        const claimant = alert_id == null ? "" : String(alert_id);
+        const params = [
+            budget_id,
+            destination_account_id,
+            currency,
+            Math.abs(amount_cents),
+            iso(ts - windowMs),
+            iso(ts + windowMs),
+        ];
+        const select = (extra) =>
+            `SELECT * FROM transfer_journal
               WHERE budget_id = ? AND destination_account_id = ?
                 AND currency = ? AND amount_cents = ?
                 AND status = 'inserted'
                 AND occurred_at >= ? AND occurred_at <= ?
+                ${extra}
               ORDER BY occurred_at
-              LIMIT 1
-            `)
-                .get(
-                    budget_id,
-                    destination_account_id,
-                    currency,
-                    Math.abs(amount_cents),
-                    iso(ts - windowMs),
-                    iso(ts + windowMs),
-                ) || null
-        );
+              LIMIT 1`;
+        if (!claimant) {
+            return this._db.prepare(select("")).get(...params) || null;
+        }
+        return this._db.transaction(() => {
+            const leg = this._db
+                .prepare(
+                    select("AND (counterpart_alert_id IS NULL OR counterpart_alert_id = ?)"),
+                )
+                .get(...params, claimant);
+            if (!leg) return null;
+            if (leg.counterpart_alert_id == null) {
+                this._db
+                    .prepare(
+                        "UPDATE transfer_journal SET counterpart_alert_id = ? WHERE id = ? AND counterpart_alert_id IS NULL",
+                    )
+                    .run(claimant, leg.id);
+                leg.counterpart_alert_id = claimant;
+            }
+            return leg;
+        })();
     }
 
     getTransfer(id) {
@@ -393,6 +433,10 @@ export class DedupJournal {
             if (row || stored) {
                 this._db.prepare("DELETE FROM booked_messages").run();
                 this._db.prepare("DELETE FROM processed_uids").run();
+                // Claims are keyed by uid too (issue #578).
+                this._db
+                    .prepare("UPDATE transfer_journal SET counterpart_alert_id = NULL")
+                    .run();
                 return true;
             }
             return false;

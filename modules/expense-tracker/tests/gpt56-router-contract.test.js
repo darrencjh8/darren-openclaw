@@ -95,9 +95,7 @@ describe("GPT-5.6 LiteLLM contract", () => {
     await client.chat([{ role: "user", content: "parse transaction" }]);
 
     expect(responsesCreate.mock.calls.map(([request]) => request.model)).toEqual([
-      "gpt-5.6-luna",
-      "gpt-5.6-luna",
-      "gpt-5.6-luna",
+      "gpt-5.6-luna", // router is tried once: its 300s budget is not retried (#697)
     ]);
     expect(create.mock.calls[0][0].model).toBe("deepseek-flash");
     expect(create.mock.calls[0][0].temperature).toBe(0.1);

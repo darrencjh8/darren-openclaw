@@ -74,6 +74,7 @@ describe("LLMClient DeepSeek route", () => {
                 tools,
                 tool_choice: "auto",
             }),
+            { signal: expect.any(AbortSignal) },
         );
     });
 

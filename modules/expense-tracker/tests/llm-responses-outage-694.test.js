@@ -162,7 +162,7 @@ describe("LLM outage is retryable, not 'couldn't understand' (#694)", () => {
 
         const result = await orch.processEmail(
             "1069",
-            "Card Transaction Alert\nS$5.00 was spent on your card ending 3255 at SOME SHOP",
+            "Card Transaction Alert\nS$5.00 was spent on your card ending 7111 at SOME SHOP",
             null,
             "ibanking.alert@dbs.com",
             "Card Transaction Alert",
