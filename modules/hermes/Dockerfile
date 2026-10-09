@@ -21,6 +21,13 @@ RUN uv venv /opt/codex-router-venv --python /usr/bin/python3 \
     && rm /tmp/requirements-codex-router.txt \
     && printf '#!/bin/sh\nexec /opt/codex-router-venv/bin/python "$@"\n' > /usr/local/bin/codex-router-python \
     && chmod 755 /usr/local/bin/codex-router-python
+# Issue #650: upstream runs a state.db quick_check on the event loop after an
+# unclean exit (an hour+ on a multi-GB store). Move it to a background thread.
+# The patch fails the build if the upstream text changes, so an image bump
+# cannot silently drop it.
+COPY patches/patch-lifecycle-ledger.py /tmp/patch-lifecycle-ledger.py
+RUN python3 /tmp/patch-lifecycle-ledger.py /opt/hermes/gateway/lifecycle_ledger.py \
+    && rm /tmp/patch-lifecycle-ledger.py
 COPY config.yaml SOUL.md.template /opt/hermes-defaults/
 COPY skills/ /opt/hermes-defaults/skills/
 COPY scripts/ /opt/hermes-defaults/scripts/
