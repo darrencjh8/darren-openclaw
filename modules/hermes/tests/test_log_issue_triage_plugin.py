@@ -97,6 +97,31 @@ class LogIssueTriagePluginTest(unittest.TestCase):
         self.assertEqual(result["status"], "degraded")
         self.assertEqual(result["findings"][0]["kind"], "invocation_missing")
 
+    def test_ticker_stale_finding_id_is_stable_as_age_changes(self):
+        observed = dt.datetime(2026, 10, 9, 0, 0, tzinfo=dt.timezone.utc)
+        first = triage._cron_finding("scheduler", "cron-scheduler", "ticker_stale", "ticker heartbeat is 301 seconds old", observed)
+        second = triage._cron_finding("scheduler", "cron-scheduler", "ticker_stale", "ticker heartbeat is 900 seconds old", observed + dt.timedelta(minutes=10))
+        self.assertEqual(first["finding_id"], second["finding_id"])
+
+    def test_cron_health_returns_all_findings(self):
+        now = dt.datetime(2026, 10, 9, 2, 0, tzinfo=dt.timezone.utc)
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            jobs = [{"id": f"job-{i}", "name": f"job-{i}", "enabled": True,
+                     "schedule": {"kind": "cron", "expr": "0 * * * *"},
+                     "next_run_at": "2026-10-09T01:00:00+00:00"} for i in range(60)]
+            (root / "jobs.json").write_text(json.dumps({"jobs": jobs}), encoding="utf-8")
+            (root / "ticker_heartbeat").write_text(str(now.timestamp()), encoding="utf-8")
+            db = sqlite3.connect(root / "executions.db")
+            db.execute("CREATE TABLE executions (job_id TEXT, status TEXT, claimed_at TEXT, finished_at TEXT, error TEXT, delivery_outcome TEXT, scheduled_instant TEXT)")
+            db.commit()
+            db.close()
+            with patch.object(triage, "_CRON_ROOT", root), patch.object(triage, "_now", return_value=now):
+                result = triage._cron_health({})
+        self.assertEqual(result["finding_count"], 60)
+        self.assertEqual(len(result["findings"]), 60)
+
+    def test_cron_health_publication_uses_live_finding_and_verifies_issue(self):
         finding = {
             "finding_id": "f" * 32, "job_id": "job-1", "job_name": "broken-job",
             "kind": "delivery_failed", "detail": "delivery outcome was failed",

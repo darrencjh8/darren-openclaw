@@ -120,7 +120,8 @@ def _parse_time(value):
 
 def _cron_finding(job_id, job_name, kind, detail, observed_at, **extra):
     safe_detail = _SECRET_RE.sub("[REDACTED]", str(detail))[-1000:]
-    key = "|".join((job_id, kind, safe_detail))
+    identity_detail = "ticker heartbeat is stale" if kind == "ticker_stale" else safe_detail
+    key = "|".join((job_id, kind, identity_detail))
     finding_id = hashlib.sha256(key.encode("utf-8")).hexdigest()[:32]
     finding = {
         "finding_id": finding_id,
@@ -204,7 +205,7 @@ def _cron_health(args):
         "checked_at": now.isoformat(),
         "job_count": sum(1 for job in jobs if isinstance(job, dict) and job.get("enabled", True)),
         "finding_count": len(findings),
-        "findings": findings[:50],
+        "findings": findings,
         **({"finding_id": findings[0]["finding_id"]} if len(findings) == 1 else {}),
     }
 
