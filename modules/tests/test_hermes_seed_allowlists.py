@@ -134,6 +134,40 @@ class SeedAllowlistTest(unittest.TestCase):
             self.env_path.read_text(),
         )
 
+    def test_mirrors_telegram_delivery_credentials_for_cron(self) -> None:
+        """Cron delivery reads TELEGRAM_BOT_TOKEN / TELEGRAM_HOME_CHANNEL through the profile
+        secret scope; without them in the profile .env it fails with "no gateway credentials"."""
+        self.env_path.write_text("OPENCODE_ZEN_API_KEY=keep-me\nTELEGRAM_BOT_TOKEN=stale\n")
+        self.env_path.chmod(0o600)
+
+        result = self.seed(
+            TELEGRAM_BOT_TOKEN="123456:fake-token_value",
+            TELEGRAM_HOME_CHANNEL="-1001234567890",
+            TELEGRAM_UNRELATED_SETTING="not-mirrored",
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(
+            self.env_path.read_text().splitlines(),
+            [
+                "OPENCODE_ZEN_API_KEY=keep-me",
+                "TELEGRAM_BOT_TOKEN=123456:fake-token_value",
+                "TELEGRAM_HOME_CHANNEL=-1001234567890",
+            ],
+        )
+        self.assertEqual(self.env_path.stat().st_mode & 0o777, 0o600)
+        self.assertNotIn("fake-token_value", result.stdout)
+
+    def test_unset_telegram_credentials_never_remove_existing_keys(self) -> None:
+        original = "TELEGRAM_BOT_TOKEN=keep\nTELEGRAM_HOME_CHANNEL=1\n"
+        self.env_path.write_text(original)
+        self.env_path.chmod(0o600)
+
+        result = self.seed(TELEGRAM_BOT_TOKEN="", TELEGRAM_HOME_CHANNEL=" ")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.env_path.read_text(), original)
+
     def test_block_is_wired_into_the_boot_hook_and_fails_loudly(self) -> None:
         text = SEED.read_text()
         self.assertRegex(text, re.compile(r"python3 <<'PYALLOWLIST' \|\| echo \"WARNING:"))
