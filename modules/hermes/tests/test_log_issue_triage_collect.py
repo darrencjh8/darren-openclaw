@@ -316,6 +316,7 @@ if [ "$1" = ps ]; then
         hermes) echo hermes ;;
         expense-tracker) echo modules-expense-tracker-1 ;;
         portfolio-tracker) echo modules-portfolio-tracker-1 ;;
+        actual-api) echo modules-actual-api-1 ;;
         codex-router-a) echo modules-codex-router-a-1 ;;
         codex-router-b) echo modules-codex-router-b-1 ;;
     esac
@@ -466,6 +467,55 @@ fi
 
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertIn("--since 2026-10-08T00:00:00Z", seen.read_text(encoding="utf-8"))
+
+    def _logs_recorder(self, seen):
+        return (
+            "#!/bin/sh\n"
+            "if [ \"$1\" = logs ]; then\n"
+            "  printf '%s\\n' \"$*\" >> " + str(seen) + "\n"
+            "  echo '2026-10-09T00:00:00.000000000Z fresh failure'\n"
+            "fi\n"
+        )
+
+    def test_corrupt_stored_window_falls_back_to_24h_and_is_rewritten(self):
+        """#739: garbage in .since must not wedge every run in a docker-logs failure."""
+        for garbage in ("not-a-time", "2026-10-08", "--tail 9999", "\x00\x01", "24h; rm -rf /"):
+            with self.subTest(garbage=garbage), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                seen = root / "docker-logs-args"
+                (root / "state").mkdir(parents=True)
+                since = root / "state" / "hermes.since"
+                since.write_text(garbage, encoding="utf-8")
+
+                result = self.run_snapshot(root, "hermes", self._logs_recorder(seen))
+
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn("--since 24h ", seen.read_text(encoding="utf-8"))
+                self.assertRegex(since.read_text(encoding="utf-8"), r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
+
+    def test_valid_stored_windows_are_kept(self):
+        for good in ("2026-10-08T00:00:00Z", "2026-10-08T00:00:00.123Z", "2026-10-08T08:00:00+08:00", "6h"):
+            with self.subTest(good=good), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                seen = root / "docker-logs-args"
+                (root / "state").mkdir(parents=True)
+                (root / "state" / "hermes.since").write_text(good + "\n", encoding="utf-8")
+
+                result = self.run_snapshot(root, "hermes", self._logs_recorder(seen))
+
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn(f"--since {good} ", seen.read_text(encoding="utf-8"))
+
+    def test_actual_api_is_collected(self):
+        """#740: the Actual Budget backend is a production service with triage coverage."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            docker = "#!/bin/sh\necho '2026-10-09T00:00:00.000000000Z budget sync failed'\n"
+            result = self.run_snapshot(root, "actual-api", docker)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            payload = json.loads((root / "snapshots" / "actual-api.json").read_text(encoding="utf-8"))
+            self.assertEqual(payload["component"], "actual-api")
+            self.assertEqual(payload["collected_containers"], ["modules-actual-api-1"])
 
     def test_snapshot_retries_the_same_window_after_failure(self):
         """A failed run must not advance the window, or logs are skipped."""

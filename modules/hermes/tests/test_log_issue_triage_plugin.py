@@ -485,5 +485,19 @@ class LogIssueTriagePluginTest(unittest.TestCase):
         self.assertEqual(run.call_count, 2)
 
 
+class ActualApiCoverageTest(unittest.TestCase):
+    """#740: actual-api is a production service, so triage must cover it."""
+
+    def test_actual_api_routes_to_this_repo(self):
+        self.assertEqual(triage._COMPONENT_REPOS["actual-api"], "darrencjh8/darren-openclaw")
+        self.assertIn("actual-api", triage._COMPONENTS)
+
+    def test_collector_and_seed_prompt_list_actual_api(self):
+        collect = (PLUGIN_PATH.parents[2] / "scripts/log-issue-triage-collect.py").read_text(encoding="utf-8")
+        self.assertRegex(collect, r"ALLOWED_COMPONENTS = \{[^}]*\"actual-api\"")
+        seed = (PLUGIN_PATH.parents[2] / "50-seed-defaults").read_text(encoding="utf-8")
+        self.assertIn("expense-tracker/portfolio-tracker/actual-api to `darrencjh8/darren-openclaw`", seed)
+
+
 if __name__ == "__main__":
     unittest.main()

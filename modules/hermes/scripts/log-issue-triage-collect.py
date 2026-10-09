@@ -7,7 +7,7 @@ import re
 import sys
 from pathlib import Path
 
-ALLOWED_COMPONENTS = {"codex-router", "expense-tracker", "hermes", "portfolio-tracker"}
+ALLOWED_COMPONENTS = {"actual-api", "codex-router", "expense-tracker", "hermes", "portfolio-tracker"}
 SECRET_PATTERNS = (
     re.compile(r"(?i)\bauthorization\s*:\s*(?:bearer|basic)\s+\S+"),
     re.compile(r"(?i)\bbearer\s+\S+"),

@@ -22,6 +22,7 @@ _COMPONENT_REPOS = {
     "expense-tracker": "darrencjh8/darren-openclaw",
     "portfolio-tracker": "darrencjh8/darren-openclaw",
     "codex-router": "darrencjh8/codex-router",
+    "actual-api": "darrencjh8/darren-openclaw",
 }
 _COMPONENTS = tuple(_COMPONENT_REPOS)
 _SNAPSHOT_ROOT = Path("/opt/data/log-issue-triage/snapshots")
