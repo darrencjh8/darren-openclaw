@@ -143,7 +143,7 @@ class LogIssueTriageCollectorTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             raw = (
                 "bot token 123456789:AAHdqTcvCH1vGWJxfSeofSAs0K5PALDsaw\n"
-                + "hook https://hooks.slack.com/services/T000/B000/XXXX\n"
+                + "hook " + "https://hooks.slack.com/services/T000/B000/XXXX\n"
                 + "key ntn_abc123def456789\n"
             )
             result = subprocess.run(
