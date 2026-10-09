@@ -10,8 +10,9 @@ import { simpleParser } from "mailparser";
 import { DedupJournal } from "./dedup.js";
 import { isBookableAmountCents } from "./amounts.js";
 import { extractPdfFromBuffer, extractEmailContent } from "./extractors.js";
-import { LLMClient } from "./orchestrator.js";
 import { factNamesMerchant } from "./memory.js";
+import { classifyPayee, eligiblePayees } from "./jev.js";
+import { PendingLearning, descriptorOf } from "./learning.js";
 import { composeNotes } from "./transaction-notes.js";
 import { logger, getLogger, redactSensitive } from "./logging.js";
 
@@ -813,6 +814,32 @@ const TOOLS = [
         budget_id: { type: "string" },
       },
       required: ["merchant", "budget_id"],
+    },
+  },
+  {
+    name: "list_pending_learning",
+    description:
+      "List the payee mappings the tracker has offered to remember and the user has not answered yet. Nothing is learned until confirm_learning is called.",
+    schema: { type: "object", properties: {} },
+  },
+  {
+    name: "confirm_learning",
+    description:
+      "Persist one offered payee mapping. Call only after the user has explicitly said yes to that exact offer. Returns {confirmed}.",
+    schema: {
+      type: "object",
+      properties: { id: { type: "string", description: "Offer id from list_pending_learning" } },
+      required: ["id"],
+    },
+  },
+  {
+    name: "decline_learning",
+    description:
+      "Discard one offered payee mapping the user does not want remembered. The booked transaction is not changed.",
+    schema: {
+      type: "object",
+      properties: { id: { type: "string", description: "Offer id from list_pending_learning" } },
+      required: ["id"],
     },
   },
   {
@@ -1971,77 +1998,138 @@ export class ToolRegistry {
     }
   }
 
-  async _handle_resolve_merchant({ merchant, budget_id }) {
+  async _handle_resolve_merchant({
+    merchant,
+    budget_id,
+    evidence,
+    direction,
+    amount_cents,
+    currency,
+  }) {
     if (!budget_id) return { error: "budget_id is required" };
-    if (!this._memory) return { payee: "Misc", source: "fallback" };
     const budgetId = budget_id;
-    try {
-      const memResults = await this._memory.search(merchant);
-      if (memResults && memResults.length > 0) {
-        for (const r of memResults) {
-          // A hit for a different merchant must never supply this one's payee.
-          // Issue #471: a weakly similar neighbour booked an AliPay charge to
-          // the neighbour's payee and then to that payee's category.
-          if (!factNamesMerchant(r.text, merchant)) continue;
-          const match = (r.text || "").match(/maps to (.+?) payee/i);
-          if (match) return { payee: match[1], source: "memory" };
+    if (this._memory) {
+      try {
+        const memResults = await this._memory.search(merchant);
+        if (memResults && memResults.length > 0) {
+          for (const r of memResults) {
+            // A hit for a different merchant must never supply this one's payee.
+            // Issue #471: a weakly similar neighbour booked an AliPay charge to
+            // the neighbour's payee and then to that payee's category.
+            if (!factNamesMerchant(r.text, merchant)) continue;
+            const match = (r.text || "").match(/maps to (.+?) payee/i);
+            if (match) return { payee: match[1], source: "memory" };
+          }
         }
+      } catch {
+        // Memory search failed — fall through
       }
-    } catch {
-      // Memory search failed — fall through to web search
     }
 
     // An unverified web/LLM classification is not durable merchant evidence.
     // Returning or learning it caused a clinic payment to become a permanent
-    // Petrol mapping (#587). Unknown merchants must remain Misc until confirmed.
+    // Petrol mapping (#587). The Jev tier below is different in kind: it is
+    // validated against the real payee list and thresholds, it only runs when the
+    // orchestrator supplies the email as evidence, and its answer is never
+    // learned here (a user must confirm it, #720).
+    if (evidence?.text && this._config.jevApiKey) {
+      try {
+        const payees = await this._get("/payees", budgetId);
+        const result = await classifyPayee({
+          config: this._config,
+          merchant,
+          direction,
+          amountCents: amount_cents,
+          currency,
+          evidence,
+          payees,
+        });
+        if (result.payee) {
+          return {
+            payee: result.payee,
+            source: "jev",
+            runner_up: result.runnerUp?.payee || null,
+            confidence: result.confidence,
+            evidence_score: result.evidenceScore,
+          };
+        }
+      } catch (error) {
+        logger.warn({ event: "jev_tier_failed", error: error.message });
+      }
+    }
     return { payee: "Misc", source: "fallback" };
   }
 
-  async _classify_merchant(merchant, searchResults, budgetId) {
-    const payees = await this._get("/payees", budgetId);
-    const payeeNames = Array.isArray(payees)
-      ? payees.map((p) => p.name).filter(Boolean)
-      : [];
+  // ── Learning that waits for the user (#720) ─────────────────
 
-    const snippets = (searchResults || [])
-      .map((r, i) => `${i + 1}. ${r.title}\n   ${r.description}\n   ${r.url}`)
-      .join("\n\n");
-
-    const prompt = [
-      `Given the merchant name "${merchant}" and the following web search results, determine the most appropriate payee from the list below.`,
-      "",
-      "Web Search Results:",
-      snippets || "No results available.",
-      "",
-      "Available Payees:",
-      payeeNames.join("\n"),
-      "",
-      'Respond with a JSON object: { "payee": "Chosen Payee Name" }',
-    ].join("\n");
-
-    const client = new LLMClient(this._config);
-    const response = await client.chat(
-      [{ role: "user", content: prompt }],
-      undefined,
+  get _pendingLearning() {
+    this._pending ||= new PendingLearning(
+      this._config.pendingLearningPath || "data/pending-learning.json",
     );
-    const content = (response.choices || [{}])[0].message?.content || "";
+    return this._pending;
+  }
+
+  /**
+   * Internal: not on the HTTP or MCP routes. Stores an offer to remember a
+   * mapping. Writes no fact.
+   */
+  async _handle_propose_learning({ descriptor, payee, runner_up, budget_id }) {
+    const clean = descriptorOf(descriptor);
+    if (!clean) return { offered: false, reason: "unusable_descriptor" };
+    let eligible;
     try {
-      const parsed = JSON.parse(content);
-      const payee = parsed.payee || null;
-      if (payee && !payeeNames.includes(payee)) return null;
-      return payee;
+      eligible = eligiblePayees(await this._get("/payees", budget_id));
     } catch {
-      // Try to extract JSON from the response
-      const jsonMatch = content.match(/\{[\s\S]*\}/);
-      if (jsonMatch) {
-        try {
-          const payee = JSON.parse(jsonMatch[0]).payee || null;
-          if (payee && !payeeNames.includes(payee)) return null;
-          return payee;
-        } catch {}
-      }
-      return null;
+      return { offered: false, reason: "payees_unavailable" };
     }
+    if (!eligible.includes(payee)) return { offered: false, reason: "ineligible_payee" };
+    const id = this._pendingLearning.offer({
+      descriptor: clean,
+      payee,
+      runnerUp: runner_up || null,
+      budgetId: budget_id || "",
+    });
+    return { offered: true, id };
+  }
+
+  /** Internal: drop an offer whose notification never reached the user. */
+  async _handle_withdraw_learning({ id }) {
+    return { withdrawn: this._pendingLearning.discard(id) };
+  }
+
+  async _handle_list_pending_learning() {
+    return {
+      offers: this._pendingLearning.list().map((offer) => ({
+        id: offer.id,
+        descriptor: offer.descriptor,
+        payee: offer.payee,
+        runner_up: offer.runnerUp,
+        expires_at: new Date(offer.expiresAt).toISOString(),
+      })),
+    };
+  }
+
+  async _handle_confirm_learning({ id }) {
+    const offer = this._pendingLearning.get(id);
+    if (!offer) return { confirmed: false, reason: "unknown_or_expired" };
+    const fact = `${offer.descriptor} maps to ${offer.payee} payee`;
+    const learned = await this._handle_learn_fact({
+      fact,
+      budget_id: offer.budgetId,
+    });
+    // An existing identical fact is the outcome the user asked for.
+    const known = ["duplicate", "structured duplicate", "semantic duplicate"].includes(
+      learned?.reason,
+    );
+    if (!learned?.added && !known) {
+      return { confirmed: false, reason: learned?.reason || "not_saved", kept: true };
+    }
+    this._pendingLearning.discard(offer.id);
+    return { confirmed: true, fact };
+  }
+
+  async _handle_decline_learning({ id }) {
+    return { declined: this._pendingLearning.discard(id) };
   }
 
   // ── HTTP helpers ────────────────────────────────────────────

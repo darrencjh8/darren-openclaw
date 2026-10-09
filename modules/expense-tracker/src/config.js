@@ -64,6 +64,11 @@ export class Config {
     this.statementDbPath = env.STATEMENT_DB_PATH || "data/statement.db";
     this.memoryPath = env.MEMORY_PATH || "data/MEMORY.md";
     this.braveSearchApiKey = env.BRAVE_SEARCH_API_KEY || "";
+    // Jev (TypeSafe System One) payee classifier; empty key disables it (#720).
+    this.jevApiKey = env.JEV_API_KEY || "";
+    this.jevEndpoint = env.JEV_ENDPOINT || "";
+    this.jevModel = env.JEV_MODEL || "";
+    this.pendingLearningPath = env.PENDING_LEARNING_PATH || "data/pending-learning.json";
     this.logLevel = env.LOG_LEVEL || "INFO";
   }
 

@@ -191,3 +191,17 @@ describe("extractEmailContent — PDF/multipart structure", () => {
         expect(result).not.toContain("iVBOR");
     });
 });
+
+describe("extractEmailContent keepLines (#720)", () => {
+    const text = "Amount: SGD 2.27\nReference: 360 SAVE BONUS\n\n\n\nThis is an auto-generated email.   Do not reply.";
+
+    it("flattens whitespace by default, exactly as before", async () => {
+        const out = await extractEmailContent(Buffer.from(buildMimeEmail({ text })));
+        expect(out).toBe("Amount: SGD 2.27 Reference: 360 SAVE BONUS This is an auto-generated email. Do not reply.");
+    });
+
+    it("keeps the email's own line breaks so a field ends where the sender ended it", async () => {
+        const out = await extractEmailContent(Buffer.from(buildMimeEmail({ text })), null, { keepLines: true });
+        expect(out).toBe("Amount: SGD 2.27\nReference: 360 SAVE BONUS\n\nThis is an auto-generated email. Do not reply.");
+    });
+});

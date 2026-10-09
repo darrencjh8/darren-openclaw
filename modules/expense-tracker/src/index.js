@@ -153,6 +153,9 @@ async function main() {
         "extract_email_content",
         "check_statement_duplicate",
         "resolve_merchant",
+        "list_pending_learning",
+        "confirm_learning",
+        "decline_learning",
         "update_transaction",
         "extract_inbox_pdf",
     ];
@@ -160,7 +163,11 @@ async function main() {
     for (const name of toolNames) {
         app.post(`/tools/${name.replace(/_/g, "-")}`, async (req, res) => {
             try {
-                const result = await registry.executeTool(name, req.body || {});
+                // `evidence` is the orchestrator's own argument to resolve_merchant
+                // (the email, for Jev). A caller on this route must not be able to
+                // supply it, or it could spend a Jev call on text it chose (#720).
+                const { evidence: _evidence, ...args } = req.body || {};
+                const result = await registry.executeTool(name, args);
                 res.json(result);
             } catch (e) {
                 res.status(e.message?.startsWith("Unknown") ? 404 : 500).json({

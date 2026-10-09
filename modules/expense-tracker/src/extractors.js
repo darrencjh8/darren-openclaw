@@ -17,9 +17,22 @@ import { join } from "path";
  *
  * @param {Buffer|string} rawEmail - raw MIME email bytes or string
  * @param {string} [password] - optional password for encrypted PDFs
+ * @param {{keepLines?: boolean}} [options] - keepLines keeps the email's own line
+ *   breaks (evidence for classification). The default flattens whitespace, which
+ *   is what the parsers and Phase 1 read.
+ *   ponytail: an HTML-only email is already flattened by cheerio, so keepLines
+ *   cannot recover its breaks; block-aware HTML text is the upgrade path.
  * @returns {Promise<string>} extracted plain text
  */
-export async function extractEmailContent(rawEmail, password = null) {
+export async function extractEmailContent(rawEmail, password = null, { keepLines = false } = {}) {
+    const tidy = (text) =>
+        keepLines
+            ? String(text)
+                  .replace(/[^\S\n]+/g, " ")
+                  .replace(/ ?\n ?/g, "\n")
+                  .replace(/\n{3,}/g, "\n\n")
+                  .trim()
+            : String(text).replace(/\s+/g, " ").trim();
     const raw = Buffer.isBuffer(rawEmail)
         ? rawEmail
         : Buffer.from(rawEmail || "");
@@ -66,7 +79,7 @@ export async function extractEmailContent(rawEmail, password = null) {
             }
         }
 
-        const result = parts.join("\n").replace(/\s+/g, " ").trim();
+        const result = tidy(parts.join("\n"));
         if (result) return result;
 
         // Fallback: try cheerio directly on raw bytes (handles non-MIME HTML)

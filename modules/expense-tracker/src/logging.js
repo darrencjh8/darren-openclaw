@@ -39,6 +39,7 @@ const SENSITIVE_KEYS = new Set([
     "raw_text",
     "raw_description",
     "raw_merchant_descriptor",
+    "evidence",
     "pdf_bytes_b64",
     "password",
     "authorization",

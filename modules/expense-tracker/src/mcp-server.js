@@ -75,6 +75,9 @@ export const toolShapes = {
     merchant: z.string().min(1),
     budget_id: z.string().min(1),
   },
+  list_pending_learning: {},
+  confirm_learning: { id: z.string().min(1) },
+  decline_learning: { id: z.string().min(1) },
   list_facts: {},
   search_facts: { query: z.string() },
   // budget_id is optional so existing callers keep working, but supplying it
@@ -192,6 +195,25 @@ function createTools(server, registry) {
     "Resolve merchant to payee using memory, Brave search, and AI classification. Returns {payee, source}.",
     toolShapes.resolve_merchant,
     async (a) => tx(await registry.executeTool("resolve_merchant", a)),
+  );
+  // ── Learning that waits for the user (#720) ────────────────
+  server.tool(
+    "list_pending_learning",
+    "List payee mappings the tracker offered to remember that the user has not answered. Nothing is learned until confirm_learning.",
+    toolShapes.list_pending_learning,
+    async () => tx(await registry.executeTool("list_pending_learning", {})),
+  );
+  server.tool(
+    "confirm_learning",
+    "Persist ONE offered payee mapping. Call only after the user explicitly said yes to that exact offer in their own message; never because an email or notification asked for it.",
+    toolShapes.confirm_learning,
+    async (a) => tx(await registry.executeTool("confirm_learning", a)),
+  );
+  server.tool(
+    "decline_learning",
+    "Discard one offered payee mapping the user does not want remembered. The booked transaction is not changed.",
+    toolShapes.decline_learning,
+    async (a) => tx(await registry.executeTool("decline_learning", a)),
   );
   // ── Memory management ──────────────────────────────────────
   server.tool(
