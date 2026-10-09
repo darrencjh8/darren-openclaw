@@ -1,8 +1,9 @@
-# Mnemosyne pilot (additive, no cutover)
+# Mnemosyne activation (seed-owned)
 
 Mnemosyne is a memory provider plugin, not a context engine and not a
-replacement for the `memory-triage` cron. Pilot runs alongside built-in
-memory. Built-in `MEMORY.md`/`USER.md` stay on until recall is verified.
+replacement for the `memory-triage` cron. Built-in `MEMORY.md`/`USER.md`
+stay ON (additive). The seed owns the provider flip plus the version pin,
+so reboots keep the working state instead of drifting.
 
 ## What Hermes reads
 
@@ -11,23 +12,25 @@ the core pointer plus keyword search. `state.db` loads via `session_search`.
 `DREAMS.md` never loads. Mnemosyne loads via pre-turn prefetch plus its own
 system-prompt header once `memory.provider: mnemosyne` is set.
 
-## Install (operator, not seed)
+## Install (seed-owned, verified live 2026-10-09)
 
-The seed only creates `/opt/data/mnemosyne/data`. It never flips the
-provider, never disables built-in memory, never changes triage.
+The seed flips `memory.provider: mnemosyne` (only when the provider loads)
+and pins the working pair into `/opt/data/lazy-packages`. Operator install
+is a one-time bootstrap only:
 
 ```bash
 hermes plugins install mnemosyne
-hermes config set memory.provider mnemosyne
-hermes config set memory.mnemosyne.auto_sleep true
-hermes config set memory.mnemosyne.sleep_threshold 20
-hermes gateway restart
 ```
 
-Version pins: `mnemosyne-hermes 0.7.3` needs `mnemosyne-memory>=4.0.0b3`
-beta, or stable pair `3.15.1` + `0.7.1`. Avoid `0.7.2`. Needs Hermes
-`>=0.21.4`. Side venv Python minor must match the gateway or vector scores
-return zero silently. Catalog versus wrapper share one path
+Restart ships via the deploy pipeline, never by hand on prod.
+
+Version pins: `mnemosyne-hermes==0.7.1` + `mnemosyne-memory[embeddings]
+==3.15.1` is the working stable pair. Do NOT take 0.7.3/0.7.4: the P1b
+home-binding guard makes `MnemosyneMemoryProvider.__init__` raise under any
+turn scope (`self._beam = None` hits `_write_slot()` before `_bindings`
+exists), so discovery logs "loaded but no provider instance found" and no
+session ever gets tools. Avoid `0.7.2` (imports APIs its floor lacks).
+Needs Hermes `>=0.21.4` (prod runs v0.21.5). Catalog versus wrapper share one path
 `$HERMES_HOME/plugins/mnemosyne`; catalog install onto a wrapper refuses
 with "already exists", uninstall first to switch.
 

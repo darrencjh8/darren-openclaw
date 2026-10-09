@@ -244,12 +244,42 @@ PY
 mkdir -p /opt/data/memories-backup
 chown -R hermes:hermes /opt/data/memories-backup 2>/dev/null || true
 
-# Mnemosyne pilot (additive): data dir only. No provider flip, no built-in
-# disable, no triage change. The provider stays off until an operator runs
-# `hermes plugins install mnemosyne` + `hermes config set memory.provider
-# mnemosyne` and verifies recall. MNEMOSYNE_DATA_DIR defaults to this path.
+# Mnemosyne activation (seed-owned): provider flip + version pin.
+# Verified live 2026-10-09: mnemosyne-hermes 0.7.1 + mnemosyne-memory 3.15.1
+# is the working pair. 0.7.3/0.7.4 ship the P1b home-binding guard whose
+# __init__ property assignment raises under any turn scope, so the provider
+# can never construct in a real agent session ("loaded but no provider
+# instance found"). Pin stays until upstream fixes the constructor.
+# Built-in MEMORY.md/USER.md stay ON (additive); triage unchanged.
 mkdir -p /opt/data/mnemosyne/data
 chown -R hermes:hermes /opt/data/mnemosyne 2>/dev/null || true
+if ! su -s /bin/sh hermes -c 'HERMES_HOME=/opt/data timeout 60 python3 -c "
+import hermes_bootstrap
+from plugins.memory import load_memory_provider
+import sys
+p = load_memory_provider(\"mnemosyne\")
+sys.exit(0 if p is not None else 1)
+"' >/dev/null 2>&1; then
+    echo "WARNING: mnemosyne provider not loadable; leaving memory.provider unset this boot" >&2
+else
+    python3 - <<'PYMNEMO' || echo "WARNING: mnemosyne config seed failed; keeping live config" >&2
+import re
+from pathlib import Path
+path = Path("/opt/data/config.yaml")
+text = path.read_text()
+if re.search(r"^\s*provider:\s*mnemosyne\s*$", text, re.MULTILINE) is None:
+    text = re.sub(r"^(memory:\n(?:.*\n)*?)(sessions:)",
+                  r"\1  provider: mnemosyne\n  mnemosyne:\n    auto_sleep: true\n    sleep_threshold: 20\n\2",
+                  text, count=1)
+    path.write_text(text)
+    print("memory: mnemosyne provider seeded (auto_sleep true, threshold 20)")
+PYMNEMO
+fi
+# Pin the working pair into the durable lazy-packages target. uv resolves
+# == pins without network when already installed; `|| true` keeps a pin
+# failure from aborting boot (live state keeps serving).
+su -s /bin/sh hermes -c 'HERMES_HOME=/opt/data timeout 300 uv pip install --target /opt/data/lazy-packages --no-deps "mnemosyne-hermes==0.7.1" >/dev/null 2>&1' || true
+su -s /bin/sh hermes -c 'HERMES_HOME=/opt/data timeout 300 uv pip install --target /opt/data/lazy-packages "mnemosyne-memory[embeddings]==3.15.1" >/dev/null 2>&1' || true
 
 # Configure gh CLI authentication. The helper installs GitHub App auth when the
 # App configuration is complete, and otherwise installs the scoped fallback PAT.
