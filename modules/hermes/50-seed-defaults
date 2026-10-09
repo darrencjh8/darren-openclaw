@@ -372,7 +372,8 @@ for path in paths:
         f.write(content)
 '
 
-# Mirror the deployed platform allowlists into the profile's .env.
+# Mirror the deployed platform allowlists (and the telegram cron-delivery
+# credentials) into the profile's .env.
 #
 # Hermes authorizes a chat caller by reading the platform allowlist through the
 # per-profile secret scope, not through the process environment: under
@@ -395,10 +396,18 @@ env_path = home / ".env"
 # ponytail: allowlists are comma-separated ids, so they carry no whitespace,
 # quotes or '#'. Values that need dotenv quoting would use hermes's own
 # _quote_env_value instead of this plain KEY=value mirror.
+# Cron delivery resolves the platform token and home channel through the same
+# scope, so a job that delivers to telegram fails with "has no gateway
+# credentials" unless those two are in the profile .env as well.
+mirrored_exact = ("TELEGRAM_BOT_TOKEN", "TELEGRAM_HOME_CHANNEL")
 wanted = {
     key: value.strip()
     for key, value in os.environ.items()
-    if key.endswith("_ALLOWED_USERS") and key != "GATEWAY_ALLOWED_USERS" and value.strip()
+    if (
+        (key.endswith("_ALLOWED_USERS") and key != "GATEWAY_ALLOWED_USERS")
+        or key in mirrored_exact
+    )
+    and value.strip()
 }
 if wanted:
     old_text = env_path.read_text() if env_path.exists() else None
