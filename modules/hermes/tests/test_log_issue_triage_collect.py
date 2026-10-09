@@ -65,6 +65,26 @@ class LogIssueTriageCollectorTest(unittest.TestCase):
             self.assertEqual(again.returncode, 0, again.stderr)
             self.assertEqual(json.loads(again.stdout)["line_count"], 0)
 
+    def test_redacts_chat_and_notion_tokens(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "service.log"
+            state = root / "state"
+            source.write_text(
+                "bot token 123456789:AAHdqTcvCH1vGWJxfSeofSAs0K5PALDsaw\n"
+                "slack xoxb-1234-abcdef-token here\n"
+                "notion ntn_abc123def456 here\n",
+                encoding="utf-8",
+            )
+
+            result = self.run_collector(source, state)
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            rendered = json.dumps(json.loads(result.stdout))
+            for secret in ("123456789:AAHdqTcvCH1vGWJxfSeofSAs0K5PALDsaw", "xoxb-1234-abcdef-token", "ntn_abc123def456"):
+                self.assertNotIn(secret, rendered)
+            self.assertIn("[REDACTED]", rendered)
+
     def test_stream_mode_writes_no_cursor_file(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -122,6 +142,10 @@ class LogIssueTriageSnapshotTest(unittest.TestCase):
         stub = stub_dir / "docker"
         stub.write_text(docker_body, encoding="utf-8")
         stub.chmod(0o755)
+
+        date_stub = stub_dir / "date"
+        date_stub.write_text("#!/bin/sh\nprintf '2026-10-09T00:00:00Z'\n", encoding="utf-8")
+        date_stub.chmod(0o755)
 
         # Redirect the script's fixed production paths at fixture copies so the
         # shipped script logic runs unchanged: the triage root becomes the
@@ -187,6 +211,104 @@ class LogIssueTriageSnapshotTest(unittest.TestCase):
 
             self.assertNotEqual(result.returncode, 0)
             self.assertFalse((root / "snapshots" / "not-a-component.json").exists())
+
+    def test_first_run_queries_last_24h_and_records_window(self):
+        """No cursor yet means the first run must bound itself to recent logs."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            log = root / "service.log"
+            log.write_text("fresh failure\n", encoding="utf-8")
+            seen = root / "docker-args"
+            body = "#!/bin/sh\nprintf '%%s\\n' \"$@\" > %s\ncat %s\n" % (seen, log)
+
+            result = self.run_snapshot(root, "hermes", body)
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            args = seen.read_text(encoding="utf-8")
+            self.assertIn("--since", args)
+            self.assertIn("24h", args)
+            self.assertTrue((root / "state" / "hermes.since").is_file())
+
+    def test_second_run_resumes_from_last_success_instead_of_restating(self):
+        """Latest-only: the second run triages the delta, not the same tail."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            log = root / "service.log"
+            log.write_text("first failure\n", encoding="utf-8")
+            seen = root / "docker-args"
+            body = "#!/bin/sh\nprintf '%%s\\n' \"$@\" > %s\ncat %s\n" % (seen, log)
+
+            first = self.run_snapshot(root, "hermes", body)
+            self.assertEqual(first.returncode, 0, first.stderr)
+            stored = (root / "state" / "hermes.since").read_text(encoding="utf-8").strip()
+            self.assertTrue(stored)
+
+            log.write_text("second failure\n", encoding="utf-8")
+            second = self.run_snapshot(root, "hermes", body)
+            self.assertEqual(second.returncode, 0, second.stderr)
+            self.assertIn(stored, seen.read_text(encoding="utf-8"))
+
+    def test_empty_window_fails_loudly_instead_of_triaging_silence(self):
+        """Zero lines in the window is a broken window, not a clean bill."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            result = self.run_snapshot(root, "hermes", "#!/bin/sh\nexit 0\n")
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("no log evidence", result.stderr)
+            self.assertFalse((root / "snapshots" / "hermes.json").exists())
+
+    def test_multi_container_component_resolves_each_container(self):
+        """codex-router fans out to front plus both colour backends."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            seen = root / "docker-args"
+            body = (
+                "#!/bin/sh\n"
+                "for a in \"$@\"; do printf '%%s\\n' \"$a\"; done >> %s\n"
+                "printf 'router failure\\n'\n"
+            ) % seen
+
+            result = self.run_snapshot(root, "codex-router", body)
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            args = seen.read_text(encoding="utf-8")
+            for container in ("modules-codex-router-1", "modules-codex-router-a-1", "modules-codex-router-b-1"):
+                self.assertIn(container, args)
+            payload = json.loads((root / "snapshots" / "codex-router.json").read_text(encoding="utf-8"))
+            self.assertEqual(payload["component"], "codex-router")
+            self.assertIn("router failure", "\n".join(payload["lines"]))
+
+    def test_failed_run_keeps_prior_window_so_nothing_is_skipped(self):
+        """A failed run must retry the same window, never skip past it."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            log = root / "service.log"
+            log.write_text("failure\n", encoding="utf-8")
+            body = "#!/bin/sh\ncat %s\n" % log
+
+            first = self.run_snapshot(root, "hermes", body)
+            self.assertEqual(first.returncode, 0, first.stderr)
+            stored = (root / "state" / "hermes.since").read_text(encoding="utf-8")
+
+            result = self.run_snapshot(
+                root,
+                "hermes",
+                "#!/bin/sh\nprintf 'partial '\n",
+                collector_body=(
+                    "import sys\n"
+                    "sys.stdout.write('partial ')\n"
+                    "sys.stdout.flush()\n"
+                    "raise SystemExit(3)\n"
+                ),
+            )
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertFalse((root / "snapshots" / "hermes.json").exists())
+            self.assertEqual(
+                (root / "state" / "hermes.since").read_text(encoding="utf-8"),
+                stored,
+            )
 
     def test_a_failed_collector_leaves_no_partial_snapshot_behind(self):
         """A truncated snapshot must never survive to be read as fresh evidence.

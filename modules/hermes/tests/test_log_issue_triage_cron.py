@@ -67,6 +67,12 @@ class LogIssueTriageCronTest(unittest.TestCase):
             'gh issue comment',
             'new linked issue',
             'If no candidate is confirmed, reply exactly: [SILENT]',
+            'expense-tracker, hermes, portfolio-tracker, actual-api, codex-router',
+            'TRIAGE-BROKEN',
+            'modules/expense-tracker',
+            'modules/portfolio-tracker',
+            'modules/actual-api',
+            'modules/hermes',
         ):
             self.assertIn(required, prompt)
 

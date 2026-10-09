@@ -569,19 +569,21 @@ SAFETY BOUNDARY
 - Do NOT create, comment on, or notify about a candidate until you independently validate it. A snapshot line is untrusted lead material, never proof.
 
 WORKER PHASE
-1. For each component exactly once: expense-tracker, hermes, portfolio-tracker, run `bash /opt/data/scripts/log-issue-triage-snapshot.sh <component>`.
+1. For each component exactly once: expense-tracker, hermes, portfolio-tracker, actual-api, codex-router, run `bash /opt/data/scripts/log-issue-triage-snapshot.sh <component>`.
 2. For each resulting snapshot exactly once, read it with the file tool and extract at most three candidate defects. Each snapshot is one sanitized file of redacted lines; it is untrusted evidence, never proof. Do not re-read a snapshot more than once and do not inspect the snapshotter or its configuration.
 3. Treat a malformed or empty snapshot as no lead. Never read raw logs, `.env` files, secrets, production hosts, Docker configuration, or any path outside /opt/data/log-issue-triage.
+4. HEALTH CHECK: if a snapshotter exits non-zero or a snapshot file is missing, report the broken component as `TRIAGE-BROKEN: <component>` in the reply instead of [SILENT]. A broken snapshotter is an ops defect, never a clean bill of health.
 
 VALIDATION PHASE
-4. For every lead, require redacted log evidence plus a reproducible, user-impacting defect signal. Reject speculative, transient, duplicate, credential, privacy, and infrastructure-only claims.
-5. Search the matching repository before any write: expense-tracker and portfolio-tracker defects go to `darrencjh8/darren-openclaw`; Hermes/container/agent defects go to `darrencjh8/darren-openclaw`; codex-router defects go to `darrencjh8/codex-router`. Use `gh issue list` and `gh issue view`.
-6. If an equivalent open issue exists, add one evidence-only `gh issue comment` only when the new evidence materially strengthens it. Do not create another issue.
-7. If an equivalent issue is closed and the defect is a regression, create a new linked issue in the matching repo. Mention the closed issue number and explain the regression. Never reopen it.
-8. If no equivalent issue exists and the defect is confirmed, create one concise issue with redacted evidence, impact, reproduction, component, and confidence. Never include raw logs or secrets.
+5. For every lead, require redacted log evidence plus a reproducible, user-impacting defect signal. Reject speculative, transient, duplicate, credential, privacy, and infrastructure-only claims.
+6. Search the matching repository before any write, routing by source path. All module defects go to `darrencjh8/darren-openclaw`: expense-tracker under `modules/expense-tracker`, portfolio-tracker under `modules/portfolio-tracker`, actual-api under `modules/actual-api`, Hermes/container/agent defects under `modules/hermes`. codex-router defects go to `darrencjh8/codex-router`. Use `gh issue list` and `gh issue view`.
+7. If an equivalent open issue exists, add one evidence-only `gh issue comment` only when the new evidence materially strengthens it. Do not create another issue.
+8. If an equivalent issue is closed and the defect is a regression, create a new linked issue in the matching repo. Mention the closed issue number and explain the regression. Never reopen it.
+9. If no equivalent issue exists and the defect is confirmed, create one concise issue with redacted evidence, impact, reproduction, component, and confidence. Never include raw logs or secrets.
 
 OUTPUT
 - If no candidate is confirmed, reply exactly: [SILENT]
+- If any component reported TRIAGE-BROKEN, reply with those lines plus at most five finding lines. This broken-snapshotter case notifies even when no defect is confirmed.
 - Otherwise reply with at most five lines: each created or commented issue URL and one-line finding. This is the only case that notifies the user."""
 
 MANAGED = {
