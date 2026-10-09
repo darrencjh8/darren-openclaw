@@ -114,7 +114,7 @@ To: CITI CREDIT CARDS (Ref ending 2666)
     // separator, so the next label is glued onto the previous value
     // ("2026Time of Payment", "SGTAmount", "4.00From your account").
     const movement = parseBankMovement(
-      "Dear Valued CustomerAs you instructed, we have made the following bill payment:Date of Payment:01 Sep 2026Time of Payment:01:05 am SGTAmount:SGD 4.00From your account:111 Account (-166600)To account:OCBC 88.N Visa Card (-344400)Reference number:2609010033904322Billing Organisation may take up to three working days to process payment.",
+      "Dear Valued CustomerAs you instructed, we have made the following bill payment:Date of Payment:01 Sep 2026Time of Payment:01:05 am SGTAmount:SGD 4.00From your account:111 Account (-166600)To account:OCBC 88.N Visa Card (-344400)Reference number:2609010085466037Billing Organisation may take up to three working days to process payment.",
       { senderBank: "OCBC", receivedAt: "2026-09-01T01:06:00+08:00" },
     );
 
@@ -124,7 +124,7 @@ To: CITI CREDIT CARDS (Ref ending 2666)
       currency: "SGD",
       own_account: { bank: "OCBC", suffix: "166600" },
       counterparty: { bank: "OCBC", suffix: "344400" },
-      reference_number: expect.stringContaining("2609010033904322"),
+      reference_number: expect.stringContaining("2609010085466037"),
     });
   });
 
@@ -592,7 +592,7 @@ describe("identityMappingsFromFacts", () => {
   // not a suffix — that would read a reference number as an account.
   it("reads a masked trailing suffix but never a bare reference number", () => {
     const from = parseBankMovement(
-      `Dear Customer,\nAs you instructed, we have made the following transfer:\nTransfer Date: 18 Sep 2026 5.04AM\nAmount: MYR 62.00\nFrom your account: OCBC 360 ACCOUNT ******2444\nTo payee: A Person (********2333)\nReference number: 2609180110340750\n`,
+      `Dear Customer,\nAs you instructed, we have made the following transfer:\nTransfer Date: 18 Sep 2026 5.04AM\nAmount: MYR 62.00\nFrom your account: OCBC 360 ACCOUNT ******2444\nTo payee: A Person (********2333)\nReference number: 2609180147355231\n`,
       { senderBank: "OCBC", receivedAt: "2026-09-17T21:04:12.000Z" },
     );
 
@@ -604,8 +604,8 @@ describe("identityMappingsFromFacts", () => {
     });
     // The reference number is longer than the masked suffixes, so it can never
     // be mistaken for one.
-    expect(from.own_account.suffix).not.toBe("2609180110340750");
-    expect(from.counterparty.suffix).not.toBe("2609180110340750");
+    expect(from.own_account.suffix).not.toBe("2609180147355231");
+    expect(from.counterparty.suffix).not.toBe("2609180147355231");
   });
 
   it("maps identity facts whose account name ends in Account without truncating it", () => {
@@ -911,7 +911,7 @@ To: CITI CREDIT CARDS (Ref ending 2666)
     orch._llm.chat = vi.fn();
 
     const phase1 = await orch._runPhase1(`
-Transaction Ref: 17881954645475715284
+Transaction Ref: 17881923709657843541
 Date and Time: 01 Sep 00:57 (SGT)
 Amount: SGD 68.94
 From: My Account (A/C ending 7222)
@@ -1035,7 +1035,7 @@ To: Nova (Ref ending 7111)
     orch._llm.chat = vi.fn();
 
     const phase1 = await orch._runPhase1(`
-Transaction Ref: 17881954645475715284
+Transaction Ref: 17881923709657843541
 Date and Time: 01 Sep 00:57 (SGT)
 Amount: SGD 68.94
 From: My Account (A/C ending 7222)
@@ -1596,7 +1596,7 @@ To: CITI CREDIT CARDS (Ref ending 2666)
     orch._llm.chat = vi.fn();
 
     const phase1 = await orch._runPhase1(`
-Transaction Ref: 17881954645475715284
+Transaction Ref: 17881923709657843541
 Date and Time: 01 Sep 00:57 (SGT)
 Amount: SGD 68.94
 From: My Account (A/C ending 7222)

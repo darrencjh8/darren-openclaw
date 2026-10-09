@@ -68,7 +68,7 @@ class SeedAllowlistTest(unittest.TestCase):
 
         result = self.seed(
             SLACK_ALLOWED_USERS="U0C0Z9GK23B",
-            TELEGRAM_ALLOWED_USERS="488065038",
+            TELEGRAM_ALLOWED_USERS="486674959",
             GATEWAY_ALLOWED_USERS="UANYONE",
         )
 
@@ -80,7 +80,7 @@ class SeedAllowlistTest(unittest.TestCase):
                 "# operator notes",
                 "# SLACK_ALLOWED_USERS=stale-in-comment",
                 "HERMES_HOME=/opt/data",
-                "TELEGRAM_ALLOWED_USERS=488065038",
+                "TELEGRAM_ALLOWED_USERS=486674959",
                 "OPENCODE_ZEN_API_KEY=keep-me",
                 "SLACK_ALLOWED_USERS=U0C0Z9GK23B",
             ],
@@ -113,10 +113,10 @@ class SeedAllowlistTest(unittest.TestCase):
         self.assertEqual(self.env_path.read_text(), original)
 
     def test_creates_a_missing_env_owner_only(self) -> None:
-        result = self.seed(TELEGRAM_ALLOWED_USERS="488065038")
+        result = self.seed(TELEGRAM_ALLOWED_USERS="486674959")
 
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(self.env_path.read_text(), "TELEGRAM_ALLOWED_USERS=488065038\n")
+        self.assertEqual(self.env_path.read_text(), "TELEGRAM_ALLOWED_USERS=486674959\n")
         self.assertEqual(self.env_path.stat().st_mode & 0o777, 0o600)
 
     def test_without_allowlists_the_home_is_left_untouched(self) -> None:

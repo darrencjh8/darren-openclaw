@@ -483,7 +483,7 @@ Dear Valued Customer,
 Banking Transaction
 You have received a PayNow/FAST transfer of SGD 31.00 from ACCOUNT HOLDER| on 21-Sep-26 12:33 AM.
 `;
-    const DBS_FAST_5589 = `Transaction Ref: 17899217887419724242
+    const DBS_FAST_5589 = `Transaction Ref: 17899237848838872763
 
 Dear Customer,
 
@@ -494,7 +494,7 @@ Amount: SGD55.89
 From: POSB Cashback A/C ending 5500
 To: ACCOUNT HOLDER SC A/C ending 2555
 `;
-    const DBS_FAST_3100 = `Transaction Ref: 17899220094587466504
+    const DBS_FAST_3100 = `Transaction Ref: 17899270420627426494
 
 Dear Customer,
 

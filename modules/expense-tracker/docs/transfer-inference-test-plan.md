@@ -13,7 +13,7 @@ This work covers structured movement alerts from OCBC, Trust, and DBS, including
 The DBS fixture below must be handled without an LLM when its source and destination account identities are configured and resolve uniquely:
 
 ```text
-Transaction Ref: 17881959177693481349
+Transaction Ref: 17881904007442101381
 
 You’ve successfully made a bill payment.
 
@@ -31,7 +31,7 @@ destination: UOB CREDIT CARDS, suffix 1888
 amount: -129929 cents
 currency: SGD
 time: 2026-09-01T01:05:00+08:00
-reference: 17881959177693481349
+reference: 17881904007442101381
 ```
 
 If `UOB CREDIT CARDS` plus suffix `1888` resolves to an open Actual account, send an Actual transfer from `Epsilon Vista` to that account. If destination account identity is absent or ambiguous, do not guess a transfer; send it through review/normal fallback.
@@ -64,7 +64,7 @@ From your account : 111 Account (-166600)
 To account : Example Trust (-222000) at TRUST BANK SINGAPORE LIMITED
 Date of Transfer : 01 Sep 2026
 Time of Transfer : 01.06 AM SGT
-Reference number : 2609010016652878
+Reference number : 2609010097341215
 ```
 
 Trust incoming alert:
@@ -131,7 +131,7 @@ Add a pure parser that emits normalized movement evidence when an alert has a su
     bank: "TRUST BANK SINGAPORE LIMITED",
     suffix: "222000",
   },
-  reference_number: "2609010016652878",
+  reference_number: "2609010097341215",
   merchant_display_name: null,
   raw_merchant_descriptor: "",
 }
@@ -479,7 +479,7 @@ date: 2026-09-01
 amount: -1425
 payee: TRUST_CARD_TRANSFER_PAYEE_ID
 category: omitted or null according to Actual adapter contract
-notes: contains 2609010016652878
+notes: contains 2609010097341215
 ```
 
 Required assertions:
@@ -517,7 +517,7 @@ PASS: no transfer payee is sent.
 PASS: no destination Actual account ID is sent.
 PASS: raw UEN descriptor is preserved in final adapter notes/body.
 
-For the DBS bill-payment fixture, assert final Actual HTTP body uses Epsilon Vista as source, amount `-129929`, UOB Card's verified transfer payee, no ordinary category, and notes containing transaction reference `17881959177693481349`.
+For the DBS bill-payment fixture, assert final Actual HTTP body uses Epsilon Vista as source, amount `-129929`, UOB Card's verified transfer payee, no ordinary category, and notes containing transaction reference `17881904007442101381`.
 ```
 
 ### Recovery and safety assertions

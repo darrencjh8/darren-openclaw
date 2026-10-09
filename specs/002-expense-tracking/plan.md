@@ -332,7 +332,7 @@ WORKFLOW:
 {
   "date": "2026-06-04",
   "amount": -1280,
-  "account": "22caada9-a118-4767-a0b3-577952728282",
+  "account": "22caada9-a118-4767-a0b3-577146320820",
   "imported_description": "Toast Box",
   "notes": "OpenClaw | msg_id: <abcd1234@example.com> | source: alerts@example.com | currency: SGD",
   "cleared": false,

@@ -113,13 +113,13 @@ async function orchestrate(
 
 /** uid 1031 — card -> own card, destination already an account ("Altitude"). */
 const DBS_BILLPAY_TO_ALTITUDE =
-    "Transaction Ref: 1790860627083557 Dear Customer, You've successfully made a bill payment. " +
+    "Transaction Ref: 1790867316694201 Dear Customer, You've successfully made a bill payment. " +
     "Date and Time: 01 Oct 21:17 (SGT) Amount: SGD 2435.35 From: My Account (A/C ending 7222) " +
     "To: Altitude (Ref ending 1777) If unauthorised, please call our DBS hotline.";
 
 /** uid 1025 — card -> card, destination named only by product. */
 const DBS_BILLPAY_TO_CITI =
-    "Transaction Ref: 1790860376865887 Dear Customer, You've successfully made a bill payment. " +
+    "Transaction Ref: 1790865962876580 Dear Customer, You've successfully made a bill payment. " +
     "Date and Time: 01 Oct 21:12 (SGT) Amount: SGD 345.64 From: Altitude (A/C ending 1777) " +
     "To: CITI CREDIT CARDS (Ref ending 2666) If unauthorised, please call our DBS hotline.";
 
