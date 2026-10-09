@@ -9,6 +9,7 @@ import { DedupJournal } from "../src/dedup.js";
 import { unlinkSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
+import { OWN_LEGAL_NAME_UPPER } from "./helpers/own-name.js";
 
 function makeConfig(overrides = {}) {
     const defaults = {
@@ -784,8 +785,8 @@ describe("AgentOrchestrator", () => {
                                 currency: "SGD",
                                 direction: "outgoing",
                                 occurred_at: "2026-09-01T01:05:00+08:00",
-                                from_account: "Vista (-869001)",
-                                to_account: "Example Trust (-310980)",
+                                from_account: "Vista (-166600)",
+                                to_account: "Example Trust (-222000)",
                             }),
                         },
                     },
@@ -817,8 +818,8 @@ describe("AgentOrchestrator", () => {
                             currency: "SGD",
                             direction: "outgoing",
                             occurred_at: "2026-09-01T01:05:00+08:00",
-                            from_account: "Vista (-869001)",
-                            to_account: "Example Trust (-310980)",
+                            from_account: "Vista (-166600)",
+                            to_account: "Example Trust (-222000)",
                         }),
                     },
                 },
@@ -923,12 +924,12 @@ describe("AgentOrchestrator", () => {
             "raw email body",
             null,
             "alerts.dbs.com",
-            "Card Transaction Alert for 3255",
+            "Card Transaction Alert for 7111",
         );
 
         const phase1Arg = orch._runPhase1.mock.calls[0][0];
         expect(phase1Arg).toContain("Email-Sender: alerts.dbs.com");
-        expect(phase1Arg).toContain("Subject: Card Transaction Alert for 3255");
+        expect(phase1Arg).toContain("Subject: Card Transaction Alert for 7111");
         expect(phase1Arg).toContain("raw email body");
         // Headers should appear before body. Does NOT prepend "From:".
         expect(phase1Arg).not.toMatch(/^From:\s/);
@@ -1410,14 +1411,14 @@ describe("bill payment pre-parser", () => {
         "",
         "Date: 01 Aug 11:26 (SGT)",
         "Amount: SGD 104.21",
-        "From: My Account (A/C ending 5750)",
-        "To: Nova (Ref ending 3255)",
+        "From: My Account (A/C ending 7222)",
+        "To: Nova (Ref ending 7111)",
     ].join("\n");
 
     it("parses DBS bill payment deterministically, bypassing LLM", async () => {
         const config = makeConfig();
         const allAccounts = [
-            { id: "acc-dbs-main", name: "DBS My Account 5750", closed: false },
+            { id: "acc-dbs-main", name: "DBS My Account 7222", closed: false },
             { id: "acc-dbs-nova", name: "DBS Nova Card", closed: false },
         ];
         let llmCalled = false;
@@ -1442,7 +1443,7 @@ describe("bill payment pre-parser", () => {
         expect(result.amount_cents).toBe(-10421);
         expect(result.currency).toBe("SGD");
         expect(result.account_id).toBe("acc-dbs-main");
-        expect(result.account_name).toBe("DBS My Account 5750");
+        expect(result.account_name).toBe("DBS My Account 7222");
         expect(result.budget_id).toBe("test-budget");
     });
 
@@ -1483,13 +1484,13 @@ describe("bill payment pre-parser", () => {
         const config = makeConfig();
         const allAccounts = [
             { id: "acc-other", name: "DBS Savings", closed: false },
-            { id: "acc-5750", name: "DBS Current 5750", closed: false },
+            { id: "acc-7222", name: "DBS Current 7222", closed: false },
         ];
         let llmCalled = false;
         const tools = makeTools({
             executeTool: vi.fn(async (name) => {
                 if (name === "search_memory") return { results: [
-                    { text: "Account ending 5750 belongs to DBS Current 5750", score: 1 },
+                    { text: "Account ending 7222 belongs to DBS Current 7222", score: 1 },
                 ] };
                 if (name === "fetch_context")
                     return { accounts: allAccounts, categories: [], payees: [] };
@@ -1503,20 +1504,20 @@ describe("bill payment pre-parser", () => {
         const result = await orch._runPhase1(dbsBillPaymentEmail, { senderBank: "DBS" });
 
         expect(llmCalled).toBe(false);
-        expect(result.account_id).toBe("acc-5750");
-        expect(result.account_name).toBe("DBS Current 5750");
+        expect(result.account_id).toBe("acc-7222");
+        expect(result.account_name).toBe("DBS Current 7222");
     });
 
     it("falls through when a legacy bill-payment identity resolves only to a closed account", async () => {
         const config = makeConfig();
         const allAccounts = [
-            { id: "acc-5750", name: "DBS Old 5750", closed: true },
+            { id: "acc-7222", name: "DBS Old 7222", closed: true },
         ];
         let llmCalled = false;
         const tools = makeTools({
             executeTool: vi.fn(async (name) => {
                 if (name === "search_memory") return { results: [
-                    { text: "Account ending 5750 belongs to DBS Old 5750", score: 1 },
+                    { text: "Account ending 7222 belongs to DBS Old 7222", score: 1 },
                 ] };
                 if (name === "fetch_context")
                     return { accounts: allAccounts, categories: [], payees: [] };
@@ -1652,7 +1653,7 @@ describe("Phase 1 memory retrieval (LLM-directed)", () => {
             if (name === "fetch_context")
                 return { accounts: [{ id: "acc-nova", name: "DBS Nova Card", closed: false }], categories: [], payees: [] };
             if (name === "search_memory")
-                return { results: [{ text: "Card ending 3255 belongs to DBS Nova Card", score: 0.85 }] };
+                return { results: [{ text: "Card ending 7111 belongs to DBS Nova Card", score: 0.85 }] };
             return true;
         }));
 
@@ -1662,13 +1663,13 @@ describe("Phase 1 memory retrieval (LLM-directed)", () => {
                 .fn()
                 .mockImplementationOnce(async (messages) => {
                     capturedMessages = messages;
-                    return { choices: [{ message: toolCall("search_memory", { query: "3255" }) }] };
+                    return { choices: [{ message: toolCall("search_memory", { query: "7111" }) }] };
                 })
                 .mockResolvedValueOnce(json(baseOut("acc-nova", "DBS Nova Card"))),
         };
 
         const result = await orch._runPhase1(
-            "From: alerts@dbs.com\nSubject: Card Transaction Alert for 3255\n\nS$12.80 charged",
+            "From: alerts@dbs.com\nSubject: Card Transaction Alert for 7111\n\nS$12.80 charged",
             { senderBank: "DBS" },
         );
 
@@ -1676,7 +1677,7 @@ describe("Phase 1 memory retrieval (LLM-directed)", () => {
         // The LLM asked for facts and received them as a tool message
         const toolMsgs = capturedMessages.filter((m) => m.role === "tool");
         expect(toolMsgs.length).toBeGreaterThanOrEqual(1);
-        expect(JSON.stringify(toolMsgs)).toContain("Card ending 3255 belongs to DBS Nova Card");
+        expect(JSON.stringify(toolMsgs)).toContain("Card ending 7111 belongs to DBS Nova Card");
         // No pre-fetch injection into the system prompt anymore
         const sysPrompt = capturedMessages.find((m) => m.role === "system")?.content;
         expect(sysPrompt).not.toContain("KNOWN CARD SUFFIXES (from memory");
@@ -1698,7 +1699,7 @@ describe("Phase 1 memory retrieval (LLM-directed)", () => {
                 .fn()
                 .mockImplementationOnce(async (messages) => {
                     capturedMessages = messages;
-                    return { choices: [{ message: toolCall("search_memory", { query: "3255" }) }] };
+                    return { choices: [{ message: toolCall("search_memory", { query: "7111" }) }] };
                 })
                 .mockResolvedValueOnce(json(baseOut("acc-1", "DBS Account"))),
         };
@@ -1727,7 +1728,7 @@ describe("Phase 1 memory retrieval (LLM-directed)", () => {
                     payees: [],
                 };
             if (name === "search_memory")
-                return { results: [{ text: "Card ending 3255 belongs to DBS Nova Card", score: 0.85 }] };
+                return { results: [{ text: "Card ending 7111 belongs to DBS Nova Card", score: 0.85 }] };
             return true;
         }));
 
@@ -1735,13 +1736,13 @@ describe("Phase 1 memory retrieval (LLM-directed)", () => {
         orch._llm = {
             chat: vi
                 .fn()
-                .mockResolvedValueOnce({ choices: [{ message: toolCall("search_memory", { query: "3255" }) }] })
+                .mockResolvedValueOnce({ choices: [{ message: toolCall("search_memory", { query: "7111" }) }] })
                 // LLM picks the WRONG account (Vista instead of Nova)
                 .mockResolvedValueOnce(json(baseOut("acc-alt", "DBS Vista Card"))),
         };
 
         const result = await orch._runPhase1(
-            "From: alerts@dbs.com\nSubject: Card Transaction Alert for 3255\n\nS$12.80 charged",
+            "From: alerts@dbs.com\nSubject: Card Transaction Alert for 7111\n\nS$12.80 charged",
             { senderBank: "DBS" },
         );
 
@@ -1789,7 +1790,7 @@ describe("Phase 1 memory retrieval (LLM-directed)", () => {
             if (name === "fetch_context")
                 return { accounts: [{ id: "acc-nova", name: "DBS Nova Card", closed: false }], categories: [], payees: [] };
             if (name === "search_memory")
-                return { results: [{ text: "Card ending 3255 belongs to DBS Nova Card", score: 0.80 }] };
+                return { results: [{ text: "Card ending 7111 belongs to DBS Nova Card", score: 0.80 }] };
             if (name === "check_duplicate") return false;
             return true;
         }));
@@ -1801,13 +1802,13 @@ describe("Phase 1 memory retrieval (LLM-directed)", () => {
                 .fn()
                 .mockImplementationOnce(async (messages) => {
                     capturedMessages = messages;
-                    return { choices: [{ message: toolCall("search_memory", { query: "3255" }) }] };
+                    return { choices: [{ message: toolCall("search_memory", { query: "7111" }) }] };
                 })
                 .mockResolvedValueOnce(json(baseOut("acc-nova", "DBS Nova Card"))),
         };
 
         await orch.processText(
-            "From: alerts@dbs.com\nSubject: Card Transaction Alert for 3255\n\nS$12.80 charged",
+            "From: alerts@dbs.com\nSubject: Card Transaction Alert for 7111\n\nS$12.80 charged",
         );
 
         // The LLM retrieved facts itself via the search_memory tool
@@ -1816,7 +1817,7 @@ describe("Phase 1 memory retrieval (LLM-directed)", () => {
         );
         expect(searchCalls.length).toBeGreaterThanOrEqual(1);
         const toolMsgs = capturedMessages.filter((m) => m.role === "tool");
-        expect(JSON.stringify(toolMsgs)).toContain("Card ending 3255 belongs to DBS Nova Card");
+        expect(JSON.stringify(toolMsgs)).toContain("Card ending 7111 belongs to DBS Nova Card");
     });
 });
 
@@ -2642,7 +2643,7 @@ describe("_resolvePhase2 transfer detection", () => {
                     };
                 if (name === "search_memory")
                     return {
-                        results: [{ text: "CHONG JIN HENG maps to Spotify payee", score: 1 }],
+                        results: [{ text: `${OWN_LEGAL_NAME_UPPER} maps to Spotify payee`, score: 1 }],
                     };
                 return true;
             }),
@@ -2650,7 +2651,7 @@ describe("_resolvePhase2 transfer detection", () => {
         const orch = new AgentOrchestrator(config, tools);
 
         const p1 = fakePhase1Output({
-            merchant: "CHONG JIN HENG",
+            merchant: OWN_LEGAL_NAME_UPPER,
             amount_cents: 474,
             account_id: "ocbc",
             _is_paynow: true,
@@ -2723,7 +2724,7 @@ describe("_resolvePhase2 transfer detection", () => {
     // Issue #574, real redacted alert (2026-09-15, S$1.00): the counterparty
     // bank's own email booked the pair first (journal leg `inserted`), then the
     // Standard Chartered credit alert arrived 49 s later naming the holder —
-    // "from CHONG JIN HENG|" — a person, so Phase 1 resolved no own account and
+    // `from ${OWN_LEGAL_NAME_UPPER}|` — a person, so Phase 1 resolved no own account and
     // the old pipeline held a credit that was already recorded.
     it("does not hold a credit whose transfer leg is already inserted (#574)", async () => {
         const config = makeConfig({ USER_NAME: "there" });
@@ -2774,9 +2775,9 @@ describe("_resolvePhase2 transfer detection", () => {
             const orch = new AgentOrchestrator(config, tools);
 
             const p1 = fakePhase1Output({
-                merchant: "CHONG JIN HENG",
+                merchant: OWN_LEGAL_NAME_UPPER,
                 raw_description:
-                    "You have received a PayNow/FAST transfer of SGD 1.00 from CHONG JIN HENG| on 16-Sep-26 07:19 AM.",
+                    `You have received a PayNow/FAST transfer of SGD 1.00 from ${OWN_LEGAL_NAME_UPPER}| on 16-Sep-26 07:19 AM.`,
                 amount_cents: 100,
                 account_id: "sc-bonus",
                 account_name: "SC Bonus Saver",
@@ -2877,7 +2878,7 @@ describe("_resolvePhase2 transfer detection", () => {
 
             const p2 = await orch._resolvePhase2(
                 fakePhase1Output({
-                    merchant: "CHONG JIN HENG",
+                    merchant: OWN_LEGAL_NAME_UPPER,
                     amount_cents: 100,
                     account_id: "sc-bonus",
                     account_name: "SC Bonus Saver",
@@ -2949,7 +2950,7 @@ describe("_resolvePhase2 transfer detection", () => {
 
             const p2 = await orch._resolvePhase2(
                 fakePhase1Output({
-                    merchant: "CHONG JIN HENG",
+                    merchant: OWN_LEGAL_NAME_UPPER,
                     amount_cents: 100,
                     account_id: "sc-bonus",
                     account_name: "SC Bonus Saver",
@@ -3002,7 +3003,7 @@ describe("_resolvePhase2 transfer detection", () => {
 
         const p2 = await orch._resolvePhase2(
             fakePhase1Output({
-                merchant: "CHONG JIN HENG",
+                merchant: OWN_LEGAL_NAME_UPPER,
                 amount_cents: 100,
                 account_id: "sc-bonus",
                 account_name: "SC Bonus Saver",
@@ -3047,7 +3048,7 @@ describe("_resolvePhase2 transfer detection", () => {
 
         await orch._resolvePhase2(
             fakePhase1Output({
-                merchant: "CHONG JIN HENG",
+                merchant: OWN_LEGAL_NAME_UPPER,
                 amount_cents: 100,
                 account_id: "sc-bonus",
                 account_name: "SC Bonus Saver",
@@ -3058,7 +3059,7 @@ describe("_resolvePhase2 transfer detection", () => {
         );
         await orch._resolvePhase2(
             fakePhase1Output({
-                merchant: "CHONG JIN HENG",
+                merchant: OWN_LEGAL_NAME_UPPER,
                 amount_cents: 100,
                 account_id: "sc-bonus",
                 account_name: "SC Bonus Saver",
@@ -3183,7 +3184,7 @@ describe("_resolvePhase2 transfer detection", () => {
 
             const p2 = await orch._resolvePhase2(
                 fakePhase1Output({
-                    merchant: "CHONG JIN HENG",
+                    merchant: OWN_LEGAL_NAME_UPPER,
                     amount_cents: 100,
                     date: "2026-09-15",
                     account_id: "sc-bonus",

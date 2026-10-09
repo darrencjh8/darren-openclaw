@@ -39,13 +39,13 @@ const payees = [
 ];
 
 const facts = [
-    { text: "Account ending 5750 belongs to DBS Account", score: 1 },
-    { text: "Account ending 9302 belongs to DBS Altitude Card", score: 1 },
-    // The real memory says "869001"; the real alert prints "(-869001)" in the
+    { text: "Account ending 7222 belongs to DBS Account", score: 1 },
+    { text: "Account ending 1777 belongs to DBS Altitude Card", score: 1 },
+    // The real memory says "166600"; the real alert prints "(-166600)" in the
     // body and the same account as "360 Account" in the source field, so the
     // two spellings of one account must stay keyed to one mapping.
-    { text: "Account ending 869001 belongs to OCBC 360", score: 1 },
-    { text: "Card ending 4605 belongs to UOB Ladies Card", score: 1 },
+    { text: "Account ending 166600 belongs to OCBC 360", score: 1 },
+    { text: "Card ending 1888 belongs to UOB Ladies Card", score: 1 },
     { text: "DBS Account is a bank account", score: 1 },
     { text: "OCBC 360 is a bank account", score: 1 },
     { text: "DBS Altitude Card is a credit card account", score: 1 },
@@ -114,20 +114,20 @@ async function orchestrate(
 /** uid 1031 — card -> own card, destination already an account ("Altitude"). */
 const DBS_BILLPAY_TO_ALTITUDE =
     "Transaction Ref: 1790860627083557 Dear Customer, You've successfully made a bill payment. " +
-    "Date and Time: 01 Oct 21:17 (SGT) Amount: SGD 2435.35 From: My Account (A/C ending 5750) " +
-    "To: Altitude (Ref ending 9302) If unauthorised, please call our DBS hotline.";
+    "Date and Time: 01 Oct 21:17 (SGT) Amount: SGD 2435.35 From: My Account (A/C ending 7222) " +
+    "To: Altitude (Ref ending 1777) If unauthorised, please call our DBS hotline.";
 
 /** uid 1025 — card -> card, destination named only by product. */
 const DBS_BILLPAY_TO_CITI =
     "Transaction Ref: 1790860376865887 Dear Customer, You've successfully made a bill payment. " +
-    "Date and Time: 01 Oct 21:12 (SGT) Amount: SGD 345.64 From: Altitude (A/C ending 9302) " +
-    "To: CITI CREDIT CARDS (Ref ending 4756) If unauthorised, please call our DBS hotline.";
+    "Date and Time: 01 Oct 21:12 (SGT) Amount: SGD 345.64 From: Altitude (A/C ending 1777) " +
+    "To: CITI CREDIT CARDS (Ref ending 2666) If unauthorised, please call our DBS hotline.";
 
 /** uid 1029 — the outgoing leg of a held own-account FAST transfer. */
 const OCBC_TRANSFER_REQUEST_FLAT =
     "Dear Valued CustomerWe have received your request to make the following transfer:" +
     "Date of Transfer:01 Oct 2026Time of Transfer:09.14 PM SGTAmount:SGD 1000.00" +
-    "From your account:360 Account (-869001)To account:Darren DBS (-665750) at DBS BANK LTD" +
+    "From your account:360 Account (-166600)To account:Darren DBS (-667222) at DBS BANK LTD" +
     "Reference number:26100100114You can log in to OCBC Online Banking and select Customer " +
     "Service > Check internet transaction status to check the status of this transfer.";
 
@@ -192,7 +192,7 @@ describe("a bill payment into the holder's own card account books as a transfer"
                 senderBank: "DBS",
                 receivedAt: "2026-10-01T13:12:59.000Z",
             }).counterparty,
-        ).toMatchObject({ name: "CITI CREDIT CARDS", suffix: "4756" });
+        ).toMatchObject({ name: "CITI CREDIT CARDS", suffix: "2666" });
     });
 });
 
@@ -209,7 +209,7 @@ describe("the flattened OCBC transfer request is not held", () => {
         // The destination is the holder's own DBS Account, so this is a
         // transfer between own accounts: booked on the funding OCBC 360 side
         // against the destination's transfer payee, with no category. Before
-        // the fix the DBS leg (printed "665750" by OCBC, stored as "5750")
+        // the fix the DBS leg (printed "667222" by OCBC, stored as "7222")
         // could not be matched, and the row was held and notified instead.
         expect(phase2.account_id).toBe(OCBC_360);
         expect(phase2.payee_id).toBe("p-dbs-account");

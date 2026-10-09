@@ -177,8 +177,8 @@ describe("Phase 1: LLM Analysis (3-phase)", () => {
           const query = String(args?.query || "");
           if (query.includes("BUS/MRT"))
             return { results: [{ text: "BUS/MRT maps to Public Transport payee", score: 1 }] };
-          if (query.includes("3255"))
-            return { results: [{ text: "Card ending 3255 belongs to DBS Nova Card", score: 1 }] };
+          if (query.includes("7111"))
+            return { results: [{ text: "Card ending 7111 belongs to DBS Nova Card", score: 1 }] };
           if (query.includes("Public Transport"))
             return { results: [{ text: "Public Transport maps to Public Transport category", score: 1 }] };
           return { results: [] };
@@ -199,7 +199,7 @@ describe("Phase 1: LLM Analysis (3-phase)", () => {
         raw_description: "SGD 4.60 at BUS/MRT",
         notes: "",
         skip: false,
-        reasoning: "Matched DBS Nova Card ending 3255",
+        reasoning: "Matched DBS Nova Card ending 7111",
         notify_message: "",
       }),
     );
@@ -213,7 +213,7 @@ We refer to your card transaction request dated 03/09/26. We are pleased to conf
 
 Date & Time: 03 SEP 05:38 (SGT)
 Amount: SGD4.60
-From: DBS/POSB card ending 3255
+From: DBS/POSB card ending 7111
 To: BUS/MRT`;
 
     const phase1 = await orch._runPhase1(emailText, {
@@ -566,7 +566,7 @@ To: BUS/MRT`;
         });
       });
 
-    const result = await orch._runPhase1("From: DBS/POSB card ending 3255\nTo: BUS/MRT");
+    const result = await orch._runPhase1("From: DBS/POSB card ending 7111\nTo: BUS/MRT");
 
     expect(orch._llm.chat).toHaveBeenCalledTimes(2);
     expect(result.merchant).toBe("BUS/MRT");
@@ -860,8 +860,8 @@ describe("Phase 1: LLM-directed retrieval (multi-round tools)", () => {
             payees: [],
           };
         if (name === "search_memory") {
-          if (args && String(args.query).includes("3255"))
-            return { results: [{ text: "Card ending 3255 belongs to DBS Nova Card", score: 1 }] };
+          if (args && String(args.query).includes("7111"))
+            return { results: [{ text: "Card ending 7111 belongs to DBS Nova Card", score: 1 }] };
           return { results: [] };
         }
         return true;
@@ -909,11 +909,11 @@ describe("Phase 1: LLM-directed retrieval (multi-round tools)", () => {
 
     orch._llm.chat = vi
       .fn()
-      .mockResolvedValueOnce({ choices: [{ message: toolCallMsg("search_memory", { query: "3255" }) }] })
+      .mockResolvedValueOnce({ choices: [{ message: toolCallMsg("search_memory", { query: "7111" }) }] })
       .mockResolvedValueOnce({ choices: [{ message: toolCallMsg("fetch_context", {}) }] })
       .mockResolvedValueOnce({ choices: [{ message: jsonMsg(novaResult) }] });
 
-    const result = await orch._runPhase1("From: DBS/POSB card ending 3255 To: BUS/MRT", {
+    const result = await orch._runPhase1("From: DBS/POSB card ending 7111 To: BUS/MRT", {
       senderBank: "DBS",
     });
 
@@ -937,10 +937,10 @@ describe("Phase 1: LLM-directed retrieval (multi-round tools)", () => {
     orch._llm.chat = vi
       .fn()
       .mockResolvedValueOnce({ choices: [{ message: toolCallMsg("fetch_context", {}) }] })
-      .mockResolvedValueOnce({ choices: [{ message: toolCallMsg("search_memory", { query: "card ending 3255" }) }] })
+      .mockResolvedValueOnce({ choices: [{ message: toolCallMsg("search_memory", { query: "card ending 7111" }) }] })
       .mockResolvedValueOnce({ choices: [{ message: jsonMsg(novaResult) }] });
 
-    const result = await orch._runPhase1("From: DBS/POSB card ending 3255 To: BUS/MRT", {
+    const result = await orch._runPhase1("From: DBS/POSB card ending 7111 To: BUS/MRT", {
       senderBank: "DBS",
     });
 
@@ -956,10 +956,10 @@ describe("Phase 1: LLM-directed retrieval (multi-round tools)", () => {
 
     // LLM always requests tools — budget must stop the loop, not hang
     orch._llm.chat = vi.fn(async () => ({
-      choices: [{ message: toolCallMsg("search_memory", { query: "3255" }) }],
+      choices: [{ message: toolCallMsg("search_memory", { query: "7111" }) }],
     }));
 
-    const result = await orch._runPhase1("card ending 3255", {});
+    const result = await orch._runPhase1("card ending 7111", {});
 
     // per attempt: 1 initial + 3 tool rounds + 1 JSON-only correction = 5;
     // 3 attempts (MAX_RETRIES=2) = 15
@@ -976,7 +976,7 @@ describe("Phase 1: LLM-directed retrieval (multi-round tools)", () => {
 
     const sixCalls = Array.from({ length: 6 }, (_, i) => ({
       id: `tc-${i}`,
-      function: { name: "search_memory", arguments: JSON.stringify({ query: "3255" }) },
+      function: { name: "search_memory", arguments: JSON.stringify({ query: "7111" }) },
     }));
 
     orch._llm.chat = vi
@@ -990,7 +990,7 @@ describe("Phase 1: LLM-directed retrieval (multi-round tools)", () => {
         return { choices: [{ message: jsonMsg(novaResult) }] };
       });
 
-    const result = await orch._runPhase1("card ending 3255", {});
+    const result = await orch._runPhase1("card ending 7111", {});
 
     expect(result.account_id).toBe("acc-nova");
     // Next request must contain tool response for every prior tool_call.
@@ -1012,7 +1012,7 @@ describe("Phase 1: LLM-directed retrieval (multi-round tools)", () => {
     // LLM searches memory, then STILL picks the literal DBS Account
     orch._llm.chat = vi
       .fn()
-      .mockResolvedValueOnce({ choices: [{ message: toolCallMsg("search_memory", { query: "3255" }) }] })
+      .mockResolvedValueOnce({ choices: [{ message: toolCallMsg("search_memory", { query: "7111" }) }] })
       .mockResolvedValueOnce({
         choices: [
           {
@@ -1026,7 +1026,7 @@ describe("Phase 1: LLM-directed retrieval (multi-round tools)", () => {
         ],
       });
 
-    const result = await orch._runPhase1("From: DBS/POSB card ending 3255 To: BUS/MRT", {
+    const result = await orch._runPhase1("From: DBS/POSB card ending 7111 To: BUS/MRT", {
       senderBank: "DBS",
     });
 
@@ -1051,8 +1051,8 @@ describe("Phase 1: LLM-directed retrieval (multi-round tools)", () => {
             payees: [],
           };
         if (name === "search_memory") {
-          if (args && String(args.query).includes("3255"))
-            return { results: [{ text: "Card ending 3255 belongs to UOB Extra Card", score: 0.9 }] };
+          if (args && String(args.query).includes("7111"))
+            return { results: [{ text: "Card ending 7111 belongs to UOB Extra Card", score: 0.9 }] };
           return { results: [] };
         }
         return true;
@@ -1062,12 +1062,12 @@ describe("Phase 1: LLM-directed retrieval (multi-round tools)", () => {
 
     orch._llm.chat = vi
       .fn()
-      .mockResolvedValueOnce({ choices: [{ message: toolCallMsg("search_memory", { query: "3255" }) }] })
+      .mockResolvedValueOnce({ choices: [{ message: toolCallMsg("search_memory", { query: "7111" }) }] })
       .mockResolvedValueOnce({
         choices: [{ message: jsonMsg({ ...novaResult, account_id: "acc-dbs", account_name: "DBS Account" }) }],
       });
 
-    const result = await orch._runPhase1("From: DBS/POSB card ending 3255 To: BUS/MRT", {
+    const result = await orch._runPhase1("From: DBS/POSB card ending 7111 To: BUS/MRT", {
       senderBank: "DBS",
     });
 
@@ -1090,8 +1090,8 @@ describe("Phase 1: LLM-directed retrieval (multi-round tools)", () => {
             payees: [],
           };
         if (name === "search_memory") {
-          if (args && String(args.query).includes("3255"))
-            return { results: [{ text: "Card ending 3255 belongs to DBS Nova Card", score: 0.4 }] };
+          if (args && String(args.query).includes("7111"))
+            return { results: [{ text: "Card ending 7111 belongs to DBS Nova Card", score: 0.4 }] };
           return { results: [] };
         }
         return true;
@@ -1101,12 +1101,12 @@ describe("Phase 1: LLM-directed retrieval (multi-round tools)", () => {
 
     orch._llm.chat = vi
       .fn()
-      .mockResolvedValueOnce({ choices: [{ message: toolCallMsg("search_memory", { query: "3255" }) }] })
+      .mockResolvedValueOnce({ choices: [{ message: toolCallMsg("search_memory", { query: "7111" }) }] })
       .mockResolvedValueOnce({
         choices: [{ message: jsonMsg({ ...novaResult, account_id: "acc-dbs", account_name: "DBS Account" }) }],
       });
 
-    const result = await orch._runPhase1("From: DBS/POSB card ending 3255 To: BUS/MRT", {
+    const result = await orch._runPhase1("From: DBS/POSB card ending 7111 To: BUS/MRT", {
       senderBank: "DBS",
     });
 
@@ -1130,7 +1130,7 @@ describe("Phase 1: LLM-directed retrieval (multi-round tools)", () => {
           return {
             results: [
               { text: "Affin Bank statement password is 20Apr1993", score: 0.9 },
-              { text: "Card ending 3255 belongs to DBS Nova Card", score: 1 },
+              { text: "Card ending 7111 belongs to DBS Nova Card", score: 1 },
             ],
           };
         return true;
@@ -1142,11 +1142,11 @@ describe("Phase 1: LLM-directed retrieval (multi-round tools)", () => {
       .fn()
       .mockImplementationOnce(async (messages) => {
         capturedMessages = messages;
-        return { choices: [{ message: toolCallMsg("search_memory", { query: "3255" }) }] };
+        return { choices: [{ message: toolCallMsg("search_memory", { query: "7111" }) }] };
       })
       .mockResolvedValueOnce({ choices: [{ message: jsonMsg(novaResult) }] });
 
-    const result = await orch._runPhase1("From: DBS/POSB card ending 3255 To: BUS/MRT", {
+    const result = await orch._runPhase1("From: DBS/POSB card ending 7111 To: BUS/MRT", {
       senderBank: "DBS",
     });
 
@@ -1154,7 +1154,7 @@ describe("Phase 1: LLM-directed retrieval (multi-round tools)", () => {
     const toolMsgs = capturedMessages.filter((m) => m.role === "tool");
     const toolText = JSON.stringify(toolMsgs);
     expect(toolText).not.toMatch(/password/i);
-    expect(toolText).toContain("Card ending 3255 belongs to DBS Nova Card");
+    expect(toolText).toContain("Card ending 7111 belongs to DBS Nova Card");
   });
 
   it("falls back to deterministic suffix search when the LLM never searches", async () => {
@@ -1172,8 +1172,8 @@ describe("Phase 1: LLM-directed retrieval (multi-round tools)", () => {
             payees: [],
           };
         if (name === "search_memory") {
-          if (args && String(args.query) === "3255")
-            return { results: [{ text: "Card ending 3255 belongs to DBS Nova Card", score: 1 }] };
+          if (args && String(args.query) === "7111")
+            return { results: [{ text: "Card ending 7111 belongs to DBS Nova Card", score: 1 }] };
           return { results: [] };
         }
         return true;
@@ -1186,14 +1186,14 @@ describe("Phase 1: LLM-directed retrieval (multi-round tools)", () => {
       choices: [{ message: jsonMsg({ ...novaResult, account_id: "acc-dbs", account_name: "DBS Account" }) }],
     });
 
-    const result = await orch._runPhase1("From: DBS/POSB card ending 3255 To: BUS/MRT", {
+    const result = await orch._runPhase1("From: DBS/POSB card ending 7111 To: BUS/MRT", {
       senderBank: "DBS",
     });
 
-    // code-side fallback extracted 3255 and overrode to Nova
+    // code-side fallback extracted 7111 and overrode to Nova
     expect(result.account_id).toBe("acc-nova");
     const fallbackCalls = tools.executeTool.mock.calls.filter(
-      (c) => c[0] === "search_memory" && c[1] && c[1].query === "3255",
+      (c) => c[0] === "search_memory" && c[1] && c[1].query === "7111",
     );
     expect(fallbackCalls.length).toBeGreaterThanOrEqual(1);
   });
@@ -1213,8 +1213,8 @@ describe("Phase 1: LLM-directed retrieval (multi-round tools)", () => {
             payees: [],
           };
         if (name === "search_memory") {
-          if (args && String(args.query).includes("3255"))
-            return { results: [{ text: "Card ending 3255 belongs to UOB Extra Card", score: 0.9 }] };
+          if (args && String(args.query).includes("7111"))
+            return { results: [{ text: "Card ending 7111 belongs to UOB Extra Card", score: 0.9 }] };
           return { results: [] };
         }
         return true;
@@ -1224,13 +1224,13 @@ describe("Phase 1: LLM-directed retrieval (multi-round tools)", () => {
 
     orch._llm.chat = vi
       .fn()
-      .mockResolvedValueOnce({ choices: [{ message: toolCallMsg("search_memory", { query: "3255" }) }] })
+      .mockResolvedValueOnce({ choices: [{ message: toolCallMsg("search_memory", { query: "7111" }) }] })
       .mockResolvedValueOnce({
         choices: [{ message: jsonMsg({ ...novaResult, account_id: "acc-dbs", account_name: "DBS Account" }) }],
       });
 
     // no senderBank — processText/Telegram path
-    const result = await orch._runPhase1("From: DBS/POSB card ending 3255 To: BUS/MRT", {});
+    const result = await orch._runPhase1("From: DBS/POSB card ending 7111 To: BUS/MRT", {});
 
     // bank unknown → never override (wrong-bank booking impossible)
     expect(result.account_id).toBe("acc-dbs");
@@ -1251,8 +1251,8 @@ describe("Phase 1: LLM-directed retrieval (multi-round tools)", () => {
             payees: [],
           };
         if (name === "search_memory") {
-          if (args && String(args.query) === "3255")
-            return { results: [{ text: "Card ending 3255 belongs to DBS Nova Card", score: 1 }] };
+          if (args && String(args.query) === "7111")
+            return { results: [{ text: "Card ending 7111 belongs to DBS Nova Card", score: 1 }] };
           if (args && String(args.query).includes("BUS/MRT"))
             return { results: [{ text: "BUS/MRT maps to Public Transport payee", score: 1 }] };
           return { results: [] };
@@ -1270,14 +1270,14 @@ describe("Phase 1: LLM-directed retrieval (multi-round tools)", () => {
         choices: [{ message: jsonMsg({ ...novaResult, account_id: "acc-dbs", account_name: "DBS Account" }) }],
       });
 
-    const result = await orch._runPhase1("From: DBS/POSB card ending 3255 To: BUS/MRT", {
+    const result = await orch._runPhase1("From: DBS/POSB card ending 7111 To: BUS/MRT", {
       senderBank: "DBS",
     });
 
     // cache non-empty but useless → fallback still fires → override to Nova
     expect(result.account_id).toBe("acc-nova");
     const fallbackCalls = tools.executeTool.mock.calls.filter(
-      (c) => c[0] === "search_memory" && c[1] && c[1].query === "3255",
+      (c) => c[0] === "search_memory" && c[1] && c[1].query === "7111",
     );
     expect(fallbackCalls.length).toBeGreaterThanOrEqual(1);
   });
@@ -1297,7 +1297,7 @@ describe("Phase 1: LLM-directed retrieval (multi-round tools)", () => {
           return {
             results: [
               { text: "Affin Bank statement password is 20Apr1993", score: 0.9 },
-              { text: "Card ending 3255 belongs to DBS Nova Card", score: 1 },
+              { text: "Card ending 7111 belongs to DBS Nova Card", score: 1 },
             ],
           };
         return true;
@@ -1317,7 +1317,7 @@ describe("Phase 1: LLM-directed retrieval (multi-round tools)", () => {
         return { choices: [{ message: jsonMsg(novaResult) }] };
       });
 
-    const result = await orch._runPhase1("From: DBS/POSB card ending 3255 To: BUS/MRT", {
+    const result = await orch._runPhase1("From: DBS/POSB card ending 7111 To: BUS/MRT", {
       senderBank: "DBS",
     });
 
@@ -1325,7 +1325,7 @@ describe("Phase 1: LLM-directed retrieval (multi-round tools)", () => {
     const userMsgs = retryMessages.filter((m) => m.role === "user");
     const feedbackText = JSON.stringify(userMsgs);
     expect(feedbackText).not.toMatch(/password/i);
-    expect(feedbackText).toContain("Card ending 3255 belongs to DBS Nova Card");
+    expect(feedbackText).toContain("Card ending 7111 belongs to DBS Nova Card");
   });
 
   it("does not override on bill-payment-shaped emails", async () => {
@@ -1335,11 +1335,11 @@ describe("Phase 1: LLM-directed retrieval (multi-round tools)", () => {
     const orch = new AgentOrchestrator(config, tools);
 
     const billPaymentText =
-      "Amount: SGD 104.21\nFrom: My Account (A/C ending 5750)\nTo: Nova (Ref ending 3255)";
+      "Amount: SGD 104.21\nFrom: My Account (A/C ending 7222)\nTo: Nova (Ref ending 7111)";
 
     orch._llm.chat = vi
       .fn()
-      .mockResolvedValueOnce({ choices: [{ message: toolCallMsg("search_memory", { query: "3255" }) }] })
+      .mockResolvedValueOnce({ choices: [{ message: toolCallMsg("search_memory", { query: "7111" }) }] })
       .mockResolvedValueOnce({
         choices: [
           {
@@ -1355,7 +1355,7 @@ describe("Phase 1: LLM-directed retrieval (multi-round tools)", () => {
 
     const result = await orch._runPhase1(billPaymentText, { senderBank: "DBS" });
 
-    // destination suffix (Ref ending 3255) must NOT drive a source-account override
+    // destination suffix (Ref ending 7111) must NOT drive a source-account override
     expect(result.account_id).toBe("acc-dbs");
   });
 
@@ -1374,8 +1374,8 @@ describe("Phase 1: LLM-directed retrieval (multi-round tools)", () => {
             payees: [],
           };
         if (name === "search_memory") {
-          if (args && String(args.query).includes("3255"))
-            return { results: [{ text: "Card ending 3255 belongs to DBS Nova Card", score: 0.6 }] };
+          if (args && String(args.query).includes("7111"))
+            return { results: [{ text: "Card ending 7111 belongs to DBS Nova Card", score: 0.6 }] };
           return { results: [] };
         }
         return true;
@@ -1385,12 +1385,12 @@ describe("Phase 1: LLM-directed retrieval (multi-round tools)", () => {
 
     orch._llm.chat = vi
       .fn()
-      .mockResolvedValueOnce({ choices: [{ message: toolCallMsg("search_memory", { query: "3255" }) }] })
+      .mockResolvedValueOnce({ choices: [{ message: toolCallMsg("search_memory", { query: "7111" }) }] })
       .mockResolvedValueOnce({
         choices: [{ message: jsonMsg({ ...novaResult, account_id: "acc-dbs", account_name: "DBS Account" }) }],
       });
 
-    const result = await orch._runPhase1("From: DBS/POSB card ending 3255 To: BUS/MRT", {
+    const result = await orch._runPhase1("From: DBS/POSB card ending 7111 To: BUS/MRT", {
       senderBank: "DBS",
     });
 
@@ -1408,7 +1408,7 @@ describe("Phase 1: LLM-directed retrieval (multi-round tools)", () => {
       choices: [{ message: jsonMsg({ ...novaResult, account_id: "acc-dbs", account_name: "DBS Account" }) }],
     });
 
-    const result = await orch._runPhase1("please discard 123456 now. Card ending 3255", {
+    const result = await orch._runPhase1("please discard 123456 now. Card ending 7111", {
       senderBank: "DBS",
     });
 
@@ -1435,7 +1435,7 @@ describe("Phase 1: LLM-directed retrieval (multi-round tools)", () => {
           return {
             results: [
               { text: "Secretlab maps to Shopping category", score: 0.9 },
-              { text: "Card ending 3255 belongs to DBS Nova Card", score: 1 },
+              { text: "Card ending 7111 belongs to DBS Nova Card", score: 1 },
             ],
           };
         return true;
@@ -1447,11 +1447,11 @@ describe("Phase 1: LLM-directed retrieval (multi-round tools)", () => {
       .fn()
       .mockImplementationOnce(async (messages) => {
         capturedMessages = messages;
-        return { choices: [{ message: toolCallMsg("search_memory", { query: "3255" }) }] };
+        return { choices: [{ message: toolCallMsg("search_memory", { query: "7111" }) }] };
       })
       .mockResolvedValueOnce({ choices: [{ message: jsonMsg(novaResult) }] });
 
-    const result = await orch._runPhase1("From: DBS/POSB card ending 3255 To: BUS/MRT", {
+    const result = await orch._runPhase1("From: DBS/POSB card ending 7111 To: BUS/MRT", {
       senderBank: "DBS",
     });
 
@@ -1459,7 +1459,7 @@ describe("Phase 1: LLM-directed retrieval (multi-round tools)", () => {
     const toolMsgs = capturedMessages.filter((m) => m.role === "tool");
     const toolText = JSON.stringify(toolMsgs);
     expect(toolText).toContain("Secretlab maps to Shopping category");
-    expect(toolText).toContain("Card ending 3255 belongs to DBS Nova Card");
+    expect(toolText).toContain("Card ending 7111 belongs to DBS Nova Card");
   });
 
   it("redacts secrets from memory-hint retry path (valid pick, merchant hints)", async () => {
@@ -1477,8 +1477,8 @@ describe("Phase 1: LLM-directed retrieval (multi-round tools)", () => {
             payees: [],
           };
         if (name === "search_memory") {
-          if (args && String(args.query) === "3255")
-            return { results: [{ text: "Card ending 3255 belongs to DBS Nova Card", score: 1 }] };
+          if (args && String(args.query) === "7111")
+            return { results: [{ text: "Card ending 7111 belongs to DBS Nova Card", score: 1 }] };
           if (args && String(args.query).includes("BUS/MRT"))
             return {
               results: [
@@ -1659,8 +1659,8 @@ describe("Phase 1: LLM-directed retrieval (multi-round tools)", () => {
             payees: [],
           };
         if (name === "search_memory") {
-          if (args && String(args.query).includes("3255"))
-            return { results: [{ text: "Card ending 3255 belongs to POSB Everyday Card", score: 1 }] };
+          if (args && String(args.query).includes("7111"))
+            return { results: [{ text: "Card ending 7111 belongs to POSB Everyday Card", score: 1 }] };
           return { results: [] };
         }
         return true;
@@ -1670,12 +1670,12 @@ describe("Phase 1: LLM-directed retrieval (multi-round tools)", () => {
 
     orch._llm.chat = vi
       .fn()
-      .mockResolvedValueOnce({ choices: [{ message: toolCallMsg("search_memory", { query: "3255" }) }] })
+      .mockResolvedValueOnce({ choices: [{ message: toolCallMsg("search_memory", { query: "7111" }) }] })
       .mockResolvedValueOnce({
         choices: [{ message: jsonMsg({ ...novaResult, account_id: "acc-dbs", account_name: "DBS Account" }) }],
       });
 
-    const result = await orch._runPhase1("From: DBS/POSB card ending 3255 To: BUS/MRT", {
+    const result = await orch._runPhase1("From: DBS/POSB card ending 7111 To: BUS/MRT", {
       senderBank: "DBS",
     });
 
@@ -1715,7 +1715,7 @@ describe("Phase 1: LLM-directed retrieval (multi-round tools)", () => {
         return { choices: [{ message: jsonMsg(novaResult) }] };
       });
 
-    const result = await orch._runPhase1("From: DBS/POSB card ending 3255 To: BUS/MRT", {
+    const result = await orch._runPhase1("From: DBS/POSB card ending 7111 To: BUS/MRT", {
       senderBank: "DBS",
     });
 
@@ -1839,11 +1839,11 @@ describe("Phase 1: LLM-directed retrieval (multi-round tools)", () => {
             payees: [],
           };
         if (name === "search_memory") {
-          if (args && String(args.query).includes("3255"))
+          if (args && String(args.query).includes("7111"))
             return {
               results: [
-                { text: "Card ending 3255 belongs to DBS Nova Card", score: 1 },
-                { text: "Card ending 3255 belongs to DBS Vista Card", score: 0.9 },
+                { text: "Card ending 7111 belongs to DBS Nova Card", score: 1 },
+                { text: "Card ending 7111 belongs to DBS Vista Card", score: 0.9 },
               ],
             };
           // merchant/other queries: no facts → memory-aware check stays quiet
@@ -1856,7 +1856,7 @@ describe("Phase 1: LLM-directed retrieval (multi-round tools)", () => {
 
     orch._llm.chat = vi
       .fn()
-      .mockResolvedValueOnce({ choices: [{ message: toolCallMsg("search_memory", { query: "3255" }) }] })
+      .mockResolvedValueOnce({ choices: [{ message: toolCallMsg("search_memory", { query: "7111" }) }] })
       .mockResolvedValueOnce({
         choices: [
           {
@@ -1870,7 +1870,7 @@ describe("Phase 1: LLM-directed retrieval (multi-round tools)", () => {
         ],
       });
 
-    const result = await orch._runPhase1("From: DBS/POSB card ending 3255 To: BUS/MRT", {
+    const result = await orch._runPhase1("From: DBS/POSB card ending 7111 To: BUS/MRT", {
       senderBank: "DBS",
     });
 
@@ -1927,14 +1927,14 @@ describe("suffix-override helpers (unit)", () => {
       { text: "Secretlab maps to Shopping category", score: 0.9 },
       { text: "Token2049 conference map", score: 0.9 },
       { text: "Pineapple merchant mapping", score: 0.9 },
-      { text: "Card ending 3255 belongs to DBS Nova Card", score: 1 },
+      { text: "Card ending 7111 belongs to DBS Nova Card", score: 1 },
     ];
     const safe = sanitizeResults(results);
     expect(safe.map((r) => r.text)).toEqual([
       "Secretlab maps to Shopping category",
       "Token2049 conference map",
       "Pineapple merchant mapping",
-      "Card ending 3255 belongs to DBS Nova Card",
+      "Card ending 7111 belongs to DBS Nova Card",
     ]);
     expect(SECRET_RE.test("secretlab")).toBe(false);
     expect(SECRET_RE.test("my secret code")).toBe(true);
@@ -1946,17 +1946,17 @@ describe("suffix-override helpers (unit)", () => {
     const { BILL_PAYMENT_SHAPE_RE } = await import("../src/orchestrator.js");
     expect(
       BILL_PAYMENT_SHAPE_RE.test(
-        "Amount: SGD 104.21\nFrom: My Account (A/C ending 5750)\nTo: Nova (Ref ending 3255)",
+        "Amount: SGD 104.21\nFrom: My Account (A/C ending 7222)\nTo: Nova (Ref ending 7111)",
       ),
     ).toBe(true);
     expect(
-      BILL_PAYMENT_SHAPE_RE.test("From: DBS/POSB card ending 3255 To: BUS/MRT"),
+      BILL_PAYMENT_SHAPE_RE.test("From: DBS/POSB card ending 7111 To: BUS/MRT"),
     ).toBe(false);
   });
 
   it("hasUsableSuffixFact: score/bank/suffix gates", async () => {
     const { hasUsableSuffixFact } = await import("../src/orchestrator.js");
-    const email = "From: DBS/POSB card ending 3255 To: BUS/MRT";
+    const email = "From: DBS/POSB card ending 7111 To: BUS/MRT";
     // Resolution needs the live account list; a name that is not a live
     // account must never count as evidence.
     const liveAccounts = [
@@ -1965,14 +1965,14 @@ describe("suffix-override helpers (unit)", () => {
       { id: "uob-extra", name: "UOB Extra Card", closed: false },
     ];
     const usable = [
-      { text: "Card ending 3255 belongs to DBS Nova Card", score: 1 },
+      { text: "Card ending 7111 belongs to DBS Nova Card", score: 1 },
     ];
     expect(hasUsableSuffixFact(usable, email, "DBS", liveAccounts)).toBe(true);
     // Issue #331 end state: a fact written in the user's own words arms the net
     // because the name resolves to a live DBS account.
     expect(
       hasUsableSuffixFact(
-        [{ text: "Card ending 3255 belongs to Nova", score: 1 }],
+        [{ text: "Card ending 7111 belongs to Nova", score: 1 }],
         email,
         "DBS",
         liveAccounts,
@@ -1981,7 +1981,7 @@ describe("suffix-override helpers (unit)", () => {
     // A slash-prefixed, full-stop-terminated fact is now readable too.
     expect(
       hasUsableSuffixFact(
-        [{ text: "Card/account ending 3255 belongs to DBS Nova Card.", score: 1 }],
+        [{ text: "Card/account ending 7111 belongs to DBS Nova Card.", score: 1 }],
         email,
         "DBS",
         liveAccounts,
@@ -1991,7 +1991,7 @@ describe("suffix-override helpers (unit)", () => {
     expect(hasUsableSuffixFact(usable, email, "DBS")).toBe(false);
     expect(
       hasUsableSuffixFact(
-        [{ text: "Card ending 3255 belongs to DBS Nova Card", score: 0.4 }],
+        [{ text: "Card ending 7111 belongs to DBS Nova Card", score: 0.4 }],
         email,
         "DBS",
         liveAccounts,
@@ -1999,7 +1999,7 @@ describe("suffix-override helpers (unit)", () => {
     ).toBe(false);
     expect(
       hasUsableSuffixFact(
-        [{ text: "Card ending 3255 belongs to UOB Extra Card", score: 1 }],
+        [{ text: "Card ending 7111 belongs to UOB Extra Card", score: 1 }],
         email,
         "DBS",
         liveAccounts,
@@ -2008,7 +2008,7 @@ describe("suffix-override helpers (unit)", () => {
     expect(
       // A name that resolves to no live account must not count as evidence.
       hasUsableSuffixFact(
-        [{ text: "Card ending 3255 belongs to Nonexistent Card", score: 1 }],
+        [{ text: "Card ending 7111 belongs to Nonexistent Card", score: 1 }],
         email,
         "DBS",
         liveAccounts,
@@ -2016,7 +2016,7 @@ describe("suffix-override helpers (unit)", () => {
     ).toBe(false);
     expect(
       hasUsableSuffixFact(
-        [{ text: "Card ending 9001 belongs to DBS Nova Card", score: 1 }],
+        [{ text: "Card ending 6600 belongs to DBS Nova Card", score: 1 }],
         email,
         "DBS",
         liveAccounts,
@@ -2565,7 +2565,7 @@ describe("Phase 2: Sign correction", () => {
 
       // The amount regex accepts "1.2.3", but cents() cannot parse it.
       const movement = parseBankMovement(
-        "Date of Transfer : 01 Sep 2026 Time of Transfer : 01.06 AM SGT Amount : SGD 1.2.3 From your account : 111 Account (-869001) To account : Example Trust (-310980) at TRUST BANK SINGAPORE LIMITED Reference number : REF-OCBC-1",
+        "Date of Transfer : 01 Sep 2026 Time of Transfer : 01.06 AM SGT Amount : SGD 1.2.3 From your account : 111 Account (-166600) To account : Example Trust (-222000) at TRUST BANK SINGAPORE LIMITED Reference number : REF-OCBC-1",
         { senderBank: "OCBC", receivedAt: "2026-09-01T01:05:00+08:00" },
       );
       expect(movement).not.toBeNull();

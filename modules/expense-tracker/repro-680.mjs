@@ -16,7 +16,7 @@ const ACCOUNTS = [
     { id: "acc-altitude", name: "DBS Altitude Card", closed: false },
     { id: "acc-yuu", name: "DBS Yuu Card", closed: false },
 ];
-const FACTS = ["Account ending 5750 belongs to DBS Account"];
+const FACTS = ["Account ending 7222 belongs to DBS Account"];
 
 // uid 1030, PII-redacted the way this repository redacts production bodies: the
 // suffix is kept so suffix-to-account pairing still resolves, names and amounts
@@ -24,7 +24,7 @@ const FACTS = ["Account ending 5750 belongs to DBS Account"];
 const BODY =
     "digibank Alerts - You have received a transfer Transaction Ref: 0126100100114350 " +
     "Dear Customer, You have received SGD 1000.00 via FAST transfer on 01 Oct 2026 21:14 SGT. " +
-    "From: ACCOUNT HOLDER To: Your DBS/ POSB account ending 5750 ";
+    "From: ACCOUNT HOLDER To: Your DBS/ POSB account ending 7222 ";
 
 const tools = {
     executeTool: async (name, args) => {

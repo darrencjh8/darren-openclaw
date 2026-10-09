@@ -46,14 +46,14 @@ const asRecords = (names) => names.map((name) => ({ id: name, name, closed: fals
 
 describe("parseSuffixFact (tolerant reader)", () => {
   it.each([
-    ["Card ending 3255 belongs to Epsilon Nova Card", "3255", "Epsilon Nova Card"],
-    ["Account ending 5750 belongs to Epsilon Account", "5750", "Epsilon Account"],
+    ["Card ending 7111 belongs to Epsilon Nova Card", "7111", "Epsilon Nova Card"],
+    ["Account ending 7222 belongs to Epsilon Account", "7222", "Epsilon Account"],
     // The shape Hermes actually stored during the live probe.
     ["Card/account ending 9999 belongs to Epsilon Nova Card.", "9999", "Epsilon Nova Card"],
-    ["Account/card ending 9001 belongs to Beta 360", "9001", "Beta 360"],
-    ["card ending in 3255 belongs to Epsilon Nova", "3255", "Epsilon Nova"],
-    ["  Card Ending 3255 Belongs To Epsilon Nova Card  ", "3255", "Epsilon Nova Card"],
-    ["Card ending 3255 belongs to Epsilon Nova Card,", "3255", "Epsilon Nova Card"],
+    ["Account/card ending 6600 belongs to Beta 360", "6600", "Beta 360"],
+    ["card ending in 7111 belongs to Epsilon Nova", "7111", "Epsilon Nova"],
+    ["  Card Ending 7111 Belongs To Epsilon Nova Card  ", "7111", "Epsilon Nova Card"],
+    ["Card ending 7111 belongs to Epsilon Nova Card,", "7111", "Epsilon Nova Card"],
   ])("parses %j", (text, suffix, accountName) => {
     expect(parseSuffixFact(text)).toEqual({ suffix, accountName });
   });
@@ -63,10 +63,10 @@ describe("parseSuffixFact (tolerant reader)", () => {
     ["Epsilon Nova Card is a credit card account"],
     ["Zeta alert recipient maps to Zeta Bank account"],
     ["CARD FACTORY 2048 belongs to X"],
-    ["Card ending 3255"],
-    ["Example Eta A/C ending 6445 maps to Household stuffs payee"],
+    ["Card ending 7111"],
+    ["Example Eta A/C ending 2555 maps to Household stuffs payee"],
     [
-      "Example Banking Corporation Ltd A/C ending 9001 maps to Beta 360 payee",
+      "Example Banking Corporation Ltd A/C ending 6600 maps to Beta 360 payee",
     ],
     [""],
   ])("rejects %j", (text) => {
@@ -88,14 +88,14 @@ describe("parseSuffixFact (tolerant reader)", () => {
 describe("canonicalSuffixFact (deterministic prefix)", () => {
   it("uses Card for card-named accounts", () => {
     expect(
-      canonicalSuffixFact({ suffix: "3255", accountName: "Epsilon Nova Card" }),
-    ).toBe("Card ending 3255 belongs to Epsilon Nova Card");
+      canonicalSuffixFact({ suffix: "7111", accountName: "Epsilon Nova Card" }),
+    ).toBe("Card ending 7111 belongs to Epsilon Nova Card");
   });
 
   it("uses Account for everything else", () => {
     expect(
-      canonicalSuffixFact({ suffix: "5750", accountName: "Epsilon Account" }),
-    ).toBe("Account ending 5750 belongs to Epsilon Account");
+      canonicalSuffixFact({ suffix: "7222", accountName: "Epsilon Account" }),
+    ).toBe("Account ending 7222 belongs to Epsilon Account");
   });
 
   it("keeps the word boundary, so Cardiff is not a card", () => {
@@ -106,11 +106,11 @@ describe("canonicalSuffixFact (deterministic prefix)", () => {
 
   it("round-trips through the parser", () => {
     const fact = canonicalSuffixFact({
-      suffix: "9302",
+      suffix: "1777",
       accountName: "Epsilon Vista Card",
     });
     expect(parseSuffixFact(fact)).toEqual({
-      suffix: "9302",
+      suffix: "1777",
       accountName: "Epsilon Vista Card",
     });
   });
@@ -230,24 +230,24 @@ describe("MemoryStore.cleanup — canonicalisation of suffix facts", () => {
 
   it("rewrites a slash form to canonical and drops the duplicate spelling", async () => {
     const { store, path } = await storeWith([
-      "- Card/account ending 3255 belongs to Epsilon Nova Card.",
-      "- Card ending 3255 belongs to Epsilon Nova Card",
+      "- Card/account ending 7111 belongs to Epsilon Nova Card.",
+      "- Card ending 7111 belongs to Epsilon Nova Card",
     ]);
     const result = await store.cleanup();
     expect(result.normalised).toBeGreaterThan(0);
     const { readFileSync } = await import("fs");
     const written = readFileSync(path, "utf8");
-    expect(written).toContain("Card ending 3255 belongs to Epsilon Nova Card");
+    expect(written).toContain("Card ending 7111 belongs to Epsilon Nova Card");
     expect(written).not.toContain("Card/account");
     expect(
-      written.split("\n").filter((l) => l.includes("ending 3255")).length,
+      written.split("\n").filter((l) => l.includes("ending 7111")).length,
     ).toBe(1);
   });
 
   it("reports a same-suffix conflict instead of hiding it", async () => {
     const { store, path } = await storeWith([
-      "- Card ending 3255 belongs to Epsilon Nova Card",
-      "- Card ending 3255 belongs to Epsilon Vista Card",
+      "- Card ending 7111 belongs to Epsilon Nova Card",
+      "- Card ending 7111 belongs to Epsilon Vista Card",
     ]);
     const result = await store.cleanup();
     const { readFileSync } = await import("fs");
@@ -256,12 +256,12 @@ describe("MemoryStore.cleanup — canonicalisation of suffix facts", () => {
     // REPORTED: two live mappings for one card is a data problem the user has
     // to decide, and canonicalisation must not quietly pick one.
     expect(result.contradictions.length).toBeGreaterThan(0);
-    expect(written).toContain("ending 3255");
+    expect(written).toContain("ending 7111");
   });
 
   it("is idempotent: a second run reports no normalisation", async () => {
     const { store } = await storeWith([
-      "- Card ending 3255 belongs to Epsilon Nova Card",
+      "- Card ending 7111 belongs to Epsilon Nova Card",
     ]);
     const first = await store.cleanup();
     expect(first.normalised).toBe(0);
@@ -270,16 +270,16 @@ describe("MemoryStore.cleanup — canonicalisation of suffix facts", () => {
     expect(second.removed).toBe(0);
   });
 
-  it("preserves the Beta 9001 / 869001 alias pair (distinct suffixes, one account)", async () => {
+  it("preserves the Beta 6600 / 166600 alias pair (distinct suffixes, one account)", async () => {
     const { store, path } = await storeWith([
-      "- Account ending 869001 belongs to Beta 360",
-      "- Account ending 9001 belongs to Beta 360",
+      "- Account ending 166600 belongs to Beta 360",
+      "- Account ending 6600 belongs to Beta 360",
     ]);
     await store.cleanup();
     const { readFileSync } = await import("fs");
     const written = readFileSync(path, "utf8");
-    expect(written).toContain("Account ending 869001 belongs to Beta 360");
-    expect(written).toContain("Account ending 9001 belongs to Beta 360");
+    expect(written).toContain("Account ending 166600 belongs to Beta 360");
+    expect(written).toContain("Account ending 6600 belongs to Beta 360");
   });
 });
 
@@ -324,10 +324,10 @@ describe("regressions found in dev-loop review rounds 2-3", () => {
 
     // The legitimate filler case still resolves by exact name.
     const ok = identityMappingsFromFacts(
-      ["Account ending 869001 belongs to Beta 360 account"],
+      ["Account ending 166600 belongs to Beta 360 account"],
       [{ id: "beta", name: "Beta 360", closed: false }],
     );
-    expect(ok.suffix.get("869001")?.name).toBe("Beta 360");
+    expect(ok.suffix.get("166600")?.name).toBe("Beta 360");
   });
 
   it("arms the safety net for a filler-word fact too", async () => {
@@ -339,8 +339,8 @@ describe("regressions found in dev-loop review rounds 2-3", () => {
     const live = [{ id: "dbs-example", name: "DBS Example", closed: false }];
     expect(
       hasUsableSuffixFact(
-        [{ text: "Account ending 9001 belongs to DBS Example account", score: 1 }],
-        "From: DBS card ending 9001",
+        [{ text: "Account ending 6600 belongs to DBS Example account", score: 1 }],
+        "From: DBS card ending 6600",
         "DBS",
         live,
       ),
@@ -408,8 +408,8 @@ describe("regressions found in dev-loop review rounds 2-3", () => {
         "",
         "## Facts",
         "",
-        "- Card/account ending 3255 belongs to Epsilon Nova Card.",
-        "- Card ending 3255 belongs to Epsilon Nova Card",
+        "- Card/account ending 7111 belongs to Epsilon Nova Card.",
+        "- Card ending 7111 belongs to Epsilon Nova Card",
         "- BUS/MRT maps to Public Transport payee",
         "",
       ].join("\n"),
@@ -418,8 +418,8 @@ describe("regressions found in dev-loop review rounds 2-3", () => {
     await store.cleanup();
     // A later update must not overwrite an unrelated fact through a stale index.
     await store.update(
-      "Card ending 3255 belongs to Epsilon Nova Card",
-      "Card ending 3255 belongs to Epsilon Vista Card",
+      "Card ending 7111 belongs to Epsilon Nova Card",
+      "Card ending 7111 belongs to Epsilon Vista Card",
     );
     const written = readFileSync(path, "utf8");
     expect(written).toContain("Public Transport payee");
