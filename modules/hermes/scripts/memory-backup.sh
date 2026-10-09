@@ -24,7 +24,10 @@ fi
 CLONE_DIR="${MEMORY_CLONE_DIR:-/opt/data/memories-backup}"
 SRC_DIR="${MEMORY_SRC_DIR:-/opt/data/memories}"
 EXPENSE_DIR="${EXPENSE_TRACKER_DATA:-}"
-MNEMOSYNE_DIR="${MNEMOSYNE_DATA_DIR:-/opt/data/mnemosyne/data}"
+# ponytail: one root for every live path below, so tests can point the whole
+# script at a fixture tree with HERMES_DATA_DIR instead of touching /opt/data.
+DATA_DIR="${HERMES_DATA_DIR:-/opt/data}"
+MNEMOSYNE_DIR="${MNEMOSYNE_DATA_DIR:-$DATA_DIR/mnemosyne/data}"
 
 # Fix read-only permissions from prior git operations
 if [ -d "$CLONE_DIR" ]; then
@@ -60,7 +63,7 @@ if [ -d "$SRC_DIR/topics" ]; then
     cp "$SRC_DIR"/topics/*.md "$CLONE_DIR/topics/" 2>/dev/null || true
 fi
 # Backup SOUL.md (evolves over time)
-cp /opt/data/SOUL.md "$CLONE_DIR/" 2>/dev/null || true
+cp "$DATA_DIR/SOUL.md" "$CLONE_DIR/" 2>/dev/null || true
 if [ -n "$EXPENSE_DIR" ]; then
     mkdir -p "$CLONE_DIR/expense-tracker"
     if [ -f "$EXPENSE_DIR/MEMORY.md" ]; then
@@ -76,12 +79,12 @@ if command -v sqlite3 >/dev/null 2>&1; then
     mkdir -p "$CLONE_DIR/kanban"
 
     # Default board
-    if [ -f /opt/data/kanban.db ]; then
-        sqlite3 /opt/data/kanban.db ".dump" > "$CLONE_DIR/kanban/kanban.sql" 2>/dev/null || true
+    if [ -f "$DATA_DIR/kanban.db" ]; then
+        sqlite3 "$DATA_DIR/kanban.db" ".dump" > "$CLONE_DIR/kanban/kanban.sql" 2>/dev/null || true
     fi
 
     # Named boards
-    for board_db in /opt/data/kanban/boards/*/kanban.db; do
+    for board_db in "$DATA_DIR"/kanban/boards/*/kanban.db; do
         [ -f "$board_db" ] || continue
         slug=$(basename "$(dirname "$board_db")")
         sqlite3 "$board_db" ".dump" > "$CLONE_DIR/kanban/${slug}.sql" 2>/dev/null || true
@@ -92,12 +95,12 @@ fi
 mkdir -p "$CLONE_DIR/profiles"
 
 # Sticky active profile
-if [ -f /opt/data/active_profile ]; then
-    cp /opt/data/active_profile "$CLONE_DIR/profiles/_active" 2>/dev/null || true
+if [ -f "$DATA_DIR/active_profile" ]; then
+    cp "$DATA_DIR/active_profile" "$CLONE_DIR/profiles/_active" 2>/dev/null || true
 fi
 
 # Named profiles
-for profile_dir in /opt/data/profiles/*/; do
+for profile_dir in "$DATA_DIR"/profiles/*/; do
     [ -d "$profile_dir" ] || continue
     name=$(basename "$profile_dir")
     mkdir -p "$CLONE_DIR/profiles/$name"
@@ -105,6 +108,15 @@ for profile_dir in /opt/data/profiles/*/; do
     # Description metadata
     if [ -f "$profile_dir/profile.yaml" ]; then
         cp "$profile_dir/profile.yaml" "$CLONE_DIR/profiles/$name/" 2>/dev/null || true
+    fi
+
+    # Identity files: SOUL.md is the profile personality, config.yaml its
+    # routing. Private repo, so no redaction.
+    if [ -f "$profile_dir/SOUL.md" ]; then
+        cp "$profile_dir/SOUL.md" "$CLONE_DIR/profiles/$name/" 2>/dev/null || true
+    fi
+    if [ -f "$profile_dir/config.yaml" ]; then
+        cp "$profile_dir/config.yaml" "$CLONE_DIR/profiles/$name/" 2>/dev/null || true
     fi
 
     # Per-profile memories
@@ -118,7 +130,13 @@ done
 
 # ---- Skills backup ----
 mkdir -p "$CLONE_DIR/skills"
-cp -r /opt/data/skills/* "$CLONE_DIR/skills/" 2>/dev/null || true
+cp -r "$DATA_DIR"/skills/* "$CLONE_DIR/skills/" 2>/dev/null || true
+
+# ---- LLM wiki backup (curated pages + raw snapshots, whole tree) ----
+if [ -d "$DATA_DIR/home/wiki" ]; then
+    mkdir -p "$CLONE_DIR/wiki"
+    cp -r "$DATA_DIR"/home/wiki/. "$CLONE_DIR/wiki/" 2>/dev/null || true
+fi
 
 # ---- Mnemosyne pilot backup (SQLite, safe on live WAL DB) ----
 # Additive only: no-op when the provider was never installed. Single file in
@@ -152,8 +170,8 @@ fi
 
 # ---- Cron jobs backup ----
 mkdir -p "$CLONE_DIR/cron"
-if [ -f /opt/data/cron/jobs.json ]; then
-    cp /opt/data/cron/jobs.json "$CLONE_DIR/cron/" 2>/dev/null || true
+if [ -f "$DATA_DIR/cron/jobs.json" ]; then
+    cp "$DATA_DIR/cron/jobs.json" "$CLONE_DIR/cron/" 2>/dev/null || true
 fi
 
 cd "$CLONE_DIR"

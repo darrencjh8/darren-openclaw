@@ -3,7 +3,11 @@
 # Skills are always synced on every boot (not just first).
 set -e
 
-SRC_DIR="/opt/data/memories"
+# ponytail: same single-root trick as memory-backup.sh — tests point the whole
+# restore at a fixture tree with HERMES_DATA_DIR.
+DATA_DIR="${HERMES_DATA_DIR:-/opt/data}"
+MNEMOSYNE_DIR="${MNEMOSYNE_DATA_DIR:-$DATA_DIR/mnemosyne/data}"
+SRC_DIR="${MEMORY_SRC_DIR:-$DATA_DIR/memories}"
 FIRST_BOOT=false
 [ -f "$SRC_DIR/MEMORY.md" ] || FIRST_BOOT=true
 
@@ -44,8 +48,22 @@ fi
 
 # Restore SOUL.md if backed up
 if [ -f "$TMP_DIR/SOUL.md" ]; then
-    cp "$TMP_DIR/SOUL.md" /opt/data/
+    cp "$TMP_DIR/SOUL.md" "$DATA_DIR/"
     log "restored SOUL.md"
+fi
+
+# Restore LLM wiki (whole tree)
+if [ -d "$TMP_DIR/wiki" ]; then
+    mkdir -p "$DATA_DIR/home/wiki"
+    cp -r "$TMP_DIR"/wiki/. "$DATA_DIR/home/wiki/" 2>/dev/null || true
+    log "restored wiki"
+fi
+
+# Restore mnemosyne DB (replace in place, never merge)
+if [ -f "$TMP_DIR/mnemosyne/mnemosyne.db" ]; then
+    mkdir -p "$MNEMOSYNE_DIR"
+    cp "$TMP_DIR/mnemosyne/mnemosyne.db" "$MNEMOSYNE_DIR/" 2>/dev/null || true
+    log "restored mnemosyne.db"
 fi
 
 # Restore expense tracker data
@@ -62,15 +80,15 @@ fi
 
 # Restore kanban
 if [ -d "$TMP_DIR/kanban" ] && command -v sqlite3 >/dev/null 2>&1; then
-    mkdir -p /opt/data/kanban/boards
+    mkdir -p "$DATA_DIR/kanban/boards"
     for sql_file in "$TMP_DIR/kanban/"*.sql; do
         [ -f "$sql_file" ] || continue
         name=$(basename "$sql_file" .sql)
         if [ "$name" = "kanban" ]; then
-            sqlite3 /opt/data/kanban.db < "$sql_file" 2>/dev/null || true
+            sqlite3 "$DATA_DIR/kanban.db" < "$sql_file" 2>/dev/null || true
         else
-            mkdir -p "/opt/data/kanban/boards/$name"
-            sqlite3 "/opt/data/kanban/boards/$name/kanban.db" < "$sql_file" 2>/dev/null || true
+            mkdir -p "$DATA_DIR/kanban/boards/$name"
+            sqlite3 "$DATA_DIR/kanban/boards/$name/kanban.db" < "$sql_file" 2>/dev/null || true
         fi
     done
     log "restored kanban"
@@ -78,8 +96,8 @@ fi
 
 # Restore skills (no-clobber — baked-in skills from image take precedence)
 if [ -d "$TMP_DIR/skills" ]; then
-    mkdir -p /opt/data/skills
-    cp -rn "$TMP_DIR/skills/"* /opt/data/skills/ 2>/dev/null || true
+    mkdir -p "$DATA_DIR/skills"
+    cp -rn "$TMP_DIR/skills/"* "$DATA_DIR/skills/" 2>/dev/null || true
     log "restored skills"
 fi
 
@@ -89,20 +107,26 @@ if [ -d "$TMP_DIR/profiles" ]; then
         [ -d "$profile_dir" ] || continue
         name=$(basename "$profile_dir")
         [ "$name" = "_active" ] && continue
-        mkdir -p "/opt/data/profiles/$name/memories"
+        mkdir -p "$DATA_DIR/profiles/$name/memories"
         if [ -f "$profile_dir/profile.yaml" ]; then
-            cp "$profile_dir/profile.yaml" "/opt/data/profiles/$name/"
+            cp "$profile_dir/profile.yaml" "$DATA_DIR/profiles/$name/"
+        fi
+        if [ -f "$profile_dir/SOUL.md" ]; then
+            cp "$profile_dir/SOUL.md" "$DATA_DIR/profiles/$name/"
+        fi
+        if [ -f "$profile_dir/config.yaml" ]; then
+            cp "$profile_dir/config.yaml" "$DATA_DIR/profiles/$name/"
         fi
         if [ -f "$profile_dir/MEMORY.md" ]; then
-            cp "$profile_dir/MEMORY.md" "/opt/data/profiles/$name/memories/"
+            cp "$profile_dir/MEMORY.md" "$DATA_DIR/profiles/$name/memories/"
         fi
         if [ -f "$profile_dir/USER.md" ]; then
-            cp "$profile_dir/USER.md" "/opt/data/profiles/$name/memories/"
+            cp "$profile_dir/USER.md" "$DATA_DIR/profiles/$name/memories/"
         fi
     done
     # Restore active profile pointer
     if [ -f "$TMP_DIR/profiles/_active" ]; then
-        cp "$TMP_DIR/profiles/_active" /opt/data/active_profile
+        cp "$TMP_DIR/profiles/_active" "$DATA_DIR/active_profile"
     fi
     log "restored profiles"
 fi

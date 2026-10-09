@@ -252,6 +252,79 @@ ls "$mnemo_clone/mnemosyne/" | grep -Eq 'mnemosyne-[0-9]{8}' \
 unset _mnemo_dest _mnemo_mtime1 _mnemo_mtime2 _mnemo_mtime3
 
 echo ""
+echo "=== wiki tree is copied into the backup repo ==="
+
+fake_root="$TMPDIR/fake-data"
+wiki_clone="$TMPDIR/wiki-backup"
+mkdir -p "$fake_root/home/wiki/entities/accounts" "$fake_root/home/wiki/concepts" \
+    "$fake_root/home/wiki/raw/articles" "$wiki_clone"
+printf '# Schema\n' > "$fake_root/home/wiki/SCHEMA.md"
+printf '# Index\n' > "$fake_root/home/wiki/index.md"
+printf 'banks content\n' > "$fake_root/home/wiki/entities/accounts/banks-cards.md"
+printf 'routing content\n' > "$fake_root/home/wiki/concepts/llm-routing.md"
+printf 'snapshot\n' > "$fake_root/home/wiki/raw/articles/snap.md"
+
+MEMORY_REPO_URL="https://example.com/owner/repo" \
+MEMORY_SRC_DIR="$topic_src" \
+MEMORY_CLONE_DIR="$wiki_clone" \
+HERMES_DATA_DIR="$fake_root" \
+PATH="$TMPDIR/expense-stubbin:$PATH" \
+    bash "$backup_script" >/dev/null 2>&1 || true
+
+[ -f "$wiki_clone/wiki/SCHEMA.md" ] && ok "wiki/SCHEMA.md copied" \
+    || nope "wiki backup" "SCHEMA.md missing from $wiki_clone/wiki"
+[ -f "$wiki_clone/wiki/entities/accounts/banks-cards.md" ] && ok "wiki nested entity copied" \
+    || nope "wiki backup" "nested entity missing from $wiki_clone/wiki"
+[ -f "$wiki_clone/wiki/raw/articles/snap.md" ] && ok "wiki raw snapshot copied" \
+    || nope "wiki backup" "raw snapshot missing from $wiki_clone/wiki"
+grep -q "routing content" "$wiki_clone/wiki/concepts/llm-routing.md" 2>/dev/null \
+    && ok "wiki content preserved" \
+    || nope "wiki content" "content not preserved"
+
+rm -rf "$fake_root/home/wiki"
+nowiki_clone="$TMPDIR/nowiki-backup"
+mkdir -p "$nowiki_clone"
+if MEMORY_REPO_URL="https://example.com/owner/repo" \
+    MEMORY_SRC_DIR="$topic_src" \
+    MEMORY_CLONE_DIR="$nowiki_clone" \
+    HERMES_DATA_DIR="$fake_root" \
+    PATH="$TMPDIR/expense-stubbin:$PATH" \
+    bash "$backup_script" >/dev/null 2>&1 \
+    && [ ! -e "$nowiki_clone/wiki" ]; then
+    ok "absent wiki creates no backup dir"
+else
+    nope "absent wiki backup" "backup failed or created wiki/ from nothing"
+fi
+
+echo ""
+echo "=== profile SOUL.md and config.yaml are copied ==="
+
+prof_root="$TMPDIR/prof-data"
+prof_clone="$TMPDIR/prof-backup"
+mkdir -p "$prof_root/profiles/architect/memories" "$prof_clone"
+printf 'arch soul\n' > "$prof_root/profiles/architect/SOUL.md"
+printf 'api_key: test\n' > "$prof_root/profiles/architect/config.yaml"
+printf 'desc\n' > "$prof_root/profiles/architect/profile.yaml"
+printf 'mem\n' > "$prof_root/profiles/architect/memories/MEMORY.md"
+printf 'default\n' > "$prof_root/active_profile"
+
+MEMORY_REPO_URL="https://example.com/owner/repo" \
+MEMORY_SRC_DIR="$topic_src" \
+MEMORY_CLONE_DIR="$prof_clone" \
+HERMES_DATA_DIR="$prof_root" \
+PATH="$TMPDIR/expense-stubbin:$PATH" \
+    bash "$backup_script" >/dev/null 2>&1 || true
+
+[ -f "$prof_clone/profiles/architect/SOUL.md" ] && ok "profile SOUL.md copied" \
+    || nope "profile SOUL backup" "SOUL.md missing from $prof_clone/profiles/architect"
+[ -f "$prof_clone/profiles/architect/config.yaml" ] && ok "profile config.yaml copied" \
+    || nope "profile config backup" "config.yaml missing from $prof_clone/profiles/architect"
+[ -f "$prof_clone/profiles/architect/profile.yaml" ] && ok "profile.yaml still copied" \
+    || nope "profile.yaml copy" "regression: profile.yaml not copied"
+[ -f "$prof_clone/profiles/_active" ] && ok "active profile pointer copied" \
+    || nope "active profile copy" "_active missing from $prof_clone/profiles"
+
+echo ""
 echo "========================================="
 echo -e " Results: ${GREEN}$pass passed${NC}, ${RED}$fail failed${NC}"
 echo "========================================="

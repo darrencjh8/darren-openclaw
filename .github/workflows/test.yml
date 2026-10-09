@@ -167,6 +167,8 @@ jobs:
               run: python modules/hermes/tests/test-seed-app-cron.py
             - name: Test memory backup script
               run: bash modules/hermes/tests/test-memory-backup.sh
+            - name: Test memory restore script
+              run: bash modules/hermes/tests/test-memory-restore.sh
             - name: Test Hermes model routing
               run: bash modules/hermes/tests/test-model-routing.sh
             - name: Test Hermes dev-loop review policy
