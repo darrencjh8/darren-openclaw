@@ -1145,11 +1145,13 @@ fi
 # Hermes gateway (the dashboard is disabled in compose, so its port would always fail)
 # Needs extra wait: config migration + profile seeding registers the supervised
 # gateway service after container start, so poll it with the same bounded budget
-# the HTTP health checks use instead of checking once.
+# the HTTP health checks use instead of checking once. Measured 2026-10-09: the
+# gateway took 2.5 minutes to come up (integrity check after an unclean exit), so
+# the budget is 5 minutes, not the 90 seconds that failed deploy 585.
 if should_deploy "hermes" || should_deploy "all"; then
   sleep 30
   gateway_up=false
-  for _ in $(seq 1 10); do
+  for _ in $(seq 1 45); do
     if docker exec hermes /package/admin/s6/command/s6-svstat -o up /run/service/gateway-default 2>/dev/null | grep -qx true; then
       gateway_up=true
       break

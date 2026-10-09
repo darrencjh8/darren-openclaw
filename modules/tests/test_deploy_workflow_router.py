@@ -193,6 +193,19 @@ class DeployWorkflowRouterTests(unittest.TestCase):
             deploy_script,
         )
 
+    def test_hermes_gateway_health_gate_outlasts_a_slow_start(self):
+        # Measured 2026-10-09: the gateway came up 2.5 minutes after container start
+        # (config migration, profile seeding, state.db integrity check), but the gate
+        # gave up after 90 seconds and failed deploy 585 with the gateway healthy.
+        import re
+
+        block = DEPLOY_SCRIPT.read_text(encoding="utf-8").split("# Hermes gateway (the dashboard", 1)[1]
+        block = block.split('echo -e "  ${GREEN}✓ hermes gateway${NC}"', 1)[0]
+        initial = int(re.search(r"sleep (\d+)\n\s*gateway_up=false", block).group(1))
+        tries = int(re.search(r"seq 1 (\d+)", block).group(1))
+        step = int(re.search(r"done\n", block) and re.findall(r"sleep (\d+)", block)[-1])
+        self.assertGreaterEqual(initial + tries * step, 300)
+
     def test_hermes_container_checkout_is_refreshed(self):
         # Dev-loop sessions in the Hermes container drive the gate from their own
         # checkout (`codex/skills/dev-loop/scripts/loop.py`), so a checkout pinned
