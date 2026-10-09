@@ -41,7 +41,10 @@ for _db in "$HERMES_HOME/state.db" "$HERMES_HOME"/profiles/*/state.db; do
     if command -v sqlite3 >/dev/null 2>&1; then
         _tables=$(sqlite3 "$_db" ".tables" 2>/dev/null)
         _old="?"
-        # Probe known session-table shapes without assuming schema; any miss stays "?".
+        # Best-effort probe of known session-table shapes without assuming
+        # schema; TEXT timestamps can compare lexically and misreport, so a
+        # "?" means unknown, never a deletion trigger. Deletion stays owned
+        # by sessions.auto_prune regardless of what prints here.
         for _q in \
             "SELECT COUNT(*) FROM sessions WHERE updated_at < strftime('%s','now','-${SESSION_MAX_AGE_DAYS} days');" \
             "SELECT COUNT(*) FROM sessions WHERE ended_at < strftime('%s','now','-${SESSION_MAX_AGE_DAYS} days');" \

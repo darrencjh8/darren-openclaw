@@ -124,9 +124,11 @@ cp -r /opt/data/skills/* "$CLONE_DIR/skills/" 2>/dev/null || true
 # Additive only: no-op when the provider was never installed. Single file in
 # the repo, replaced in place — never timestamped fresh copies. Throttled to
 # once per day while the rest of the backup still runs every 6h, so the git
-# history does not take a binary blob per run. Uses `sqlite3 .backup` so a
-# live gateway write cannot tear the copy.
+# history does not take a binary blob per run. The sqlite3 path uses .backup
+# with busy_timeout so a live gateway write cannot tear the copy; the no-
+# sqlite3 fallback only copies when no WAL sidecar exists, else skips.
 MNEMOSYNE_BACKUP_MAX_AGE_HOURS="${MNEMOSYNE_BACKUP_MAX_AGE_HOURS:-24}"
+case "$MNEMOSYNE_BACKUP_MAX_AGE_HOURS" in ''|*[!0-9]*) MNEMOSYNE_BACKUP_MAX_AGE_HOURS=24 ;; esac
 if [ -f "$MNEMOSYNE_DIR/mnemosyne.db" ]; then
     mkdir -p "$CLONE_DIR/mnemosyne"
     _mnemo_dest="$CLONE_DIR/mnemosyne/mnemosyne.db"
@@ -138,8 +140,10 @@ if [ -f "$MNEMOSYNE_DIR/mnemosyne.db" ]; then
     fi
     if [ "$_mnemo_due" = true ]; then
         if command -v sqlite3 >/dev/null 2>&1; then
-            sqlite3 "$MNEMOSYNE_DIR/mnemosyne.db" ".backup '$_mnemo_dest'" 2>/dev/null || true
-        else
+            sqlite3 "$MNEMOSYNE_DIR/mnemosyne.db" "PRAGMA busy_timeout=5000;" ".backup '$_mnemo_dest'" 2>/dev/null || true
+        elif [ ! -f "$MNEMOSYNE_DIR/mnemosyne.db-wal" ]; then
+            # No sqlite3 and no WAL sidecar, so a plain copy is crash-consistent.
+            # With a WAL sidecar present skip rather than tear the copy.
             cp "$MNEMOSYNE_DIR/mnemosyne.db" "$_mnemo_dest" 2>/dev/null || true
         fi
     fi

@@ -439,15 +439,19 @@ fi
 # sessions.auto_prune/retention_days. Scheduling fields are minted once and
 # left alone afterwards, so a dashboard change is not reverted on reboot.
 python3 <<'PYEOF' || true
-import os, json, uuid, datetime
+import os, json, uuid, datetime, tempfile
 jobs_path = "/opt/data/cron/jobs.json"
 os.makedirs(os.path.dirname(jobs_path), exist_ok=True)
 try:
-    with open(jobs_path) as f:
-        data = json.load(f)
-    jobs = data.get("jobs", []) if isinstance(data, dict) else data
-except (FileNotFoundError, json.JSONDecodeError):
-    jobs = []
+    with open(jobs_path, encoding="utf-8") as handle:
+        data = json.load(handle)
+except FileNotFoundError:
+    data = {"jobs": []}
+except json.JSONDecodeError as error:
+    raise SystemExit(f"refusing to replace corrupt cron jobs file: {error}")
+if not isinstance(data, dict) or not isinstance(data.get("jobs", []), list):
+    raise SystemExit("refusing to replace malformed cron jobs file")
+jobs = data["jobs"]
 
 MANAGED = {
     "script": "mnemosyne-vacuum.sh",
@@ -481,8 +485,13 @@ else:
         existing[key] = MANAGED[key]
     print("cron: mnemosyne-vacuum migrated: " + ", ".join(sorted(changed)) if changed else "cron: mnemosyne-vacuum unchanged")
 
-with open(jobs_path, "w") as f:
-    json.dump({"jobs": jobs, "updated_at": datetime.datetime.now(datetime.timezone.utc).isoformat()}, f, indent=2)
+directory = os.path.dirname(jobs_path)
+with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=directory, delete=False) as handle:
+    json.dump({"jobs": jobs, "updated_at": datetime.datetime.now(datetime.timezone.utc).isoformat()}, handle, indent=2)
+    handle.flush()
+    os.fsync(handle.fileno())
+    temp_path = handle.name
+os.replace(temp_path, jobs_path)
 PYEOF
 
 # Restore memories from friday-memory repo on first boot
