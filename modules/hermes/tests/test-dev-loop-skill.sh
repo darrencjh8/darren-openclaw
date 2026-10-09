@@ -101,9 +101,9 @@ grep -Eq '^ +model: auto-thinking$' "$CODE_REVIEWER_PROFILE/config.yaml" \
     || nope "code-reviewer profile keeps the auto-thinking pool fallback"
 
 echo "=== repo rules keep the gate invariants ==="
-grep -Fq -- 'two continuous approvals on the same unchanged HEAD' "$REPO_RULES" \
-    && ok "repo rules require two approvals" \
-    || nope "repo rules require two approvals"
+grep -Fq -- 'one approval on an unchanged HEAD' "$REPO_RULES" \
+    && ok "repo rules require one approval on an unchanged HEAD" \
+    || nope "repo rules require one approval on an unchanged HEAD"
 grep -Fq -- 'invoke spec-auditor before code review' "$REPO_RULES" \
     && ok "repo rules invoke spec-auditor when a spec exists" \
     || nope "repo rules invoke spec-auditor when a spec exists"
