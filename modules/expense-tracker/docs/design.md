@@ -185,6 +185,12 @@ Why the restriction is accepted: measured against the live fact set (238 facts, 
 
 Pinned by `tests/memory.test.js`: key anchoring (a partial query must not select a neighbour's mapping), the structured-fact refusal (#420, #471), and the free-form similarity floor.
 
+#### Jev classification fallback and user-confirmed learning (#720)
+
+When memory and web search leave a payee unresolved, `src/jev.js` sends the full extracted email (scrubbed of links and long digit runs, no raw MIME headers, no credentials) to TypeSafe `jev-latest` with every eligible payee. Account-transfer payees, `Misc` and `Starting Balance` are never offered. A `choice` call returns best match, runner-up and confidence; a second `noul` call checks that the email itself supports the winner. A weak, unvalidated or failed answer leaves `Misc`. Thresholds start at confidence 0.85, margin 0.3 and evidence 0.8 and are to be calibrated on real traffic. The email is untrusted data, the model has no tools, and the answer must be an exact eligible payee name.
+
+A Jev answer is never written to memory automatically. Phase 3 stores a pending offer (`src/learning.js`, JSON on the data volume, 7-day expiry) and the notification asks "Remember this mapping?" with the exact reference, payee and runner-up. `confirm_learning` writes the `X maps to Y payee` fact only for a live offer id; `decline_learning` discards it. Neither changes the booked transaction. Only `list_pending_learning`, `confirm_learning` and `decline_learning` are routed over HTTP and MCP, and `evidence` is stripped from HTTP `resolve_merchant` calls.
+
 ---
 
 ## Test Strategy

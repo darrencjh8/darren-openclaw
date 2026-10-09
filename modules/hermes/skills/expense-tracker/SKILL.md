@@ -64,6 +64,25 @@ fact, and say what you saved.
   account`). A contradiction is logged. Fix a wrong type deliberately with
   `update_fact`, because the type decides whether a purchase is booked negative.
 
+### Remembering a Jev payee guess (#720)
+
+When memory has no payee and the pipeline could not decide, a model (Jev) may
+pick one from the full email, and the notification then asks "Remember this
+mapping?". That is a guess, so nothing is saved until the user says yes.
+
+- Call `list_pending_learning` to see the open offers (descriptor, payee,
+  runner-up, id).
+- Only after an explicit user yes, in a later turn than the offer, call
+  `confirm_learning` with that offer's id. If the user says no, call
+  `decline_learning`. Declining never changes the booked transaction.
+- Never `learn_fact` a Jev mapping yourself, and never confirm on silence or on
+  a yes that does not refer to the offer.
+- Residual limit: confirmation is a tool call the agent makes, so it rests on
+  this instruction and on the id being absent from the notification. The tool
+  cannot itself prove a human typed the yes, and the memory data mount is
+  read-only to Hermes, so a fact still reaches memory only through the
+  expense-tracker tools.
+
 ### Must not
 
 - Guess an account for a user, or store a fact the user did not confirm.
@@ -77,7 +96,7 @@ The expense-tracker orchestrator handles ALL phases internally. Hermes only rout
 **Phase 1 — LLM Analysis:** Single LLM call (`reasoning=low`) with the `fetch_context` tool to read live accounts/categories/payees. Extracts merchant, amount, date, currency and proposes payee/category, leaving fields blank when unsure. 1 retry.
 
 **Phase 2 — Resolution (code-driven, no LLM gates):** Deterministic fill-in of blanks:
-- **payee:** memory → `resolve_merchant` (memory → web search → classification) → `"Misc"`
+- **payee:** memory → `resolve_merchant` (memory → web search → classification) → Jev full-email fallback (needs `JEV_API_KEY`, offers a confirmable memory) → `"Misc"`
 - **category:** memory → LLM category picker (`getCategoryPickerPrompt`) → `null`
 
 **Phase 3 — Execute:** Insert with duplicate check, notify, `learn_fact` ×1. Skip for non-transactions. Notify on exhaustion.

@@ -98,6 +98,17 @@ function field(text, labels) {
   return match?.[1]?.trim() || "";
 }
 
+/**
+ * The labelled reference as the email's own line ends it. The flattened text the
+ * parser reads runs a trailing `Reference:` into the boilerplate that follows,
+ * so a line-preserved copy bounds it. The line value wins only when the parsed
+ * one starts with it; any other disagreement keeps the parser's value.
+ */
+export function exactReference(linesText, parsedReference) {
+  const exact = field(linesText, ["Reference number", "Transaction Ref", "Reference"]);
+  return exact && String(parsedReference || "").startsWith(exact) ? exact : parsedReference;
+}
+
 // Labels recognised by field(), longest-first so prefixed variants
 // ("From your account") win over their short forms ("From").
 const FIELD_LABELS = [

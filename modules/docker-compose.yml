@@ -74,6 +74,7 @@ services:
             - /home/runner/data/expense-tracker/data:/app/data
         environment:
             - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}
+            - JEV_API_KEY=${JEV_API_KEY:-}
             - LLM_PROVIDER=${LLM_PROVIDER:-litellm}
             - LLM_BASE_URL=${LLM_BASE_URL:-http://codex-router:4100/v1}
             - LLM_MODEL=${LLM_MODEL:-auto-thinking}

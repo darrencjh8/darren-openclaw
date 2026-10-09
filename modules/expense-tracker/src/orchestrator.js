@@ -20,6 +20,7 @@ import {
     cents,
     suffix,
     bankFromText,
+    exactReference,
 } from "./bank-movement.js";
 import {
     accountAliases,
@@ -30,6 +31,7 @@ import {
     resolveFactAccount as resolveFactAccountShared,
 } from "./suffix-facts.js";
 import { factNamesMerchant } from "./memory.js";
+import { descriptorOf } from "./learning.js";
 import {
     bookableAmountCents,
     isBookableAmountCents,
@@ -705,14 +707,21 @@ export class AgentOrchestrator {
         // Extract email content
         let emailText = "";
         let usedFallback = false;
+        // The email with its own line breaks: evidence for classification and
+        // the only reliable end of a `Reference:` field (#720). Empty when the
+        // MIME could not be parsed, because the fallback text is raw MIME with
+        // headers, which is never sent anywhere.
+        let linesText = "";
         try {
             const raw = Buffer.isBuffer(rawEmail)
                 ? rawEmail
                 : Buffer.from(rawEmail || "");
             emailText = await extractEmailContent(raw);
+            linesText = await extractEmailContent(raw, null, { keepLines: true });
         } catch {
             emailText = String(rawEmail || "");
             usedFallback = true;
+            linesText = "";
         }
 
         // Prepend sender + subject as account-matching signals for Phase 1.
@@ -734,6 +743,7 @@ export class AgentOrchestrator {
             phase1 = await this._runPhase1(emailText, {
                 senderBank,
                 receivedAt: this._emailReceivedAt(rawEmail),
+                linesText,
             });
         } catch (error) {
             if (!(error instanceof LLMUnavailableError)) throw error;
@@ -794,6 +804,9 @@ export class AgentOrchestrator {
         // claim a booked leg for this alert only (issue #578); set after the
         // Phase-1 sanitiser, so LLM output cannot supply it.
         phase1._alert_id = msgId;
+        if (linesText) {
+            phase1._evidence = { text: linesText, subject: subject || "", sender: from || "" };
+        }
         const phase2 = await this._resolvePhase2(phase1);
 
         // Phase 3: Execute
@@ -812,12 +825,17 @@ export class AgentOrchestrator {
         return Number.isNaN(parsed) ? new Date().toISOString() : new Date(parsed).toISOString();
     }
 
-    async _runStructuredMovement(emailText, senderBank, receivedAt) {
+    async _runStructuredMovement(emailText, senderBank, receivedAt, linesText = "") {
         const movement = parseBankMovement(emailText, {
             senderBank,
             receivedAt: receivedAt || new Date().toISOString(),
         });
         if (!movement) return null;
+        // The flattened text runs a trailing `Reference:` into the email's
+        // boilerplate; the line-preserved text ends it where the sender did.
+        if (linesText) {
+            movement.reference_number = exactReference(linesText, movement.reference_number);
+        }
         return this._resolveMovementToOutput(movement, { allowSuffixLearning: true });
     }
 
@@ -1123,8 +1141,15 @@ export class AgentOrchestrator {
         }
 
         if (movement.direction === "incoming" && !movement.counterparty) {
+            // The reference is the only identity a one-sided deposit has (#720).
+            // It becomes the descriptor only when it is a short label; an id or a
+            // sentence stays in the notes and in the evidence sent to the
+            // resolver. Phase 2 clears the `Misc` placeholder, so memory and Jev
+            // get to decide, and `Misc` remains the answer when neither can.
+            const reference = String(movement.reference_number || "").trim();
+            const descriptor = descriptorOf(reference) || "Unidentified deposit";
             return {
-                merchant: "Unidentified deposit",
+                merchant: descriptor,
                 amount_cents: Math.abs(movement.amount_cents),
                 date,
                 currency: movement.currency,
@@ -1134,13 +1159,14 @@ export class AgentOrchestrator {
                 action: "insert",
                 payee_name: "Misc",
                 category_id: null,
-                raw_description: "Unidentified deposit",
+                raw_description: descriptor,
                 raw_merchant_descriptor: "",
-                notes: "",
+                notes: reference ? `Reference: ${reference.slice(0, 120)}` : "",
                 reasoning: "Deterministic one-sided bank deposit",
                 notify_message: "",
                 _suffix_mappings: suffixMappings,
                 _structured_movement: true,
+                _payee_unresolved: true,
             };
         }
 
@@ -1563,9 +1589,9 @@ export class AgentOrchestrator {
         }, { allowSuffixLearning: true });
     }
 
-    async _runPhase1(emailText, { senderBank, receivedAt } = {}) {
+    async _runPhase1(emailText, { senderBank, receivedAt, linesText = "" } = {}) {
         try {
-            const structured = await this._runStructuredMovement(emailText, senderBank, receivedAt);
+            const structured = await this._runStructuredMovement(emailText, senderBank, receivedAt, linesText);
             if (structured) return structured;
         } catch (error) {
             logger.warn({ event: "structured_movement_failed", error: error.message });
@@ -2507,6 +2533,9 @@ export class AgentOrchestrator {
         // A PayNow counterparty the identity check settled keeps that payee; the
         // transfer lookup below is what turns an account match into a transfer.
         // Everything else takes the merchant tiers. Review round 2 on #561.
+        // A deterministic placeholder `Misc` is not a decision (#720): clear it so
+        // the memory, resolver and Jev tiers below run, and fall back to `Misc`.
+        if (output._payee_unresolved && !paynowSettled) output.payee_name = "";
         if (!output.payee_name && searchTerm && !paynowSettled) {
             let memResults = [];
             try {
@@ -2542,11 +2571,28 @@ export class AgentOrchestrator {
                         {
                             merchant: searchTerm,
                             budget_id: output.budget_id || "",
+                            // The email is untrusted evidence for the Jev tier
+                            // only; the tool never learns from it (#720).
+                            ...(output._evidence
+                                ? {
+                                      evidence: output._evidence,
+                                      direction: Number(output.amount_cents) > 0 ? "incoming" : "outgoing",
+                                      amount_cents: output.amount_cents,
+                                      currency: output.currency,
+                                  }
+                                : {}),
                         },
                     );
                     if (resolved?.payee) {
                         output.payee_name = resolved.payee;
                         output.payee_source = resolved.source || "fallback";
+                        if (resolved.source === "jev") {
+                            output._jev = {
+                                descriptor: searchTerm,
+                                runnerUp: resolved.runner_up || null,
+                                confidence: resolved.confidence ?? null,
+                            };
+                        }
                     }
                 } catch (e) {
                     // resolve_merchant failed — leave payee blank, fall through to Misc
@@ -3251,10 +3297,17 @@ export class AgentOrchestrator {
                 const cat = llmOutput.category_name
                     ? ` → ${llmOutput.category_name}`
                     : "";
+                const offer = await this._jevOffer(llmOutput, payeeName);
                 const notified = await this._tools.executeTool("notify_user", {
-                    message: `${amountPrefix}at ${displayPayee} via ${acct} on ${dt}${cat}, logged`,
+                    message: `${amountPrefix}at ${displayPayee} via ${acct} on ${dt}${cat}, logged${offer.text}`,
                 });
                 if (!notified) {
+                    // An offer the user was never told about must not linger.
+                    if (offer.id) {
+                        try {
+                            await this._tools.executeTool("withdraw_learning", { id: offer.id });
+                        } catch {}
+                    }
                     logger.error({
                         event: "notify_user_failed",
                         context: "phase3_insert",
@@ -3334,6 +3387,41 @@ export class AgentOrchestrator {
     // ═══════════════════════════════════════════════════════════════
     // Helpers
     // ═══════════════════════════════════════════════════════════════
+
+    /**
+     * The "Remember this mapping?" text for a payee that Jev chose (#720), and
+     * the stored offer behind it. A model guess is never learned here: the offer
+     * only waits for an explicit confirm_learning call. The offer id is not in
+     * the text; it is read with list_pending_learning in the user's own turn.
+     */
+    async _jevOffer(llmOutput, payeeName) {
+        const none = { id: null, text: "" };
+        if (llmOutput.payee_source !== "jev" || !llmOutput._jev) return none;
+        const { descriptor, runnerUp, confidence } = llmOutput._jev;
+        const placeholder = descriptor === "Unidentified deposit";
+        const sure = Number.isFinite(Number(confidence))
+            ? `${Math.round(Number(confidence) * 100)}% sure`
+            : "matched";
+        const matched = ` Payee matched by AI (${sure}${runnerUp ? `, runner-up ${runnerUp}` : ""}).`;
+        // The placeholder names nothing to remember.
+        if (placeholder) return { id: null, text: matched };
+        try {
+            const offered = await this._tools.executeTool("propose_learning", {
+                descriptor,
+                payee: payeeName,
+                runner_up: runnerUp || "",
+                budget_id: llmOutput.budget_id || "",
+            });
+            if (!offered?.offered) return { id: null, text: matched };
+            return {
+                id: offered.id,
+                text: `${matched} Remember "${descriptor}" as ${payeeName}? Nothing is saved until you confirm.`,
+            };
+        } catch (error) {
+            logger.warn({ event: "jev_offer_failed", error: error.message });
+            return { id: null, text: matched };
+        }
+    }
 
     /**
      * Build the canonical suffix→account fact. "Card ending X belongs to Y"
