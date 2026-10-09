@@ -6,6 +6,7 @@ import datetime as dt
 import hashlib
 import io
 import json
+import math
 import os
 import re
 import sqlite3
@@ -30,6 +31,7 @@ _PROOF_DIR = "proofs"
 _CRON_ROOT = Path("/opt/data/cron")
 _CRON_FINDINGS: dict[str, dict] = {}
 _CRON_STALE_TICKER_SECONDS = 300
+_CRON_RUNNING_STALE_SECONDS = 7200
 _COLLECTOR = "/opt/data/scripts/log-issue-triage-snapshot.sh"
 _SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 _IMAGE_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
@@ -151,7 +153,10 @@ def _cron_health(args):
     findings = []
     heartbeat_path = _CRON_ROOT / "ticker_heartbeat"
     try:
-        heartbeat_age = max(0.0, now.timestamp() - float(heartbeat_path.read_text(encoding="utf-8").strip()))
+        heartbeat_value = float(heartbeat_path.read_text(encoding="utf-8").strip())
+        if not math.isfinite(heartbeat_value):
+            raise ValueError("heartbeat is not finite")
+        heartbeat_age = max(0.0, now.timestamp() - heartbeat_value)
     except (OSError, TypeError, ValueError):
         heartbeat_age = None
     if heartbeat_age is None:
@@ -186,7 +191,12 @@ def _cron_health(args):
                 findings.append(_cron_finding(job_id, job_name, "execution_failed", "job metadata reports a non-success status without a matching execution record", now, schedule=job.get("schedule")))
             continue
         status, claimed_at, finished_at, error, delivery, scheduled = row[1:]
-        if status != "completed" or error:
+        claimed = _parse_time(claimed_at)
+        if status in ("claimed", "running") and not error:
+            running_age = (now - claimed).total_seconds() if claimed else None
+            if running_age is None or running_age > _CRON_RUNNING_STALE_SECONDS:
+                findings.append(_cron_finding(job_id, job_name, "execution_stale", "execution remains active beyond the stale threshold", now, schedule=job.get("schedule"), execution_status=status))
+        elif status != "completed" or error:
             findings.append(_cron_finding(job_id, job_name, "execution_failed", error or f"execution ended with status {status}", now, schedule=job.get("schedule"), execution_status=status))
         elif delivery in ("failed", "unverified"):
             findings.append(_cron_finding(job_id, job_name, "delivery_failed", f"delivery outcome was {delivery}", now, schedule=job.get("schedule"), execution_status=status))

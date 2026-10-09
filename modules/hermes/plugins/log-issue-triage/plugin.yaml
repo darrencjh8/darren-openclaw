@@ -8,3 +8,5 @@ provides_tools:
   - triage_run_reproducer
   - triage_search_issues
   - triage_publish_finding
+  - triage_check_cron_health
+  - triage_publish_cron_failure
