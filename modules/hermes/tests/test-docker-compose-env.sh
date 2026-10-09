@@ -135,6 +135,18 @@ test_node_services_have_init() {
     done
 }
 
+test_revision_labels_are_wired() {
+    local root="$(cd "$SCRIPT_DIR/../../.." && pwd)"
+    local compose_labels
+    compose_labels=$(grep -Fc 'org.opencontainers.image.revision: ${HERMES_SOURCE_REVISION:-unknown}' "$COMPOSE_FILE")
+    if [ "$compose_labels" -eq 3 ] && grep -Fq 'org.opencontainers.image.revision: ${CODEX_ROUTER_REVISION:-unknown}' "$COMPOSE_FILE" && grep -q 'export HERMES_SOURCE_REVISION=' "$root/modules/build.sh" && grep -q 'export CODEX_ROUTER_REVISION=' "$root/modules/build.sh"; then
+        ok "triage source revisions are labelled on app and router containers"
+    else
+        nope "triage source revision labels" "labels/build variables missing or incomplete"
+    fi
+}
+
+test_revision_labels_are_wired
 test_has_safe_root
 test_has_opt_data
 test_has_workspace

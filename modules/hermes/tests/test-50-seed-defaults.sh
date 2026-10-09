@@ -540,8 +540,8 @@ mcp_servers:
   expense-tracker:
     url: http://expense-tracker:8080/mcp
 YAML
-migration_block=${migration_block//\/opt\/hermes-defaults/$TMPDIR/hermes-defaults}
 migration_block=${migration_block//\/opt\/data/$TMPDIR/data}
+migration_block=${migration_block//\/opt\/hermes-defaults/$TMPDIR/hermes-defaults}
 python3 -c "$migration_block"
 migration_result=$(python3 - "$migration_target/config.yaml" <<'PY'
 import sys
@@ -748,8 +748,8 @@ mkdir -p "$TMPDIR/fallback/bin" "$TMPDIR/fallback/data"
 printf '#!/bin/sh\nexit 1\n' > "$TMPDIR/fallback/bin/python3"
 chmod +x "$TMPDIR/fallback/bin/python3"
 if [ -n "$seed_fallback" ]; then
-    seed_fallback=${seed_fallback//\/opt\/hermes-defaults/$TMPDIR/seed/hermes-defaults}
     seed_fallback=${seed_fallback//\/opt\/data/$TMPDIR/fallback/data}
+    seed_fallback=${seed_fallback//\/opt\/hermes-defaults/$TMPDIR/seed/hermes-defaults}
     cp "$seed_config" "$TMPDIR/fallback/data/config.yaml"
     PATH="$TMPDIR/fallback/bin:$PATH" sh -c "$seed_fallback" 2>/dev/null
     cmp -s "$TMPDIR/fallback/data/config.yaml" "$seed_config" \
@@ -1198,8 +1198,8 @@ chmod +x "$probe_root/hermes-defaults/scripts/sync-codex-router-skills.sh"
 # fixtures. It is executed as a file, never sourced: a special-builtin redirect
 # failure exits the shell outright, and sourcing would apply that to this suite
 # instead of to the hook under test.
-probe_code=${probe_block//\/opt\/hermes-defaults/$probe_root/hermes-defaults}
-probe_code=${probe_code//\/opt\/data/$probe_root/data}
+probe_code=${probe_block//\/opt\/data/$probe_root/data}
+probe_code=${probe_code//\/opt\/hermes-defaults/$probe_root/hermes-defaults}
 probe_script="$TMPDIR/probe-hook.sh"
 printf '%s\n' "$probe_code" > "$probe_script"
 if command -v dash >/dev/null 2>&1; then

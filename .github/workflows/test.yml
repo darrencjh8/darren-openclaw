@@ -188,11 +188,7 @@ jobs:
             - name: Test Hermes Slack platform wiring
               run: python -m unittest modules.hermes.tests.test_slack_platform -v
             - name: Test Hermes log-issue triage
-              run: |
-                python -m unittest \
-                  modules.hermes.tests.test_log_issue_triage_collect \
-                  modules.hermes.tests.test_log_issue_triage_cron \
-                  -v
+              run: python -m unittest discover -s modules/hermes/tests -p 'test_log_issue_triage_*.py' -v
 
     # The Hermes image is the only artifact the new WebUI ships inside, and every
     # other check in this workflow is text-only: an unreachable pinned commit, a
@@ -321,6 +317,8 @@ jobs:
                   # the real agent class, not just a healthy process.
                   docker exec hermes-webui-test /opt/hermes/.venv/bin/python3 -c \
                       "import sys; sys.path.append('/opt/hermes'); from run_agent import AIAgent; print('AIAgent', AIAgent.__module__)"
+                  docker exec hermes-webui-test /opt/hermes/.venv/bin/python3 -c \
+                      "import sys; sys.path.append('/opt/hermes'); import json; from pathlib import Path; from cron.scheduler import _resolve_cron_enabled_toolsets; from hermes_cli.plugins import _ensure_plugins_discovered, get_plugin_manager; _ensure_plugins_discovered(); jobs=json.loads(Path('/opt/data/cron/jobs.json').read_text())['jobs']; job=next(j for j in jobs if j.get('name') == 'log-issue-triage'); tools=_resolve_cron_enabled_toolsets(job, {'mcp_servers': {'unrelated': {'enabled': True}}}); assert tools == ['log_issue_triage'], tools; m=get_plugin_manager(); assert set(m._plugin_tool_names) >= {'triage_collect_snapshot','triage_run_reproducer','triage_search_issues','triage_publish_finding','triage_check_cron_health','triage_publish_cron_failure'}, m._plugin_tool_names; print('log_issue_triage exact tools loaded; MCP excluded')"
 
                   # Chat path against a stub agent: CI holds no provider
                   # credentials, so a deterministic stub proves the wiring

@@ -19,6 +19,17 @@ done
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 MODULES_DIR="$ROOT/modules"
+source_revision_or_unknown() {
+    local repo="$1"
+    if [ -n "$(git -C "$repo" status --porcelain 2>/dev/null)" ]; then
+        printf 'unknown'
+    else
+        git -C "$repo" rev-parse HEAD
+    fi
+}
+
+export HERMES_SOURCE_REVISION="$(source_revision_or_unknown "$ROOT")"
+export CODEX_ROUTER_REVISION="$(source_revision_or_unknown "$MODULES_DIR/codex-router")"
 cd "$MODULES_DIR"
 
 export COMPOSE_DOCKER_CLI_BUILD=1 DOCKER_BUILDKIT=1

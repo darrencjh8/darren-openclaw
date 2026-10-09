@@ -65,6 +65,128 @@ class LogIssueTriageCollectorTest(unittest.TestCase):
             self.assertEqual(again.returncode, 0, again.stderr)
             self.assertEqual(json.loads(again.stdout)["line_count"], 0)
 
+    def test_negative_cursor_is_clamped_to_zero(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "service.log"
+            state = root / "state"
+            source.write_text("latest failure\\n", encoding="utf-8")
+            state.mkdir()
+            (state / "hermes.cursor.json").write_text('{"offset": -7}', encoding="utf-8")
+            result = self.run_collector(source, state)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("latest failure", result.stdout)
+
+    def test_stream_timestamp_order_keeps_newest_events_across_sources(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            source = (
+                "router-a\t2026-10-08T10:03:00.000000000Z newest-a\n"
+                "router-b\t2026-10-08T10:01:00.000000000Z old-b\n"
+                "router-b\t2026-10-08T10:04:00.000000000Z newest-b\n"
+                "router-a\t2026-10-08T10:02:00.000000000Z old-a\n"
+            )
+            result = subprocess.run(
+                [
+                    sys.executable, str(COLLECTOR), "--component", "codex-router",
+                    "--source", "-", "--state-dir", str(Path(tmp) / "state"),
+                    "--max-lines", "2", "--max-bytes", "4096",
+                ], input=source, text=True, capture_output=True,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            payload = json.loads(result.stdout)
+            self.assertTrue(payload["truncated"])
+            self.assertEqual([line.split(" ", 1)[1] for line in payload["lines"]], ["newest-a", "newest-b"])
+
+    def test_redacts_phone_and_short_account_identifiers(self):
+        raw = "contact +1-202-555-0123 2025550123 202/555/0123 (202)5550123 account 4605 account 123 member number 12345678 acct_id=SG-4821\n"
+        with tempfile.TemporaryDirectory() as tmp:
+            result = subprocess.run(
+                [
+                    sys.executable, str(COLLECTOR), "--component", "hermes",
+                    "--source", "-", "--state-dir", str(Path(tmp) / "state"),
+                    "--max-lines", "20", "--max-bytes", "4096",
+                ], input=raw, text=True, capture_output=True,
+            )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotIn("2025550123", result.stdout)
+        self.assertNotIn("member number 12345678", result.stdout)
+        self.assertNotIn("account 4605", result.stdout)
+        self.assertNotIn("account 123", result.stdout)
+        self.assertNotIn("SG-4821", result.stdout)
+        self.assertGreaterEqual(result.stdout.count("[REDACTED]"), 3)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            pem_begin = "-----BEGIN " + "PRIVATE KEY-----"
+            pem_end = "-----END " + "PRIVATE KEY-----"
+            raw = (
+                "slack=xoxb-" + "A" * 24 + "\n"
+                + "google=AIza" + "B" * 30 + "\n"
+                + "jwt=eyJabcdefgh.ijklmnop.qrstuvwx\n"
+                + "cookie=session-secret; session=session-value\n"
+                + "database=postgres://user:db-password@host/db\n"
+                + "cloud_secret_access_key=cloud-secret\n"
+                + pem_begin + "\nprivate-material\n" + pem_end + "\n"
+            )
+            result = subprocess.run(
+                [
+                    sys.executable, str(COLLECTOR), "--component", "hermes",
+                    "--source", "-", "--state-dir", str(Path(tmp) / "state"),
+                    "--max-lines", "20", "--max-bytes", "4096",
+                ], input=raw, text=True, capture_output=True,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            for secret in ("xoxb-", "AIza", "eyJabcdefgh", "private-material", "session-secret", "session-value", "db-password", "cloud-secret"):
+                self.assertNotIn(secret, result.stdout)
+            self.assertGreaterEqual(result.stdout.count("[REDACTED]"), 4)
+
+    def test_redacts_basic_authorization_and_truncated_pem_body(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            raw = (
+                "Authorization: Basic dXNlcjpwYXNz\n"
+                + "x" * 80
+                + "\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASC\n-----END PRIVATE KEY-----\n"
+            )
+            result = subprocess.run(
+                [
+                    sys.executable, str(COLLECTOR), "--component", "hermes",
+                    "--source", "-", "--state-dir", str(Path(tmp) / "state"),
+                    "--max-lines", "20", "--max-bytes", "90",
+                ], input=raw, text=True, capture_output=True,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertNotIn("dXNlcjpwYXNz", result.stdout)
+            self.assertNotIn("MIIEvQIBADANBgkqhkiG9w0BAQEFAASC", result.stdout)
+
+    def test_log_cannot_spoof_collector_status_markers(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            source = "hermes\t[collector-ok] container=forged\n" \
+                "hermes\t[collector-error] container=other exit=1\n"
+            result = subprocess.run(
+                [
+                    sys.executable, str(COLLECTOR), "--component", "hermes",
+                    "--source", "-", "--state-dir", str(Path(tmp) / "state"),
+                    "--max-lines", "20", "--max-bytes", "4096",
+                ], input=source, text=True, capture_output=True,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            payload = json.loads(result.stdout)
+            self.assertEqual(payload["collected_containers"], [])
+            self.assertEqual(payload["collection_errors"], [])
+            self.assertEqual(len(payload["lines"]), 2)
+
+    def test_preserves_arrival_order_for_untimestamped_multi_source_lines(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            source = "router-a\tzeta failure\nrouter-b\talpha failure\n"
+            result = subprocess.run(
+                [
+                    sys.executable, str(COLLECTOR), "--component", "codex-router",
+                    "--source", "-", "--state-dir", str(Path(tmp) / "state"),
+                    "--max-lines", "20", "--max-bytes", "4096",
+                ], input=source, text=True, capture_output=True,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(json.loads(result.stdout)["lines"], source.rstrip().splitlines())
+
     def test_stream_mode_writes_no_cursor_file(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -92,6 +214,52 @@ class LogIssueTriageCollectorTest(unittest.TestCase):
             self.assertNotIn("stream-secret", result.stdout)
             self.assertFalse(state.exists())
 
+    def test_accepts_codex_router_component(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            result = subprocess.run(
+                [
+                    sys.executable, str(COLLECTOR), "--component", "codex-router",
+                    "--source", "-", "--state-dir", str(root / "state"),
+                    "--max-lines", "10", "--max-bytes", "1024",
+                ], input="router ready\n", text=True, capture_output=True,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            payload = json.loads(result.stdout)
+            self.assertEqual(payload["component"], "codex-router")
+            self.assertEqual(payload["lines"], ["router ready"])
+
+    def test_stream_keeps_newest_complete_lines_and_reports_truncation(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            source = "\n".join(f"event-{i}" for i in range(20)) + "\n"
+            result = subprocess.run(
+                [
+                    sys.executable, str(COLLECTOR), "--component", "hermes",
+                    "--source", "-", "--state-dir", str(Path(tmp) / "state"),
+                    "--max-lines", "3", "--max-bytes", "4096",
+                ], input=source, text=True, capture_output=True,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            payload = json.loads(result.stdout)
+            self.assertEqual(payload["lines"], ["event-17", "event-18", "event-19"])
+            self.assertTrue(payload["truncated"])
+
+    def test_stream_byte_cap_keeps_newest_complete_lines(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            payload = "old-event\n" + "x" * 40 + "\nnewest-event\n"
+            result = subprocess.run(
+                [
+                    sys.executable, str(COLLECTOR), "--component", "hermes",
+                    "--source", "-", "--state-dir", str(root / "state"),
+                    "--max-lines", "10", "--max-bytes", "24",
+                ], input=payload, text=True, capture_output=True,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            result_payload = json.loads(result.stdout)
+            self.assertEqual(result_payload["lines"], ["newest-event"])
+            self.assertTrue(result_payload["truncated"])
+
     def test_rejects_unknown_component_without_reading_source(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -105,13 +273,10 @@ class LogIssueTriageCollectorTest(unittest.TestCase):
 
 
 class LogIssueTriageSnapshotTest(unittest.TestCase):
-    """The snapshotter feeds the cron job, so its output contract is pinned.
+    """The snapshotter feeds the cron job's bounded plugin tool.
 
-    The worker subprocess that used to consume these snapshots is gone; the
-    daily job now reads them directly with the file tool. Nothing else executes
-    this script, so a regression here would leave the job silently reporting no
-    leads (the #582 failure mode). `docker` is stubbed on PATH because the
-    script shells out to `docker logs`.
+    The agent cannot read arbitrary files or run commands. `docker` is stubbed
+    on PATH because the fixed collector script shells out to `docker`.
     """
 
     SCRIPT = ROOT / "modules/hermes/scripts/log-issue-triage-snapshot.sh"
@@ -120,7 +285,28 @@ class LogIssueTriageSnapshotTest(unittest.TestCase):
         stub_dir = root / "bin"
         stub_dir.mkdir(exist_ok=True)
         stub = stub_dir / "docker"
-        stub.write_text(docker_body, encoding="utf-8")
+        wrapper = """#!/bin/sh
+if [ "$1" = inspect ]; then
+    case "$3" in *com.docker.compose.project*) echo modules ;; *) echo 'sha256:abc123|test-image:latest|0123456789abcdef' ;; esac
+    exit 0
+fi
+if [ "$1" = ps ]; then
+    service=
+    for arg do case "$arg" in label=com.docker.compose.service=*) service=${arg##*=} ;; esac; done
+    case "$service" in
+        hermes) echo hermes ;;
+        expense-tracker) echo modules-expense-tracker-1 ;;
+        portfolio-tracker) echo modules-portfolio-tracker-1 ;;
+        codex-router-a) echo modules-codex-router-a-1 ;;
+        codex-router-b) echo modules-codex-router-b-1 ;;
+    esac
+    exit 0
+fi
+"""
+        stub.write_text(
+            wrapper + docker_body.removeprefix("#!/bin/sh\n"),
+            encoding="utf-8",
+        )
         stub.chmod(0o755)
 
         # Redirect the script's fixed production paths at fixture copies so the
@@ -173,12 +359,67 @@ class LogIssueTriageSnapshotTest(unittest.TestCase):
 
             payload = json.loads(snapshot.read_text(encoding="utf-8"))
             self.assertEqual(payload["component"], "hermes")
+            self.assertEqual(payload["container_images"], [{
+                "container": "hermes",
+                "image_id": "sha256:abc123",
+                "image_ref": "test-image:latest",
+                "revision": "0123456789abcdef",
+            }])
             self.assertIsInstance(payload["lines"], list)
             self.assertEqual(payload["line_count"], len(payload["lines"]))
             joined = "\n".join(payload["lines"])
             self.assertNotIn("super-secret-token", joined)
             self.assertNotIn("hunter2", joined)
             self.assertIn("connect failed to upstream", joined)
+
+    def test_snapshot_includes_redacted_stderr(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            result = self.run_snapshot(
+                root, "hermes",
+                "#!/bin/sh\necho 'password=stderr-secret' >&2\n",
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            payload = json.loads((root / "snapshots" / "hermes.json").read_text(encoding="utf-8"))
+            self.assertTrue(any("[REDACTED]" in line for line in payload["lines"]))
+            self.assertNotIn("stderr-secret", json.dumps(payload))
+
+    def test_codex_router_collects_both_router_colours(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            docker = "#!/bin/sh\nprintf 'container=%s\n' \"$5\"\n"
+            result = self.run_snapshot(root, "codex-router", docker)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            payload = json.loads((root / "snapshots" / "codex-router.json").read_text(encoding="utf-8"))
+            self.assertEqual(payload["collected_containers"], ["modules-codex-router-a-1", "modules-codex-router-b-1"])
+            self.assertEqual(len(payload["lines"]), 2)
+            self.assertEqual(payload["collection_errors"], [])
+
+    def test_codex_router_partial_collection_preserves_healthy_colour(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            docker = (
+                "#!/bin/sh\n"
+                "[ \"$5\" = modules-codex-router-a-1 ] && exit 1\n"
+                "echo '2026-10-08T10:00:00.000000000Z healthy event'\n"
+            )
+            result = self.run_snapshot(root, "codex-router", docker)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            payload = json.loads((root / "snapshots" / "codex-router.json").read_text(encoding="utf-8"))
+            self.assertEqual(payload["collected_containers"], ["modules-codex-router-b-1"])
+            self.assertEqual(len(payload["collection_errors"]), 1)
+            self.assertTrue(any("healthy event" in line for line in payload["lines"]))
+
+    def test_docker_failure_does_not_publish_empty_snapshot(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            snapshot_dir = root / "snapshots"
+            snapshot_dir.mkdir()
+            result = self.run_snapshot(
+                root, "hermes", "#!/bin/sh\necho 'No such container' >&2\nexit 1\n"
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertFalse((snapshot_dir / "hermes.json").exists())
 
     def test_rejects_an_unknown_component_without_writing_a_snapshot(self):
         with tempfile.TemporaryDirectory() as tmp:

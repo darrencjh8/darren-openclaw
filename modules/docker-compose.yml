@@ -13,6 +13,8 @@ x-codex-router-color: &codex-router-color
     build:
         context: ./codex-router
         dockerfile: Dockerfile
+    labels:
+        org.opencontainers.image.revision: ${CODEX_ROUTER_REVISION:-unknown}
     image: modules-codex-router:local
     environment:
         - CODEX_ROUTER_AUTH_PASSWORD=${CODEX_ROUTER_AUTH_PASSWORD}
@@ -64,6 +66,8 @@ services:
         build:
             context: ../modules/expense-tracker
             dockerfile: docker/Dockerfile
+        labels:
+            org.opencontainers.image.revision: ${HERMES_SOURCE_REVISION:-unknown}
         ports:
             - "127.0.0.1:8080:8080"
         volumes:
@@ -129,6 +133,8 @@ services:
         build:
             context: ../modules/portfolio-tracker
             dockerfile: docker/Dockerfile
+        labels:
+            org.opencontainers.image.revision: ${HERMES_SOURCE_REVISION:-unknown}
         ports:
             - "127.0.0.1:8081:8081"
         volumes:
@@ -221,6 +227,8 @@ services:
         build:
             context: ../modules/hermes
             dockerfile: Dockerfile
+        labels:
+            org.opencontainers.image.revision: ${HERMES_SOURCE_REVISION:-unknown}
         container_name: hermes
         restart: unless-stopped
         command: gateway run
