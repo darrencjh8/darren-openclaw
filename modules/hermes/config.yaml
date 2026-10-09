@@ -53,6 +53,16 @@ memory:
     # of adds and removes from different sessions can still land (the cap is checked
     # against the final state of a batch).
     memory_char_limit: 2800
+    # Mnemosyne provider (seed-owned): single writer, no merge carry needed.
+    # The merge writes baked bytes verbatim, so this survives every reboot.
+    # Without the plugin installed discovery finds no instance and Hermes
+    # falls back to built-in, so fresh hosts are unaffected. Pinned to the
+    # working pair 0.7.1 + 3.15.1 (0.7.3/0.7.4 constructor raises under turn
+    # scope); the seed enforces the pin into lazy-packages.
+    provider: mnemosyne
+    mnemosyne:
+        auto_sleep: true
+        sleep_threshold: 20
 
 sessions:
     # Keep ended sessions searchable for 60 days. auto_prune removes ended sessions
