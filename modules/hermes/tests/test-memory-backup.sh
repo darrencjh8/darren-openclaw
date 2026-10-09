@@ -186,6 +186,41 @@ else
 fi
 
 echo ""
+echo "=== mnemosyne pilot backup (additive, no-op when absent) ==="
+
+mnemo_src="$TMPDIR/mnemo-data"
+mnemo_clone="$TMPDIR/mnemo-backup"
+mkdir -p "$mnemo_src" "$mnemo_clone"
+if MEMORY_REPO_URL="https://example.com/owner/repo" \
+    MEMORY_SRC_DIR="$topic_src" \
+    MEMORY_CLONE_DIR="$mnemo_clone" \
+    MNEMOSYNE_DATA_DIR="$mnemo_src" \
+    PATH="$TMPDIR/expense-stubbin:$PATH" \
+    bash "$backup_script" >/dev/null 2>&1 \
+    && [ ! -e "$mnemo_clone/mnemosyne/mnemosyne.db" ]; then
+    ok "absent mnemosyne.db creates no backup file"
+else
+    nope "absent mnemosyne backup" "backup failed or created mnemosyne.db from nothing"
+fi
+
+if command -v sqlite3 >/dev/null 2>&1; then
+    sqlite3 "$mnemo_src/mnemosyne.db" "CREATE TABLE t(x TEXT); INSERT INTO t VALUES('pilot');" 2>/dev/null || true
+else
+    printf 'pilot\n' > "$mnemo_src/mnemosyne.db"
+fi
+if MEMORY_REPO_URL="https://example.com/owner/repo" \
+    MEMORY_SRC_DIR="$topic_src" \
+    MEMORY_CLONE_DIR="$mnemo_clone" \
+    MNEMOSYNE_DATA_DIR="$mnemo_src" \
+    PATH="$TMPDIR/expense-stubbin:$PATH" \
+    bash "$backup_script" >/dev/null 2>&1 \
+    && [ -f "$mnemo_clone/mnemosyne/mnemosyne.db" ]; then
+    ok "present mnemosyne.db backed up"
+else
+    nope "present mnemosyne backup" "mnemosyne.db missing from $mnemo_clone/mnemosyne"
+fi
+
+echo ""
 echo "========================================="
 echo -e " Results: ${GREEN}$pass passed${NC}, ${RED}$fail failed${NC}"
 echo "========================================="

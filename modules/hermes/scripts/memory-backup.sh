@@ -24,6 +24,7 @@ fi
 CLONE_DIR="${MEMORY_CLONE_DIR:-/opt/data/memories-backup}"
 SRC_DIR="${MEMORY_SRC_DIR:-/opt/data/memories}"
 EXPENSE_DIR="${EXPENSE_TRACKER_DATA:-}"
+MNEMOSYNE_DIR="${MNEMOSYNE_DATA_DIR:-/opt/data/mnemosyne/data}"
 
 # Fix read-only permissions from prior git operations
 if [ -d "$CLONE_DIR" ]; then
@@ -118,6 +119,18 @@ done
 # ---- Skills backup ----
 mkdir -p "$CLONE_DIR/skills"
 cp -r /opt/data/skills/* "$CLONE_DIR/skills/" 2>/dev/null || true
+
+# ---- Mnemosyne pilot backup (SQLite, safe on live WAL DB) ----
+# Additive only: no-op when the provider was never installed. Uses
+# `sqlite3 .backup` so a live gateway write cannot tear the copy.
+if [ -f "$MNEMOSYNE_DIR/mnemosyne.db" ]; then
+    mkdir -p "$CLONE_DIR/mnemosyne"
+    if command -v sqlite3 >/dev/null 2>&1; then
+        sqlite3 "$MNEMOSYNE_DIR/mnemosyne.db" ".backup '$CLONE_DIR/mnemosyne/mnemosyne.db'" 2>/dev/null || true
+    else
+        cp "$MNEMOSYNE_DIR/mnemosyne.db" "$CLONE_DIR/mnemosyne/" 2>/dev/null || true
+    fi
+fi
 
 # ---- Cron jobs backup ----
 mkdir -p "$CLONE_DIR/cron"

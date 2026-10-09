@@ -218,6 +218,13 @@ PY
 mkdir -p /opt/data/memories-backup
 chown -R hermes:hermes /opt/data/memories-backup 2>/dev/null || true
 
+# Mnemosyne pilot (additive): data dir only. No provider flip, no built-in
+# disable, no triage change. The provider stays off until an operator runs
+# `hermes plugins install mnemosyne` + `hermes config set memory.provider
+# mnemosyne` and verifies recall. MNEMOSYNE_DATA_DIR defaults to this path.
+mkdir -p /opt/data/mnemosyne/data
+chown -R hermes:hermes /opt/data/mnemosyne 2>/dev/null || true
+
 # Configure gh CLI authentication. The helper installs GitHub App auth when the
 # App configuration is complete, and otherwise installs the scoped fallback PAT.
 # The PAT arrives as a root-only secret file rather than an ambient environment
