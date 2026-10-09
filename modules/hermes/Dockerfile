@@ -34,6 +34,12 @@ RUN python3 /tmp/patch-lifecycle-ledger.py /opt/hermes/gateway/lifecycle_ledger.
 COPY patches/patch-stale-open-webhook.py /tmp/patch-stale-open-webhook.py
 RUN python3 /tmp/patch-stale-open-webhook.py /opt/hermes/hermes_state.py \
     && rm /tmp/patch-stale-open-webhook.py
+# Slack: upstream's block fallback misses msg_blocks_too_long (rich_blocks > 50 blocks) and has none
+# for cannot_reply_to_message (gone thread parent), so those replies were dropped. Retry once as plain
+# text / without thread_ts. Fails the build on upstream drift.
+COPY patches/patch-slack-send-fallback.py /tmp/patch-slack-send-fallback.py
+RUN python3 /tmp/patch-slack-send-fallback.py /opt/hermes/plugins/platforms/slack/adapter.py \
+    && rm /tmp/patch-slack-send-fallback.py
 COPY config.yaml SOUL.md.template /opt/hermes-defaults/
 COPY skills/ /opt/hermes-defaults/skills/
 COPY scripts/ /opt/hermes-defaults/scripts/
