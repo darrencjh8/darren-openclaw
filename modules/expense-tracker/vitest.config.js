@@ -3,6 +3,8 @@ import { defineConfig } from 'vitest/config';
 export default defineConfig({
   test: {
     environment: 'node',
+    // No test may reach a real LLM provider (see the file for why).
+    setupFiles: ['./tests/setup/no-network-llm.js'],
     globals: true,
     // The dedup journal fsyncs on every commit, which costs ~300ms per fsync
     // on this container's overlay filesystem. Tests open a throwaway DB per
