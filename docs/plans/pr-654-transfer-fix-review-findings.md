@@ -143,7 +143,7 @@ structural and list-free, and a person name is indistinguishable from an unliste
 business descriptor on every feature the parser exposes — proven, not asserted:
 
 ```
-must HOLD:  {"person_transfer":true,"tokens":3,"nonPersonToken":false,"digits":false,"dots":false}   CHONG JIN HENG
+must HOLD:  {"person_transfer":true,"tokens":3,"nonPersonToken":false,"digits":false,"dots":false}   ACCOUNT HOLDER
 must BOOK:  {"person_transfer":true,"tokens":3,"nonPersonToken":false,"digits":false,"dots":false}   BLUE BOTTLE COFFEE
 No feature separates the classes: true
 ```
@@ -175,7 +175,7 @@ writers and readers:
    exactly this comparison at :759).
 
 Matching is on the fact's KEY, compared whole after normalisation. A substring or
-token-overlap match is explicitly forbidden: `Legal name: CHONG JIN HENG -> CHON
+token-overlap match is explicitly forbidden: `Legal name: <holder> -> <MNEMONIC>
 (statement password)` shares a token with the counterparty, and an overlap rule
 would release a real person transfer — re-opening F1 behind F1.
 
@@ -332,7 +332,7 @@ extractor route assigns `own_account` from `from_account` and `counterparty` fro
 destination — which on an incoming movement is the HOLDER'S OWN ACCOUNT. Verified:
 `looksLikePersonName` is true for `Main Account`, `Savings Account`,
 `Current Account`, `POSB Cashback Account`, `Ryt Credit` and `DBS account`, and
-false for `DBS Account 4380`, `OCBC 360`, `Your account ending 4380`. Keying on
+false for `DBS Account 5500`, `OCBC 360`, `Your account ending 5500`. Keying on
 `to_account` unconditionally therefore holds real incoming credits, and the
 release predicate cannot rescue them: the plan's own fact table marks the only two
 account-shape facts this module writes (`NAME is a TYPE account` :2749,
@@ -420,7 +420,7 @@ RED first, each failing on real code at the revision named in Evidence:
    - the same counterparty with a `... merchant maps to ... payee` fact in
      memory → books normally;
    - the same counterparty with ONLY a legal-name fact
-     (`Legal name: CHONG JIN HENG -> CHON (statement password)`) → still held
+     (`Legal name: <holder> -> <MNEMONIC> (statement password)`) → still held
      (the case an overlap rule gets wrong, and F1's own regression guard);
    - an incoming person credit with ONE live account at the sender bank → held,
      and NOT booked as income;

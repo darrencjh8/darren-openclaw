@@ -12,6 +12,7 @@ vi.mock("../src/dedup.js", () => ({
 }));
 
 import { ToolRegistry } from "../src/tools.js";
+import { OWN_LEGAL_NAME_FACT, OWN_LEGAL_NAME_UPPER } from "./helpers/own-name.js";
 
 /**
  * A received transfer must book as the CREDITED LEG of a transfer, not vanish
@@ -24,9 +25,9 @@ import { ToolRegistry } from "../src/tools.js";
  * never marked read, re-fetched on every poll.
  *
  * The received money is the holder's OWN transfer, not income. uid 1030 (DBS
- * received SGD 1000.00 into …5750, ref 0126100100114350) and uid 1029 (OCBC
- * "We have processed your funds transfer request": 360 Account (-869001) ->
- * Darren DBS (-665750), SGD 1000.00, ref 2610010011435015) are the two legs of
+ * received SGD 1000.00 into …7222, ref 0126100100114350) and uid 1029 (OCBC
+ * "We have processed your funds transfer request": 360 Account (-166600) ->
+ * Darren DBS (-667222), SGD 1000.00, ref 2610010011435015) are the two legs of
  * one transfer in the same minute. So the credited leg books as a plain `Misc`
  * row on the credited account with NO transfer payee and NO `_transfer` — the
  * exact shape `find_link_candidate` matches — and the existing #598 machinery
@@ -38,11 +39,11 @@ import { ToolRegistry } from "../src/tools.js";
  */
 
 /** uid 1030 — DBS "digibank Alerts - You've received a transfer". */
-const DBS_RECEIVED_5750 =
+const DBS_RECEIVED_7222 =
     "digibank Alerts - You've received a transfer Problems viewing this email? " +
     'Select "always display images" Transaction Ref: 0126100100114350 ' +
     "Dear Customer, You have received SGD 1000.00 via FAST transfer on 01 Oct 2026 21:14 SGT. " +
-    "From: ACCOUNT HOLDER To: Your DBS/ POSB account ending 5750 " +
+    "From: ACCOUNT HOLDER To: Your DBS/ POSB account ending 7222 " +
     "Didn't expect these funds? If this is a joint account, it may be for your joint " +
     "account holder. Otherwise, please call our DBS hotline.";
 
@@ -54,8 +55,8 @@ We have received your request to make the following transfer:
 Date of Transfer   : 01 Oct 2026
 Time of Transfer   : 09.14 PM SGT
 Amount             : SGD 1000.00
-From your account  : 360 Account (-869001)
-To account         : Darren DBS (-665750) at DBS BANK LTD
+From your account  : 360 Account (-166600)
+To account         : Darren DBS (-667222) at DBS BANK LTD
 Reference number   : 2610010011435015
 `;
 
@@ -70,10 +71,10 @@ const ACCOUNTS = [
 ];
 
 const FACTS = [
-    "Card ending 3255 belongs to DBS Yuu Card",
-    "Card ending 9302 belongs to DBS Altitude Card",
-    "Account ending 5750 belongs to DBS Account",
-    "Account ending 869001 belongs to OCBC 360",
+    "Card ending 7111 belongs to DBS Yuu Card",
+    "Card ending 1777 belongs to DBS Altitude Card",
+    "Account ending 7222 belongs to DBS Account",
+    "Account ending 166600 belongs to OCBC 360",
 ];
 
 const PAYEES = [
@@ -104,7 +105,7 @@ function makeOrchestrator(tools) {
 }
 
 function makeTools(spy, { linkCandidate = null, holderFacts = false } = {}) {
-    const facts = holderFacts ? [...FACTS, "Legal name: Chong Jin Heng"] : FACTS;
+    const facts = holderFacts ? [...FACTS, OWN_LEGAL_NAME_FACT] : FACTS;
     return {
         executeTool: vi.fn(async (name, args) => {
             spy.push({ name, args });
@@ -138,7 +139,7 @@ describe("incoming credit into a resolvable account (issue #680)", () => {
         const orch = await makeOrchestrator(makeTools(calls));
 
         const result = await orch._runStructuredMovement(
-            DBS_RECEIVED_5750,
+            DBS_RECEIVED_7222,
             "DBS",
             "2026-10-01T13:14:00.000Z",
         );
@@ -167,7 +168,7 @@ describe("incoming credit into a resolvable account (issue #680)", () => {
 
         const result = await orch.processEmail(
             "uid-1030",
-            DBS_RECEIVED_5750,
+            DBS_RECEIVED_7222,
             null,
             "no-reply@dbs",
             "digibank Alerts - You've received a transfer",
@@ -188,7 +189,7 @@ describe("incoming credit into a resolvable account (issue #680)", () => {
         const ocbcDeposit =
             "Transaction Ref: 0126100100114400 " +
             "You have received SGD 20.00 via FAST transfer on 02 Oct 2026 09:00 SGT. " +
-            "To: Your DBS/ POSB account ending 5750";
+            "To: Your DBS/ POSB account ending 7222";
         const result = await orch._runStructuredMovement(
             ocbcDeposit,
             "DBS",
@@ -213,7 +214,7 @@ describe("incoming credit into a resolvable account (issue #680)", () => {
             "digibank Alerts - You've received a transfer Problems viewing this email? " +
             'Select "always display images" Transaction Ref: 0126100100114450 ' +
             "Dear Customer, You have received SGD 250.00 via FAST transfer on 03 Oct 2026 11:00 SGT. " +
-            "From: JANE VENDOR PTE LTD To: Your DBS/ POSB account ending 5750 " +
+            "From: JANE VENDOR PTE LTD To: Your DBS/ POSB account ending 7222 " +
             "Didn't expect these funds?";
 
         const result = await orch.processEmail(
@@ -250,10 +251,10 @@ describe("incoming credit into a resolvable account (issue #680)", () => {
             "PayNow transfer from JANE VENDOR PTE LTD\n" +
             "Time of deposit : 19:34 PM SGT\n" +
             "Amount : SGD 250.00\n" +
-            "Account that money was deposited in : OCBC 360 (-869001)\n";
+            "Account that money was deposited in : OCBC 360 (-166600)\n";
 
         const result = await orch.processEmail(
-            "uid-9001",
+            "uid-6600",
             paynowDeposit,
             null,
             "no-reply@ocbc",
@@ -287,7 +288,7 @@ describe("incoming credit into a resolvable account (issue #680)", () => {
             "digibank Alerts - You've received a transfer Problems viewing this email? " +
             'Select "always display images" Transaction Ref: 0126100100114460 ' +
             "Dear Customer, You have received SGD 1557.24 via FAST transfer on 03 Oct 2026 09:00 SGT. " +
-            "From: CHONG JIN HENG To: Your DBS/ POSB account ending 5750 " +
+            `From: ${OWN_LEGAL_NAME_UPPER} To: Your DBS/ POSB account ending 7222 ` +
             "Didn't expect these funds?";
 
         const result = await orch.processEmail(

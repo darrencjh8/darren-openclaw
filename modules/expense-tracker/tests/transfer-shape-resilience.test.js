@@ -47,7 +47,7 @@ import { parseBankMovement } from "../src/bank-movement.js";
 const OCBC_TRANSFER_REQUEST_FLAT =
     "Dear Valued CustomerWe have received your request to make the following transfer:" +
     "Date of Transfer:01 Oct 2026Time of Transfer:09.14 PM SGTAmount:SGD 1000.00" +
-    "From your account:360 Account (-869001)To account:Darren DBS (-665750) at DBS BANK LTD" +
+    "From your account:360 Account (-166600)To account:Darren DBS (-667222) at DBS BANK LTD" +
     "Reference number:26100100114You can log in to OCBC Online Banking and select Customer " +
     "Service > Check internet transaction status to check the status of this transfer." +
     "If you have any questions, please call our Personal Banking Hotline: OCBC website > " +
@@ -63,34 +63,34 @@ const DBS_RECEIVED_TRANSFER_FLAT =
     "digibank Alerts - You've received a transfer Problems viewing this email? " +
     'Select "always display images" Transaction Ref: 0126100100114350 ' +
     "Dear Customer, You have received SGD 1000.00 via FAST transfer on 01 Oct 2026 21:14 SGT. " +
-    "From: ACCOUNT HOLDER To: Your DBS/ POSB account ending 5750 " +
+    "From: ACCOUNT HOLDER To: Your DBS/ POSB account ending 7222 " +
     "Didn't expect these funds? If this is a joint account, it may be for your joint " +
     "account holder. Otherwise, please call our DBS hotline.";
 
 /**
- * uid 1025 — DBS bill payment, source `Altitude (A/C ending 9302)` (a CARD),
- * destination `CITI CREDIT CARDS (Ref ending 4756)`. Realised production row:
+ * uid 1025 — DBS bill payment, source `Altitude (A/C ending 1777)` (a CARD),
+ * destination `CITI CREDIT CARDS (Ref ending 2666)`. Realised production row:
  * `S$345.64 at Citi Reward via DBS Altitude Card, logged` — an expense for a
  * transfer into the holder's own Citi card.
  */
 const DBS_BILLPAY_TO_CITI_CARD =
     "Transaction Ref: 1790860376865887 Dear Customer, You've successfully made a bill payment. " +
-    "Date and Time: 01 Oct 21:12 (SGT) Amount: SGD 345.64 From: Altitude (A/C ending 9302) " +
-    "To: CITI CREDIT CARDS (Ref ending 4756) If unauthorised, please call our DBS hotline. " +
+    "Date and Time: 01 Oct 21:12 (SGT) Amount: SGD 345.64 From: Altitude (A/C ending 1777) " +
+    "To: CITI CREDIT CARDS (Ref ending 2666) If unauthorised, please call our DBS hotline. " +
     "To view transaction details, please login to digibank. Thank you for banking with us.";
 
-/** uid 1031 — same layout, destination `Altitude (Ref ending 9302)`. */
+/** uid 1031 — same layout, destination `Altitude (Ref ending 1777)`. */
 const DBS_BILLPAY_TO_ALTITUDE_CARD =
     "Transaction Ref: 1790860627083557 Dear Customer, You've successfully made a bill payment. " +
-    "Date and Time: 01 Oct 21:17 (SGT) Amount: SGD 2435.35 From: My Account (A/C ending 5750) " +
-    "To: Altitude (Ref ending 9302) If unauthorised, please call our DBS hotline. " +
+    "Date and Time: 01 Oct 21:17 (SGT) Amount: SGD 2435.35 From: My Account (A/C ending 7222) " +
+    "To: Altitude (Ref ending 1777) If unauthorised, please call our DBS hotline. " +
     "To view transaction details, please login to digibank.";
 
-/** uid 1032 — same layout, destination `Yuu (Ref ending 3255)`. */
+/** uid 1032 — same layout, destination `Yuu (Ref ending 7111)`. */
 const DBS_BILLPAY_TO_YUU_CARD =
     "Transaction Ref: 1790860641654649 Dear Customer, You've successfully made a bill payment. " +
-    "Date and Time: 01 Oct 21:17 (SGT) Amount: SGD 121.89 From: My Account (A/C ending 5750) " +
-    "To: Yuu (Ref ending 3255) If unauthorised, please call our DBS hotline.";
+    "Date and Time: 01 Oct 21:17 (SGT) Amount: SGD 121.89 From: My Account (A/C ending 7222) " +
+    "To: Yuu (Ref ending 7111) If unauthorised, please call our DBS hotline.";
 
 /**
  * uid 1012 — Ryt "Scheduled transfer completed successfully!". An outgoing
@@ -116,8 +116,8 @@ describe("flattened labelled bodies survive field extraction", () => {
             direction: "outgoing",
             amount_cents: -100000,
             currency: "SGD",
-            own_account: { bank: "OCBC", suffix: "869001" },
-            counterparty: { name: "Darren DBS", bank: "DBS", suffix: "665750" },
+            own_account: { bank: "OCBC", suffix: "166600" },
+            counterparty: { name: "Darren DBS", bank: "DBS", suffix: "667222" },
         });
     });
 
@@ -130,7 +130,7 @@ describe("flattened labelled bodies survive field extraction", () => {
         // The value must stop at the following label, so the destination
         // carries only the account name and its own suffix.
         expect(movement.counterparty.name).toBe("Darren DBS");
-        expect(movement.counterparty.suffix).toBe("665750");
+        expect(movement.counterparty.suffix).toBe("667222");
     });
 });
 
@@ -146,8 +146,8 @@ describe("a DBS bill payment to the holder's own card is a transfer", () => {
         expect(movement).toMatchObject({
             direction: "outgoing",
             amount_cents: -34564,
-            own_account: { bank: "DBS", suffix: "9302" },
-            counterparty: { name: "CITI CREDIT CARDS", suffix: "4756" },
+            own_account: { bank: "DBS", suffix: "1777" },
+            counterparty: { name: "CITI CREDIT CARDS", suffix: "2666" },
         });
     });
 
@@ -160,8 +160,8 @@ describe("a DBS bill payment to the holder's own card is a transfer", () => {
         expect(movement).toMatchObject({
             direction: "outgoing",
             amount_cents: -12189,
-            own_account: { bank: "DBS", suffix: "5750" },
-            counterparty: { name: "Yuu", suffix: "3255" },
+            own_account: { bank: "DBS", suffix: "7222" },
+            counterparty: { name: "Yuu", suffix: "7111" },
         });
     });
 
@@ -174,8 +174,8 @@ describe("a DBS bill payment to the holder's own card is a transfer", () => {
         expect(movement).toMatchObject({
             direction: "outgoing",
             amount_cents: -243535,
-            own_account: { bank: "DBS", suffix: "5750" },
-            counterparty: { name: "Altitude", suffix: "9302" },
+            own_account: { bank: "DBS", suffix: "7222" },
+            counterparty: { name: "Altitude", suffix: "1777" },
         });
     });
 });

@@ -91,7 +91,7 @@ find modules/expense-tracker -name "MEMORY.md"
 bash scripts/migrate-memory.sh
 
 # Verify in Hermes chat:
-# "what credit card ends with 4605?"
+# "what credit card ends with 1888?"
 # → Should return: Delta Extra credit card
 
 # Copy to Docker volume

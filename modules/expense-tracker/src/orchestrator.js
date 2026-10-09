@@ -376,7 +376,7 @@ function normalizeIdentityName(value) {
  * none of them can release a person hold.
  *
  * The key is compared WHOLE after normalisation. A substring or token-overlap
- * match is forbidden: `Legal name: CHONG JIN HENG -> CHON (statement password)`
+ * match is forbidden: `Legal name: <holder> -> <MNEMONIC> (statement password)`
  * shares tokens with the counterparty, and an overlap rule would release a real
  * person transfer.
  *
@@ -404,7 +404,7 @@ export function counterpartyIsRememberedEntity(name, facts) {
  *
  * A bank NAME alone is a weak signal: "OverseaChinese Banking Corporation Ltd"
  * matches both OCBC 360 and OCBC 90N, so the name alone is ambiguous. The alert
- * body does carry a stronger signal in `A/C ending 9001`, and a row resolved
+ * body does carry a stronger signal in `A/C ending 6600`, and a row resolved
  * from such evidence comes back marked `_structured_movement`, which makes the
  * caller skip this ambiguity check. So the rows that reach this gate are the
  * unresolved ones, and for those the bank name is the best signal available —
@@ -453,7 +453,7 @@ export function transferDestinationIsAmbiguous(name, destination, accounts) {
 /**
  * True when `value` is a mask of one of the user's own account names: it stays
  * literal outside the masked run, and the run matches one or more letters.
- * `T*** U***` masks `Trust Bank`; `Chong *** Heng` masks `Chong Jin Heng`.
+ * `T*** U***` masks `Trust Bank`; `A*** B***` masks a two-part holder name.
  * Only account names are considered, so a masked merchant cannot be mistaken
  * for a self identity. Issue #561.
  */
@@ -898,7 +898,7 @@ export class AgentOrchestrator {
             // payment. When the source account cannot be resolved (its suffix
             // has no memory fact yet), the LLM fallback books the counterparty
             // name as a merchant and posts a phantom expense (issue #592: a DBS
-            // FAST transfer POSB ...4380 -> SC 6445 was booked as "Household
+            // FAST transfer POSB ...5500 -> SC 2555 was booked as "Household
             // stuffs"). Hold it for the user instead of guessing a purchase.
             if (
                 !source &&
@@ -1002,7 +1002,7 @@ export class AgentOrchestrator {
             const match = text.match(/\b(?:legal|account\s+holder)\s+name\s*:\s*([^\n.]+)/i);
             if (!match) return false;
             // The live fact carries a statement-password mnemonic after the
-            // holder name, e.g. `Legal name: Chong Jin Heng -> CHON (statement
+            // holder name, e.g. `Legal name: <holder> -> <MNEMONIC> (statement
             // password)`. Everything after an arrow is metadata, not part of the
             // name, so trim it before comparing or the holder never matches.
             // Issue #592.
@@ -1102,7 +1102,7 @@ export class AgentOrchestrator {
                 // Phase-2 ambiguity gate below from re-deciding that settled
                 // destination from the counterparty's BANK NAME, which matches
                 // every account the holder owns at that bank. "OverseaChinese
-                // Banking Corporation Ltd A/C ending 9001" was judged ambiguous
+                // Banking Corporation Ltd A/C ending 6600" was judged ambiguous
                 // purely because two open accounts carry an OCBC token, and a
                 // correct transfer pair was flipped to Misc and held (issue
                 // #575, production incident 2026-09-27). The other four checks

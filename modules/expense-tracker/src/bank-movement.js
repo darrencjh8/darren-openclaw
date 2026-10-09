@@ -148,8 +148,8 @@ export function suffix(value) {
 }
 
 /**
- * Trailing account digits in a masked alert, e.g. "OCBC 360 ACCOUNT ******9223"
- * or "ACCOUNT HOLDER (********3461)". Bare 4-6 digit runs are deliberately not
+ * Trailing account digits in a masked alert, e.g. "OCBC 360 ACCOUNT ******2444"
+ * or "ACCOUNT HOLDER (********2333)". Bare 4-6 digit runs are deliberately not
  * matched: a reference number must never be read as an account.
  */
 function maskedSuffix(value) {
@@ -314,7 +314,7 @@ export function parseBankMovement(text, { senderBank = null, receivedAt } = {}) 
 
   // Ryt scheduled-transfer completion — the third Ryt sentence form, and the
   // one that is not a "you've sent/received/paid" sentence:
-  //   "Your scheduled transfer of RM908.25 to CHONG JIN HENG on 1/10/2026,
+  //   "Your scheduled transfer of RM908.25 to ACCOUNT HOLDER on 1/10/2026,
   //    10:02 AM (GMT+8) was successfully completed."
   // Without this branch the alert matches nothing, returns null, and the whole
   // email falls through to the LLM extractor — which cannot parse it either,
@@ -429,8 +429,8 @@ export function parseBankMovement(text, { senderBank = null, receivedAt } = {}) 
 
   // DBS inbound FAST transfer notice — no "Amount :" label.
   //   "You have received SGD 1000.00 via FAST transfer on 23 Sep 2026 00:36  SGT.
-  //    From: CHONG JIN HENG
-  //    To: Your DBS/ POSB account ending 4380"
+  //    From: ACCOUNT HOLDER
+  //    To: Your DBS/ POSB account ending 5500"
   // The credited account is named only by the "To:" mask, so that suffix is the
   // own account. Without this branch the body exits at the `Amount :` guard
   // below, the whole alert falls through to the LLM extractor, and one FAST
@@ -461,8 +461,8 @@ export function parseBankMovement(text, { senderBank = null, receivedAt } = {}) 
   }
 
   // SC "Confirmation Advice for FAST Transaction" (uid 977, 2026-09-28):
-  //   "From account: ******6445
-  //    To account: ******5750
+  //   "From account: ******2555
+  //    To account: ******7222
   //    Amount: 1,275.00
   //    Currency: SGD
   //    Transaction due date: 28/09/2026 10:08:02
@@ -550,12 +550,12 @@ export function parseBankMovement(text, { senderBank = null, receivedAt } = {}) 
     // so name the accounts from the advice itself rather than from
     // `senderBank`. `senderBank` is the outer `From:` header, which on the
     // forwarded path this branch now serves is the FORWARDER: forwarding from
-    // an OCBC address would otherwise label SC account 6445 as OCBC. The
+    // an OCBC address would otherwise label SC account 2555 as OCBC. The
     // masked values carry no bank name, so `bankFromText` cannot recover it
-    // from "******6445" — only the fallback decides.
+    // from "******2555" — only the fallback decides.
     const ownAccount = namedAccount(fromValue, "SC");
     // "Payee Bank: DBS" names the RECIPIENT's bank and is the only statement of
-    // it in the advice; `bankFromText("******5750")` can only ever return null,
+    // it in the advice; `bankFromText("******7222")` can only ever return null,
     // so read the label instead of discarding the evidence. The value is
     // delimited by the next known label, because the real advice leaves this
     // field EMPTY ("Payee Bank: Transaction message:") and a bank name must not
@@ -737,7 +737,7 @@ function resolveMappedAccount(evidence, mappings) {
     ).values(),
   ];
   // Dedup by account so two suffix aliases that resolve to the SAME account
-  // (e.g. Beta 360 as both 869001 and 9001) are not treated as ambiguous.
+  // (e.g. Beta 360 as both 166600 and 6600) are not treated as ambiguous.
   return unique.length === 1 ? unique[0] : null;
 }
 
