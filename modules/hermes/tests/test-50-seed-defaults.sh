@@ -497,7 +497,7 @@ print('present' if profiles and fields and reviewer_isolation else 'missing')
 [ "$managed_routing_migration" = "present" ] && ok "managed profile routing and reviewer isolation migrate on startup" || nope "managed profile migration" "got: $managed_routing_migration"
 
 echo ""
-echo "=== self-wiki-maintenance-and-reminders seed (MANAGED telegram) ==="
+echo "=== self-wiki-maintenance-and-reminders seed (MANAGED prompt/skills; delivery origin)"
 
 wiki_block=$(python3 - "$SEED_SCRIPT" <<'PY'
 import re, sys
@@ -529,7 +529,7 @@ checks = {
     "expr": sched.get("expr") == "0 9 * * 1",
     "display": j.get("schedule_display") == "every monday 9am",
     "enabled": j.get("enabled") is True,
-    "deliver": j.get("deliver") == "telegram",
+    "deliver": j.get("deliver") == "origin",
     "skills": j.get("skills") == ["llm-wiki", "expense-tracker", "notion", "notion-pitfalls", "github-issues", "cron-job-inspection", "docs-accuracy-verification"],
     "skill": j.get("skill") == "llm-wiki",
     "workdir": j.get("workdir") == "/workspace",
@@ -539,14 +539,14 @@ checks = {
     "schema": "SCHEMA.md" in prompt,
     "notion_ro": "Notion is read-only" in prompt,
     "target_line": "Send only to the configured delivery target" in prompt,
-    "no_origin_claim": "Telegram is not connected" not in prompt,
+    "origin_guard": "Telegram is not connected" in prompt,
 }
 bad = [k for k, v in checks.items() if not v]
 print("pass" if not bad else "fail " + repr(bad))
 PY
 )
 case "$wiki_fields" in
-    pass) ok "job: monday 9am · telegram · llm-wiki stack · full-refresh prompt" ;;
+    pass) ok "job: monday 9am, origin, llm-wiki stack, full-refresh prompt" ;;
     *) nope "self-wiki fields" "$wiki_fields" ;;
 esac
 
@@ -557,7 +557,7 @@ wiki2=$(python3 -c "import json;print(len(json.load(open('$TMPDIR/cron-wiki/jobs
 
 # Migration: existing installs get MANAGED fields (prompt/deliver/skills) updated
 # in place, while schedule/enabled stay user-owned.
-echo '{"jobs": [{"id": "legacywiki1", "name": "self-wiki-maintenance-and-reminders", "prompt": "legacy wiki prompt", "skills": ["llm-wiki"], "skill": "llm-wiki", "schedule": {"kind": "cron", "expr": "0 10 * * 2", "display": "tue 10am"}, "schedule_display": "tue 10am", "enabled": false, "deliver": "origin", "workdir": "/workspace", "context_from": ["self"]}]}' > "$TMPDIR/cron-wiki/jobs.json"
+echo '{"jobs": [{"id": "legacywiki1", "name": "self-wiki-maintenance-and-reminders", "prompt": "legacy wiki prompt", "skills": ["llm-wiki"], "skill": "llm-wiki", "schedule": {"kind": "cron", "expr": "0 10 * * 2", "display": "tue 10am"}, "schedule_display": "tue 10am", "enabled": false, "deliver": "telegram", "workdir": "/workspace", "context_from": ["self"]}]}' > "$TMPDIR/cron-wiki/jobs.json"
 python3 -c "$wiki_block_tmp" >/dev/null 2>&1
 wiki_mig=$(python3 - "$TMPDIR/cron-wiki/jobs.json" <<'PY'
 import json, sys
@@ -565,9 +565,9 @@ j = json.load(open(sys.argv[1]))["jobs"][0]
 prompt = j.get("prompt") or ""
 ok = (
     len(json.load(open(sys.argv[1]))["jobs"]) == 1
-    and j.get("deliver") == "telegram"
+    and j.get("deliver") == "origin"
     and "Send only to the configured delivery target" in prompt
-    and "Telegram is not connected" not in prompt
+    and "Telegram is not connected" in prompt
     and j.get("skills") == ["llm-wiki", "expense-tracker", "notion", "notion-pitfalls", "github-issues", "cron-job-inspection", "docs-accuracy-verification"]
     and j.get("schedule", {}).get("expr") == "0 10 * * 2"
     and j.get("enabled") is False
@@ -576,7 +576,7 @@ print("pass" if ok else "fail " + json.dumps({"deliver": j.get("deliver"), "expr
 PY
 )
 case "$wiki_mig" in
-    pass) ok "migration: MANAGED telegram reconciled, schedule/enabled preserved" ;;
+    pass) ok "migration: MANAGED prompt/skills reconciled, schedule/enabled preserved" ;;
     *) nope "self-wiki migration" "$wiki_mig" ;;
 esac
 if ! python3 -c 'import yaml' >/dev/null 2>&1; then

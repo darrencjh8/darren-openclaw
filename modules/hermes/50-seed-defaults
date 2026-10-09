@@ -781,9 +781,13 @@ with open(jobs_path, "w") as f:
     json.dump({"jobs": jobs, "updated_at": datetime.datetime.now(datetime.timezone.utc).isoformat()}, f, indent=2)
 PYEOF
 
-# Seed self-wiki-maintenance-and-reminders cron job (MANAGED delivery telegram).
-# The wiki job already exists on long-lived installs, so behaviour-defining
-# fields reconcile in place on every boot; schedule/enabled stay user-owned.
+# Seed self-wiki-maintenance-and-reminders cron job (MANAGED prompt/skills; delivery origin).
+# Telegram delivery is BLOCKED for cron: preflight reports blocked_config
+# (gateway config shows only webhook connected; see issue #714). The seed must
+# keep deliver origin until Telegram creds resolve in gateway config, or the
+# Monday run dies before the agent starts.
+# Behaviour-defining fields reconcile in place on every boot;
+# schedule/enabled stay user-owned.
 python3 <<'PYEOF' || true
 import os, json, uuid, datetime
 jobs_path = "/opt/data/cron/jobs.json"
@@ -805,7 +809,7 @@ Every Monday run a complete refresh, not a spot check:
 5. Update every affected knowledge page (not just the index): provenance, facts, balances, date windows, repo baselines, updated dates, source lists, backlinks, and index summary. Dates and balances are volatile: show capture date and refresh before presenting as current. Notion is read-only; do not edit Notion, Actual transactions, repositories, or deploy anything.
 6. Lint the WHOLE wiki mechanically: required frontmatter, taxonomy tags, all declared source files exist, every raw hash verifies, every page is indexed exactly once, index page count is correct, all wikilinks resolve, every entity/concept has inbound links, and each content page has at least two outbound wikilinks. Also scan active pages for stale/conflicting claims, accidental secrets/whole card numbers, and outdated dates. Fix what is evidence-backed; preserve ambiguities with a named settling check.
 7. If a public repo document materially conflicts with current implementation or verified live behavior, search GitHub for an existing issue first. File a concise non-sensitive issue only for a clear actionable mismatch, with source paths and evidence; never disclose Darren's account data or secrets. Do not file duplicates.
-8. Append a dated log entry for all changes and audit results. Report only meaningful diffs, upcoming account dates within 30 days, open conflicts/issues, any failed checks, and source freshness. Send only to the configured delivery target.
+8. Append a dated log entry for all changes and audit results. Report only meaningful diffs, upcoming account dates within 30 days, open conflicts/issues, any failed checks, and source freshness. Send only to the configured delivery target; Telegram is not connected for cron delivery (preflight blocked_config), so never claim Telegram delivery.
 
 If any source/tool is unavailable, preserve the last verified data with its old capture date, mark it stale/needs-verify, and report the blocker. Do not invent replacement data or claim a failed check passed."""
 
@@ -815,7 +819,7 @@ MANAGED = {
     "skill": "llm-wiki",
     "workdir": "/workspace",
     "context_from": ["self"],
-    "deliver": "telegram",
+    "deliver": "origin",
 }
 DEFAULTS = {
     "schedule": {"kind": "cron", "expr": "0 9 * * 1", "display": "every monday 9am"},
