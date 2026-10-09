@@ -14,12 +14,25 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 sys.path.insert(0, HERE)
 
-try:
-    import pii_patterns
-    P = pii_patterns.load()
-except pii_patterns.PatternsMissing as exc:
-    print(f"verify-remap-safety: CANNOT VERIFY — {exc}", file=sys.stderr)
-    sys.exit(2)
+import pii_patterns
+
+P = pii_patterns.try_load_local()
+if P is None:
+    # The remap invariants need the real plaintext values (and the remap is not
+    # committed), so they are local-only. CI still gates the tree via the hashed set.
+    print("verify-remap-safety: SKIP remap invariants — local plaintext pattern "
+          "file absent (they run only where it exists). Running the hashed gate "
+          "and the git-ignore checks only.")
+    rc = subprocess.run([sys.executable, os.path.join(HERE, "check-no-pii.py")]).returncode
+    ign = subprocess.run(["git", "-C", ROOT, "check-ignore", "-q",
+                          "scripts/.pii-patterns.local.json"]).returncode == 0
+    trk = subprocess.run(["git", "-C", ROOT, "ls-files", "--error-unmatch",
+                          "scripts/.pii-patterns.local.json"],
+                         capture_output=True).returncode != 0
+    print(f"  {'OK  ' if ign else 'FAIL'}  plaintext pattern file is git-ignored")
+    print(f"  {'OK  ' if trk else 'FAIL'}  plaintext pattern file is not tracked")
+    sys.exit(0 if rc == 0 and ign and trk else 1)
+HASHED = pii_patterns.load_hashed()
 
 MAPPING = P["remap"]
 PAIRS = P["pairs"]
@@ -68,10 +81,10 @@ missing = [k for k in P["forbidden"] if k.isdigit() and k not in MAPPING]
 check("every forbidden digit is in the remap", not missing, str(missing))
 
 print("=== last-4 pairing (shared tails must stay shared) ===")
-for long_v, short_v in PAIRS:
+for _i, (long_v, short_v) in enumerate(PAIRS):
     ok = long_v in MAPPING and short_v in MAPPING and \
         MAPPING[long_v][-4:] == MAPPING[short_v]
-    check(f"{long_v} pairs with {short_v}", ok,
+    check(f"pair #{_i} shares its last 4", ok,
           f"{MAPPING.get(long_v, '?')[-4:]} vs {MAPPING.get(short_v, '?')}")
 
 print("=== embedded references (containment must survive) ===")
@@ -93,8 +106,8 @@ _cspec = importlib.util.spec_from_file_location(
 _cmod = importlib.util.module_from_spec(_cspec)
 _cspec.loader.exec_module(_cmod)
 
-tokens, line_hits = _cmod.make_matcher(P)
-hits = _cmod.scan(ROOT, tokens, line_hits)
+line_hits = _cmod.make_matcher(HASHED, P)
+hits = _cmod.scan(ROOT, line_hits)
 check("no real PII literal in tracked files", not hits,
       f"{len(hits)} hit(s)" + (f" first: {hits[0][0]}:{hits[0][1]}" if hits else ""))
 
@@ -136,15 +149,15 @@ for _label, _rel, _rx in FP_EMBEDDED:
 _body = read("modules/hermes/tests/test_log_issue_triage_collect.py")
 _long_run = re.search(r"[0-9]{16}", _body) if _body else None
 check("16-digit fixture number intact", bool(_long_run),
-      _long_run.group(0) if _long_run else "FILE MISSING")
+      "" if _long_run else "FILE MISSING")
 if _long_run:
     _run = _long_run.group(0)
     _inside = [v for v in MAPPING if v in _run and len(v) == 4]
     check("a real value sits inside the 16-digit run", bool(_inside),
-          f"run={_run} values={_inside}")
+          "")
     check("the 16-digit run was not partially rewritten", _run not in set(MAPPING.values()))
     for _v in _inside:
-        check(f"{_v} inside the run was left alone", _run.count(_v) == 1, _run)
+        check("a value inside the run was left alone", _run.count(_v) == 1)
 
 print("=== remapped values present where expected ===")
 # Derive the two 6-digit targets by shape (the long member of a pair) so no real
