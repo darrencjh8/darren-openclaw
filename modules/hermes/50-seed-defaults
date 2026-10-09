@@ -49,13 +49,38 @@ if live_path.exists():
         for key, value in live.items():
             if key not in canonical:
                 carried[key] = value
+        # Seed-owned memory provider state survives reseeds: the baked config
+        # has no memory.provider key, so a whole-block carry would be needed,
+        # but memory.* caps stay baked-owned. Carry only the provider subtree.
+        live_memory = live.get("memory")
+        if isinstance(live_memory, dict):
+            carried_memory = {}
+            if "provider" in live_memory:
+                carried_memory["provider"] = live_memory["provider"]
+            if "mnemosyne" in live_memory:
+                carried_memory["mnemosyne"] = live_memory["mnemosyne"]
+            if carried_memory:
+                carried["memory"] = carried_memory
 
 live_path.parent.mkdir(parents=True, exist_ok=True)
 # Write the baked bytes unchanged and graft the carried keys on the end, so the
-# baked file's comments and formatting survive the merge.
+# baked file's comments and formatting survive the merge. A carried `memory`
+# subtree merges into the baked memory block instead of appending a second
+# one: PyYAML re-parse plus key-level merge keeps one `memory:` mapping with
+# baked caps winning and carried provider keys added.
 text = canonical_path.read_text()
+carried_memory = carried.pop("memory", None)
 if carried:
     text = text.rstrip("\n") + "\n\n" + yaml.safe_dump(carried, sort_keys=False)
+if carried_memory:
+    merged = yaml.safe_load(text) or {}
+    mem_block = merged.get("memory")
+    if not isinstance(mem_block, dict):
+        mem_block = {}
+        merged["memory"] = mem_block
+    for sub_key, sub_value in carried_memory.items():
+        mem_block[sub_key] = sub_value
+    text = yaml.safe_dump(merged, sort_keys=False)
 # Atomic replace: a kill mid-write must not truncate the live config.
 tmp_path = live_path.with_name(live_path.name + ".tmp")
 tmp_path.write_text(text)
