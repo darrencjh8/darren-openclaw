@@ -737,7 +737,7 @@ import sys
 with open(sys.argv[1]) as f:
     content = f.read()
 match = re.search(
-    r"(if ! python3 - /opt/hermes-defaults/config\.yaml /opt/data/config\.yaml <<'PYCONFIG'.*?\nPYCONFIG\n.*?\nfi)",
+    r"(if \[ -f /opt/data/config\.yaml \]; then\n    su -s /bin/sh hermes -c 'python3 - /opt/hermes-defaults/config\.yaml /opt/data/config\.yaml' <<'PYCONFIG'.*?\nPYCONFIG\nelse\n    cp /opt/hermes-defaults/config\.yaml /opt/data/config\.yaml\nfi)",
     content,
     re.DOTALL,
 )
