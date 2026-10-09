@@ -18,8 +18,8 @@ class LogIssueTriageCronTest(unittest.TestCase):
         self.assertIn('timezone: Asia/Singapore', CONFIG)
         self.assertIn('"name": "log-issue-triage"', SEED)
         self.assertIn('"expr": "30 18 * * *"', SEED)
-        self.assertIn('"deliver": "telegram"', SEED)
-        self.assertIn('"enabled_toolsets": ["terminal", "file"]', SEED)
+        self.assertIn('"deliver": "local"', SEED)
+        self.assertIn('"enabled_toolsets": ["log_issue_triage", "no_mcp"]', SEED)
 
     def test_seed_creates_idempotent_job_with_scoped_tools(self):
         blocks = re.findall(r"<<'PYEOF'[^\n]*\n(.*?)\nPYEOF", SEED, re.DOTALL)
@@ -38,8 +38,30 @@ class LogIssueTriageCronTest(unittest.TestCase):
             job = jobs[0]
             self.assertEqual(job["name"], "log-issue-triage")
             self.assertEqual(job["schedule"]["expr"], "30 18 * * *")
-            self.assertEqual(job["enabled_toolsets"], ["terminal", "file"])
+            self.assertEqual(job["enabled_toolsets"], ["log_issue_triage", "no_mcp"])
             self.assertEqual(job["workdir"], "/opt/data/log-issue-triage")
+            self.assertEqual(job["model"], "auto-thinking")
+            self.assertEqual(job["provider"], "custom:codex-router")
+            self.assertEqual(job["deliver"], "local")
+
+    def test_seed_preserves_custom_delivery_and_migrates_legacy_telegram(self):
+        blocks = re.findall(r"<<'PYEOF'[^\n]*\n(.*?)\nPYEOF", SEED, re.DOTALL)
+        block = next(block for block in blocks if "LOG_ISSUE_TRIAGE_PROMPT" in block)
+        for delivery, expected in (("slack", "slack"), ("telegram", "local"), ("origin", "local"), (None, "local")):
+            with self.subTest(delivery=delivery), tempfile.TemporaryDirectory() as tmp:
+                jobs_path = Path(tmp) / "cron" / "jobs.json"
+                jobs_path.parent.mkdir()
+                jobs_path.write_text(json.dumps({"jobs": [{
+                    "id": "existing", "name": "log-issue-triage", "deliver": delivery,
+                    "schedule": {"kind": "cron", "expr": "30 18 * * *"},
+                }]}), encoding="utf-8")
+                runnable = block.replace("/opt/data/cron/jobs.json", str(jobs_path))
+                result = subprocess.run(["python3", "-c", runnable], text=True, capture_output=True)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                job = json.loads(jobs_path.read_text(encoding="utf-8"))["jobs"][0]
+                self.assertEqual(job["deliver"], expected)
+                self.assertEqual(job["model"], "auto-thinking")
+                self.assertEqual(job["provider"], "custom:codex-router")
 
     def test_seed_refuses_corrupt_jobs_file(self):
         blocks = re.findall(r"<<'PYEOF'[^\n]*\n(.*?)\nPYEOF", SEED, re.DOTALL)
@@ -54,39 +76,38 @@ class LogIssueTriageCronTest(unittest.TestCase):
             self.assertIn("refusing to replace corrupt cron jobs file", result.stderr)
             self.assertEqual(jobs_path.read_text(encoding="utf-8"), "{not json")
 
-    def test_prompt_reads_snapshots_natively_and_validates_before_writes(self):
+    def test_prompt_uses_constrained_collection_reproduction_and_publication_tools(self):
         match = re.search(r'LOG_ISSUE_TRIAGE_PROMPT = """(.*?)"""', SEED, re.DOTALL)
         self.assertIsNotNone(match)
         prompt = match.group(1)
         for required in (
-            'log-issue-triage-snapshot.sh',
-            'read it with the file tool',
-            'at most three',
-            'Do NOT create, comment on, or notify',
-            'gh issue list',
-            'gh issue comment',
-            'new linked issue',
-            'If no candidate is confirmed, reply exactly: [SILENT]',
+            'triage_collect_snapshot',
+            'triage_run_reproducer',
+            'triage_search_issues',
+            'triage_publish_finding',
+            'read-only, resource-limited container',
+            'fix plan',
+            '`[SILENT]` is allowed only when all four collections',
         ):
             self.assertIn(required, prompt)
 
-    def test_prompt_forbids_writes_because_the_file_toolset_can_write(self):
-        """The job holds a file toolset, so its read-only rule must be explicit.
-
-        Hermes' `file` toolset provides patch and write_file as well as reads.
-        The job is allowed to read one sanitized snapshot and nothing else, and
-        `approvals.cron_mode: allow` means nothing else stops a stray write, so
-        the prohibition has to be stated in the prompt and pinned here.
-        """
+    def test_prompt_includes_cron_health_audit_and_issue_path(self):
         match = re.search(r'LOG_ISSUE_TRIAGE_PROMPT = """(.*?)"""', SEED, re.DOTALL)
         self.assertIsNotNone(match)
         prompt = match.group(1)
-        self.assertIn('The file tool is for READING ONLY.', prompt)
-        self.assertIn('Never write, edit, patch, move, or delete any file', prompt)
-        self.assertIn('Your only writes are GitHub issues via `gh`.', prompt)
+        for required in (
+            "triage_check_cron_health",
+            "triage_publish_cron_failure",
+            "missed, late, failed, or undelivered",
+            "every enabled cron job",
+        ):
+            self.assertIn(required, prompt)
 
-    def test_prompt_no_longer_references_a_separate_worker_runtime(self):
-        """The job reads snapshots itself; no subprocess worker or OpenCode remains."""
+        self.assertIn('"enabled_toolsets": ["log_issue_triage", "no_mcp"]', SEED)
+        self.assertNotIn('"enabled_toolsets": ["terminal", "file"]', SEED)
+
+    def test_prompt_uses_only_constrained_plugin_tools(self):
+        """The agent can call the four constrained tools, not generic shell or file tools."""
         match = re.search(r'LOG_ISSUE_TRIAGE_PROMPT = """(.*?)"""', SEED, re.DOTALL)
         self.assertIsNotNone(match)
         prompt = match.group(1)

@@ -3,15 +3,37 @@
 set -euo pipefail
 
 if [ "$#" -ne 1 ]; then
-    echo "usage: $0 expense-tracker|hermes|portfolio-tracker" >&2
+    echo "usage: $0 expense-tracker|hermes|portfolio-tracker|codex-router" >&2
     exit 64
 fi
 
 component=$1
 case "$component" in
-    expense-tracker|hermes|portfolio-tracker) ;;
+    expense-tracker|hermes|portfolio-tracker|codex-router) ;;
     *) echo "unknown triage component" >&2; exit 64 ;;
 esac
+
+case "$component" in
+    hermes) services=(hermes) ;;
+    expense-tracker) services=(expense-tracker) ;;
+    portfolio-tracker) services=(portfolio-tracker) ;;
+    codex-router) services=(codex-router-a codex-router-b) ;;
+esac
+
+project=$(docker inspect --format '{{index .Config.Labels "com.docker.compose.project"}}' hermes 2>/dev/null || true)
+if [[ ! "$project" =~ ^[A-Za-z0-9_.-]+$ ]]; then
+    echo "cannot resolve Compose project for log triage" >&2
+    exit 1
+fi
+containers=()
+for service in "${services[@]}"; do
+    if names=$(docker ps -a --filter "label=com.docker.compose.project=$project" \
+        --filter "label=com.docker.compose.service=$service" --format '{{.Names}}' 2>/dev/null); then
+        while IFS= read -r name; do
+            [ -n "$name" ] && containers+=("$name")
+        done <<< "$names"
+    fi
+done
 
 snapshot_dir=/opt/data/log-issue-triage/snapshots
 state_dir=/opt/data/log-issue-triage/state
@@ -30,7 +52,27 @@ trap 'rm -f "$tmp"' EXIT INT TERM
 
 # Stream directly into the redactor: no raw log artifact is persisted and each
 # bounded Docker tail is a standalone sample rather than a stale file cursor.
-timeout 30 docker logs --tail 500 "$component" |
+if ((${#containers[@]} == 0)); then
+    printf '[collector-error] container=%s exit=1\n' "$component"
+else
+for container in "${containers[@]}"; do
+    if metadata=$(docker inspect --format '{{.Id}}|{{.Config.Image}}|{{index .Config.Labels "org.opencontainers.image.revision"}}' "$container" 2>/dev/null); then
+        IFS='|' read -r image_id image_ref revision <<< "$metadata"
+    else
+        image_id=""
+        image_ref=""
+        revision=""
+    fi
+    printf '[collector-meta] container=%s image_id=%s image_ref=%s revision=%s\n' \
+        "$container" "$image_id" "$image_ref" "$revision"
+    if timeout 30 docker logs --timestamps --tail 500 "$container" 2>&1 | sed "s/^/$container\t/"; then
+        printf '[collector-ok] container=%s\n' "$container"
+    else
+        status=$?
+        printf '[collector-error] container=%s exit=%s\n' "$container" "$status"
+    fi
+done
+fi |
     python3 /opt/data/scripts/log-issue-triage-collect.py \
         --component "$component" \
         --source - \
