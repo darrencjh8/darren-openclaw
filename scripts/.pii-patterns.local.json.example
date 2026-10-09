@@ -4,8 +4,8 @@
     "That file is git-ignored ON PURPOSE: it holds real personal data, so it must",
     "never be committed to a public repository. The gate and the remapper read it",
     "at runtime, which is what lets the tools themselves ship with no PII in them.",
-    "In CI, provide it from a secret; if it is absent the gate exits 2 (cannot",
-    "verify) rather than 0, because a gate that silently passes is worse than none.",
+    "CI needs no secret: it uses the committed scripts/pii-patterns.hashed.json",
+    "(regenerate with scripts/hash-pii-patterns.py). Short values stay local-only.",
     "This example is PLACEHOLDERS ONLY. The values below are the SHAPE the loader",
     "expects, with lengths preserved so a placeholder can never be mistaken for a",
     "real value and a real value can never be pasted in by accident."

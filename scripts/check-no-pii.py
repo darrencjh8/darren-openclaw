@@ -9,8 +9,8 @@ test-count assertions ("260 tests") and commit SHAs contain digits that are not
 secrets. A 7+ digit value is flagged anywhere: a real bank transfer reference is
 PII on sight, and no test count looks like one.
 
-The real values live in a git-ignored JSON file, never in this source, so this
-gate can be committed to a public repository. See scripts/pii_patterns.py.
+High-entropy values are matched from the committed hashed file (no secret needed);
+short values only when the git-ignored plaintext file exists. See scripts/pii_patterns.py.
 """
 from __future__ import annotations
 
@@ -42,16 +42,47 @@ ACCOUNT_CONTEXTS = [
 MIN_UNCONTEXTED_DIGITS = 7  # a real transfer reference is PII on sight
 
 
-def make_matcher(patterns: dict):
-    """Build a line matcher bound to one pattern set.
+def _hashed_matcher(hashed: dict):
+    """Match high-entropy values (7+ digit runs and emails) by salted
+    PBKDF2 digest. Only candidate tokens whose length (and, for names, word-length
+    shape) matches a stored entry are hashed, which keeps CI runtime low."""
+    salt = hashed["salt"]
+    by_kind: dict[str, dict[str, str]] = {"digits": {}, "email": {}, "name": {}}
+    digit_lens, email_lens = set(), set()
+    for e in hashed["forbidden"]:
+        by_kind[e["kind"]][e["hash"]] = e["label"]
+        if e["kind"] == "digits":
+            digit_lens.add(e["len"])
+        elif e["kind"] == "email":
+            email_lens.add(e["len"])
 
-    The remap's targets are the CORRECT state of the tree, not a leak, so they
-    are excluded — otherwise a correctly scrubbed repository reads as dirty.
-    """
+    def hits(line: str) -> list[tuple[int, int, str]]:
+        found = []
+        if digit_lens:
+            for m in re.finditer(r"[0-9]+", line):
+                if len(m.group()) in digit_lens:
+                    lab = by_kind["digits"].get(pii_patterns.digest(m.group(), salt))
+                    if lab:
+                        found.append((m.start(), m.end(), lab))
+        if email_lens and "@" in line:
+            for m in pii_patterns.EMAIL_RE.finditer(line):
+                if len(m.group()) in email_lens:
+                    lab = by_kind["email"].get(
+                        pii_patterns.digest(m.group().lower(), salt))
+                    if lab:
+                        found.append((m.start(), m.end(), lab))
+        return found
+
+    return hits
+
+
+def _local_matcher(patterns: dict):
+    """Plaintext matcher over EVERY forbidden value, including the short digit and
+    single-word values that are too low-entropy to commit as hashes."""
     synthetic = set(patterns["remap"].values()) | {w for _, w in patterns["embedded"]}
     tokens = {k: v for k, v in patterns["forbidden"].items() if k not in synthetic}
 
-    def line_hits(line: str) -> list[str]:
+    def hits(line: str) -> list[tuple[int, int, str]]:
         ctx = set()
         for pattern in ACCOUNT_CONTEXTS:
             for m in pattern.finditer(line):
@@ -70,9 +101,29 @@ def make_matcher(patterns: dict):
             if any(longer != token and token in longer for _, longer in found):
                 continue
             found.append((start, token))
-        return [t for _, t in sorted(found)]
+        return [(st, st + len(t), tokens[t]) for st, t in sorted(found)]
 
-    return tokens, line_hits
+    return hits
+
+
+def make_matcher(hashed: dict, local: dict | None = None):
+    """Build a line matcher returning (start, end, label) spans.
+
+    Hashed mode always runs (it is what CI has). When the git-ignored plaintext
+    file is present it also runs, covering the low-entropy values. The remap's
+    targets are the CORRECT state of the tree, not a leak, and are excluded.
+    """
+    h = _hashed_matcher(hashed)
+    lo = _local_matcher(local) if local else None
+
+    def line_hits(line: str) -> list[tuple[int, int, str]]:
+        found = h(line) + (lo(line) if lo else [])
+        found = [f for f in found
+                 if not any(g != f and g[0] <= f[0] and f[1] <= g[1] and
+                            (g[1] - g[0] > f[1] - f[0]) for g in found)]
+        return sorted(set(found))
+
+    return line_hits
 
 
 SKIP_DIRS = {".git", "node_modules", "dist", "build", ".venv", "venv",
@@ -86,6 +137,8 @@ SELF_EXEMPT = {
     "scripts/redact-pii.py",
     "scripts/verify-remap-safety.py",
     "scripts/pii_patterns.py",
+    "scripts/hash-pii-patterns.py",
+    "scripts/pii-patterns.hashed.json",
 }
 TEXT_EXT = {".py", ".js", ".mjs", ".cjs", ".ts", ".tsx", ".json", ".yaml",
             ".yml", ".md", ".txt", ".sh", ".bash", ".sql", ".toml", ".java",
@@ -98,7 +151,7 @@ def tracked_files(root: str) -> list[str]:
     return [p for p in out.split("\0") if p]
 
 
-def scan(root: str, tokens: dict, line_hits) -> list[tuple[str, int, str, str]]:
+def scan(root: str, line_hits) -> list[tuple[str, int, str, str]]:
     hits = []
     for rel in tracked_files(root):
         if rel in SELF_EXEMPT:
@@ -116,26 +169,36 @@ def scan(root: str, tokens: dict, line_hits) -> list[tuple[str, int, str, str]]:
         except OSError:
             continue
         for lineno, line in enumerate(text.splitlines(), 1):
-            for token in line_hits(line):
-                hits.append((rel, lineno, token, line.strip()[:140]))
+            spans = line_hits(line)
+            if not spans:
+                continue
+            shown = line
+            for st, en, _ in sorted(spans, reverse=True):
+                shown = shown[:st] + "«redacted»" + shown[en:]
+            for _, _, label in spans:
+                hits.append((rel, lineno, label, shown.strip()[:140]))
     return hits
 
 
 def main() -> int:
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     try:
-        patterns = pii_patterns.load()
+        hashed = pii_patterns.load_hashed()
     except pii_patterns.PatternsMissing as exc:
         print(f"check-no-pii: CANNOT VERIFY — {exc}", file=sys.stderr)
         return 2
-    tokens, line_hits = make_matcher(patterns)
-    hits = scan(root, tokens, line_hits)
+    local = pii_patterns.try_load_local()
+    if local is None:
+        print("check-no-pii: NOTE — local plaintext pattern file absent; short "
+              "values (<7 digits) and names are NOT checked "
+              "(hashed high-entropy set only)")
+    line_hits = make_matcher(hashed, local)
+    hits = scan(root, line_hits)
     if hits:
         print(f"check-no-pii: FAIL — {len(hits)} PII literal(s) in tracked files",
               file=sys.stderr)
-        for rel, lineno, token, line in hits:
-            print(f"  {rel}:{lineno}  [{tokens[token]}]  "
-                  f"{line.replace(token, '«redacted»')}", file=sys.stderr)
+        for rel, lineno, label, line in hits:
+            print(f"  {rel}:{lineno}  [{label}]  {line}", file=sys.stderr)
         return 1
     print("check-no-pii: PASS — no forbidden PII literal in tracked files")
     return 0
