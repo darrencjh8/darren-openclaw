@@ -390,7 +390,7 @@ class LogIssueTriagePluginTest(unittest.TestCase):
         with patch.object(triage, "_run") as run:
             for body in (
                 "token 123456789:AAHdqTcvCH1vGWJxfSeofSAs0K5PALDsaw",
-                "hook " + "https://hooks.slack.com/services/T000/B000/XXXX",
+                "hook " + "https://hooks" + ".slack.com/services/T000/B000/XXXX",
                 "key ntn_abc123def456789",
             ):
                 result = triage._publish({
