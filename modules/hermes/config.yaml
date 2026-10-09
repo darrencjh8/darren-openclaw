@@ -55,11 +55,16 @@ memory:
     memory_char_limit: 2800
 
 sessions:
-    # Keep ended sessions searchable for 60 days. auto_prune removes ended sessions
+    # Keep ended sessions searchable for 30 days. auto_prune removes ended sessions
     # older than retention_days, while auto_archive hides inactive sessions earlier
     # without deleting their transcript.
     auto_prune: true
-    retention_days: 60
+    retention_days: 30
+    # Build-time patch (patches/patch-session-caps.py): after the age prune, also delete the
+    # least recently active ended sessions while there are more than max_sessions sessions or
+    # state.db uses more than max_db_mb. Whichever cap is tighter wins; 0 disables a cap.
+    max_sessions: 1000
+    max_db_mb: 512
     auto_archive: true
     auto_archive_days: 14
 

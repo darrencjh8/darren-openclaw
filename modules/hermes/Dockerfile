@@ -34,6 +34,11 @@ RUN python3 /tmp/patch-lifecycle-ledger.py /opt/hermes/gateway/lifecycle_ledger.
 COPY patches/patch-stale-open-webhook.py /tmp/patch-stale-open-webhook.py
 RUN python3 /tmp/patch-stale-open-webhook.py /opt/hermes/hermes_state.py \
     && rm /tmp/patch-stale-open-webhook.py
+# Auto-prune only bounds sessions by age. Also cap the session count and state.db size
+# (sessions.max_sessions / sessions.max_db_mb). Fails the build on upstream drift.
+COPY patches/patch-session-caps.py /tmp/patch-session-caps.py
+RUN python3 /tmp/patch-session-caps.py /opt/hermes/hermes_state_maintenance.py \
+    && rm /tmp/patch-session-caps.py
 # Slack: upstream's block fallback misses msg_blocks_too_long (rich_blocks > 50 blocks) and has none
 # for cannot_reply_to_message (gone thread parent), so those replies were dropped. Retry once as plain
 # text / without thread_ts. Fails the build on upstream drift.

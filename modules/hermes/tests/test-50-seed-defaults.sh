@@ -849,10 +849,10 @@ print(
 )
 PY
 )
-if [ "$seeded_memory_limits" = "2800 60 True True 14" ]; then
-    ok "config: memory 2800 + retention 60 + prune/archive enabled (14d)"
+if [ "$seeded_memory_limits" = "2800 30 True True 14" ]; then
+    ok "config: memory 2800 + retention 30 + prune/archive enabled (14d)"
 else
-    nope "memory/sessions config" "expected '2800 60 True True 14', got '$seeded_memory_limits'"
+    nope "memory/sessions config" "expected '2800 30 True True 14', got '$seeded_memory_limits'"
 fi
 
 echo ""
