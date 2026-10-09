@@ -3,13 +3,13 @@
 set -euo pipefail
 
 if [ "$#" -ne 1 ]; then
-    echo "usage: $0 expense-tracker|hermes|portfolio-tracker|codex-router" >&2
+    echo "usage: $0 expense-tracker|hermes|portfolio-tracker|codex-router|actual-api" >&2
     exit 64
 fi
 
 component=$1
 case "$component" in
-    expense-tracker|hermes|portfolio-tracker|codex-router) ;;
+    expense-tracker|hermes|portfolio-tracker|codex-router|actual-api) ;;
     *) echo "unknown triage component" >&2; exit 64 ;;
 esac
 
@@ -18,6 +18,7 @@ case "$component" in
     expense-tracker) services=(expense-tracker) ;;
     portfolio-tracker) services=(portfolio-tracker) ;;
     codex-router) services=(codex-router-a codex-router-b) ;;
+    actual-api) services=(actual-api) ;;
 esac
 
 project=$(docker inspect --format '{{index .Config.Labels "com.docker.compose.project"}}' hermes 2>/dev/null || true)
@@ -51,8 +52,18 @@ rm -f "$snapshot"
 # re-seen rather than lost.
 run_started=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 since="24h"
+# Only a stored RFC3339 timestamp (or docker's relative form, e.g. 6h) is used.
+# Anything else (disk trouble, a hand edit) would make every `docker logs` fail,
+# skip the store below, and wedge each later run on the same garbage (#739), so
+# it falls back to 24h and the success path overwrites it.
 if [ -s "$since_file" ]; then
-    since=$(cat "$since_file")
+    stored=$(head -c 64 "$since_file" | tr -d '\n')
+    if [[ "$stored" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]+)?(Z|[+-][0-9]{2}:[0-9]{2})$ ]] \
+        || [[ "$stored" =~ ^[0-9]+[smh]$ ]]; then
+        since=$stored
+    else
+        echo "log triage: ignoring invalid stored window in $since_file; using 24h" >&2
+    fi
 fi
 # Write to a temp file and publish only on success. Redirecting straight at
 # "$snapshot" truncates it before the collector runs, so a collector that died

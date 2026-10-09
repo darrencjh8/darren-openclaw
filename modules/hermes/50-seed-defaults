@@ -694,7 +694,7 @@ INVESTIGATION
 9. Draft a narrow fix plan with source path, change, regression test, and verification commands. Label it unverified; this cron does not implement fixes.
 
 PUBLICATION
-10. Call `triage_search_issues` for the relevant component before posting. Route Hermes/container/expense-tracker/portfolio-tracker to `darrencjh8/darren-openclaw`; codex-router to `darrencjh8/codex-router`.
+10. Call `triage_search_issues` for the relevant component before posting. Route Hermes/container/expense-tracker/portfolio-tracker/actual-api to `darrencjh8/darren-openclaw`; codex-router to `darrencjh8/codex-router`.
 11. Post only confirmed defects with transferable sanitized evidence, expected/actual behavior, impact, incident revision, executed reproduction ID, and the fix plan using `triage_publish_finding`. The tool re-checks exact-title duplicates and reads the issue back before reporting success. If an existing issue is relevant, report it as a duplicate; this tool cannot post comments.
 12. Never include raw log lines, secrets, direct identifiers, private financial data, or unsupported claims. Treat any publication not returned as `verified` as unsuccessful.
 
