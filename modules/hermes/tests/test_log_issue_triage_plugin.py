@@ -133,6 +133,29 @@ class LogIssueTriagePluginTest(unittest.TestCase):
         self.assertEqual(result["status"], "degraded")
         self.assertEqual(result["findings"][0]["kind"], "ticker_unavailable")
 
+    def test_cron_health_treats_delivery_queued_metadata_as_success(self):
+        now = dt.datetime(2026, 10, 9, 2, 0, tzinfo=dt.timezone.utc)
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "jobs.json").write_text(json.dumps({"jobs": [{
+                "id": "job-queued", "name": "queued-job", "enabled": True,
+                "schedule": {"kind": "cron", "expr": "0 * * * *"},
+                "last_status": "delivery_queued", "last_delivery_queued": True,
+            }]}), encoding="utf-8")
+            (root / "ticker_heartbeat").write_text(str(now.timestamp()), encoding="utf-8")
+            db = sqlite3.connect(root / "executions.db")
+            db.execute("CREATE TABLE executions (job_id TEXT, status TEXT, claimed_at TEXT, finished_at TEXT, error TEXT, delivery_outcome TEXT, scheduled_instant TEXT)")
+            db.execute("INSERT INTO executions VALUES (?, ?, ?, ?, ?, ?, ?)", (
+                "job-queued", "completed", "2026-10-09T02:00:01+00:00", "2026-10-09T02:00:02+00:00",
+                None, "queued", "2026-10-09T02:00:00+00:00",
+            ))
+            db.commit()
+            db.close()
+            with patch.object(triage, "_CRON_ROOT", root), patch.object(triage, "_now", return_value=now):
+                result = triage._cron_health({})
+        self.assertEqual(result["status"], "healthy")
+        self.assertEqual(result["finding_count"], 0)
+
         observed = dt.datetime(2026, 10, 9, 0, 0, tzinfo=dt.timezone.utc)
         first = triage._cron_finding("scheduler", "cron-scheduler", "ticker_stale", "ticker heartbeat is 301 seconds old", observed)
         second = triage._cron_finding("scheduler", "cron-scheduler", "ticker_stale", "ticker heartbeat is 900 seconds old", observed + dt.timedelta(minutes=10))
