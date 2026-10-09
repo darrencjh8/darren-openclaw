@@ -40,7 +40,7 @@
 - For documentation, configuration, or skill changes with no testable behavior, state why TDD does not apply and run relevant validation.
 - When a relevant specification or approved implementation plan exists, invoke spec-auditor before code review. Skip spec-auditor only when no relevant specification exists.
 - Fix validated Critical and High findings before merge. Cosmetic notes, style preferences, and coverage-only suggestions do not block the loop.
-- Require two continuous approvals on the same unchanged HEAD before merge. Any repository mutation or `REQUEST_CHANGES` resets the streak. This must stay aligned with `required_clean_rounds` in `darrencjh8/codex-router` `codex/skills/dev-loop/policy.json`, which is authoritative.
+- Require one approval on an unchanged HEAD before merge. Any repository mutation or `REQUEST_CHANGES` after that approval invalidates it. This must stay aligned with `required_clean_rounds` in `darrencjh8/codex-router` `codex/skills/dev-loop/policy.json`, which is authoritative.
 - Push a branch, open a pull request, wait for required GitHub Actions checks, then squash-merge. CI/CD owns deployment after merge.
 
 
