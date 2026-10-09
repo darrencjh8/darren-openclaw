@@ -620,6 +620,14 @@ _PUBLISH_CRON_SCHEMA = {
 }
 
 
+def _json_result(handler):
+    """The gateway accepts only string tool results, so serialize the dict payloads."""
+    def wrapped(args, **kwargs):
+        result = handler(args, **kwargs)
+        return result if isinstance(result, str) else json.dumps(result, sort_keys=True)
+    return wrapped
+
+
 def register(ctx):
     for name, schema, handler in (
         ("triage_collect_snapshot", _COLLECT_SCHEMA, _collect),
@@ -633,6 +641,6 @@ def register(ctx):
             name=name,
             toolset="log_issue_triage",
             schema=schema,
-            handler=handler,
+            handler=_json_result(handler),
             description=schema["description"],
         )
