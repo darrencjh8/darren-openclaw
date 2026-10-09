@@ -139,6 +139,25 @@ class LogIssueTriageCollectorTest(unittest.TestCase):
                 self.assertNotIn(secret, result.stdout)
             self.assertGreaterEqual(result.stdout.count("[REDACTED]"), 4)
 
+    def test_redacts_chat_and_notion_tokens(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            raw = (
+                "bot token 123456789:AAHdqTcvCH1vGWJxfSeofSAs0K5PALDsaw\n"
+                + "hook https://hooks.slack.com/services/T000/B000/XXXX\n"
+                + "key ntn_abc123def456789\n"
+            )
+            result = subprocess.run(
+                [
+                    sys.executable, str(COLLECTOR), "--component", "hermes",
+                    "--source", "-", "--state-dir", str(Path(tmp) / "state"),
+                    "--max-lines", "20", "--max-bytes", "4096",
+                ], input=raw, text=True, capture_output=True,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            for secret in ("AAHdqTcvCH1vGWJxfSeofSAs0K5PALDsaw", "hooks.slack.com/services", "ntn_abc123def456789"):
+                self.assertNotIn(secret, result.stdout)
+            self.assertGreaterEqual(result.stdout.count("[REDACTED]"), 3)
+
     def test_redacts_basic_authorization_and_truncated_pem_body(self):
         with tempfile.TemporaryDirectory() as tmp:
             raw = (
@@ -400,7 +419,7 @@ fi
             root = Path(tmp)
             docker = (
                 "#!/bin/sh\n"
-                "[ \"$5\" = modules-codex-router-a-1 ] && exit 1\n"
+                "case \"$*\" in *modules-codex-router-a-1*) exit 1;; esac\n"
                 "echo '2026-10-08T10:00:00.000000000Z healthy event'\n"
             )
             result = self.run_snapshot(root, "codex-router", docker)
@@ -409,6 +428,62 @@ fi
             self.assertEqual(payload["collected_containers"], ["modules-codex-router-b-1"])
             self.assertEqual(len(payload["collection_errors"]), 1)
             self.assertTrue(any("healthy event" in line for line in payload["lines"]))
+
+    def test_snapshot_bounds_each_container_to_the_latest_window(self):
+        """Latest-only: docker logs carries --since from the stored window."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            seen = root / "docker-logs-args"
+            docker = (
+                "#!/bin/sh\n"
+                "if [ \"$1\" = logs ]; then\n"
+                "  printf '%s\\n' \"$*\" >> " + str(seen) + "\n"
+                "  echo '2026-10-09T00:00:00.000000000Z fresh failure'\n"
+                "fi\n"
+            )
+            result = self.run_snapshot(root, "hermes", docker)
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("--since 24h", seen.read_text(encoding="utf-8"))
+            self.assertTrue((root / "state" / "hermes.since").is_file())
+
+    def test_snapshot_resumes_from_the_stored_window(self):
+        """The second run triages the delta, not the same tail."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            seen = root / "docker-logs-args"
+            docker = (
+                "#!/bin/sh\n"
+                "if [ \"$1\" = logs ]; then\n"
+                "  printf '%s\\n' \"$*\" >> " + str(seen) + "\n"
+                "  echo '2026-10-09T00:00:00.000000000Z fresh failure'\n"
+                "fi\n"
+            )
+            (root / "state").mkdir(parents=True)
+            (root / "state" / "hermes.since").write_text("2026-10-08T00:00:00Z", encoding="utf-8")
+
+            result = self.run_snapshot(root, "hermes", docker)
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("--since 2026-10-08T00:00:00Z", seen.read_text(encoding="utf-8"))
+
+    def test_snapshot_retries_the_same_window_after_failure(self):
+        """A failed run must not advance the window, or logs are skipped."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "state").mkdir(parents=True)
+            (root / "state" / "hermes.since").write_text("2026-10-08T00:00:00Z", encoding="utf-8")
+
+            result = self.run_snapshot(
+                root, "hermes", "#!/bin/sh\nexit 1\n",
+                collector_body="import sys\nraise SystemExit(3)\n",
+            )
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertEqual(
+                (root / "state" / "hermes.since").read_text(encoding="utf-8"),
+                "2026-10-08T00:00:00Z",
+            )
 
     def test_docker_failure_does_not_publish_empty_snapshot(self):
         with tempfile.TemporaryDirectory() as tmp:

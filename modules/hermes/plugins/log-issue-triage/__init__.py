@@ -51,6 +51,8 @@ _SECRET_RE = re.compile(
     r"(?i:\b(?:account|acct|account[_ -]?id|acct[_ -]?id|customer|customer[_ -]?id|member|member[_ -]?id|reference|ref)\s*(?:number|no\.?|id)?\s*(?:is\s*)?(?:[:=#-]\s*)?[A-Z0-9][A-Z0-9_-]{0,31}\b)|"
     r"(?<!\d)(?!\d{4}[\s./-]\d{1,2}[\s./-]\d{1,2}(?:T|\b))(?:\+\d{1,3}[\s./-]?)?(?:\(\d{2,4}\)[\s./-]?)?(?:\d{3,4}(?:[\s./-]\d{2,4}){1,3}|\d{7,12})(?!\d)|(?<!\d)\d{10,15}(?!\d)|\b(?:\d[ -]?){13,19}\b|"
     r"gh[pousr]_[A-Za-z0-9_]{20,}|xox[baprs]-[A-Za-z0-9-]{10,}|"
+    r"\b\d{6,12}:[A-Za-z0-9_-]{30,}|https://hooks\.slack\.com/services/[A-Za-z0-9/_-]+|"
+    r"\bntn_[A-Za-z0-9]+|"
     r"AIza[A-Za-z0-9_-]{20,}|sk-[A-Za-z0-9_-]{20,}|"
     r"eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}|"
     r"-----BEGIN (?:RSA |EC |DSA |OPENSSH |PGP |ENCRYPTED )?PRIVATE KEY-----.*?"
