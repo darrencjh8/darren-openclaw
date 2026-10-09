@@ -221,6 +221,37 @@ else
 fi
 
 echo ""
+echo "=== mnemosyne backup replaces in place, throttled daily ==="
+
+_mnemo_dest="$mnemo_clone/mnemosyne/mnemosyne.db"
+_mnemo_mtime1=$(stat -c%Y "$_mnemo_dest" 2>/dev/null || stat -f%m "$_mnemo_dest" 2>/dev/null)
+sleep 1
+MEMORY_REPO_URL="https://example.com/owner/repo" \
+MEMORY_SRC_DIR="$topic_src" \
+MEMORY_CLONE_DIR="$mnemo_clone" \
+MNEMOSYNE_DATA_DIR="$mnemo_src" \
+PATH="$TMPDIR/expense-stubbin:$PATH" \
+    bash "$backup_script" >/dev/null 2>&1 || true
+_mnemo_mtime2=$(stat -c%Y "$_mnemo_dest" 2>/dev/null || stat -f%m "$_mnemo_dest" 2>/dev/null)
+[ "$_mnemo_mtime1" = "$_mnemo_mtime2" ] && ok "fresh mnemosyne backup skipped (replace, not fresh copy)" \
+    || nope "mnemosyne throttle" "backup rewrote a fresh copy within 24h"
+touch -d '2 days ago' "$_mnemo_dest" 2>/dev/null || touch -t 202001010000 "$_mnemo_dest"
+sleep 1
+MEMORY_REPO_URL="https://example.com/owner/repo" \
+MEMORY_SRC_DIR="$topic_src" \
+MEMORY_CLONE_DIR="$mnemo_clone" \
+MNEMOSYNE_DATA_DIR="$mnemo_src" \
+PATH="$TMPDIR/expense-stubbin:$PATH" \
+    bash "$backup_script" >/dev/null 2>&1 || true
+_mnemo_mtime3=$(stat -c%Y "$_mnemo_dest" 2>/dev/null || stat -f%m "$_mnemo_dest" 2>/dev/null)
+[ "$_mnemo_mtime3" != "$_mnemo_mtime2" ] && ok "stale mnemosyne backup replaced in place" \
+    || nope "mnemosyne replace" "stale backup older than 24h not refreshed"
+ls "$mnemo_clone/mnemosyne/" | grep -Eq 'mnemosyne-[0-9]{8}' \
+    && nope "mnemosyne timestamped copies" "found dated fresh copies beside mnemosyne.db" \
+    || ok "single mnemosyne.db path, no dated copies"
+unset _mnemo_dest _mnemo_mtime1 _mnemo_mtime2 _mnemo_mtime3
+
+echo ""
 echo "========================================="
 echo -e " Results: ${GREEN}$pass passed${NC}, ${RED}$fail failed${NC}"
 echo "========================================="

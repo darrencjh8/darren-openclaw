@@ -60,9 +60,20 @@ built-in with `hermes tools disable memory`; that hides provider tools too
   cross-session consolidation never runs on fresh installs.
 - `hermes journey` manages built-in nodes only. Mnemosyne rows use
   `forget`/`update`/`invalidate`/`get`, `doctor` plus gated `repair`.
-- Backup is split: git markdown under `memories/` plus SQLite
-  `mnemosyne.db` via `sqlite3 .backup` into `mnemosyne/` in the same repo.
+- Backup is split: git markdown under `memories/` every 6h plus a single
+  `mnemosyne/mnemosyne.db` file replaced in place at most once per 24h
+  (`MNEMOSYNE_BACKUP_MAX_AGE_HOURS`, same filename, never dated copies).
   `memory-backup.sh` no-ops when the DB is absent.
+
+## Vacuum (weekly, never deletes)
+
+`mnemosyne-vacuum` cron runs Sundays `0 3 * * 0`, `no_agent`, `deliver: local`:
+`scripts/mnemosyne-vacuum.sh` prints integrity, working/episodic counts,
+size before/after plus `VACUUM`, then per `state.db` (main plus profiles)
+counts sessions older than 30 days (`SESSION_MAX_AGE_DAYS`) plus `VACUUM`.
+Report only. Session deletion stays owned by
+`sessions.auto_prune`/`retention_days` (currently 60); tighten to 30 only by
+explicit config change once the 30-day counts show a need.
 
 ## Cutover rule
 

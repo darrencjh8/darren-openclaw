@@ -121,15 +121,29 @@ mkdir -p "$CLONE_DIR/skills"
 cp -r /opt/data/skills/* "$CLONE_DIR/skills/" 2>/dev/null || true
 
 # ---- Mnemosyne pilot backup (SQLite, safe on live WAL DB) ----
-# Additive only: no-op when the provider was never installed. Uses
-# `sqlite3 .backup` so a live gateway write cannot tear the copy.
+# Additive only: no-op when the provider was never installed. Single file in
+# the repo, replaced in place — never timestamped fresh copies. Throttled to
+# once per day while the rest of the backup still runs every 6h, so the git
+# history does not take a binary blob per run. Uses `sqlite3 .backup` so a
+# live gateway write cannot tear the copy.
+MNEMOSYNE_BACKUP_MAX_AGE_HOURS="${MNEMOSYNE_BACKUP_MAX_AGE_HOURS:-24}"
 if [ -f "$MNEMOSYNE_DIR/mnemosyne.db" ]; then
     mkdir -p "$CLONE_DIR/mnemosyne"
-    if command -v sqlite3 >/dev/null 2>&1; then
-        sqlite3 "$MNEMOSYNE_DIR/mnemosyne.db" ".backup '$CLONE_DIR/mnemosyne/mnemosyne.db'" 2>/dev/null || true
-    else
-        cp "$MNEMOSYNE_DIR/mnemosyne.db" "$CLONE_DIR/mnemosyne/" 2>/dev/null || true
+    _mnemo_dest="$CLONE_DIR/mnemosyne/mnemosyne.db"
+    _mnemo_due=true
+    if [ -f "$_mnemo_dest" ] && command -v find >/dev/null 2>&1; then
+        if [ -z "$(find "$_mnemo_dest" -mmin +"$((MNEMOSYNE_BACKUP_MAX_AGE_HOURS * 60))" 2>/dev/null)" ]; then
+            _mnemo_due=false
+        fi
     fi
+    if [ "$_mnemo_due" = true ]; then
+        if command -v sqlite3 >/dev/null 2>&1; then
+            sqlite3 "$MNEMOSYNE_DIR/mnemosyne.db" ".backup '$_mnemo_dest'" 2>/dev/null || true
+        else
+            cp "$MNEMOSYNE_DIR/mnemosyne.db" "$_mnemo_dest" 2>/dev/null || true
+        fi
+    fi
+    unset _mnemo_dest _mnemo_due
 fi
 
 # ---- Cron jobs backup ----
