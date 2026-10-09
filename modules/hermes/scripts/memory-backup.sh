@@ -24,6 +24,7 @@ fi
 CLONE_DIR="${MEMORY_CLONE_DIR:-/opt/data/memories-backup}"
 SRC_DIR="${MEMORY_SRC_DIR:-/opt/data/memories}"
 EXPENSE_DIR="${EXPENSE_TRACKER_DATA:-}"
+MNEMOSYNE_DIR="${MNEMOSYNE_DATA_DIR:-/opt/data/mnemosyne/data}"
 
 # Fix read-only permissions from prior git operations
 if [ -d "$CLONE_DIR" ]; then
@@ -118,6 +119,36 @@ done
 # ---- Skills backup ----
 mkdir -p "$CLONE_DIR/skills"
 cp -r /opt/data/skills/* "$CLONE_DIR/skills/" 2>/dev/null || true
+
+# ---- Mnemosyne pilot backup (SQLite, safe on live WAL DB) ----
+# Additive only: no-op when the provider was never installed. Single file in
+# the repo, replaced in place — never timestamped fresh copies. Throttled to
+# once per day while the rest of the backup still runs every 6h, so the git
+# history does not take a binary blob per run. The sqlite3 path uses .backup
+# with busy_timeout so a live gateway write cannot tear the copy; the no-
+# sqlite3 fallback only copies when no WAL sidecar exists, else skips.
+MNEMOSYNE_BACKUP_MAX_AGE_HOURS="${MNEMOSYNE_BACKUP_MAX_AGE_HOURS:-24}"
+case "$MNEMOSYNE_BACKUP_MAX_AGE_HOURS" in ''|*[!0-9]*) MNEMOSYNE_BACKUP_MAX_AGE_HOURS=24 ;; esac
+if [ -f "$MNEMOSYNE_DIR/mnemosyne.db" ]; then
+    mkdir -p "$CLONE_DIR/mnemosyne"
+    _mnemo_dest="$CLONE_DIR/mnemosyne/mnemosyne.db"
+    _mnemo_due=true
+    if [ -f "$_mnemo_dest" ] && command -v find >/dev/null 2>&1; then
+        if [ -z "$(find "$_mnemo_dest" -mmin +"$((MNEMOSYNE_BACKUP_MAX_AGE_HOURS * 60))" 2>/dev/null)" ]; then
+            _mnemo_due=false
+        fi
+    fi
+    if [ "$_mnemo_due" = true ]; then
+        if command -v sqlite3 >/dev/null 2>&1; then
+            sqlite3 "$MNEMOSYNE_DIR/mnemosyne.db" "PRAGMA busy_timeout=5000;" ".backup '$_mnemo_dest'" 2>/dev/null || true
+        elif [ ! -f "$MNEMOSYNE_DIR/mnemosyne.db-wal" ]; then
+            # No sqlite3 and no WAL sidecar, so a plain copy is crash-consistent.
+            # With a WAL sidecar present skip rather than tear the copy.
+            cp "$MNEMOSYNE_DIR/mnemosyne.db" "$_mnemo_dest" 2>/dev/null || true
+        fi
+    fi
+    unset _mnemo_dest _mnemo_due
+fi
 
 # ---- Cron jobs backup ----
 mkdir -p "$CLONE_DIR/cron"

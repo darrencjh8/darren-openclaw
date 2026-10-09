@@ -238,6 +238,13 @@ PY
 mkdir -p /opt/data/memories-backup
 chown -R hermes:hermes /opt/data/memories-backup 2>/dev/null || true
 
+# Mnemosyne pilot (additive): data dir only. No provider flip, no built-in
+# disable, no triage change. The provider stays off until an operator runs
+# `hermes plugins install mnemosyne` + `hermes config set memory.provider
+# mnemosyne` and verifies recall. MNEMOSYNE_DATA_DIR defaults to this path.
+mkdir -p /opt/data/mnemosyne/data
+chown -R hermes:hermes /opt/data/mnemosyne 2>/dev/null || true
+
 # Configure gh CLI authentication. The helper installs GitHub App auth when the
 # App configuration is complete, and otherwise installs the scoped fallback PAT.
 # The PAT arrives as a root-only secret file rather than an ambient environment
@@ -446,6 +453,66 @@ if not any(j.get("name") == "memory-backup" for j in jobs if isinstance(j, dict)
     print("cron: memory-backup seeded")
 ' || true
 fi
+
+# Seed mnemosyne-vacuum cron job (no_agent script-only report + VACUUM).
+# Never deletes memories or sessions; session deletion stays owned by
+# sessions.auto_prune/retention_days. Scheduling fields are minted once and
+# left alone afterwards, so a dashboard change is not reverted on reboot.
+python3 <<'PYEOF' || true
+import os, json, uuid, datetime, tempfile
+jobs_path = "/opt/data/cron/jobs.json"
+os.makedirs(os.path.dirname(jobs_path), exist_ok=True)
+try:
+    with open(jobs_path, encoding="utf-8") as handle:
+        data = json.load(handle)
+except FileNotFoundError:
+    data = {"jobs": []}
+except json.JSONDecodeError as error:
+    raise SystemExit(f"refusing to replace corrupt cron jobs file: {error}")
+if not isinstance(data, dict) or not isinstance(data.get("jobs", []), list):
+    raise SystemExit("refusing to replace malformed cron jobs file")
+jobs = data["jobs"]
+
+MANAGED = {
+    "script": "mnemosyne-vacuum.sh",
+    "no_agent": True,
+    "deliver": "local",
+}
+DEFAULTS = {
+    "schedule": {"kind": "cron", "expr": "0 3 * * 0", "display": "0 3 * * 0"},
+    "schedule_display": "0 3 * * 0",
+    "enabled": True,
+    "next_run_at": None,
+}
+
+existing = next(
+    (j for j in jobs if isinstance(j, dict) and j.get("name") == "mnemosyne-vacuum"),
+    None,
+)
+if existing is None:
+    jobs.append({
+        "id": uuid.uuid4().hex[:12],
+        "name": "mnemosyne-vacuum",
+        "prompt": "Run /opt/data/scripts/mnemosyne-vacuum.sh and deliver its stdout",
+        "created_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        **DEFAULTS,
+        **MANAGED,
+    })
+    print("cron: mnemosyne-vacuum seeded (no_agent weekly)")
+else:
+    changed = [key for key, value in MANAGED.items() if existing.get(key) != value]
+    for key in changed:
+        existing[key] = MANAGED[key]
+    print("cron: mnemosyne-vacuum migrated: " + ", ".join(sorted(changed)) if changed else "cron: mnemosyne-vacuum unchanged")
+
+directory = os.path.dirname(jobs_path)
+with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=directory, delete=False) as handle:
+    json.dump({"jobs": jobs, "updated_at": datetime.datetime.now(datetime.timezone.utc).isoformat()}, handle, indent=2)
+    handle.flush()
+    os.fsync(handle.fileno())
+    temp_path = handle.name
+os.replace(temp_path, jobs_path)
+PYEOF
 
 # Restore memories from friday-memory repo on first boot
 if [ -n "${MEMORY_REPO_URL}" ] && [ ! -f "/opt/data/memories/MEMORY.md" ]; then
