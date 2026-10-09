@@ -28,6 +28,12 @@ RUN uv venv /opt/codex-router-venv --python /usr/bin/python3 \
 COPY patches/patch-lifecycle-ledger.py /tmp/patch-lifecycle-ledger.py
 RUN python3 /tmp/patch-lifecycle-ledger.py /opt/hermes/gateway/lifecycle_ledger.py \
     && rm /tmp/patch-lifecycle-ledger.py
+# Webhook sessions are one-shot, but a restart mid-run (and builds before upstream
+# added the close hook) leaves them open, and prune only deletes ended rows. Add
+# webhook to the automatic stale-open sweep. Fails the build on upstream drift.
+COPY patches/patch-stale-open-webhook.py /tmp/patch-stale-open-webhook.py
+RUN python3 /tmp/patch-stale-open-webhook.py /opt/hermes/hermes_state.py \
+    && rm /tmp/patch-stale-open-webhook.py
 COPY config.yaml SOUL.md.template /opt/hermes-defaults/
 COPY skills/ /opt/hermes-defaults/skills/
 COPY scripts/ /opt/hermes-defaults/scripts/
