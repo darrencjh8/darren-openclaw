@@ -1275,6 +1275,25 @@ seed_scripts_run || true
 [ "$before" = "$(cat "$SP/data/.hermes-seeded-scripts")" ] && [ -f "$SP/data/scripts/keep.sh" ] && [ -f "$SP/data/scripts/operator.sh" ] \
     && ok "re-running is idempotent" || nope "idempotence" "state changed"
 
+# Pre-manifest orphans: a one-time retired-name list removes scripts the image
+# once shipped (in repo history), but never an operator file (names never in
+# the repo), and never a retired name the image ships again.
+echo stale > "$SP/data/scripts/log-issue-triage-worker.sh"
+for n in deleg-watchdog.sh onedrive-auth-poll.sh; do echo mine > "$SP/data/scripts/$n"; done
+mkdir -p "$SP/data/scripts/whatsapp-bridge"; echo x > "$SP/data/scripts/whatsapp-bridge/a"
+seed_scripts_run || true
+[ ! -e "$SP/data/scripts/log-issue-triage-worker.sh" ] \
+    && ok "retired pre-manifest orphan is pruned" || nope "retired orphan" "still present"
+[ -f "$SP/data/scripts/deleg-watchdog.sh" ] && [ -f "$SP/data/scripts/onedrive-auth-poll.sh" ] \
+    && [ -f "$SP/data/scripts/whatsapp-bridge/a" ] && [ -f "$SP/data/scripts/operator.sh" ] \
+    && ok "never-shipped files are left alone" || nope "retired list scope" "operator file removed"
+echo stale > "$SP/data/scripts/log-issue-triage-worker.sh"
+echo "new in image" > "$SP/defaults/scripts/log-issue-triage-worker.sh"
+seed_scripts_run || true
+grep -qx "new in image" "$SP/data/scripts/log-issue-triage-worker.sh" \
+    && ok "retired name shipped by the image is kept" || nope "retired but shipped" "removed or stale"
+rm -f "$SP/defaults/scripts/log-issue-triage-worker.sh"
+
 echo ""
 echo "========================================="
 echo -e " Results: ${GREEN}$pass passed${NC}, ${RED}$fail failed${NC}"

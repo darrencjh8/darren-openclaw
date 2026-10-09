@@ -114,6 +114,13 @@ if [ -s "$SEED_MANIFEST.new" ] && [ -f "$SEED_MANIFEST" ]; then
         grep -qxF -- "$seed_old" "$SEED_MANIFEST.new" || rm -rf -- "/opt/data/scripts/$seed_old"
     done < "$SEED_MANIFEST"
 fi
+# One-time cleanup of orphans that predate the manifest (never recorded, so the
+# manifest cannot see them). Explicit names only, and only when the image does
+# not ship that name now. Only names the image once shipped (repo history);
+# files the repo never had are operator-owned and left alone.
+for seed_retired in log-issue-triage-worker.sh; do
+    [ -e "/opt/hermes-defaults/scripts/$seed_retired" ] || rm -rf -- "/opt/data/scripts/$seed_retired"
+done
 cp -r /opt/hermes-defaults/scripts/* /opt/data/scripts/
 chmod +x /opt/data/scripts/*.sh
 mv "$SEED_MANIFEST.new" "$SEED_MANIFEST"
