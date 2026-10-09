@@ -38,10 +38,22 @@ done
 snapshot_dir=/opt/data/log-issue-triage/snapshots
 state_dir=/opt/data/log-issue-triage/state
 snapshot="$snapshot_dir/$component.json"
+since_file="$state_dir/$component.since"
 mkdir -p "$snapshot_dir" "$state_dir"
 # Drop any previous run's snapshot first, so a failure below cannot leave the
 # caller reading stale evidence from an earlier run.
 rm -f "$snapshot"
+
+# Latest-only window: the first run bounds to the last 24h; each success stores
+# its start time and the next run resumes from it. A failure exits before the
+# store, so the next run retries the same window instead of skipping past it.
+# The start (not end) timestamp is stored so logs written during the run are
+# re-seen rather than lost.
+run_started=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+since="24h"
+if [ -s "$since_file" ]; then
+    since=$(cat "$since_file")
+fi
 # Write to a temp file and publish only on success. Redirecting straight at
 # "$snapshot" truncates it before the collector runs, so a collector that died
 # mid-write left a PARTIAL snapshot that the next run read as a fresh sample and
@@ -65,7 +77,7 @@ for container in "${containers[@]}"; do
     fi
     printf '[collector-meta] container=%s image_id=%s image_ref=%s revision=%s\n' \
         "$container" "$image_id" "$image_ref" "$revision"
-    if timeout 30 docker logs --timestamps --tail 500 "$container" 2>&1 | sed "s/^/$container\t/"; then
+    if timeout 30 docker logs --since "$since" --timestamps --tail 500 "$container" 2>&1 | sed "s/^/$container\t/"; then
         printf '[collector-ok] container=%s\n' "$container"
     else
         status=$?
@@ -81,4 +93,5 @@ fi |
         --max-bytes 65536 \
         >"$tmp"
 mv "$tmp" "$snapshot"
+printf '%s' "$run_started" >"$since_file"
 printf '%s\n' "$snapshot"

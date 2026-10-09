@@ -401,6 +401,21 @@ class LogIssueTriagePluginTest(unittest.TestCase):
         })
         self.assertEqual(result["status"], "blocked")
 
+    def test_publication_blocks_chat_and_notion_tokens(self):
+        triage._PROOFS["proof"] = {"component": "hermes", "completed": True}
+        with patch.object(triage, "_run") as run:
+            for body in (
+                "token 123456789:AAHdqTcvCH1vGWJxfSeofSAs0K5PALDsaw",
+                "hook " + "https://hooks" + ".slack.com/services/T000/B000/XXXX",
+                "key ntn_abc123def456789",
+            ):
+                result = triage._publish({
+                    "component": "hermes", "reproduction_id": "proof",
+                    "title": "Defect", "body": body,
+                })
+                self.assertEqual(result["status"], "blocked", body)
+        run.assert_not_called()
+
     def test_publication_blocks_phone_and_short_account_identifiers(self):
         triage._PROOFS["proof"] = {
             "component": "hermes", "completed": True, "fixture_sensitive": True,

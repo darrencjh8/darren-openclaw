@@ -14,6 +14,9 @@ SECRET_PATTERNS = (
     re.compile(r"(?i)(?:password|passwd|pin|otp|secret(?:[_-]?access[_-]?key)?|client[_-]?secret|private[_-]?key|token|api[_-]?key|authorization|cookie|session)\s*[:=]\s*(?:\"[^\"]*\"|'[^']*'|[^\s,;}]+)"),
     re.compile(r"(?i)\"(?:password|passwd|pin|otp|secret(?:[_-]?access[_-]?key)?|client[_-]?secret|private[_-]?key|token|api[_-]?key|authorization|cookie|session)\"\s*:\s*(?:\"[^\"]*\"|'[^']*'|[^\s,;}]+)"),
     re.compile(r"\b(?:gh[pousr]_[A-Za-z0-9_]+|sk-[A-Za-z0-9_-]+|AKIA[A-Z0-9]{16})\b"),
+    re.compile(r"\b\d{6,12}:[A-Za-z0-9_-]{30,}\b"),  # telegram bot token
+    re.compile(r"https://hooks\.slack\.com/services/[A-Za-z0-9/_-]+"),  # slack webhook URL
+    re.compile(r"\bntn_[A-Za-z0-9]+\b"),  # notion token
     re.compile(r"(?i)\b(?:https?|postgres(?:ql)?|mysql|redis|mongodb(?:\+srv)?)://[^/\s:@]+:[^@\s/]+@[^\s]+"),
     re.compile(r"(?i)\b(?:xox[baprs]-[A-Za-z0-9-]{10,}|AIza[A-Za-z0-9_-]{20,})\b"),
     re.compile(r"\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b"),
