@@ -17,7 +17,13 @@
 # copied when absent, so they carry a retired-key drop list in the managed
 # profile migration below. Add one here only if a retired key starts breaking
 # boot.
-if ! python3 - /opt/hermes-defaults/config.yaml /opt/data/config.yaml <<'PYCONFIG'
+# The merge runs as the hermes user, not root: the file it writes is born
+# hermes-owned, so no chown is ever needed for it. Root only bootstraps a
+# missing file (first boot, unwritable target); every later boot rewrites
+# in place as hermes. A no-change merge skips the write entirely, so the
+# inode and ownership survive untouched boots.
+if [ -f /opt/data/config.yaml ]; then
+    su -s /bin/sh hermes -c 'python3 - /opt/hermes-defaults/config.yaml /opt/data/config.yaml' <<'PYCONFIG' || echo "WARNING: hermes config merge failed; keeping the live config" >&2
 import os
 import shutil
 import sys
@@ -30,43 +36,44 @@ live_path = Path(sys.argv[2])
 
 canonical = yaml.safe_load(canonical_path.read_text()) or {}
 carried = {}
-if live_path.exists():
+try:
+    live = yaml.safe_load(live_path.read_text()) or {}
+except (OSError, UnicodeDecodeError, yaml.YAMLError) as exc:
+    # An unreadable live config parses as empty, so the reseed below would
+    # drop every carried key without trace. Keep a copy an operator can
+    # recover the hooks from before overwriting it.
+    live = {}
+    backup_path = live_path.with_name(live_path.name + ".invalid")
     try:
-        live = yaml.safe_load(live_path.read_text()) or {}
-    except (OSError, UnicodeDecodeError, yaml.YAMLError) as exc:
-        # An unreadable live config parses as empty, so the reseed below would
-        # drop every carried key without trace. Keep a copy an operator can
-        # recover the hooks from before overwriting it.
-        live = {}
-        backup_path = live_path.with_name(live_path.name + ".invalid")
-        try:
-            shutil.copyfile(live_path, backup_path)
-            detail = f"backed up to {backup_path}"
-        except OSError as backup_exc:
-            detail = f"backup failed ({backup_exc})"
-        print(f"WARNING: {live_path} is unreadable or not valid YAML ({exc}); {detail}; reseeding it", file=sys.stderr)
-    if isinstance(canonical, dict) and isinstance(live, dict):
-        for key, value in live.items():
-            if key not in canonical:
-                carried[key] = value
+        shutil.copyfile(live_path, backup_path)
+        detail = f"backed up to {backup_path}"
+    except OSError as backup_exc:
+        detail = f"backup failed ({backup_exc})"
+    print(f"WARNING: {live_path} is unreadable or not valid YAML ({exc}); {detail}; reseeding it", file=sys.stderr)
+if isinstance(canonical, dict) and isinstance(live, dict):
+    for key, value in live.items():
+        if key not in canonical:
+            carried[key] = value
 
-live_path.parent.mkdir(parents=True, exist_ok=True)
 # Write the baked bytes unchanged and graft the carried keys on the end, so the
 # baked file's comments and formatting survive the merge. The memory provider
 # lives in the baked config itself, so no carry is needed for it.
 text = canonical_path.read_text()
 if carried:
     text = text.rstrip("\n") + "\n\n" + yaml.safe_dump(carried, sort_keys=False)
-# Atomic replace: a kill mid-write must not truncate the live config.
-tmp_path = live_path.with_name(live_path.name + ".tmp")
-tmp_path.write_text(text)
-os.replace(tmp_path, live_path)
+try:
+    existing = live_path.read_text()
+except OSError:
+    existing = None
+if existing != text:
+    # Atomic replace: a kill mid-write must not truncate the live config.
+    tmp_path = live_path.with_name(live_path.name + ".tmp")
+    tmp_path.write_text(text)
+    os.replace(tmp_path, live_path)
+    print("config: merged baked config into live config")
 PYCONFIG
-then
-    # Merge failed (no python3, no PyYAML, unwritable target). Never fall back
-    # to the raw copy that caused this bug: only bootstrap a missing file.
-    echo "WARNING: hermes config merge failed; keeping the live config" >&2
-    [ -f /opt/data/config.yaml ] || cp /opt/hermes-defaults/config.yaml /opt/data/config.yaml
+else
+    cp /opt/hermes-defaults/config.yaml /opt/data/config.yaml
 fi
 [ ! -f /opt/data/SOUL.md ] && cp /opt/hermes-defaults/SOUL.md.template /opt/data/SOUL.md
 mkdir -p /opt/data/skills
