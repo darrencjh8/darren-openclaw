@@ -74,21 +74,21 @@ const DBS_RECEIVED_TRANSFER_FLAT =
  * transfer into the holder's own Citi card.
  */
 const DBS_BILLPAY_TO_CITI_CARD =
-    "Transaction Ref: 1790860376865887 Dear Customer, You've successfully made a bill payment. " +
+    "Transaction Ref: 1790865962876580 Dear Customer, You've successfully made a bill payment. " +
     "Date and Time: 01 Oct 21:12 (SGT) Amount: SGD 345.64 From: Altitude (A/C ending 1777) " +
     "To: CITI CREDIT CARDS (Ref ending 2666) If unauthorised, please call our DBS hotline. " +
     "To view transaction details, please login to digibank. Thank you for banking with us.";
 
 /** uid 1031 — same layout, destination `Altitude (Ref ending 1777)`. */
 const DBS_BILLPAY_TO_ALTITUDE_CARD =
-    "Transaction Ref: 1790860627083557 Dear Customer, You've successfully made a bill payment. " +
+    "Transaction Ref: 1790867316694201 Dear Customer, You've successfully made a bill payment. " +
     "Date and Time: 01 Oct 21:17 (SGT) Amount: SGD 2435.35 From: My Account (A/C ending 7222) " +
     "To: Altitude (Ref ending 1777) If unauthorised, please call our DBS hotline. " +
     "To view transaction details, please login to digibank.";
 
 /** uid 1032 — same layout, destination `Yuu (Ref ending 7111)`. */
 const DBS_BILLPAY_TO_YUU_CARD =
-    "Transaction Ref: 1790860641654649 Dear Customer, You've successfully made a bill payment. " +
+    "Transaction Ref: 1790867027500568 Dear Customer, You've successfully made a bill payment. " +
     "Date and Time: 01 Oct 21:17 (SGT) Amount: SGD 121.89 From: My Account (A/C ending 7222) " +
     "To: Yuu (Ref ending 7111) If unauthorised, please call our DBS hotline.";
 

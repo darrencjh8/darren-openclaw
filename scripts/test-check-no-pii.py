@@ -161,6 +161,33 @@ if LOCAL:
 else:
     print("== real-value cases SKIPPED: local plaintext file absent ==")
 
+# Generic detectors: they need no pattern file, so a real value nobody hashed is
+# still caught. A long number or a Telegram id must be on the synthetic allowlist.
+print("== generic detectors ==")
+_ALLOW = {"2609000000001111", "1111111111"}
+_gen = _cmod.make_matcher({"salt": "x", "forbidden": []}, None, allow=_ALLOW)
+for _line in ("Transaction Ref: 2609015555123456",
+              "ref 17881900000000000123 posted",
+              "Account 501234567890 credited",
+              'TELEGRAM_ALLOWED_USERS="487000111"',
+              "TELEGRAM_ALLOWED_USERS=487000111,1111111111",
+              "chat_id: 735000111"):
+    if not _gen(_line):
+        print("  MISS")
+        failures.append(f"generic: should flag but did not: {_line}")
+for _line in ("Transaction Ref: 2609000000001111",
+              'TELEGRAM_ALLOWED_USERS="1111111111"',
+              "commit 3f9a1c2b4d5e6f708192a3b4c5d6e7f8091a2b3c",
+              "sha256-AbC123456789012345678xyz",
+              "timeout 30000 ms, 260 tests, version 1.2.3",
+              "amount 12345678901 in an unrelated sentence",
+              'DBS = "506df429-0000-0000-0000-000000000001"',
+              'TELEGRAM_BOT_TOKEN="123456789:AAH-fake"'):
+    if _gen(_line):
+        print("  FALSE+")
+        failures.append(f"generic: false positive: {_line}")
+print("  checked")
+
 TMP_REL = "modules/expense-tracker/tests/pii-selftest-fixture.md"
 
 

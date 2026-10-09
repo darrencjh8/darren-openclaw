@@ -106,18 +106,56 @@ def _local_matcher(patterns: dict):
     return hits
 
 
-def make_matcher(hashed: dict, local: dict | None = None):
+# Generic detectors need no pattern file, so they also catch a real value that
+# nobody thought to hash. A bank reference or account number is a long digit run;
+# a Telegram id is a number after a Telegram/chat key. Either must be listed in
+# ALLOWLIST_PATH, which holds only synthetic fixture values.
+ALLOWLIST_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                              "pii-synthetic-numbers.txt")
+LONG_NUMBER_RE = re.compile(r"(?<![0-9A-Za-z-])[0-9]{12,20}(?![0-9A-Za-z])")
+TELEGRAM_ID_RE = re.compile(
+    r"(?i)(?:telegram_[a-z_]*(?:user|chat|channel)[a-z_]*|chat_?id|user_?id)[\"'`]?\s*[:=]\s*[\"'`]?"
+    r"(?P<ids>-?[0-9]{6,15}(?:\s*,\s*-?[0-9]{6,15})*)")
+LONG_LABEL = "unlisted long number (synthetic? add to scripts/pii-synthetic-numbers.txt)"
+TELEGRAM_LABEL = "unlisted Telegram id (synthetic? add to scripts/pii-synthetic-numbers.txt)"
+
+
+def load_allowlist(path: str = ALLOWLIST_PATH) -> set[str]:
+    try:
+        with open(path, encoding="utf-8") as fh:
+            return {ln.split("#", 1)[0].strip() for ln in fh} - {""}
+    except OSError:
+        return set()
+
+
+def _generic_matcher(allow: set[str]):
+    def hits(line: str) -> list[tuple[int, int, str]]:
+        found = [(m.start(), m.end(), LONG_LABEL) for m in LONG_NUMBER_RE.finditer(line)
+                 if m.group() not in allow]
+        for m in TELEGRAM_ID_RE.finditer(line):
+            base = m.start("ids")
+            for t in re.finditer(r"-?[0-9]+", m.group("ids")):
+                if t.group().lstrip("-") not in allow and t.group() not in allow:
+                    found.append((base + t.start(), base + t.end(), TELEGRAM_LABEL))
+        return found
+
+    return hits
+
+
+def make_matcher(hashed: dict, local: dict | None = None, allow: set[str] | None = None):
     """Build a line matcher returning (start, end, label) spans.
 
     Hashed mode always runs (it is what CI has). When the git-ignored plaintext
     file is present it also runs, covering the low-entropy values. The remap's
     targets are the CORRECT state of the tree, not a leak, and are excluded.
+    The generic detectors run whenever an allowlist is given.
     """
     h = _hashed_matcher(hashed)
     lo = _local_matcher(local) if local else None
+    gen = _generic_matcher(allow) if allow is not None else None
 
     def line_hits(line: str) -> list[tuple[int, int, str]]:
-        found = h(line) + (lo(line) if lo else [])
+        found = h(line) + (lo(line) if lo else []) + (gen(line) if gen else [])
         found = [f for f in found
                  if not any(g != f and g[0] <= f[0] and f[1] <= g[1] and
                             (g[1] - g[0] > f[1] - f[0]) for g in found)]
@@ -139,6 +177,7 @@ SELF_EXEMPT = {
     "scripts/pii_patterns.py",
     "scripts/hash-pii-patterns.py",
     "scripts/pii-patterns.hashed.json",
+    "scripts/pii-synthetic-numbers.txt",
 }
 TEXT_EXT = {".py", ".js", ".mjs", ".cjs", ".ts", ".tsx", ".json", ".yaml",
             ".yml", ".md", ".txt", ".sh", ".bash", ".sql", ".toml", ".java",
@@ -192,7 +231,7 @@ def main() -> int:
         print("check-no-pii: NOTE — local plaintext pattern file absent; short "
               "values (<7 digits) and names are NOT checked "
               "(hashed high-entropy set only)")
-    line_hits = make_matcher(hashed, local)
+    line_hits = make_matcher(hashed, local, allow=load_allowlist())
     hits = scan(root, line_hits)
     if hits:
         print(f"check-no-pii: FAIL — {len(hits)} PII literal(s) in tracked files",
