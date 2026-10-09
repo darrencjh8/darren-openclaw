@@ -204,4 +204,12 @@ describe("extractEmailContent keepLines (#720)", () => {
         const out = await extractEmailContent(Buffer.from(buildMimeEmail({ text })), null, { keepLines: true });
         expect(out).toBe("Amount: SGD 2.27\nReference: 360 SAVE BONUS\n\nThis is an auto-generated email. Do not reply.");
     });
+
+    it("leaves attachment text out, since it is sent to a third-party model", async () => {
+        const corruptPdf = Buffer.from("this is not a pdf file at all");
+        const raw = Buffer.from(buildMimeEmail({ text, pdfAttachment: corruptPdf }));
+        const out = await extractEmailContent(raw, null, { keepLines: true });
+        expect(out).toContain("Reference: 360 SAVE BONUS");
+        expect(out).not.toMatch(/PDF_/);
+    });
 });

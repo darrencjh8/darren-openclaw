@@ -54,7 +54,8 @@ export async function extractEmailContent(rawEmail, password = null, { keepLines
 
         // PDF attachments
         for (const att of parsed.attachments || []) {
-            if (att.contentType === "application/pdf" && att.content) {
+            // keepLines output goes to a third-party model: no attachment text.
+            if (!keepLines && att.contentType === "application/pdf" && att.content) {
                 try {
                     const pdfText = await extractPdfFromBuffer(
                         att.content,
