@@ -969,7 +969,7 @@ export class ToolRegistry {
   }
 
   getToolSchemas() {
-    return TOOLS.map((t) => ({
+    return TOOLS.filter((t) => !(this.learningBotEnabled && t.name === "confirm_learning")).map((t) => ({
       type: "function",
       function: {
         name: t.name,
@@ -2064,9 +2064,18 @@ export class ToolRegistry {
 
   get _pendingLearning() {
     this._pending ||= new PendingLearning(
-      this._config.pendingLearningPath || "data/pending-learning.json",
+      this._config.pendingLearningPath || "state/pending-learning.json",
     );
     return this._pending;
+  }
+
+  setLearningBot(bot) {
+    this._learningBot = bot;
+  }
+
+  /** True when buttons answer offers, so the model gets no confirm path (#723). */
+  get learningBotEnabled() {
+    return Boolean(this._config.learningBotToken && this._config.learningBotChatId);
   }
 
   /**
@@ -2089,6 +2098,14 @@ export class ToolRegistry {
       runnerUp: runner_up || null,
       budgetId: budget_id || "",
     });
+    const stored = this._pendingLearning.get(id);
+    if (this._learningBot && stored) {
+      try {
+        await this._learningBot.sendOffer({ offer: stored });
+      } catch (error) {
+        logger.warn({ event: "learning_offer_send_failed", error: error.message });
+      }
+    }
     return { offered: true, id };
   }
 
@@ -2100,7 +2117,7 @@ export class ToolRegistry {
   async _handle_list_pending_learning() {
     return {
       offers: this._pendingLearning.list().map((offer) => ({
-        id: offer.id,
+        ...(this.learningBotEnabled ? {} : { id: offer.id }),
         descriptor: offer.descriptor,
         payee: offer.payee,
         runner_up: offer.runnerUp,
@@ -2110,6 +2127,13 @@ export class ToolRegistry {
   }
 
   async _handle_confirm_learning({ id }) {
+    // The buttons are the only confirm path when the bot is on (#723).
+    if (this.learningBotEnabled) return { confirmed: false, reason: "use_buttons" };
+    return this._confirmLearning(id);
+  }
+
+  /** Writes the fact for a live offer. Called by confirm_learning and the bot. */
+  async _confirmLearning(id) {
     const offer = this._pendingLearning.get(id);
     if (!offer) return { confirmed: false, reason: "unknown_or_expired" };
     const fact = `${offer.descriptor} maps to ${offer.payee} payee`;

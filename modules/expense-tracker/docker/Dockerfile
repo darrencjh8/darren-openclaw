@@ -18,7 +18,7 @@ RUN node -e "import('@xenova/transformers').then(async ({pipeline,env})=>{env.ca
 
 COPY src/ ./src/
 
-RUN mkdir -p /app/data
+RUN mkdir -p /app/data /app/state
 
 EXPOSE 8080
 

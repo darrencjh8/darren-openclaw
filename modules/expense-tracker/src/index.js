@@ -16,6 +16,8 @@ import { DedupJournal } from "./dedup.js";
 
 import { StatementProcessor } from "./statement/orchestrator.js";
 import { existsSync } from "fs";
+import { LearningBot } from "./learning-bot.js";
+import { migratePendingLearning } from "./learning.js";
 
 // ── Crash diagnostics ──────────────────────────────────────────────
 
@@ -64,6 +66,11 @@ async function main() {
         event: "memory_initialized",
         data: { facts: memory.listFacts().length },
     });
+
+    // Offers moved off the hermes-mounted data volume (#723).
+    if (cfg.pendingLearningPath && migratePendingLearning("data/pending-learning.json", cfg.pendingLearningPath)) {
+        logger.info({ event: "pending_learning_migrated", path: cfg.pendingLearningPath });
+    }
 
     const registry = new ToolRegistry(cfg, memory);
     const orchestrator = new AgentOrchestrator(cfg, registry);
@@ -160,7 +167,23 @@ async function main() {
         "extract_inbox_pdf",
     ];
 
+    // With the learning bot on, a button press is the only confirm (#723).
+    const learningBotOn = Boolean(cfg.learningBotToken && cfg.learningBotChatId);
+    let learningBot = null;
+    if (learningBotOn) {
+        learningBot = new LearningBot({
+            token: cfg.learningBotToken,
+            chatId: cfg.learningBotChatId,
+            registry,
+        });
+        registry.setLearningBot(learningBot);
+        const shutdown = () => learningBot.stop().finally(() => process.exit(0));
+        process.once("SIGTERM", shutdown);
+        process.once("SIGINT", shutdown);
+    }
+
     for (const name of toolNames) {
+        if (learningBotOn && name === "confirm_learning") continue;
         app.post(`/tools/${name.replace(/_/g, "-")}`, async (req, res) => {
             try {
                 // `evidence` is the orchestrator's own argument to resolve_merchant
@@ -185,6 +208,7 @@ async function main() {
                 event: "health_check_started",
                 data: { port },
             });
+            learningBot?.start();
             // Start IMAP idle loop in background
             imapHandler.idleLoop(onNewEmail).catch((err) => {
                 logger.error({ event: "imap_idle_error", error: err.message });

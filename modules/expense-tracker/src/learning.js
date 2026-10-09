@@ -4,10 +4,12 @@
  * A Jev classification is a model guess, so the pipeline never writes it to
  * memory. It stores an offer here instead; only an explicit confirm call turns
  * an offer into a fact. Offers are small JSON on the data volume so they
- * survive a restart between the notification and the user's answer.
+ * survive a restart between the notification and the user's answer. The file
+ * lives on a volume only the tracker mounts (#723): the model's container must
+ * not be able to write an offer, or it could mint one for the buttons to confirm.
  */
 
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from "fs";
+import { copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "fs";
 import { dirname } from "path";
 import { randomInt } from "crypto";
 
@@ -101,4 +103,16 @@ export class PendingLearning {
         this._write(kept);
         return true;
     }
+}
+
+/**
+ * One-time move of the offer file from the shared data volume (#723). Copy then
+ * delete, because the two paths are on different mounts. Never overwrites.
+ */
+export function migratePendingLearning(oldPath, newPath) {
+    if (!existsSync(oldPath) || existsSync(newPath)) return false;
+    mkdirSync(dirname(newPath), { recursive: true });
+    copyFileSync(oldPath, newPath);
+    unlinkSync(oldPath);
+    return true;
 }

@@ -72,9 +72,16 @@ services:
             - "127.0.0.1:8080:8080"
         volumes:
             - /home/runner/data/expense-tracker/data:/app/data
+            # Learning offers live here, not under data/: hermes mounts the
+            # data tree, and a model that could write an offer could mint one
+            # for the Remember button to confirm (#723).
+            - /home/runner/data/expense-tracker/state:/app/state
         environment:
             - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}
             - JEV_API_KEY=${JEV_API_KEY:-}
+            # Dedicated bot for the Remember/Don't buttons; not hermes's bot (#723).
+            - LEARNING_BOT_TOKEN=${LEARNING_BOT_TOKEN:-}
+            - LEARNING_BOT_CHAT_ID=${LEARNING_BOT_CHAT_ID:-}
             - LLM_PROVIDER=${LLM_PROVIDER:-litellm}
             - LLM_BASE_URL=${LLM_BASE_URL:-http://codex-router:4100/v1}
             - LLM_MODEL=${LLM_MODEL:-auto-thinking}
