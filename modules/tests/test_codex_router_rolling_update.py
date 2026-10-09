@@ -118,6 +118,7 @@ def colour_selection(deploy, running, ready):
             "set -euo pipefail",
             f"RUNNING={shlex.quote(running)}",
             f"READY={shlex.quote(ready)}",
+            "ROUTER_PROBE_ATTEMPTS=3; ROUTER_PROBE_SLEEP=0",
             "colour_container() {",
             '  for c in $RUNNING; do [ "$c" = "$1" ] && printf "%s\\n" "$c"; done',
             "  return 0",
@@ -136,6 +137,47 @@ def colour_selection(deploy, running, ready):
         ["bash", "-c", body], capture_output=True, text=True, check=True
     ).stdout.strip()
     return tuple(out.split("|"))
+
+
+def roll_selection(deploy, running, ready_after):
+    """Run the selection through the candidate's `up`, with COMPOSE=echo.
+
+    `ready_after` maps a colour to the probe call on which it starts answering
+    (1 answers at once, 0 never answers). Probe waits are set to zero.
+    """
+    lines = deploy.splitlines()
+    start = next(i for i, line in enumerate(lines) if line.strip() == 'serving=""')
+    up = next(
+        i
+        for i in range(start, len(lines))
+        if "--force-recreate" in lines[i] and '"$idle"' in lines[i]
+    )
+    after = " ".join(f"{k}={v}" for k, v in ready_after.items())
+    body = "\n".join(
+        [
+            "set -euo pipefail",
+            "COMPOSE=echo",
+            'RED=""; NC=""',
+            "failed=0",
+            "ROUTER_PROBE_ATTEMPTS=3; ROUTER_PROBE_SLEEP=0",
+            "declare -A AFTER CALLS",
+            f"for kv in {after}; do AFTER[${{kv%%=*}}]=${{kv#*=}}; done",
+            f"RUNNING={shlex.quote(running)}",
+            "colour_container() {",
+            '  for c in $RUNNING; do [ "$c" = "$1" ] && printf "%s\\n" "$c"; done',
+            "  return 0",
+            "}",
+            "colour_ready() {",
+            "  CALLS[$1]=$(( ${CALLS[$1]:-0} + 1 ))",
+            '  local a="${AFTER[$1]:-0}"',
+            '  [ "$a" -gt 0 ] && [ "${CALLS[$1]}" -ge "$a" ]',
+            "}",
+            "\n".join(lines[start : up + 1]),
+            "fi",
+            'printf "serving=%s idle=%s\\n" "$serving" "$idle"',
+        ]
+    )
+    return subprocess.run(["bash", "-c", body], capture_output=True, text=True)
 
 
 class CodexRouterRollingUpdateTests(unittest.TestCase):
@@ -351,6 +393,44 @@ class CodexRouterRollingUpdateTests(unittest.TestCase):
         # The stop keeps the drain budget the compose grace period allows.
         self.assertIn('ROUTER_DRAIN_SECONDS="${ROUTER_DRAIN_SECONDS:-600}"', deploy)
 
+    def test_a_single_failed_probe_does_not_demote_the_only_colour(self):
+        deploy = DEPLOY_SCRIPT.read_text(encoding="utf-8")
+        # (a) fails twice, answers on the third try: still serving, so the
+        # candidate is the other colour.
+        run = roll_selection(deploy, "codex-router-a", {"codex-router-a": 3})
+        self.assertEqual(0, run.returncode, run.stderr)
+        self.assertIn("serving=codex-router-a idle=codex-router-b", run.stdout)
+        self.assertIn("--force-recreate codex-router-b", run.stdout)
+        self.assertNotIn("--force-recreate codex-router-a", run.stdout)
+
+    def test_a_wedged_only_colour_is_never_recreated_before_the_other_is_ready(self):
+        deploy = DEPLOY_SCRIPT.read_text(encoding="utf-8")
+        for only, other in (
+            ("codex-router-a", "codex-router-b"),
+            ("codex-router-b", "codex-router-a"),
+        ):
+            with self.subTest(only=only):
+                # (b) never answers: it is presumed to be the front's upstream.
+                run = roll_selection(deploy, only, {})
+                self.assertEqual(0, run.returncode, run.stderr)
+                self.assertIn(f"idle={other}", run.stdout)
+                self.assertIn(f"--force-recreate {other}", run.stdout)
+                self.assertNotIn(f"--force-recreate {only}", run.stdout)
+                # It is handled as the old colour: stopped after the front moves.
+                self.assertIn(f"serving={only}", run.stdout)
+
+    def test_probe_retry_is_configurable_and_roll_unchanged_when_healthy(self):
+        deploy = DEPLOY_SCRIPT.read_text(encoding="utf-8")
+        self.assertIn("ROUTER_PROBE_ATTEMPTS", deploy)
+        self.assertIn("ROUTER_PROBE_SLEEP", deploy)
+        # (c) healthy serving colour: rolls onto the other.
+        run = roll_selection(deploy, "codex-router-a", {"codex-router-a": 1})
+        self.assertIn("serving=codex-router-a idle=codex-router-b", run.stdout)
+        # (d) first deploy, nothing running: default colour, nothing to stop.
+        run = roll_selection(deploy, "", {})
+        self.assertIn("serving= idle=codex-router-a", run.stdout)
+        self.assertIn("--force-recreate codex-router-a", run.stdout)
+
     def test_roll_never_recreates_the_serving_colour(self):
         deploy = DEPLOY_SCRIPT.read_text(encoding="utf-8")
         both = "codex-router-a codex-router-b"
@@ -364,9 +444,9 @@ class CodexRouterRollingUpdateTests(unittest.TestCase):
             # upstream the front has.
             ("codex-router-a", "codex-router-a", "codex-router-a", "codex-router-b"),
             ("codex-router-b", "codex-router-b", "codex-router-b", "codex-router-a"),
-            # A sole colour that does not answer is not serving: re-up it, and
-            # nothing gets stopped because there is nothing to stop.
-            ("codex-router-a", "", "", "codex-router-a"),
+            # A sole colour that does not answer is presumed to be the front's
+            # only upstream (#691): it is the old colour, the other is the candidate.
+            ("codex-router-a", "", "codex-router-a", "codex-router-b"),
             (both, "codex-router-a", "codex-router-a", "codex-router-b"),
             (both, "codex-router-b", "codex-router-b", "codex-router-a"),
             # Two colours running and neither answering (a timed-out roll): the
