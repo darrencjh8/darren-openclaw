@@ -165,6 +165,8 @@ jobs:
             - name: Test seeded GitHub App cron block
               # Dashed filename, so run it as a script rather than via -m unittest.
               run: python modules/hermes/tests/test-seed-app-cron.py
+            - name: Test lifecycle ledger startup patch
+              run: python -m unittest modules/hermes/tests/test_lifecycle_ledger_patch.py
             - name: Test memory backup script
               run: bash modules/hermes/tests/test-memory-backup.sh
             - name: Test memory restore script
