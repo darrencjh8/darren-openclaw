@@ -496,6 +496,89 @@ print('present' if profiles and fields and reviewer_isolation else 'missing')
 ")
 [ "$managed_routing_migration" = "present" ] && ok "managed profile routing and reviewer isolation migrate on startup" || nope "managed profile migration" "got: $managed_routing_migration"
 
+echo ""
+echo "=== self-wiki-maintenance-and-reminders seed (MANAGED telegram) ==="
+
+wiki_block=$(python3 - "$SEED_SCRIPT" <<'PY'
+import re, sys
+content = open(sys.argv[1], encoding="utf-8").read()
+blocks = re.findall(r"<<'PYEOF'[^\n]*\n(.*?)\nPYEOF", content, re.DOTALL)
+named = [b for b in blocks if "self-wiki-maintenance-and-reminders" in b]
+print(named[-1] if named else "")
+PY
+)
+[ -n "$wiki_block" ] && ok "seed has a self-wiki-maintenance PYEOF block" || nope "self-wiki block" "not found"
+
+rm -rf "$TMPDIR/cron-wiki"
+mkdir -p "$TMPDIR/cron-wiki"
+echo '{"jobs": []}' > "$TMPDIR/cron-wiki/jobs.json"
+wiki_block_tmp=${wiki_block//\/opt\/data\/cron\/jobs.json/$TMPDIR\/cron-wiki\/jobs.json}
+python3 -c "$wiki_block_tmp" >/dev/null 2>&1
+
+wiki_fields=$(python3 - "$TMPDIR/cron-wiki/jobs.json" <<'PY'
+import json, sys
+jobs = json.load(open(sys.argv[1]))["jobs"]
+if len(jobs) != 1:
+    print("fail count=%d" % len(jobs)); sys.exit()
+j = jobs[0]
+sched = j.get("schedule", {})
+prompt = j.get("prompt") or ""
+checks = {
+    "name": j.get("name") == "self-wiki-maintenance-and-reminders",
+    "kind": sched.get("kind") == "cron",
+    "expr": sched.get("expr") == "0 9 * * 1",
+    "display": j.get("schedule_display") == "every monday 9am",
+    "enabled": j.get("enabled") is True,
+    "deliver": j.get("deliver") == "telegram",
+    "skills": j.get("skills") == ["llm-wiki", "expense-tracker", "notion", "notion-pitfalls", "github-issues", "cron-job-inspection", "docs-accuracy-verification"],
+    "skill": j.get("skill") == "llm-wiki",
+    "workdir": j.get("workdir") == "/workspace",
+    "ctx": j.get("context_from") == ["self"],
+    "prompt_len": len(prompt) > 500,
+    "wiki_path": "/opt/data/home/wiki" in prompt,
+    "schema": "SCHEMA.md" in prompt,
+    "notion_ro": "Notion is read-only" in prompt,
+    "target_line": "Send only to the configured delivery target" in prompt,
+    "no_origin_claim": "Telegram is not connected" not in prompt,
+}
+bad = [k for k, v in checks.items() if not v]
+print("pass" if not bad else "fail " + repr(bad))
+PY
+)
+case "$wiki_fields" in
+    pass) ok "job: monday 9am · telegram · llm-wiki stack · full-refresh prompt" ;;
+    *) nope "self-wiki fields" "$wiki_fields" ;;
+esac
+
+# Idempotency: re-running the block must not duplicate the job.
+python3 -c "$wiki_block_tmp" >/dev/null 2>&1
+wiki2=$(python3 -c "import json;print(len(json.load(open('$TMPDIR/cron-wiki/jobs.json'))['jobs']))")
+[ "$wiki2" = "1" ] && ok "idempotent: still 1 job on re-seed" || nope "self-wiki idempotent" "got $wiki2"
+
+# Migration: existing installs get MANAGED fields (prompt/deliver/skills) updated
+# in place, while schedule/enabled stay user-owned.
+echo '{"jobs": [{"id": "legacywiki1", "name": "self-wiki-maintenance-and-reminders", "prompt": "legacy wiki prompt", "skills": ["llm-wiki"], "skill": "llm-wiki", "schedule": {"kind": "cron", "expr": "0 10 * * 2", "display": "tue 10am"}, "schedule_display": "tue 10am", "enabled": false, "deliver": "origin", "workdir": "/workspace", "context_from": ["self"]}]}' > "$TMPDIR/cron-wiki/jobs.json"
+python3 -c "$wiki_block_tmp" >/dev/null 2>&1
+wiki_mig=$(python3 - "$TMPDIR/cron-wiki/jobs.json" <<'PY'
+import json, sys
+j = json.load(open(sys.argv[1]))["jobs"][0]
+prompt = j.get("prompt") or ""
+ok = (
+    len(json.load(open(sys.argv[1]))["jobs"]) == 1
+    and j.get("deliver") == "telegram"
+    and "Send only to the configured delivery target" in prompt
+    and "Telegram is not connected" not in prompt
+    and j.get("skills") == ["llm-wiki", "expense-tracker", "notion", "notion-pitfalls", "github-issues", "cron-job-inspection", "docs-accuracy-verification"]
+    and j.get("schedule", {}).get("expr") == "0 10 * * 2"
+    and j.get("enabled") is False
+)
+print("pass" if ok else "fail " + json.dumps({"deliver": j.get("deliver"), "expr": j.get("schedule", {}).get("expr"), "enabled": j.get("enabled")}))
+PY
+)
+case "$wiki_mig" in
+    pass) ok "migration: MANAGED telegram reconciled, schedule/enabled preserved" ;;
+    *) nope "self-wiki migration" "$wiki_mig" ;;
+esac
 if ! python3 -c 'import yaml' >/dev/null 2>&1; then
     echo "  SKIP YAML-backed seed merge tests (PyYAML unavailable)"
     echo ""
@@ -939,7 +1022,8 @@ mt_block=$(python3 - "$SEED_SCRIPT" <<'PY'
 import re, sys
 content = open(sys.argv[1], encoding="utf-8").read()
 blocks = re.findall(r"<<'PYEOF'[^\n]*\n(.*?)\nPYEOF", content, re.DOTALL)
-print(blocks[-1] if blocks else "")
+named = [b for b in blocks if "memory-triage" in b]
+print(named[-1] if named else "")
 PY
 )
 [ -n "$mt_block" ] && ok "seed has a memory-triage PYEOF block" || nope "memory-triage block" "not found"
@@ -1274,6 +1358,7 @@ before=$(cat "$SP/data/.hermes-seeded-scripts")
 seed_scripts_run || true
 [ "$before" = "$(cat "$SP/data/.hermes-seeded-scripts")" ] && [ -f "$SP/data/scripts/keep.sh" ] && [ -f "$SP/data/scripts/operator.sh" ] \
     && ok "re-running is idempotent" || nope "idempotence" "state changed"
+
 
 echo ""
 echo "========================================="
