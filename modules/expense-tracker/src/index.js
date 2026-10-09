@@ -67,8 +67,13 @@ async function main() {
         data: { facts: memory.listFacts().length },
     });
 
-    // Offers moved off the hermes-mounted data volume (#723).
-    if (cfg.pendingLearningPath && migratePendingLearning("data/pending-learning.json", cfg.pendingLearningPath)) {
+    // Offers moved off the hermes-mounted data volume (#723). With the bot on,
+    // the old file is deleted rather than imported.
+    const learningBotOn = Boolean(cfg.learningBotToken && cfg.learningBotChatId);
+    if (
+        cfg.pendingLearningPath &&
+        migratePendingLearning("data/pending-learning.json", cfg.pendingLearningPath, { discard: learningBotOn })
+    ) {
         logger.info({ event: "pending_learning_migrated", path: cfg.pendingLearningPath });
     }
 
@@ -168,7 +173,6 @@ async function main() {
     ];
 
     // With the learning bot on, a button press is the only confirm (#723).
-    const learningBotOn = Boolean(cfg.learningBotToken && cfg.learningBotChatId);
     let learningBot = null;
     if (learningBotOn) {
         learningBot = new LearningBot({
@@ -208,7 +212,9 @@ async function main() {
                 event: "health_check_started",
                 data: { port },
             });
-            learningBot?.start();
+            learningBot?.start().catch((err) => {
+                logger.error({ event: "learning_bot_start_failed", error: err.message });
+            });
             // Start IMAP idle loop in background
             imapHandler.idleLoop(onNewEmail).catch((err) => {
                 logger.error({ event: "imap_idle_error", error: err.message });

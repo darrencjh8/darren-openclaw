@@ -51,7 +51,15 @@ function sleep(ms, signal) {
 }
 
 export class LearningBot {
-    constructor({ token, chatId, registry, fetchFn = fetch, sleep: sleepFn = sleep }) {
+    constructor({
+        token,
+        chatId,
+        registry,
+        fetchFn = fetch,
+        sleep: sleepFn = sleep,
+        pollTimeoutMs = (POLL_TIMEOUT_S + 10) * 1000,
+    }) {
+        this._pollTimeoutMs = pollTimeoutMs;
         this._token = token;
         this._chatId = String(chatId);
         this._registry = registry;
@@ -157,7 +165,8 @@ export class LearningBot {
                     const updates = await this._call(
                         "getUpdates",
                         { offset: this._offset, timeout: POLL_TIMEOUT_S, allowed_updates: ["callback_query"] },
-                        signal,
+                        // A hung connection must not stall the loop forever.
+                        AbortSignal.any([signal, AbortSignal.timeout(this._pollTimeoutMs)]),
                     );
                     failures = 0;
                     for (const update of updates || []) {

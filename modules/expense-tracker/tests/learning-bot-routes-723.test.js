@@ -4,7 +4,7 @@
  */
 import { describe, expect, it, vi } from "vitest";
 
-const { postMock, start, stop } = vi.hoisted(() => ({ postMock: vi.fn(), start: vi.fn(), stop: vi.fn() }));
+const { postMock, start, stop } = vi.hoisted(() => ({ postMock: vi.fn(), start: vi.fn(async () => {}), stop: vi.fn(async () => {}) }));
 
 vi.mock("express", () => {
     const app = {

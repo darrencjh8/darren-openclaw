@@ -108,8 +108,14 @@ export class PendingLearning {
 /**
  * One-time move of the offer file from the shared data volume (#723). Copy then
  * delete, because the two paths are on different mounts. Never overwrites.
+ * With `discard` (the learning bot is on) the old file is only deleted: content
+ * from a volume other containers can reach must not become a live offer.
  */
-export function migratePendingLearning(oldPath, newPath) {
+export function migratePendingLearning(oldPath, newPath, { discard = false } = {}) {
+    if (discard) {
+        if (existsSync(oldPath)) unlinkSync(oldPath);
+        return false;
+    }
     if (!existsSync(oldPath) || existsSync(newPath)) return false;
     mkdirSync(dirname(newPath), { recursive: true });
     copyFileSync(oldPath, newPath);

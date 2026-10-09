@@ -277,6 +277,28 @@ describe("model-facing surface (#723)", () => {
     });
 });
 
+describe("poll timeout (#723)", () => {
+    it("a hung getUpdates is cut off and the loop backs off instead of blocking", async () => {
+        let calls = 0;
+        const fetchFn = vi.fn((url, init) => {
+            calls += 1;
+            return new Promise((_, reject) => {
+                init.signal.addEventListener("abort", () => reject(new Error("aborted")));
+            });
+        });
+        const sleeps = [];
+        const bot = new LearningBot({
+            token: "t", chatId: "1", registry: {}, fetchFn,
+            sleep: async (ms) => { sleeps.push(ms); bot._abort.abort(); },
+            pollTimeoutMs: 20,
+        });
+        await bot.start();
+        await bot._loopDone;
+        expect(calls).toBeGreaterThanOrEqual(1);
+        expect(sleeps.length).toBeGreaterThanOrEqual(1);
+    });
+});
+
 describe("config and store location (#723)", () => {
     it("reads the bot settings and defaults the store under state/", () => {
         const cfg = new Config({ LEARNING_BOT_TOKEN: "t", LEARNING_BOT_CHAT_ID: "9" });
@@ -299,5 +321,15 @@ describe("config and store location (#723)", () => {
         expect(migratePendingLearning(oldPath, newPath)).toBe(false);
         expect(readFileSync(newPath, "utf8")).toBe('{"offers":[1]}');
         expect(migratePendingLearning(join(dir, "none.json"), join(dir, "x", "y.json"))).toBe(false);
+    });
+
+    it("with the bot on, never imports the shared-volume file, only deletes it", () => {
+        const oldPath = join(dir, "data", "pending-learning.json");
+        const newPath = join(dir, "state", "pending-learning.json");
+        mkdirSync(join(dir, "data"));
+        writeFileSync(oldPath, '{"offers":[{"id":"PLANTED"}]}');
+        expect(migratePendingLearning(oldPath, newPath, { discard: true })).toBe(false);
+        expect(existsSync(oldPath)).toBe(false);
+        expect(existsSync(newPath)).toBe(false);
     });
 });
