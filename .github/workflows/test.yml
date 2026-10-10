@@ -199,6 +199,8 @@ jobs:
               run: python -m unittest modules.hermes.tests.test_slack_platform -v
             - name: Test Hermes log-issue triage
               run: python -m unittest discover -s modules/hermes/tests -p 'test_log_issue_triage_*.py' -v
+            - name: Test Hermes learning commands plugin
+              run: python -m unittest modules/hermes/tests/test_learning_commands_plugin.py -v
 
     # The Hermes image is the only artifact the new WebUI ships inside, and every
     # other check in this workflow is text-only: an unreachable pinned commit, a

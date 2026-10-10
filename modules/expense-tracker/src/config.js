@@ -69,10 +69,10 @@ export class Config {
     this.jevEndpoint = env.JEV_ENDPOINT || "";
     this.jevModel = env.JEV_MODEL || "";
     this.pendingLearningPath = env.PENDING_LEARNING_PATH || "state/pending-learning.json";
-    // Dedicated Telegram bot that answers learning offers with buttons (#723).
-    // Hermes polls its own bot, and Telegram allows one poller per token.
-    this.learningBotToken = env.LEARNING_BOT_TOKEN || "";
-    this.learningBotChatId = env.LEARNING_BOT_CHAT_ID || "";
+    // Hermes's own bot: send-only here, since Hermes polls it (#723). Both set
+    // turns on the /remember and /forget commands.
+    this.telegramBotToken = env.TELEGRAM_BOT_TOKEN || "";
+    this.telegramHomeChannel = env.TELEGRAM_HOME_CHANNEL || "";
     this.logLevel = env.LOG_LEVEL || "INFO";
   }
 
