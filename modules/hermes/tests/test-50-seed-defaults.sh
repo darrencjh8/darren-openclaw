@@ -1063,6 +1063,73 @@ esac
 # An install created under the old 09:00 default moves to 08:00 once (#579).
 # Only the exact legacy value is rewritten; a custom time is kept (above).
 echo ""
+echo "=== memory-compact weekly cron seeding ==="
+
+# Weekly compaction keeps MEMORY.md under its cap by moving detail to topic
+# files. It lives in its own block (memory-triage stays the last PYEOF block).
+mc_block=$(python3 - "$SEED_SCRIPT" <<'PY'
+import re, sys
+content = open(sys.argv[1], encoding="utf-8").read()
+blocks = re.findall(r"<<'PYEOF'[^\n]*\n(.*?)\nPYEOF", content, re.DOTALL)
+print(next((b for b in blocks if '"name": "memory-compact"' in b), ""))
+PY
+)
+[ -n "$mc_block" ] && ok "seed has a memory-compact PYEOF block" || nope "memory-compact block" "not found"
+
+rm -rf "$TMPDIR/cron-mc" && mkdir -p "$TMPDIR/cron-mc"
+echo '{"jobs": [{"id": "other1", "name": "memory-triage", "prompt": "x"}]}' > "$TMPDIR/cron-mc/jobs.json"
+mc_tmp=${mc_block//\/opt\/data\/cron\/jobs.json/$TMPDIR\/cron-mc\/jobs.json}
+mc_tmp=${mc_tmp//\/opt\/data\/config.yaml/$TMPDIR\/triage-config.yaml}
+python3 -c "$mc_tmp" >/dev/null 2>&1
+python3 -c "$mc_tmp" >/dev/null 2>&1
+
+mc_fields=$(python3 - "$TMPDIR/cron-mc/jobs.json" <<'PY'
+import json, sys
+jobs = json.load(open(sys.argv[1]))["jobs"]
+mc = [j for j in jobs if j.get("name") == "memory-compact"]
+if len(jobs) != 2 or len(mc) != 1:
+    print("fail jobs=%d compact=%d" % (len(jobs), len(mc))); sys.exit()
+j = mc[0]
+prompt = j.get("prompt") or ""
+checks = {
+    "weekly": j.get("schedule", {}).get("expr") == "30 8 * * 0",
+    "display": j.get("schedule_display") == "30 8 * * 0",
+    "enabled": j.get("enabled") is True,
+    "deliver": j.get("deliver") == "telegram",
+    "skills": j.get("skills") == ["hermes-troubleshooting"],
+    "uses_compact_cmd": "memory-triage.sh compact --plan" in prompt,
+    "dry_run_first": "--dry-run" in prompt,
+    "rollback": "memory-triage.sh restore" in prompt,
+    "topics": "memories/topics" in prompt,
+    "cap_from_config": "2800" in prompt,
+    "fresh_plan": "rm -f /opt/data/tmp/compact-plan.json" in prompt,
+    "digest": "🗜 Memory compaction" in prompt,
+    "triage_untouched": next(x for x in jobs if x["name"] == "memory-triage")["prompt"] == "x",
+}
+bad = [k for k, v in checks.items() if not v]
+print("pass" if not bad else "fail " + repr(bad))
+PY
+)
+case "$mc_fields" in
+    pass) ok "memory-compact: weekly Sun 08:30 · telegram · compact cmd, dry-run, rollback; idempotent" ;;
+    *) nope "memory-compact fields" "$mc_fields" ;;
+esac
+
+python3 - "$TMPDIR/cron-mc/jobs.json" <<'PY'
+import json, sys
+d = json.load(open(sys.argv[1]))
+for j in d["jobs"]:
+    if j["name"] == "memory-compact":
+        j["prompt"] = "old"; j["schedule_display"] = "0 6 * * 1"; j["enabled"] = False
+json.dump(d, open(sys.argv[1], "w"))
+PY
+python3 -c "$mc_tmp" >/dev/null 2>&1
+mc_mig=$(python3 -c "
+import json
+j=[j for j in json.load(open('$TMPDIR/cron-mc/jobs.json'))['jobs'] if j['name']=='memory-compact'][0]
+print('pass' if 'compact --plan' in j['prompt'] and j['schedule_display']=='0 6 * * 1' and j['enabled'] is False else 'fail')")
+[ "$mc_mig" = "pass" ] && ok "memory-compact: prompt migrated, schedule/enabled kept" || nope "memory-compact migration" "$mc_mig"
+
 echo "=== memory-triage legacy 09:00 schedule migration (#579) ==="
 rm -rf "$TMPDIR/cron-0900"
 mkdir -p "$TMPDIR/cron-0900"
