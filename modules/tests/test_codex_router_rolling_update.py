@@ -233,7 +233,7 @@ class CodexRouterRollingUpdateTests(unittest.TestCase):
         # The credentials and knobs the single router service used to carry.
         for key in (
             "CODEX_ROUTER_AUTH_PASSWORD",
-            "COMMANDCODE_API_KEY",
+            "MODEL_API_KEY",
             "CODEX_ROUTER_OPENCODE_ZEN_MODELS",
             "CODEX_ROUTER_AUTO_THINKING_TIMEOUT_SECONDS",
         ):
@@ -687,7 +687,7 @@ class CodexRouterRollingUpdateTests(unittest.TestCase):
         # password.
         normalise = deploy.index('for i in "${!COMPONENTS[@]}"; do')
         self.assertLess(normalise, deploy.index('check_var "CODEX_ROUTER_AUTH_PASSWORD"'))
-        self.assertLess(normalise, deploy.index('check_var "COMMANDCODE_API_KEY"'))
+        self.assertLess(normalise, deploy.index('check_var_optional "MODEL_API_KEY"'))
         self.assertLess(normalise, deploy.index("TARGETS=$($COMPOSE config --services"))
 
     def test_recovery_workflow_scopes_the_colour_lookup_to_this_project(self):
