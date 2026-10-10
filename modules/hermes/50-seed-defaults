@@ -778,7 +778,10 @@ CONTEXT: memory.write_approval is ON, so every memory write is staged to /opt/da
 SAFETY: the apply step is reversible by design. It takes a timestamped snapshot of the live memory files before mutating (rollback: bash /opt/data/scripts/memory-triage.sh restore --from <dir>), locks against concurrent runs, strictly validates the plan, caps it at 40 records, and appends an audit line to /opt/data/logs/memory-triage-audit.jsonl. Never bypass the script and never edit the memory files by hand.
 
 STEPS
-1. Run: bash /opt/data/scripts/memory-triage.sh list --full > /opt/data/tmp/triage-queue.json
+1. Start clean, then list the queue:
+   rm -f /opt/data/tmp/triage-queue.json /opt/data/tmp/triage-plan.json
+   bash /opt/data/scripts/memory-triage.sh list --full > /opt/data/tmp/triage-queue.json
+   The rm matters: the files are left over from the previous run, and write_file refuses to overwrite a file this task has not read, so a stale plan would block step 6 (or worse, step 7 would apply yesterday's plan).
    Always pass --full: without it the script truncates each op to 240 characters and you would judge a partial fact.
 2. Read that JSON. It has one entry per staged record with id, target (memory|user), origin, age_days, and the op text.
 3. Decide for every record in the oldest 40: approve, discard, or hold.
@@ -791,15 +794,29 @@ STEPS
    - then list that record in "discard" as well. Never file a fact and approve it in the same run — two copies of one fact will drift apart.
    Do the topic-file appends as the last thing before writing the plan, so a crash mid-run leaves the queue record staged rather than filed twice.
    Contradictory or unverifiable records are still held, never filed.
-6. Write the verdict plan to /opt/data/tmp/triage-plan.json as {"approve": ["<id>", ...], "discard": ["<id>", ...]}
+6. Write the verdict plan to /opt/data/tmp/triage-plan.json as {"approve": ["<id>", ...], "discard": ["<id>", ...]} (empty arrays when everything is held). If the write fails, stop and report it; never apply a plan you did not just write.
 7. Apply it: bash /opt/data/scripts/memory-triage.sh apply --plan /opt/data/tmp/triage-plan.json
    This replays approved ops through apply_memory_pending (bypassing the gate), moves discards into /opt/data/pending/memory-archive/<date>/, and snapshots live memory first. Read the printed report: applied_n, discarded_n, failed, remaining_n, snapshot.
-8. Reply with a SHORT digest (Telegram style, no code blocks, no raw JSON, max 5 lines of bullets):
-   - counts: applied / discarded / filed / held / still pending
-   - the 3-5 most valuable things now saved, one line each
-   - any topic file you appended to, by name
-   - any FAILED ops with their error, and anything deliberately held with a one-line reason
-   If nothing was staged, reply exactly: Memory queue empty — nothing staged.
+8. Reply with a SHORT digest for Telegram. Plain text, no code blocks, no raw JSON, no markdown tables. Use exactly this layout and drop any section that would be empty:
+
+🧠 Memory triage · <YYYY-MM-DD>
+✅ <n> applied · 🗑 <n> discarded · 📁 <n> filed · ⏸ <n> held · 📥 <n> pending
+Store: memory <used>/<cap> · user <used>/<cap>
+
+Saved
+• <one valuable fact now saved, one line>   (3-5 max)
+
+Filed
+• <topic file name>
+
+Held
+• <short id>, <short id>: <reason in under 12 words>
+
+Failed
+• <id>: <error>
+
+   Group held ids that share a reason on one line. Add "⚠️ store nearly full" to the Store line when either store is above 95%. Last line: snapshot <name>.
+   If nothing was staged, reply exactly: 🧠 Memory triage · queue empty, nothing staged.
 
 Do not stop until the apply step has actually run and been verified. If a step fails, say so plainly rather than reporting success."""
 

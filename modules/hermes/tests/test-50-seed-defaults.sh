@@ -972,6 +972,12 @@ checks = {
     "audit": "memory-triage-audit.jsonl" in prompt,
     "topic_rule": "memories/topics" in prompt,
     "untruncated_list": "list --full" in prompt,
+    # write_file refuses to overwrite a file the task never read; a plan left by
+    # the previous run must be removed before this run writes its own.
+    "fresh_plan": "rm -f /opt/data/tmp/triage-queue.json /opt/data/tmp/triage-plan.json" in prompt
+        and prompt.find("rm -f /opt/data/tmp/triage") < prompt.find("Write the verdict plan"),
+    "digest_header": "🧠 Memory triage" in prompt,
+    "digest_store_line": "Store:" in prompt,
 }
 bad = [k for k, v in checks.items() if not v]
 print("pass" if not bad else "fail " + repr(bad))
