@@ -200,6 +200,43 @@ for profile_dir in /opt/hermes-defaults/profiles/*/; do
     fi
 done
 
+# Set the default profile's display name. 'default' is the implicit root profile:
+# its HERMES_HOME is the root itself and every stored path, cron profile field, and
+# skills directory keys off that canonical id, so it is never renamed. The friendly
+# label is profile.yaml display_name, which is presentation-only. This only fills an
+# empty name, so an operator's own choice is never overwritten.
+python3 <<'PYEOF' || true
+# SEED_DEFAULT_PROFILE_DISPLAY_NAME
+import os
+import tempfile
+
+import yaml
+
+DEFAULT_PROFILE_DISPLAY_NAME = "friday"
+PROFILE_META = "/opt/data/profile.yaml"
+
+existing = {}
+if os.path.exists(PROFILE_META):
+    try:
+        with open(PROFILE_META) as f:
+            existing = yaml.safe_load(f) or {}
+    except yaml.YAMLError:
+        existing = {}
+if not isinstance(existing, dict):
+    existing = {}
+
+if not str(existing.get("display_name") or "").strip():
+    existing["display_name"] = DEFAULT_PROFILE_DISPLAY_NAME
+    directory = os.path.dirname(PROFILE_META) or "."
+    fd, tmp_path = tempfile.mkstemp(dir=directory, prefix=".profile.", suffix=".yaml")
+    with os.fdopen(fd, "w") as f:
+        yaml.safe_dump(existing, f, sort_keys=False, default_flow_style=False)
+    os.replace(tmp_path, PROFILE_META)
+    print("profile: default display name set to " + DEFAULT_PROFILE_DISPLAY_NAME)
+else:
+    print("profile: default display name already set")
+PYEOF
+
 # Migrate only routing fields for managed profiles while preserving user-owned settings.
 python3 - <<'PY'
 from pathlib import Path
@@ -1020,23 +1057,25 @@ try:
 except (FileNotFoundError, json.JSONDecodeError):
     jobs = []
 
-PROMPT = """Maintain the private wiki at /opt/data/home/wiki using its SCHEMA.md, the llm-wiki skill, and the full checklist in concepts/wiki-maintenance.md.
+PROMPT = """Maintain the private wiki using its SCHEMA.md, the llm-wiki skill, and the full checklist in concepts/wiki-maintenance.md. Resolve the wiki directory from ${WIKI_PATH:-/opt/data/home/wiki} and state the resolved path in your output.
 
 Every Monday run a complete refresh, not a spot check:
-1. Read wiki index, schema, log, all entities/concepts, and the previous run output. Inventory page/source counts before work.
-2. Fetch (do not checkout/modify) origin/main for /workspace/darren-openclaw, /workspace/codex-router, and /workspace/friday-memory. Compare with recorded baselines; snapshot each new revision and changed relevant Markdown/doc source into a new dated raw file BEFORE updating summaries. Preserve old raw captures unchanged. Inspect diffs, not just commit subjects. Record repo docs that are stale versus implementation/live state.
-3. Read current Actual Budget accounts for both Darren SGD and MYR; read expense-tracker card suffix facts using targeted card-mapping queries only; query the Notion Accounts data source for status, country, action/annual-fee/reapply/charge dates; read live codex-router status. Save sanitized dated source projections with verified SHA-256. Exclude full card/PAN values, passwords, credentials, Notion notes/relations/task IDs, and unrelated personal data. Never infer an account mapping.
-4. Read /opt/data/memories/USER.md, MEMORY.md, and relevant topic files. Compare durable, explicit user preferences and confirmed decisions with entities/darren.md. Record only useful stable preferences; omit birth dates, legal identifiers, credentials, and unrelated account details. User corrections supersede stale imported labels, but retain immutable snapshots and state why they are superseded.
-5. Update every affected knowledge page (not just the index): provenance, facts, balances, date windows, repo baselines, updated dates, source lists, backlinks, and index summary. Dates and balances are volatile: show capture date and refresh before presenting as current. Notion is read-only; do not edit Notion, Actual transactions, repositories, or deploy anything.
+0. Orient. Read the wiki index, schema, log, all entities/concepts, and the previous run output. Inventory page/source counts before work.
+1. Repos. Fetch (do not checkout/modify) origin/main for /workspace/darren-openclaw, /workspace/codex-router, and /workspace/friday-memory. Compare with recorded baselines; snapshot each new revision and changed relevant docs AND implementation/config/seed source into a new dated raw file BEFORE updating summaries. Preserve old raw captures unchanged. Inspect diffs, not just commit subjects. A merged commit is not evidence that production runs it.
+2. Finance sources. Read Actual Budget accounts and transactions for both Darren SGD and MYR; query the Notion Accounts data source a21b499b-79ae-497b-9221-0ad59a75e812 for status, country, action/annual-fee/reapply/charge dates AND the Notion Insurance Plans data source fb21acfd-b555-4a99-8b54-54ed43d4b020 for policy name, provider, status, country, and home-currency premium values; read expense-tracker card suffix/payee facts with targeted mapping queries only; read the portfolio-tracker using its read-only tools portfolio_get_all, portfolio_taxonomy, and portfolio_onedrive_status, and never call portfolio_sync (it writes to the portfolio and OneDrive); read live codex-router status. For every source record status, capture time, pagination (has_more), the queried date window, returned counts, and any truncation or error. Save sanitized dated source projections with verified SHA-256. Exclude full card/PAN values, passwords, credentials, statement passwords, Notion notes/relations/task IDs, and unrelated personal data. Never infer an account mapping.
+3. Memory. Read targeted Mnemosyne recall for durable preferences, corrections, and invalidations, plus /opt/data/memories/USER.md, MEMORY.md, and relevant topic files. Compare durable, explicit user preferences and confirmed decisions with entities/darren.md. A direct user correction outranks imported or merely observed values; record it with its effective date. Record only useful stable preferences; omit birth dates, legal identifiers, credentials, and unrelated account details. Retain immutable snapshots and state why a value is superseded.
+4. Reconcile. Keep expected (contractual amount/currency/frequency) and observed (ledger amount/currency/posting date) values in separate fields and never collapse them. Invoice, due, posting, renewal, and reimbursement dates are distinct. Record planned versus completed payment-route changes. Leave ambiguous mappings unresolved and flagged with the check that would settle them.
+5. Update every affected knowledge page (not just the index): provenance, facts, balances, date windows, repo baselines, updated dates, source lists, backlinks, and index summary. Dates and balances are volatile: show capture date and refresh before presenting as current. Notion, Actual, the portfolio, and PP are read-only; do not edit them and never deploy anything.
 6. Lint the WHOLE wiki mechanically: required frontmatter, taxonomy tags, all declared source files exist, every raw hash verifies, every page is indexed exactly once, index page count is correct, all wikilinks resolve, every entity/concept has inbound links, and each content page has at least two outbound wikilinks. Also scan active pages for stale/conflicting claims, accidental secrets/whole card numbers, and outdated dates. Fix what is evidence-backed; preserve ambiguities with a named settling check.
 7. If a public repo document materially conflicts with current implementation or verified live behavior, search GitHub for an existing issue first. File a concise non-sensitive issue only for a clear actionable mismatch, with source paths and evidence; never disclose Darren's account data or secrets. Do not file duplicates.
-8. Append a dated log entry for all changes and audit results. Report only meaningful diffs, upcoming account dates within 30 days, open conflicts/issues, any failed checks, and source freshness. Send the digest to Telegram; keep it short (Telegram style, no code blocks, no raw JSON).
+8. Report. Append a dated log entry for all changes and audit results. Write an audit artifact recording each source's status, capture time, and completeness, and each structural check's result. If any mandatory source is unavailable or truncated, the run is partial: make the first digest line "incomplete: <reason>" and never claim a failed or unverified check passed. Report only meaningful diffs, upcoming account dates needing attention, open conflicts/issues, any failed checks, and source freshness. Send the digest to Telegram; keep it short (Telegram style, no code blocks, no raw JSON).
+9. Reminders. Evaluate confirmed payment and action dates. A weekly cadence is insufficient for actions that need lead time: treat an action as due when action_date - today <= lead_days, with lead_days set per item (the daily self-wiki-reminders-daily job owns that cadence).
 
 If any source/tool is unavailable, preserve the last verified data with its old capture date, mark it stale/needs-verify, and report the blocker. Do not invent replacement data or claim a failed check passed."""
 
 MANAGED = {
     "prompt": PROMPT,
-    "skills": ["llm-wiki", "expense-tracker", "notion", "notion-pitfalls", "github-issues", "cron-job-inspection", "docs-accuracy-verification"],
+    "skills": ["llm-wiki", "expense-tracker", "notion", "notion-pitfalls", "github-issues", "cron-job-inspection", "docs-accuracy-verification", "portfolio-tracker"],
     "skill": "llm-wiki",
 }
 DEFAULTS = {
@@ -1070,6 +1109,73 @@ else:
         print("cron: self-wiki-maintenance-and-reminders migrated: " + ", ".join(sorted(changed)))
     else:
         print("cron: self-wiki-maintenance-and-reminders unchanged")
+
+with open(jobs_path, "w") as f:
+    json.dump({"jobs": jobs, "updated_at": datetime.datetime.now(datetime.timezone.utc).isoformat()}, f, indent=2)
+PYEOF
+
+# Seed self-wiki-reminders-daily cron job (MANAGED prompt/skills; delivery
+# telegram for new installs; existing installs keep their dashboard
+# schedule/enabled/deliver and only receive prompt/skill updates). A weekly
+# cadence cannot honour lead-time reminders (e.g. claim miles ~2 months before
+# renewal), so this runs daily.
+python3 <<'PYEOF' || true
+import os, json, uuid, datetime
+jobs_path = "/opt/data/cron/jobs.json"
+os.makedirs(os.path.dirname(jobs_path), exist_ok=True)
+try:
+    with open(jobs_path) as f:
+        data = json.load(f)
+    jobs = data.get("jobs", []) if isinstance(data, dict) else data
+except (FileNotFoundError, json.JSONDecodeError):
+    jobs = []
+
+PROMPT = """Check the private wiki for payment and action dates that need attention today, then report only what is due.
+
+1. Read ${WIKI_PATH:-/opt/data/home/wiki}/entities/accounts/important-dates.md and entities/accounts/recurring-payments.md. These are the single source of truth for confirmed payment dates, renewals, and action items.
+2. For each item compute days_left = action_date - today. Treat an item as due when days_left <= lead_days, with lead_days set per item type: claim/collect actions (for example claim miles before a card renewal) default to 60 days, cancellation or waiver actions default to 30 days, and a known payment date defaults to 7 days. Record the lead_days used for each item.
+3. Refresh only the dates needed for an imminent action (for example read Actual Budget for the recent posting of a bill that is due) so the reminder is not stale. Do not run a full weekly audit here.
+4. Suppress already-notified items: if an item was reported on a previous run and its date and amount are unchanged, do not send it again. Report it again only when its state changes (date, amount, or a new due window).
+5. After downtime, report overdue items once with an "overdue" marker rather than silently skipping them.
+6. Send a short Telegram digest: one line per due item with what to do, the date, and days left. If nothing is due, send a single short "nothing due today" line. Never claim a reminder was sent if delivery failed.
+"""
+
+MANAGED = {
+    "prompt": PROMPT,
+    "skills": ["llm-wiki", "expense-tracker", "notion", "cron-job-inspection"],
+    "skill": "llm-wiki",
+}
+DEFAULTS = {
+    "schedule": {"kind": "cron", "expr": "0 8 * * *", "display": "every day 8am"},
+    "schedule_display": "every day 8am",
+    "enabled": True,
+    "deliver": "telegram",
+}
+
+existing = next(
+    (j for j in jobs if isinstance(j, dict) and j.get("name") == "self-wiki-reminders-daily"),
+    None,
+)
+
+if existing is None:
+    jobs.append({
+        "id": uuid.uuid4().hex[:12],
+        "name": "self-wiki-reminders-daily",
+        "context_from": ["self"],
+        "next_run_at": None,
+        "created_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        **DEFAULTS,
+        **MANAGED,
+    })
+    print("cron: self-wiki-reminders-daily seeded")
+else:
+    changed = [key for key, value in MANAGED.items() if existing.get(key) != value]
+    for key in changed:
+        existing[key] = MANAGED[key]
+    if changed:
+        print("cron: self-wiki-reminders-daily migrated: " + ", ".join(sorted(changed)))
+    else:
+        print("cron: self-wiki-reminders-daily unchanged")
 
 with open(jobs_path, "w") as f:
     json.dump({"jobs": jobs, "updated_at": datetime.datetime.now(datetime.timezone.utc).isoformat()}, f, indent=2)
