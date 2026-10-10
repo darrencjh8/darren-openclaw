@@ -28,6 +28,16 @@ Subcommands
                                 Apply a verdict plan:
                                   {"approve": ["<id>", ...], "discard": ["<id>", ...]}
                                 Prints a JSON result report.
+  compact --plan FILE [--dry-run]
+                                Shrink MEMORY.md/USER.md in place (weekly job):
+                                  {"target": "memory",
+                                   "operations": [{"action": "replace"|"remove",
+                                                   "old_text": "...", "content": "..."}],
+                                   "topic_appends": [{"file": "infra.md", "line": "..."}]}
+                                Only replace/remove, and the net change must not
+                                grow the store. Topic lines are appended (skipped
+                                if already present) before memory is touched, so a
+                                crash leaves a duplicate, never a lost fact.
   snapshots                     List memory snapshots, newest first.
   restore --from DIR            Copy a snapshot's files back over the live ones.
 
@@ -321,6 +331,115 @@ def cmd_apply(args) -> int:
     return 0 if report["ok"] else 1
 
 
+# ----------------------------------------------------------- compact -------
+MAX_COMPACT_OPS = 30
+TOPICS_DIR = Path(HERMES_HOME) / "memories" / "topics"
+
+
+def _validate_compact(plan) -> str | None:
+    if not isinstance(plan, dict):
+        return "plan must be a JSON object"
+    if plan.get("target", "memory") not in MEMORY_FILES:
+        return "target must be 'memory' or 'user'"
+    ops = plan.get("operations")
+    if not isinstance(ops, list) or not ops:
+        return "operations must be a non-empty list"
+    if len(ops) > MAX_COMPACT_OPS:
+        return f"{len(ops)} operations > cap {MAX_COMPACT_OPS}"
+    growth = 0
+    for op in ops:
+        if not isinstance(op, dict) or op.get("action") not in ("replace", "remove"):
+            return "compaction only allows replace/remove operations"
+        old = op.get("old_text")
+        if not isinstance(old, str) or not old.strip():
+            return "every operation needs a non-empty old_text"
+        content = (op.get("content") or "") if op["action"] == "replace" else ""
+        if not isinstance(content, str):
+            return "content must be a string"
+        growth += len(content) - len(old)
+    if growth > 0:
+        return f"plan would grow the store by {growth} chars; compaction must shrink it"
+    appends = plan.get("topic_appends") or []
+    if not isinstance(appends, list):
+        return "topic_appends must be a list"
+    for a in appends:
+        if not isinstance(a, dict) or not isinstance(a.get("line"), str) or not a["line"].strip():
+            return "each topic_append needs a non-empty line"
+        name = a.get("file")
+        if (not isinstance(name, str) or Path(name).name != name
+                or not name.endswith(".md") or name.startswith(".")):
+            return f"topic file must be a plain *.md name, got {name!r}"
+        if "\n" in a["line"]:
+            return "topic lines must be single lines"
+    return None
+
+
+def _append_topic(name: str, line: str) -> bool:
+    TOPICS_DIR.mkdir(parents=True, exist_ok=True)
+    path = TOPICS_DIR / name
+    existing = path.read_text(encoding="utf-8") if path.exists() else ""
+    if line in existing.splitlines():
+        return False
+    with open(path, "a", encoding="utf-8") as f:
+        if existing and not existing.endswith("\n"):
+            f.write("\n")
+        f.write(line + "\n")
+    return True
+
+
+def cmd_compact(args) -> int:
+    def fail(error: str, code: int = 2) -> int:
+        print(json.dumps({"ok": False, "error": error}, indent=2))
+        return code
+
+    try:
+        plan = json.loads(Path(args.plan).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as e:
+        return fail(f"unreadable plan: {e}")
+    err = _validate_compact(plan)
+    if err:
+        return fail(err)
+
+    target = plan.get("target", "memory")
+    ops = plan["operations"]
+    appends = plan.get("topic_appends") or []
+    live = Path(HERMES_HOME) / "memories" / MEMORY_FILES[target]
+    before = len(live.read_text(encoding="utf-8")) if live.exists() else 0
+
+    if args.dry_run:
+        print(json.dumps({"ok": True, "dry_run": True, "target": target,
+                          "operations": ops, "topic_appends": appends,
+                          "chars_before": before}, ensure_ascii=False, indent=2))
+        return 0
+
+    lock = _acquire_lock()  # noqa: F841  (held for the whole mutation)
+    snapshot = _make_snapshot()
+    filed = [f"{a['file']}: {a['line']}" for a in appends if _append_topic(a["file"], a["line"])]
+
+    try:
+        result = apply_memory_pending(
+            {"action": "batch", "target": target, "operations": ops}, load_on_disk_store())
+    except Exception as e:
+        result = {"success": False, "error": f"{type(e).__name__}: {e}"}
+
+    after = len(live.read_text(encoding="utf-8")) if live.exists() else 0
+    report = {
+        "ok": bool(result.get("success")),
+        "target": target,
+        "ops_n": len(ops),
+        "topic_lines_added": filed,
+        "chars_before": before,
+        "chars_after": after,
+        "snapshot": snapshot["dir"],
+        "audit_log": str(AUDIT_LOG),
+    }
+    if not report["ok"]:
+        report["error"] = result.get("error", "unknown")
+    _audit({"event": "compact", "plan": str(args.plan), **report})
+    print(json.dumps(report, ensure_ascii=False, indent=2))
+    return 0 if report["ok"] else 1
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -341,6 +460,11 @@ def main() -> int:
     p_apply.add_argument("--no-snapshot", action="store_true",
                          help="skip the pre-apply memory snapshot (not recommended)")
     p_apply.set_defaults(func=cmd_apply)
+
+    p_compact = sub.add_parser("compact", help="shrink MEMORY.md/USER.md in place")
+    p_compact.add_argument("--plan", required=True)
+    p_compact.add_argument("--dry-run", action="store_true", help="validate + show, do not mutate")
+    p_compact.set_defaults(func=cmd_compact)
 
     p_snaps = sub.add_parser("snapshots", help="list memory snapshots")
     p_snaps.set_defaults(func=cmd_snapshots)
