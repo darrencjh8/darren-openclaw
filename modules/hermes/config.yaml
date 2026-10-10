@@ -250,6 +250,14 @@ platforms:
             # Ignore other Slack bots; Hermes only answers allowlisted humans.
             allow_bots: "none"
 
+    # Telegram stays enabled by TELEGRAM_BOT_TOKEN (no `enabled:` key here, so
+    # the env decides). Rich Messages (Bot API sendRichMessage) render real
+    # Markdown tables, which the memory digests use; without them Hermes
+    # rewrites tables into bullet groups.
+    telegram:
+        extra:
+            rich_messages: true
+
 quick_commands:
     portfolio-sync:
         type: exec

@@ -317,6 +317,32 @@ chown -R hermes:hermes /opt/data/mnemosyne 2>/dev/null || true
 su -s /bin/sh hermes -c 'HERMES_HOME=/opt/data timeout 300 uv pip install --target /opt/data/lazy-packages --no-deps "mnemosyne-hermes==0.7.1" >/dev/null 2>&1' || true
 su -s /bin/sh hermes -c 'HERMES_HOME=/opt/data timeout 300 uv pip install --target /opt/data/lazy-packages "mnemosyne-memory[embeddings]==3.15.1" >/dev/null 2>&1' || true
 
+# Cross-session recall (operator decision 2026-10-11). Mnemosyne reads
+# cross_session only from its own config.yaml (mnemosyne.core.config
+# resolve_beam_runtime; file beats env), not from Hermes' memory.mnemosyne
+# keys. With the default false, a memory written in one session is invisible
+# to every other. Only the one top-level line is rewritten, keeping the
+# file's comments and other keys; an absent file gets just this key.
+python3 <<'PYCS' || true
+import os, re
+path = "/opt/data/mnemosyne/config.yaml"
+try:
+    text = open(path, encoding="utf-8").read()
+except FileNotFoundError:
+    text = ""
+if re.search(r"(?m)^cross_session:", text):
+    new = re.sub(r"(?m)^cross_session:.*$", "cross_session: true", text)
+else:
+    new = text + ("" if text.endswith("\n") or not text else "\n") + "cross_session: true\n"
+if new != text:
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path + ".tmp", "w", encoding="utf-8") as handle:
+        handle.write(new)
+    os.replace(path + ".tmp", path)
+    print("mnemosyne: cross_session set to true")
+PYCS
+chown hermes:hermes /opt/data/mnemosyne/config.yaml 2>/dev/null || true
+
 # Configure gh CLI authentication. The helper installs GitHub App auth when the
 # App configuration is complete, and otherwise installs the scoped fallback PAT.
 # The PAT arrives as a root-only secret file rather than an ambient environment
@@ -354,8 +380,11 @@ try:
     with open(jobs_path) as f:
         data = json.load(f)
     jobs = data.get("jobs", []) if isinstance(data, dict) else data
-except (FileNotFoundError, json.JSONDecodeError):
+except FileNotFoundError:
     jobs = []
+except json.JSONDecodeError as error:
+    # Never treat an unreadable file as empty: rewriting it wipes every cron job.
+    raise SystemExit(f"refusing to replace corrupt cron jobs file: {error}")
 
 wanted = {
     "name": "github-app-auth-refresh",
@@ -402,8 +431,9 @@ if not found:
     })
     print("cron: github-app-auth-refresh seeded (no_agent)")
 
-with open(jobs_path, "w") as f:
+with open(jobs_path + ".tmp", "w") as f:
     json.dump({"jobs": jobs, "updated_at": datetime.datetime.now(datetime.timezone.utc).isoformat()}, f, indent=2)
+os.replace(jobs_path + ".tmp", jobs_path)
 PYEOF
 
 # The container's own codex-router checkout is the driver dev-loop sessions
@@ -513,8 +543,11 @@ try:
     with open(jobs_path) as f:
         data = json.load(f)
     jobs = data.get("jobs", []) if isinstance(data, dict) else data
-except (FileNotFoundError, json.JSONDecodeError):
+except FileNotFoundError:
     jobs = []
+except json.JSONDecodeError as error:
+    # Never treat an unreadable file as empty: rewriting it wipes every cron job.
+    raise SystemExit(f"refusing to replace corrupt cron jobs file: {error}")
 if not any(j.get("name") == "memory-backup" for j in jobs if isinstance(j, dict)):
     jobs.append({
         "id": uuid.uuid4().hex[:12],
@@ -529,8 +562,9 @@ if not any(j.get("name") == "memory-backup" for j in jobs if isinstance(j, dict)
         "next_run_at": None,
         "created_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
     })
-    with open(jobs_path, "w") as f:
+    with open(jobs_path + ".tmp", "w") as f:
         json.dump({"jobs": jobs, "updated_at": datetime.datetime.now(datetime.timezone.utc).isoformat()}, f, indent=2)
+    os.replace(jobs_path + ".tmp", jobs_path)
     print("cron: memory-backup seeded")
 ' || true
 fi
@@ -649,8 +683,11 @@ try:
     with open(jobs_path) as f:
         data = json.load(f)
     jobs = data.get("jobs", []) if isinstance(data, dict) else data
-except (FileNotFoundError, json.JSONDecodeError):
+except FileNotFoundError:
     jobs = []
+except json.JSONDecodeError as error:
+    # Never treat an unreadable file as empty: rewriting it wipes every cron job.
+    raise SystemExit(f"refusing to replace corrupt cron jobs file: {error}")
 
 found = False
 for j in jobs:
@@ -696,8 +733,9 @@ if not found:
     })
     print("cron: portfolio-daily-sync seeded (no_agent)")
 
-with open(jobs_path, "w") as f:
+with open(jobs_path + ".tmp", "w") as f:
     json.dump({"jobs": jobs, "updated_at": datetime.datetime.now(datetime.timezone.utc).isoformat()}, f, indent=2)
+os.replace(jobs_path + ".tmp", jobs_path)
 PYEOF
 
 # Seed daily log issue triage. The workdir is deliberately artifact-only: the
@@ -818,8 +856,11 @@ try:
     with open(jobs_path) as f:
         data = json.load(f)
     jobs = data.get("jobs", []) if isinstance(data, dict) else data
-except (FileNotFoundError, json.JSONDecodeError):
+except FileNotFoundError:
     jobs = []
+except json.JSONDecodeError as error:
+    # Never treat an unreadable file as empty: rewriting it wipes every cron job.
+    raise SystemExit(f"refusing to replace corrupt cron jobs file: {error}")
 
 PROMPT = """Compact the always-loaded Hermes memory on this machine (HERMES_HOME=/opt/data).
 
@@ -842,11 +883,20 @@ STEPS
    Fix the plan if it is refused. If the write or validation fails, stop and report it.
 7. Apply: bash /opt/data/scripts/memory-triage.sh compact --plan /opt/data/tmp/compact-plan.json
    Read the report: ok, chars_before, chars_after, topic_lines_added, snapshot.
-8. Reply for Telegram. Plain text, no code blocks, no raw JSON:
+8. Reply for Telegram as Markdown (Telegram renders tables). No code blocks, no raw JSON:
 
-🗜 Memory compaction · <YYYY-MM-DD>
-<store>: <before> → <after> / <cap> chars
-• merged <n> · moved <n> to topics · removed <n>
+🗜 *Memory compaction · <YYYY-MM-DD>*
+
+| Store | Before | After | Cap |
+|---|---|---|---|
+| <store> | <before> | <after> | <cap> |
+
+| Change | Count |
+|---|---|
+| Merged | <n> |
+| Moved to topics | <n> |
+| Removed | <n> |
+
 Moved to: <topic file names>
 Snapshot <name>
 
@@ -872,8 +922,8 @@ MANAGED = {
     "skill": "hermes-troubleshooting",
 }
 DEFAULTS = {
-    "schedule": {"kind": "cron", "expr": "30 8 * * 0", "display": "30 8 * * 0"},
-    "schedule_display": "30 8 * * 0",
+    "schedule": {"kind": "cron", "expr": "30 7 * * 0", "display": "30 7 * * 0"},
+    "schedule_display": "30 7 * * 0",
     "enabled": True,
     "deliver": "telegram",
 }
@@ -897,10 +947,19 @@ else:
     changed = [key for key, value in MANAGED.items() if existing.get(key) != value]
     for key in changed:
         existing[key] = MANAGED[key]
+    # One-time move off the previous default (compact must free room before Sunday's 08:00 memory-triage). Only the exact legacy
+    # value is rewritten, so a dashboard-chosen time is never reverted.
+    LEGACY_SCHEDULE = "30 8 * * 0"
+    schedule = existing.get("schedule")
+    if isinstance(schedule, dict) and schedule.get("expr") == LEGACY_SCHEDULE:
+        existing["schedule"] = dict(DEFAULTS["schedule"])
+        existing["schedule_display"] = DEFAULTS["schedule_display"]
+        changed.append("schedule")
     print("cron: memory-compact migrated: " + ", ".join(sorted(changed)) if changed else "cron: memory-compact unchanged")
 
-with open(jobs_path, "w") as f:
+with open(jobs_path + ".tmp", "w") as f:
     json.dump({"jobs": jobs, "updated_at": datetime.datetime.now(datetime.timezone.utc).isoformat()}, f, indent=2)
+os.replace(jobs_path + ".tmp", jobs_path)
 PYEOF
 
 # Seed memory-triage cron job (idempotent — drains the memory write-approval queue).
@@ -915,8 +974,11 @@ try:
     with open(jobs_path) as f:
         data = json.load(f)
     jobs = data.get("jobs", []) if isinstance(data, dict) else data
-except (FileNotFoundError, json.JSONDecodeError):
+except FileNotFoundError:
     jobs = []
+except json.JSONDecodeError as error:
+    # Never treat an unreadable file as empty: rewriting it wipes every cron job.
+    raise SystemExit(f"refusing to replace corrupt cron jobs file: {error}")
 
 PROMPT = """Triage the Hermes memory write-approval queue on this machine (HERMES_HOME=/opt/data).
 
@@ -944,26 +1006,35 @@ STEPS
 6. Write the verdict plan to /opt/data/tmp/triage-plan.json as {"approve": ["<id>", ...], "discard": ["<id>", ...]} (empty arrays when everything is held). If the write fails, stop and report it; never apply a plan you did not just write.
 7. Apply it: bash /opt/data/scripts/memory-triage.sh apply --plan /opt/data/tmp/triage-plan.json
    This replays approved ops through apply_memory_pending (bypassing the gate), moves discards into /opt/data/pending/memory-archive/<date>/, and snapshots live memory first. Read the printed report: applied_n, discarded_n, failed, remaining_n, snapshot.
-8. Reply with a SHORT digest for Telegram. Plain text, no code blocks, no raw JSON, no markdown tables. Use exactly this layout and drop any section that would be empty:
+8. Reply with a SHORT digest for Telegram, formatted as Markdown (Telegram renders tables). No code blocks, no raw JSON. Drop any section that would be empty:
 
-🧠 Memory triage · <YYYY-MM-DD>
-✅ <n> applied · 🗑 <n> discarded · 📁 <n> filed · ⏸ <n> held · 📥 <n> pending
-Store: memory <used>/<cap> · user <used>/<cap>
+🧠 *Memory triage · <YYYY-MM-DD>*
 
-Saved
-• <one valuable fact now saved, one line>   (3-5 max)
+| Result | Count |
+|---|---|
+| ✅ Applied | <n> |
+| 🗑 Discarded | <n> |
+| 📁 Filed to topics | <n> |
+| ⏸ Held | <n> |
+| 📥 Still pending | <n> |
 
-Filed
-• <topic file name>
+| Store | Used | Cap |
+|---|---|---|
+| memory | <used> | <cap> |
+| user | <used> | <cap> |
 
-Held
-• <short id>, <short id>: <reason in under 12 words>
+*Saved* — one bullet per valuable fact now saved (3-5 max)
+*Filed* — one bullet per topic file name
+*Failed* — one bullet per id: error
 
-Failed
-• <id>: <error>
+*Needs you* — every held record whose age_days is 7 or more, as a table so Darren can decide (approve or discard it with /memory):
 
-   Group held ids that share a reason on one line. Add "⚠️ store nearly full" to the Store line when either store is above 95%. Last line: snapshot <name>.
-   If nothing was staged, reply exactly: 🧠 Memory triage · queue empty, nothing staged.
+| Id | Days held | Fact (short) | Why held |
+|---|---|---|---|
+
+Held records younger than 7 days go on one line: "⏸ Held: <ids>: <reason in under 12 words>".
+Add "⚠️ store nearly full" under the store table when either store is above 95%. Last line: snapshot <name>.
+If nothing was staged, reply exactly: 🧠 Memory triage · queue empty, nothing staged.
 
 Do not stop until the apply step has actually run and been verified. If a step fails, say so plainly rather than reporting success."""
 
@@ -1039,8 +1110,9 @@ else:
     else:
         print("cron: memory-triage unchanged")
 
-with open(jobs_path, "w") as f:
+with open(jobs_path + ".tmp", "w") as f:
     json.dump({"jobs": jobs, "updated_at": datetime.datetime.now(datetime.timezone.utc).isoformat()}, f, indent=2)
+os.replace(jobs_path + ".tmp", jobs_path)
 PYEOF
 
 # Seed self-wiki-maintenance-and-reminders cron job (MANAGED prompt/skills;
@@ -1054,19 +1126,22 @@ try:
     with open(jobs_path) as f:
         data = json.load(f)
     jobs = data.get("jobs", []) if isinstance(data, dict) else data
-except (FileNotFoundError, json.JSONDecodeError):
+except FileNotFoundError:
     jobs = []
+except json.JSONDecodeError as error:
+    # Never treat an unreadable file as empty: rewriting it wipes every cron job.
+    raise SystemExit(f"refusing to replace corrupt cron jobs file: {error}")
 
 PROMPT = """Maintain the private wiki using its SCHEMA.md, the llm-wiki skill, and the full checklist in concepts/wiki-maintenance.md. Resolve the wiki directory from ${WIKI_PATH:-/opt/data/home/wiki} and state the resolved path in your output.
 
 Every Monday run a complete refresh, not a spot check:
-0. Orient. Read the wiki index, schema, log, all entities/concepts, and the previous run output. Inventory page/source counts before work.
+0. Orient. From the wiki root run `/opt/hermes/.venv/bin/python3 scripts/lint.py` and keep its report. Read the wiki index, schema, log, and the previous run output, then only the pages the lint report flags or that the repo/source diffs below touch; the lint already covers structure, so do not read every page. Do a full read of all entities/concepts instead when the day of the month is 7 or less (the first Monday of the month), or when scripts/lint.py is missing, exits with an error, or prints no report: a missing lint is not a clean wiki. State which mode you used. Inventory page/source counts before work.
 1. Repos. Fetch (do not checkout/modify) origin/main for /workspace/darren-openclaw, /workspace/codex-router, and /workspace/friday-memory. Compare with recorded baselines; snapshot each new revision and changed relevant docs AND implementation/config/seed source into a new dated raw file BEFORE updating summaries. Preserve old raw captures unchanged. Inspect diffs, not just commit subjects. A merged commit is not evidence that production runs it.
 2. Finance sources. Read Actual Budget accounts and transactions for both Darren SGD and MYR; query the Notion Accounts data source a21b499b-79ae-497b-9221-0ad59a75e812 for status, country, action/annual-fee/reapply/charge dates AND the Notion Insurance Plans data source fb21acfd-b555-4a99-8b54-54ed43d4b020 for policy name, provider, status, country, and home-currency premium values; read expense-tracker card suffix/payee facts with targeted mapping queries only; read the portfolio-tracker using its read-only tools portfolio_get_all, portfolio_taxonomy, and portfolio_onedrive_status, and never call portfolio_sync (it writes to the portfolio and OneDrive); read live codex-router status. For every source record status, capture time, pagination (has_more), the queried date window, returned counts, and any truncation or error. Save sanitized dated source projections with verified SHA-256. Exclude full card/PAN values, passwords, credentials, statement passwords, Notion notes/relations/task IDs, and unrelated personal data. Never infer an account mapping.
 3. Memory. Do not call Mnemosyne recall tools: they answer memory_unavailable in cron sessions by design (skip_contexts: cron). Instead, read the live memory DB read-only at /opt/data/mnemosyne/data/mnemosyne.db (SQLite mode=ro; the gateway holds the write lock) plus /opt/data/memories/USER.md, MEMORY.md, and relevant topic files. Compare durable, explicit user preferences and confirmed decisions with entities/darren.md. A direct user correction outranks imported or merely observed values; record it with its effective date. Record only useful stable preferences; omit birth dates, legal identifiers, credentials, and unrelated account details. Retain immutable snapshots and state why a value is superseded.
 4. Reconcile. Keep expected (contractual amount/currency/frequency) and observed (ledger amount/currency/posting date) values in separate fields and never collapse them. Invoice, due, posting, renewal, and reimbursement dates are distinct. Record planned versus completed payment-route changes. Leave ambiguous mappings unresolved and flagged with the check that would settle them.
 5. Update every affected knowledge page (not just the index): provenance, facts, balances, date windows, repo baselines, updated dates, source lists, backlinks, and index summary. Dates and balances are volatile: show capture date and refresh before presenting as current. Notion, Actual, the portfolio, and PP are read-only; do not edit them and never deploy anything.
-6. Lint the WHOLE wiki mechanically: required frontmatter, taxonomy tags, all declared source files exist, every raw hash verifies, every page is indexed exactly once, index page count is correct, all wikilinks resolve, every entity/concept has inbound links, and each content page has at least two outbound wikilinks. Also scan active pages for stale/conflicting claims, accidental secrets/whole card numbers, and outdated dates. Fix what is evidence-backed; preserve ambiguities with a named settling check.
+6. Lint. Re-run scripts/lint.py after your edits and fix every defect it reports that is evidence-backed; if it is missing or fails, do the full read of step 0 and check the same rules by hand: required frontmatter, taxonomy tags, every declared source file exists, every raw hash verifies, every page is indexed exactly once, index page count is correct, all wikilinks resolve, every entity/concept has inbound links, and each content page has at least two outbound wikilinks. Also scan the pages you read for stale/conflicting claims, accidental secrets/whole card numbers, and outdated dates. Fix what is evidence-backed; preserve ambiguities with a named settling check.
 7. If a public repo document materially conflicts with current implementation or verified live behavior, search GitHub for an existing issue first. File a concise non-sensitive issue only for a clear actionable mismatch, with source paths and evidence; never disclose Darren's account data or secrets. Do not file duplicates.
 8. Report. Append a dated log entry for all changes and audit results. Write an audit artifact recording each source's status, capture time, and completeness, and each structural check's result. If any mandatory source is unavailable or truncated, the run is partial: make the first digest line "incomplete: <reason>" and never claim a failed or unverified check passed. Report only meaningful diffs, upcoming account dates needing attention, open conflicts/issues, any failed checks, and source freshness. Send the digest to Telegram; keep it short (Telegram style, no code blocks, no raw JSON).
 9. Reminders. Evaluate confirmed payment and action dates. A weekly cadence is insufficient for actions that need lead time: treat an action as due when action_date - today <= lead_days, with lead_days set per item (the daily self-wiki-reminders-daily job owns that cadence).
@@ -1079,8 +1154,8 @@ MANAGED = {
     "skill": "llm-wiki",
 }
 DEFAULTS = {
-    "schedule": {"kind": "cron", "expr": "0 9 * * 1", "display": "every monday 9am"},
-    "schedule_display": "every monday 9am",
+    "schedule": {"kind": "cron", "expr": "0 4 * * 1", "display": "every monday 4am"},
+    "schedule_display": "every monday 4am",
     "enabled": True,
     "deliver": "telegram",
 }
@@ -1105,13 +1180,22 @@ else:
     changed = [key for key, value in MANAGED.items() if existing.get(key) != value]
     for key in changed:
         existing[key] = MANAGED[key]
+    # One-time move off the previous default (a heavy weekly run belongs in the quiet 04:00 SGT slot). Only the exact legacy
+    # value is rewritten, so a dashboard-chosen time is never reverted.
+    LEGACY_SCHEDULE = "0 9 * * 1"
+    schedule = existing.get("schedule")
+    if isinstance(schedule, dict) and schedule.get("expr") == LEGACY_SCHEDULE:
+        existing["schedule"] = dict(DEFAULTS["schedule"])
+        existing["schedule_display"] = DEFAULTS["schedule_display"]
+        changed.append("schedule")
     if changed:
         print("cron: self-wiki-maintenance-and-reminders migrated: " + ", ".join(sorted(changed)))
     else:
         print("cron: self-wiki-maintenance-and-reminders unchanged")
 
-with open(jobs_path, "w") as f:
+with open(jobs_path + ".tmp", "w") as f:
     json.dump({"jobs": jobs, "updated_at": datetime.datetime.now(datetime.timezone.utc).isoformat()}, f, indent=2)
+os.replace(jobs_path + ".tmp", jobs_path)
 PYEOF
 
 # Seed self-wiki-reminders-daily cron job (MANAGED prompt/skills; delivery
@@ -1127,8 +1211,11 @@ try:
     with open(jobs_path) as f:
         data = json.load(f)
     jobs = data.get("jobs", []) if isinstance(data, dict) else data
-except (FileNotFoundError, json.JSONDecodeError):
+except FileNotFoundError:
     jobs = []
+except json.JSONDecodeError as error:
+    # Never treat an unreadable file as empty: rewriting it wipes every cron job.
+    raise SystemExit(f"refusing to replace corrupt cron jobs file: {error}")
 
 PROMPT = """Check the private wiki for payment and action dates that need attention today, then report only what is due.
 
@@ -1146,8 +1233,8 @@ MANAGED = {
     "skill": "llm-wiki",
 }
 DEFAULTS = {
-    "schedule": {"kind": "cron", "expr": "0 8 * * *", "display": "every day 8am"},
-    "schedule_display": "every day 8am",
+    "schedule": {"kind": "cron", "expr": "15 8 * * *", "display": "every day 8:15am"},
+    "schedule_display": "every day 8:15am",
     "enabled": True,
     "deliver": "telegram",
 }
@@ -1172,13 +1259,22 @@ else:
     changed = [key for key, value in MANAGED.items() if existing.get(key) != value]
     for key in changed:
         existing[key] = MANAGED[key]
+    # One-time move off the previous default (staggered off memory-triage's 08:00 start so two agent sessions do not overlap). Only the exact legacy
+    # value is rewritten, so a dashboard-chosen time is never reverted.
+    LEGACY_SCHEDULE = "0 8 * * *"
+    schedule = existing.get("schedule")
+    if isinstance(schedule, dict) and schedule.get("expr") == LEGACY_SCHEDULE:
+        existing["schedule"] = dict(DEFAULTS["schedule"])
+        existing["schedule_display"] = DEFAULTS["schedule_display"]
+        changed.append("schedule")
     if changed:
         print("cron: self-wiki-reminders-daily migrated: " + ", ".join(sorted(changed)))
     else:
         print("cron: self-wiki-reminders-daily unchanged")
 
-with open(jobs_path, "w") as f:
+with open(jobs_path + ".tmp", "w") as f:
     json.dump({"jobs": jobs, "updated_at": datetime.datetime.now(datetime.timezone.utc).isoformat()}, f, indent=2)
+os.replace(jobs_path + ".tmp", jobs_path)
 PYEOF
 
 # Disable profile gateways (workers don't need their own gateways — they compete for Telegram token)
