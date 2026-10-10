@@ -146,7 +146,19 @@ test_revision_labels_are_wired() {
     fi
 }
 
+# Test: glibc malloc arenas are capped for hermes. The WebUI runs ~37 threads;
+# uncapped, glibc keeps up to 8 arenas per core and freed memory is not reused
+# across them, so RSS climbs and stays high (1.4 GB observed 2026-10-10).
+test_hermes_malloc_arena_cap() {
+    if get_hermes_env | grep -qE -- '- MALLOC_ARENA_MAX=2$'; then
+        ok "hermes caps glibc malloc arenas (MALLOC_ARENA_MAX=2)"
+    else
+        nope "hermes MALLOC_ARENA_MAX" "MALLOC_ARENA_MAX=2 not in the hermes environment"
+    fi
+}
+
 test_revision_labels_are_wired
+test_hermes_malloc_arena_cap
 test_has_safe_root
 test_has_opt_data
 test_has_workspace

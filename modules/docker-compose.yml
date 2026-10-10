@@ -305,6 +305,11 @@ services:
             - NOTION_API_KEY=${NOTION_API_KEY}
             - POLLINATIONS_API_KEY=${POLLINATIONS_API_KEY}
             - EXPENSE_TRACKER_DATA=/opt/data/expense-tracker-data
+            # Cap glibc malloc arenas. The WebUI runs ~37 threads; uncapped,
+            # glibc keeps up to 8 arenas per core and memory freed in one is
+            # not reused by another, so RSS climbs and stays high. 2 is enough
+            # under the GIL.
+            - MALLOC_ARENA_MAX=2
         mem_limit: 3g
         networks:
             - default
