@@ -1,6 +1,6 @@
 providers:
     codex-router:
-        name: Codex Router
+        name: Model Router
         api: http://codex-router:4100/v1
         api_key: local
         transport: responses
@@ -17,8 +17,6 @@ fallback_providers:
 
 agent:
     reasoning_effort: medium
-    disabled_toolsets:
-        - moa
 
 display:
     show_reasoning: false

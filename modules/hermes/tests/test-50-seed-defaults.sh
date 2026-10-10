@@ -644,6 +644,7 @@ agent:
   reasoning_effort: low
   disabled_toolsets:
     - user-owned
+    - moa
 memory:
   memory_enabled: true
   user_profile_enabled: true
@@ -667,15 +668,17 @@ isolated = config["memory"]["memory_enabled"] is False and config["memory"]["use
 preserved = config["approvals"]["mode"] == "custom-preserved"
 routed = config["model"] == {
     "provider": "custom:codex-router",
-    "default": "commandcode/deepseek/deepseek-v4.1-flash",
+    "default": "auto-thinking",
 }
 escalating = config["fallback_providers"] == [
-    {"provider": "custom:codex-router", "model": "auto-thinking"}
+    {"provider": "deepseek", "model": "deepseek-flash"}
 ]
 # The stale profile carries reasoning_effort low; the baked profile pins high. The
 # effort must migrate, and the profile's own agent keys must survive it, or a
 # bumped effort stays on disk at its old value and the change never takes effect.
 effort = config["agent"]["reasoning_effort"] == "high"
+# moa is no longer disabled anywhere: the migration drops it from the live
+# profile while the operator's own entry survives.
 agent_preserved = config["agent"]["disabled_toolsets"] == ["user-owned"]
 # A retired MCP server (ktmb-booking) must leave the live profile file, or its
 # connection fails on every boot; a server the profile still ships must stay.
@@ -714,10 +717,10 @@ isolated = isinstance(memory, dict) and memory.get("memory_enabled") is False an
 preserved = config["approvals"]["mode"] == "custom-preserved"
 routed = config["model"] == {
     "provider": "custom:codex-router",
-    "default": "commandcode/deepseek/deepseek-v4.1-flash",
+    "default": "auto-thinking",
 }
 escalating = config["fallback_providers"] == [
-    {"provider": "custom:codex-router", "model": "auto-thinking"}
+    {"provider": "deepseek", "model": "deepseek-flash"}
 ]
 effort = config["agent"]["reasoning_effort"] == "high"
 print("pass" if isolated and preserved and routed and escalating and effort else "fail")
@@ -727,6 +730,39 @@ if [ "$null_memory_status" -eq 0 ] && [ "$null_memory_result" = "pass" ]; then
     ok "null reviewer memory migrates safely"
 else
     nope "null reviewer memory migration" "status=$null_memory_status result=$null_memory_result output=$null_memory_output"
+fi
+
+# moa is no longer disabled anywhere: the migration drops it from a live
+# profile's disabled_toolsets. A lone moa leaves no empty key behind; a moa
+# beside an operator-owned entry keeps that entry.
+cat > "$migration_target/config.yaml" <<'YAML'
+model:
+  provider: stale
+  default: stale
+fallback_providers:
+  - provider: stale
+agent:
+  reasoning_effort: low
+  disabled_toolsets:
+    - moa
+memory:
+  memory_enabled: true
+YAML
+moa_status=0
+moa_output=$(python3 -c "$migration_block" 2>&1) || moa_status=$?
+moa_result=$(python3 - "$migration_target/config.yaml" <<'PY'
+import sys
+import yaml
+
+config = yaml.safe_load(open(sys.argv[1], encoding="utf-8"))
+agent = config.get("agent") or {}
+print("pass" if "disabled_toolsets" not in agent and agent.get("reasoning_effort") == "high" else "fail")
+PY
+)
+if [ "$moa_status" -eq 0 ] && [ "$moa_result" = "pass" ]; then
+    ok "lone moa disable is dropped without leaving an empty key"
+else
+    nope "lone moa disable migration" "status=$moa_status result=$moa_result output=$moa_output"
 fi
 
 # A scalar, null, list or absent `agent` block must not crash the boot migration

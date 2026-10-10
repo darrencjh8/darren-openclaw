@@ -77,9 +77,9 @@ Don't answer from the session system-prompt header alone, and don't answer from 
   - `model.provider` + `model.default` — configured primary chat model
   - `fallback_providers` — where the chat loop drops after 3 failed attempts
   - `delegation.provider`/`model` — subagents (distinct from main chat!)
-  - `auxiliary.*` (vision, web_extract, compression, approval, triage_specifier, profile_describer, kanban_decomposer) — each task type has its own provider/model, plus exactly one direct `deepseek-flash` `fallback_chain` on every slot
+  - `auxiliary.*` (vision, web_extract, compression, approval, triage_specifier, profile_describer, kanban_decomposer) — each task type runs the `auto-thinking` pool with one direct `deepseek-flash` `fallback_chain` as the terminal rung
 
-**A model visible in config is often fallback-only or slot-specific.** Example (a host, 2026-09): `deepseek-flash` is never a *router-backed* primary — the router-backed primaries are `auto-thinking` (main, delegation, approval, and three of the four profiles) and `commandcode/deepseek/deepseek-v4.1-flash` (the six auxiliary slots that are not the approval judge, plus the `code-reviewer` profile). `approval` uses `auto-thinking`. `deepseek-flash` appears inside `fallback_providers`, one auxiliary `fallback_chain` per slot, and nowhere as a primary. So "why DeepSeek?" means either the codex-router primary was down/overloaded and the route fell through to the direct `deepseek` provider, or the user is reading the fallback list and mistaking it for the active brain. Answer with a table of role → provider → model so the status is visible.
+**A model visible in config is often fallback-only or slot-specific.** Every primary — main, delegation, approval, every auxiliary slot, all four profiles — runs the `auto-thinking` pool. `deepseek-flash` appears only as the terminal fallback: inside `fallback_providers` and one `fallback_chain` per auxiliary slot, and nowhere as a primary. So "why DeepSeek?" means the pool itself was down and the route fell through to the direct `deepseek` provider, or the user is reading the fallback list and mistaking it for the active brain. Answer with a table of role → provider → model so the status is visible.
 
 **Diagnostic:** `env | grep -iE 'model|provider|deepseek'` (redact key values), then read `/opt/data/config.yaml` sections `model:`, `fallback_providers:`, `auxiliary:`, `delegation:`; per-profile overrides live at `/opt/data/profiles/<name>/config.yaml`.
 
@@ -383,8 +383,10 @@ Find the real path and source it directly. Never assume `~/.env` is correct.
 
 **Fix:**
 ```bash
-hermes config set agent.disabled_toolsets '["moa"]'
+hermes config set agent.disabled_toolsets '[]'
 ```
+Keep the `moa` toolset enabled: it is no longer disabled in the baked config, so
+do not re-add it here.
 Backend routing: `image_gen.provider` (plugin backends: fal, openai, openai-codex, xai, krea, deepinfra, openrouter). Model: `image_gen.model` or `hermes tools` → Image Generation. Default FAL needs `FAL_KEY` in .env or a Nous Portal subscription. Unknown top-level keys (e.g. `image_gen.provider`) save with a warning — that's expected.
 
 **Pitfall — openai-codex provider (ChatGPT OAuth) returns no image:** As of 2026-08, `chatgpt.com/backend-api/codex` accepts the request (HTTP 200) but never emits an `image_generation_call` event — the host model apologizes or fakes the call as literal text (`<image_generation.generate_image .../>`). Function-style tools get HTTP 400. Account/backend entitlement wall, not config-fixable: don't burn retries, fall back to Pollinations. A ChatGPT login is also NOT usable as an OpenAI platform key — that path needs `OPENAI_API_KEY` with separate billing.
@@ -395,25 +397,26 @@ Full catalog + provider table + diagnostic transcript: `references/image-gen-bac
 
 ## Vision input (auxiliary.vision)
 
-Vision routes through codex-router on the Command Code DeepSeek Flash model, with one
-direct `deepseek-flash` fallback. Both the primary and the fallback model are natively
-multimodal. The fallback is the last rung of the chain: the Command Code route has no
-cross-provider hop of its own, so the direct `deepseek` route is where it ends:
+Vision runs the `auto-thinking` pool, with the direct vanilla `deepseek-flash`
+route as its terminal fallback when the pool is unavailable:
 
 ```yaml
 auxiliary:
     vision:
         provider: custom:codex-router
-        model: commandcode/deepseek/deepseek-v4.1-flash
+        model: auto-thinking
         fallback_chain:
             - provider: deepseek
               model: deepseek-flash
 ```
 
+The same pooled-primary shape holds for `web_extract`, `compression`,
+`approval`, `kanban_decomposer`, `triage_specifier`, and `profile_describer`.
+
 Setting it explicitly:
 ```bash
 hermes config set auxiliary.vision.provider custom:codex-router
-hermes config set auxiliary.vision.model commandcode/deepseek/deepseek-v4.1-flash
+hermes config set auxiliary.vision.model auto-thinking
 ```
 Those two commands leave no `fallback_chain`, and neither does any other write to
 `/opt/data/config.yaml`: `50-seed-defaults` replaces the whole `auxiliary` subtree from

@@ -229,6 +229,19 @@ for name in managed_routing_profiles:
             agent = {}
             target["agent"] = agent
         agent["reasoning_effort"] = default_agent["reasoning_effort"]
+    # The moa toolset is no longer disabled anywhere: drop it from a live
+    # profile's disabled_toolsets while keeping every other entry the operator
+    # owns. An emptied list is removed outright so the file matches the baked
+    # canonical shape (no disabled_toolsets key at all).
+    agent = target.get("agent")
+    if isinstance(agent, dict):
+        disabled = agent.get("disabled_toolsets")
+        if isinstance(disabled, list) and "moa" in disabled:
+            kept = [entry for entry in disabled if entry != "moa"]
+            if kept:
+                agent["disabled_toolsets"] = kept
+            else:
+                del agent["disabled_toolsets"]
     if name == "code-reviewer":
         memory = target.get("memory")
         if not isinstance(memory, dict):

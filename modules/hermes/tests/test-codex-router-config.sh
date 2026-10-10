@@ -1,5 +1,5 @@
 #!/bin/bash
-# Verify Hermes uses the pooled Codex Router provider through Chat Completions.
+# Verify Hermes uses the pooled Model Router provider.
 set -euo pipefail
 
 RED='\033[0;31m' GREEN='\033[0;32m' NC='\033[0m'
@@ -15,12 +15,17 @@ has_provider() {
     grep -Eq '^providers:$' "$CONFIG" && grep -Eq '^    codex-router:$' "$CONFIG"
 }
 
-has_provider && ok "named Codex Router provider exists" || nope "named Codex Router provider" "missing"
+has_provider && ok "named Model Router provider exists" || nope "named Model Router provider" "missing"
+grep -Eq '^        name: Model Router$' "$CONFIG" && ok "provider is labeled Model Router" || nope "provider label" "missing or wrong"
 grep -Eq '^        api: http://codex-router:4100/v1$' "$CONFIG" && ok "provider uses internal router URL" || nope "provider URL" "missing or wrong"
 grep -Eq '^        transport: responses$' "$CONFIG" && ok "provider pins Responses transport" || nope "provider transport" "missing"
-grep -Eq '^    provider: custom:codex-router$' "$CONFIG" && ok "Hermes uses named Codex Router provider" || nope "Hermes provider" "missing"
+grep -Eq '^    provider: custom:codex-router$' "$CONFIG" && ok "Hermes uses named Model Router provider" || nope "Hermes provider" "missing"
 grep -Eq '^    default: auto-thinking$' "$CONFIG" && ok "main model routes via auto-thinking" || nope "main model" "missing"
-grep -Eq '^        model: commandcode/deepseek/deepseek-v4\.1-flash$' "$CONFIG" && ok "auxiliary slots use the Command Code DeepSeek Flash route" || nope "auxiliary model" "missing"
+if grep -Rq 'model: commandcode/' "$CONFIG" "$SCRIPT_DIR/../profiles"; then
+    nope "no commandcode primaries" "found commandcode/ model reference"
+else
+    ok "no commandcode primaries (Command Code retirement-ready)"
+fi
 
 if grep -REq 'gpt-5\.6-(terra|luna|sol)-[123]' "$SCRIPT_DIR/../config.yaml" "$SCRIPT_DIR/../profiles"; then
     nope "no account-pinned GPT aliases" "found account suffix"

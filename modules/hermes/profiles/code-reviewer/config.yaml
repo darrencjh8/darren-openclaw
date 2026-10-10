@@ -8,29 +8,24 @@
 
 providers:
     codex-router:
-        name: Codex Router
+        name: Model Router
         api: http://codex-router:4100/v1
         api_key: local
         transport: responses
-        default_model: commandcode/deepseek/deepseek-v4.1-flash
+        default_model: auto-thinking
 
 model:
     provider: custom:codex-router
-    default: commandcode/deepseek/deepseek-v4.1-flash
+    default: auto-thinking
 
-# Reviews run the Command Code DeepSeek Flash model normally. The fallback is the
-# auto-thinking pool. That is an availability fallback of last resort, not a
-# strength guarantee: the pool picks its own model per hop and can itself serve
-# deepseek-flash. Fix or reroute the primary rather than relying on the fallback
-# to keep a review at a particular tier.
+# Reviews run the auto-thinking pool. The fallback is the direct deepseek route:
+# the terminal rung when the pool itself is unavailable.
 fallback_providers:
-    - provider: custom:codex-router
-      model: auto-thinking
+    - provider: deepseek
+      model: deepseek-flash
 
 agent:
     reasoning_effort: high
-    disabled_toolsets:
-        - moa
 
 display:
     show_reasoning: false

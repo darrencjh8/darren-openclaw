@@ -722,15 +722,14 @@ echo "--- Codex Router ---"
   check_var_optional "LLM_FINAL_FALLBACK_PROVIDER" ""
   check_var_optional "LLM_FINAL_FALLBACK_MODEL" ""
   echo "  [External Providers]"
-  # Required: six Hermes auxiliary slots pin commandcode/deepseek/deepseek-v4.1-flash
-  # as their primary, and the router only publishes commandcode/* while this key is
-  # present. A model the router never publishes does not fire the slots'
-  # deepseek-flash fallback_chain, so an unset key breaks compression, vision,
-  # web_extract, kanban_decomposer, triage_specifier, and profile_describer outright
-  # instead of degrading. Fail the deploy loudly rather than ship that state.
-  # NOTE: the router-side premises (commandcode/* published only while the key is
-  # present; unpublished models do not fire fallback_chain) are not verifiable in
-  # this repo (modules/codex-router is checked out at deploy time); see #606.
+  # Optional while Command Code is still configured: the router only publishes
+  # commandcode/* while this key is present. No Hermes route pins a
+  # commandcode/* primary anymore (every primary is the auto-thinking pool),
+  # so an unset key only shrinks the pool's hop choices; nothing breaks.
+  # Keep the check loud until Command Code is retired, then drop the key.
+  # NOTE: the router-side premise (commandcode/* published only while the key
+  # is present) is not verifiable in this repo (modules/codex-router is
+  # checked out at deploy time); see #606.
   check_var "COMMANDCODE_API_KEY" ""
   check_var_optional "OPENCODE_GO_API_KEY" ""
   check_var_optional "OPENCODE_ZEN_API_KEY" ""
