@@ -1788,6 +1788,7 @@ cases = [
     ("self-wiki-maintenance-and-reminders", "0 9 * * 1", "every monday 9am", "0 4 * * 1", "every monday 4am"),
     ("memory-compact", "30 8 * * 0", "30 8 * * 0", "30 7 * * 0", "30 7 * * 0"),
     ("self-wiki-reminders-daily", "0 8 * * *", "every day 8am", "15 8 * * *", "every day 8:15am"),
+    ("memory-triage", "0 9 * * *", "0 9 * * *", "0 8 * * *", "0 8 * * *"),
 ]
 bad = []
 for name, old, old_disp, new, new_disp in cases:
@@ -1799,6 +1800,7 @@ for name, old, old_disp, new, new_disp in cases:
         os.makedirs(d, exist_ok=True)
         path = os.path.join(d, "jobs.json")
         json.dump({"jobs": [{"id": "x1", "name": name, "prompt": "old", "enabled": False,
+                             "next_run_at": "2026-01-05T09:00:00+08:00",
                              "schedule": {"kind": "cron", "expr": expr, "display": disp},
                              "schedule_display": disp}]}, open(path, "w"))
         code = block.replace("/opt/data/cron/jobs.json", path).replace("/opt/data/config.yaml", os.path.join(d, "none.yaml"))
@@ -1809,6 +1811,11 @@ for name, old, old_disp, new, new_disp in cases:
             bad.append(f"{name}/{label}: {j['schedule']}")
         if label == "legacy" and (j["schedule"].get("display") != new_disp or j.get("schedule_display") != new_disp):
             bad.append(f"{name}/display: {j['schedule']} {j.get('schedule_display')}")
+        # A migrated job must drop the instant computed from the old expr, or the
+        # scheduler re-anchors past the first new occurrence without firing it.
+        want_next = None if label == "legacy" else "2026-01-05T09:00:00+08:00"
+        if j.get("next_run_at") != want_next:
+            bad.append(f"{name}/{label} next_run_at: {j.get('next_run_at')}")
 print("pass" if not bad else "fail " + repr(bad))
 PY
 )
