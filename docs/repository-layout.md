@@ -3,7 +3,7 @@
 ```
 darren-openclaw/
 ├── modules/
-│   ├── docker-compose.yml            # The five runtime services
+│   ├── docker-compose.yml            # The seven runtime services (router front + two colours)
 │   ├── deploy.sh                     # Env validation + build + compose up + health checks
 │   ├── build.sh                      # Image builds only (no downtime)
 │   ├── codex-router-auth-recovery.py
