@@ -5,7 +5,7 @@
 #
 # Usage:
 #   1. Get a runner registration token from:
-#      https://github.com/darrencjh8/darren-openclaw/settings/actions/runners/new
+#      https://github.com/${REPO}/settings/actions/runners/new
 #      (Settings → Actions → Runners → New self-hosted runner)
 #   2. Run: bash scripts/setup-runner.sh <REGISTRATION_TOKEN>
 #
@@ -23,8 +23,8 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m'
 
-REPO="darrencjh8/darren-openclaw"
-REPO_PATH="/home/darren/workspace/hermes/darren-openclaw"
+REPO="${GITHUB_REPO:-darrencjh8/darren-openclaw}"
+REPO_PATH="${REPO_PATH:-/home/darren/workspace/hermes/${REPO#*/}}"
 RUNNER_HOME="/home/runner"
 RUNNER_DIR="$RUNNER_HOME/actions-runner"
 RUNNER_VERSION="2.323.0"
@@ -187,4 +187,4 @@ echo "  Verify:"
 echo "    systemctl status $SERVICE_NAME"
 echo ""
 echo "  Check GitHub:"
-echo "    https://github.com/darrencjh8/darren-openclaw/settings/actions/runners"
+echo "    https://github.com/${REPO}/settings/actions/runners"

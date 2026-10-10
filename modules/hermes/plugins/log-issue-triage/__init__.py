@@ -17,12 +17,14 @@ import threading
 import uuid
 from pathlib import Path
 
+# The main repo can move; TRIAGE_MAIN_REPO retargets every in-repo component.
+_MAIN_REPO = os.environ.get("TRIAGE_MAIN_REPO") or "darrencjh8/darren-openclaw"
 _COMPONENT_REPOS = {
-    "hermes": "darrencjh8/darren-openclaw",
-    "expense-tracker": "darrencjh8/darren-openclaw",
-    "portfolio-tracker": "darrencjh8/darren-openclaw",
+    "hermes": _MAIN_REPO,
+    "expense-tracker": _MAIN_REPO,
+    "portfolio-tracker": _MAIN_REPO,
     "codex-router": "darrencjh8/codex-router",
-    "actual-api": "darrencjh8/darren-openclaw",
+    "actual-api": _MAIN_REPO,
 }
 _COMPONENTS = tuple(_COMPONENT_REPOS)
 _SNAPSHOT_ROOT = Path("/opt/data/log-issue-triage/snapshots")
@@ -543,7 +545,7 @@ def _publish_cron_failure(args):
     finding = _CRON_FINDINGS.get(finding_id)
     if not finding:
         return {"status": "blocked", "detail": "use a finding ID returned by the current cron health check"}
-    repo = "darrencjh8/darren-openclaw"
+    repo = _MAIN_REPO
     title = f"[cron] {finding['job_name']}: {finding['kind']}"
     body = (
         "## Scheduler health finding\n\n"
