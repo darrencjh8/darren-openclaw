@@ -21,11 +21,7 @@ x-codex-router-color: &codex-router-color
         - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}
         # External provider keys: discovery skips a provider whose key is
         # absent, so an unset value simply leaves those models unpublished.
-        # COMMANDCODE_API_KEY is the exception: Hermes pins six auxiliary
-        # slots to a commandcode/* model, so an unpublished Command Code
-        # provider breaks them outright instead of degrading. deploy.sh
-        # validates it as required.
-        - COMMANDCODE_API_KEY=${COMMANDCODE_API_KEY:-}
+        - MODEL_API_KEY=${MODEL_API_KEY:-}
         - OPENCODE_GO_API_KEY=${OPENCODE_GO_API_KEY:-}
         - OPENCODE_ZEN_API_KEY=${OPENCODE_ZEN_API_KEY:-}
         - OPENCODE_API_KEY=${OPENCODE_API_KEY:-}
@@ -262,11 +258,11 @@ services:
         environment:
             - HERMES_WRITE_SAFE_ROOT=/opt/data:/workspace:/tmp
             - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
-            # The dev-loop round adjudicator runs in this container and calls the
-            # Command Code API with this key directly, so the key has to reach
-            # Hermes and not only codex-router. HOME here is /root and there is no
-            # ~/.env, so the driver's file fallback cannot supply it either.
-            - COMMANDCODE_API_KEY=${COMMANDCODE_API_KEY}
+            # In-container Meta-direct callers read MODEL_API_KEY (the env name
+            # the upstream meta-ai provider looks for), so the key has to reach
+            # Hermes and not only codex-router. HOME here is /root and there is
+            # no ~/.env, so a file fallback cannot supply it either.
+            - MODEL_API_KEY=${MODEL_API_KEY:-}
             # The adjudicator's primary route is TypeSafe's official jev endpoint,
             # keyed by this. Optional: without it the adjudicator uses auto-thinking.
             - JEV_API_KEY=${JEV_API_KEY:-}
