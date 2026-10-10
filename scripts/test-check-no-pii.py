@@ -171,7 +171,13 @@ for _line in ("Transaction Ref: 2609015555123456",
               "Account 501234567890 credited",
               'TELEGRAM_ALLOWED_USERS="487000111"',
               "TELEGRAM_ALLOWED_USERS=487000111,1111111111",
-              "chat_id: 735000111"):
+              "chat_id: 735000111",
+              "Transaction reference: SG26059900000000000001",
+              "ref 012609000000000000EPS1234567 posted",
+              "Ref 2609015555123456Billing",
+              "ssh user" + "@192.168.1.23",
+              "To: <someone.real@" + "gmail.com>",  # split so gitleaks skips it
+              "cc xy@" + "hotmail.com"):
     if not _gen(_line):
         print("  MISS")
         failures.append(f"generic: should flag but did not: {_line}")
@@ -182,7 +188,10 @@ for _line in ("Transaction Ref: 2609000000001111",
               "timeout 30000 ms, 260 tests, version 1.2.3",
               "amount 12345678901 in an unrelated sentence",
               'DBS = "506df429-0000-0000-0000-000000000001"',
-              'TELEGRAM_BOT_TOKEN="123456789:AAH-fake"'):
+              'TELEGRAM_BOT_TOKEN="123456789:AAH-fake"',
+              "manifest hash 11380558258791fe3 and 8746247484570942053158915adf",
+              "docker host 172.17.0.1 and placeholder <prod-host>",
+              "To: <accountholder@example.com>"):
     if _gen(_line):
         print("  FALSE+")
         failures.append(f"generic: false positive: {_line}")

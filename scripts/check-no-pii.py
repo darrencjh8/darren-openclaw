@@ -116,7 +116,17 @@ LONG_NUMBER_RE = re.compile(r"(?<![0-9A-Za-z-])[0-9]{12,20}(?![0-9A-Za-z])")
 TELEGRAM_ID_RE = re.compile(
     r"(?i)(?:telegram_[a-z_]*(?:user|chat|channel)[a-z_]*|chat_?id|user_?id)[\"'`]?\s*[:=]\s*[\"'`]?"
     r"(?P<ids>-?[0-9]{6,15}(?:\s*,\s*-?[0-9]{6,15})*)")
-LONG_LABEL = "unlisted long number (synthetic? add to scripts/pii-synthetic-numbers.txt)"
+# A bank reference glued to letters ("SG2605...", "...880EPS7678794", "...037Billing").
+# Upper-case only, so lower-case hex hashes are left alone.
+ALNUM_REF_RE = re.compile(
+    r"(?<![0-9A-Za-z])(?:[A-Z]{2,4}[0-9]{12,}[A-Z0-9]*|[0-9]{12,}[A-Z][A-Za-z0-9]*)")
+PRIVATE_IP_RE = re.compile(r"(?<![0-9.])192\.168\.[0-9]{1,3}\.[0-9]{1,3}(?![0-9])")
+PERSONAL_EMAIL_RE = re.compile(
+    r"(?i)[A-Za-z0-9._%+-]+@(?:gmail|googlemail|hotmail|yahoo|outlook|live|icloud|me|msn)\.[a-z.]+")
+REF_LABEL = "unlisted bank reference (synthetic? add to scripts/pii-synthetic-numbers.txt)"
+IP_LABEL = "home LAN IP (use a placeholder like <prod-host>)"
+EMAIL_LABEL = "personal email address (use @example.com)"
+LONG_LABEL ="unlisted long number (synthetic? add to scripts/pii-synthetic-numbers.txt)"
 TELEGRAM_LABEL = "unlisted Telegram id (synthetic? add to scripts/pii-synthetic-numbers.txt)"
 
 
@@ -132,6 +142,14 @@ def _generic_matcher(allow: set[str]):
     def hits(line: str) -> list[tuple[int, int, str]]:
         found = [(m.start(), m.end(), LONG_LABEL) for m in LONG_NUMBER_RE.finditer(line)
                  if m.group() not in allow]
+        # "<digits>Billing" is a reference glued to the next word; its digits decide.
+        found += [(m.start(), m.end(), REF_LABEL) for m in ALNUM_REF_RE.finditer(line)
+                  if m.group() not in allow
+                  and re.match(r"[0-9]*", m.group()).group() not in allow]
+        found += [(m.start(), m.end(), IP_LABEL) for m in PRIVATE_IP_RE.finditer(line)
+                  if m.group() not in allow]
+        found += [(m.start(), m.end(), EMAIL_LABEL) for m in PERSONAL_EMAIL_RE.finditer(line)
+                  if m.group() not in allow]
         for m in TELEGRAM_ID_RE.finditer(line):
             base = m.start("ids")
             for t in re.finditer(r"-?[0-9]+", m.group("ids")):

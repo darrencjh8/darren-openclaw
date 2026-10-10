@@ -160,18 +160,18 @@ ls ~/.hermes/cron/output/
 # NOTE: All production commands require explicit approval per project rules
 
 # Backup
-ssh darren@192.168.68.51 'cd ~/darren-openclaw && git pull'
+ssh darren@<prod-host> 'cd ~/darren-openclaw && git pull'
 
 # Deploy configs
-scp -r gateway/hermes/ darren@192.168.68.51:~/darren-openclaw/gateway/hermes/
-scp gateway/docker-compose.yml darren@192.168.68.51:~/darren-openclaw/gateway/docker-compose.yml
+scp -r gateway/hermes/ darren@<prod-host>:~/darren-openclaw/gateway/hermes/
+scp gateway/docker-compose.yml darren@<prod-host>:~/darren-openclaw/gateway/docker-compose.yml
 
 # Build & start
-ssh darren@192.168.68.51 'cd ~/darren-openclaw/gateway && docker compose build expense-tracker && docker compose up -d hermes expense-tracker'
+ssh darren@<prod-host> 'cd ~/darren-openclaw/gateway && docker compose build expense-tracker && docker compose up -d hermes expense-tracker'
 
 # Verify
-ssh darren@192.168.68.51 'docker logs hermes --tail 20'
-ssh darren@192.168.68.51 'docker compose ps'
+ssh darren@<prod-host> 'docker logs hermes --tail 20'
+ssh darren@<prod-host> 'docker compose ps'
 ```
 
 ## Phase 10: OpenClaw Decommission
@@ -179,7 +179,7 @@ ssh darren@192.168.68.51 'docker compose ps'
 ```bash
 # NOTE: Only after 48h stable validation
 
-ssh darren@192.168.68.51 << 'ENDSSH'
+ssh darren@<prod-host> << 'ENDSSH'
 cd ~/darren-openclaw/gateway
 docker compose stop openclaw
 # → Verify Hermes still processes emails
