@@ -113,7 +113,7 @@ jobs:
               env:
                   DEPLOY_COMPONENTS: ${{ steps.changes.outputs.components || 'all' }}
               run: |
-                  mkdir -p /home/runner/data/{expense-tracker/data,portfolio-tracker/data,hermes/{data,workspace}}
+                  mkdir -p /home/runner/data/{expense-tracker/data,expense-tracker/state,portfolio-tracker/data,hermes/{data,workspace}}
                   if [ "${DEPLOY_COMPONENTS}" = "all" ]; then
                       bash ./modules/build.sh
                   else
@@ -165,6 +165,8 @@ jobs:
                   NOTION_API_KEY: ${{ secrets.NOTION_API_TOKEN }}
                   POLLINATIONS_API_KEY: ${{ secrets.POLLINATIONS_API_KEY }}
                   JEV_API_KEY: ${{ secrets.JEV_API_KEY }}
+                  LEARNING_BOT_TOKEN: ${{ secrets.LEARNING_BOT_TOKEN }}
+                  LEARNING_BOT_CHAT_ID: ${{ secrets.LEARNING_BOT_CHAT_ID }}
                   TELEGRAM_ALLOWED_USERS: ${{ vars.TELEGRAM_ALLOWED_USERS }}
                   TELEGRAM_HOME_CHANNEL: ${{ vars.TELEGRAM_HOME_CHANNEL }}
                   SLACK_ALLOWED_USERS: ${{ vars.SLACK_ALLOWED_USERS }}
