@@ -145,7 +145,7 @@ assert each is rejected with the offending field highlighted and config file unc
 - **FR-003**: remind_hour MUST accept null (= no Telegram nudge); send_hour is required.
 - **FR-004**: auto_doneable and enabled MUST be inline toggles on the table row.
 - **FR-005**: Preview MUST be side-effect-free (no journal writes); enforced server-side
-  by a preview flag the engine honors (dependency on 031 engine support).
+  by the engine's preview flag (`reminder_compile{preview:true}`, 031 contracts.md C2).
 - **FR-006**: Saves MUST go through the validate dry-run before the real PUT when the
   client has any doubt (server always re-validates regardless).
 - **FR-007**: All hours displayed and entered in `Asia/Singapore`, labeled "SGT" next to
@@ -156,8 +156,11 @@ assert each is rejected with the offending field highlighted and config file unc
 ### Non-Functional Requirements
 
 - **NFR-001**: No new auth surface — the subtab inherits the router admin's existing
-  access control (tailnet + admin server binding).
-- **NFR-002**: Subtab initial render ≤ 1s on tailnet (one GET for definitions, one GET
+  access control (localhost-only binding: codex-router `router/admin.py` runs
+  uvicorn on `127.0.0.1:${CODEX_ROUTER_ADMIN_PORT:-4099}`; no tailnet reference
+  exists in codex-router — any remote access is provided by the operator's own
+  network layer outside this spec).
+- **NFR-002**: Subtab initial render ≤ 1s on localhost (one GET for definitions, one GET
   for preview, fired in parallel).
 - **NFR-003**: Zero fork drift on Hermes WebUI — no changes to upstream-owned WebUI code.
 - **NFR-004**: Single writer: only the expense-tracker container writes
@@ -197,13 +200,20 @@ subtab lives in the existing `manager.html` SPA.
 
 | Method | Route | Purpose |
 |---|---|---|
-| GET | `/admin/reminders/api/definitions` | Array of TodoDefinition + computed `next_run` per item |
+| GET | `/admin/reminders/api/definitions` | Array of TodoDefinition + computed `next_run` per item (derived client-side from preview — see below; no separate engine next-run tool) |
 | PUT | `/admin/reminders/api/definitions` | Full-array replace (atomic server-side); 422 + per-index errors on validation failure |
 | POST | `/admin/reminders/api/definitions/validate` | Dry-run validation only; same error shape, nothing written |
-| GET | `/admin/reminders/api/preview?days=N` | PreviewRow[] for next N days (1–30, default 7); side-effect-free |
+| GET | `/admin/reminders/api/preview?days=N` | PreviewRow[] for next N days (1–30, default 7); side-effect-free via engine `reminder_compile{preview:true}` (031 contracts.md C2; preview flag landed in 031 amendment `4e1d012`) |
+
+**`next_run` derivation (no engine next-run tool):** the subtab computes `next_run`
+per definition client-side from the already-fetched preview rows — earliest
+preview row date for that definition id, or null when it contributes zero rows
+in range. The per-row State column and `next_run` therefore always agree (same
+source data). If 031 later adds a dedicated next-run tool, this derivation MAY
+be replaced without changing the table contract.
 
 Backend flow: router admin **proxies** to new expense-tracker tools-API endpoints
-(`reminder_config_get` / `reminder_config_set` / `reminder_compile{preview:true}`), which
+(`reminder_config_get` / `reminder_config_set` / `reminder_compile{preview:true}` — 031 contracts.md C2/C6, landed in 031 amendment `4e1d012`), which
 are the sole writer of `config/reminders.json` (atomic temp-then-rename). The proxy exists
 so the browser talks to one origin (the admin server it already uses).
 
@@ -285,13 +295,15 @@ subset repeated here for form builders (on any conflict, 031 wins):
 
 - **D1 (schema)**: 031 data-model.md + contracts.md C5 are normative; any 031 schema
   change requires a matching update to this spec's Config Schema section.
-- **D2 (preview mode)**: engine's `reminder_compile` MUST support a side-effect-free
-  preview flag (no journal writes); the PreviewPanel depends on it.
-- **D3 (config endpoints)**: engine MUST expose `reminder_config_get` /
+- **D2 (preview mode)**: engine's `reminder_compile` supports a side-effect-free
+  preview flag (no journal writes); the PreviewPanel depends on it. LANDED in
+  031 (contracts.md C2 `{date, preview?}`, amendment `4e1d012`).
+- **D3 (config endpoints)**: engine exposes `reminder_config_get` /
   `reminder_config_set` (atomic write) for the admin proxy; validation logic shared, not
-  duplicated.
-- **D4 (unreachable-source signal)**: GET definitions SHOULD include per-row
-  `source_ok` so the table can flag dangling `notion_source` values.
+  duplicated. LANDED in 031 (contracts.md C6, amendment `4e1d012`).
+- **D4 (unreachable-source signal)**: GET definitions includes per-row
+  `source_ok` (`meta.source_ok` map) so the table can flag dangling `notion_source` values.
+  LANDED in 031 (contracts.md C6, amendment `4e1d012`).
 
 ## References
 
