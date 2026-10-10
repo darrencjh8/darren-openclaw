@@ -73,6 +73,7 @@ ARCHIVE_ROOT = Path(HERMES_HOME) / "pending" / "memory-archive"
 SNAPSHOT_ROOT = Path(HERMES_HOME) / "memory-snapshots"
 AUDIT_LOG = Path(HERMES_HOME) / "logs" / "memory-triage-audit.jsonl"
 LOCK_PATH = Path(HERMES_HOME) / "tmp" / "memory-triage.lock"
+QUEUE_LISTING = Path(HERMES_HOME) / "tmp" / "triage-queue.json"
 MEMORY_FILES = {"memory": "MEMORY.md", "user": "USER.md"}
 
 DEFAULT_MAX_RECORDS = 40
@@ -249,6 +250,17 @@ def _archive(rec: dict) -> Path:
 
 def cmd_apply(args) -> int:
     plan_path = Path(args.plan)
+    # The cron judge lists the queue, then writes its plan. A plan older than
+    # that listing was judged against an earlier queue (a failed plan write
+    # leaves yesterday's file behind), so it is never applied.
+    try:
+        if plan_path.stat().st_mtime < QUEUE_LISTING.stat().st_mtime:
+            print(json.dumps({"ok": False, "error": (
+                f"plan {plan_path} is older than the queue listing {QUEUE_LISTING}; "
+                "re-judge the current queue and write a fresh plan")}, indent=2))
+            return 2
+    except FileNotFoundError:
+        pass
     try:
         plan = json.loads(plan_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as e:
