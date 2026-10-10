@@ -25,6 +25,10 @@ Entries are separated by `ENTRY_DELIMITER`; `MEMORY.md` is injected into **every
 context, so its size is a permanent per-turn token tax — which is why "raise the limit" is
 the *last* lever, not the first.
 
+The weekly `memory-compact` cron (Sun 08:30) keeps the core under its cap: it merges
+duplicates and moves detail to topic files via `memory-triage.sh compact --plan`, which
+snapshots first, allows only replace/remove, and refuses any plan that grows the store.
+
 ## The approval queue — the silent write-only trap
 
 `memory.write_approval: true` gates the mutating actions (`add` / `replace` / `remove`).

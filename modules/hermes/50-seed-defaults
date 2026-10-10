@@ -756,6 +756,103 @@ with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=directory, delete=Fa
 os.replace(temp_path, jobs_path)
 PYEOF
 
+# Seed memory-compact cron job (idempotent, weekly). memory-triage only adds;
+# this job keeps MEMORY.md/USER.md under their caps by merging duplicates and
+# moving detail into the uncapped topic files, through `memory-triage.sh
+# compact`, which snapshots first and refuses any plan that grows the store.
+python3 <<'PYEOF' || true
+import os, json, uuid, datetime, re
+jobs_path = "/opt/data/cron/jobs.json"
+os.makedirs(os.path.dirname(jobs_path), exist_ok=True)
+try:
+    with open(jobs_path) as f:
+        data = json.load(f)
+    jobs = data.get("jobs", []) if isinstance(data, dict) else data
+except (FileNotFoundError, json.JSONDecodeError):
+    jobs = []
+
+PROMPT = """Compact the always-loaded Hermes memory on this machine (HERMES_HOME=/opt/data).
+
+CONTEXT: /opt/data/memories/MEMORY.md (cap __MEM_CAP__ chars) and USER.md (cap __USER_CAP__ chars) are injected into every turn. When they sit near the cap, the daily memory-triage job has to hold or drop good facts. Your job is to free room without losing facts. Topic files under /opt/data/memories/topics/ have no cap and are found by keyword search, so detail belongs there.
+
+SAFETY: never edit the memory files by hand. All changes go through `memory-triage.sh compact`, which locks, snapshots the live files first (rollback: bash /opt/data/scripts/memory-triage.sh restore --from <dir>), allows only replace/remove, refuses any plan that grows the store, and logs to /opt/data/logs/memory-triage-audit.jsonl.
+
+STEPS
+1. Start clean: rm -f /opt/data/tmp/compact-plan.json  (a leftover plan from last week would block write_file).
+2. Read /opt/data/memories/MEMORY.md, USER.md, and the list of files in /opt/data/memories/topics/ (read INDEX.md if present).
+3. If both stores are under 80% of their caps, change nothing and reply with the digest below saying no compaction needed.
+4. Otherwise pick the target store that is fullest and plan, in this order:
+   - merge entries that state the same fact into one shorter entry (replace one, remove the others);
+   - move detail (ids, hostnames, long lists, history) into the matching topic file: a topic_appends line with aliases on the label, then replace the entry with a short pointer or remove it;
+   - remove entries that are stale, superseded, or one-off dated state.
+   Keep user preferences, corrections and standing rules in the store. Never drop a fact without either keeping it, merging it, or filing it. Aim to bring the store to about 70% of its cap. Use the exact current entry text as old_text.
+5. Write the plan to /opt/data/tmp/compact-plan.json:
+   {"target": "memory", "operations": [{"action": "replace", "old_text": "...", "content": "..."}, {"action": "remove", "old_text": "..."}], "topic_appends": [{"file": "infra.md", "line": "..."}]}
+6. Validate: bash /opt/data/scripts/memory-triage.sh compact --plan /opt/data/tmp/compact-plan.json --dry-run
+   Fix the plan if it is refused. If the write or validation fails, stop and report it.
+7. Apply: bash /opt/data/scripts/memory-triage.sh compact --plan /opt/data/tmp/compact-plan.json
+   Read the report: ok, chars_before, chars_after, topic_lines_added, snapshot.
+8. Reply for Telegram. Plain text, no code blocks, no raw JSON:
+
+🗜 Memory compaction · <YYYY-MM-DD>
+<store>: <before> → <after> / <cap> chars
+• merged <n> · moved <n> to topics · removed <n>
+Moved to: <topic file names>
+Snapshot <name>
+
+   If nothing was needed: 🗜 Memory compaction · nothing to do (memory <used>/<cap>, user <used>/<cap>).
+   If anything failed, say so plainly with the error."""
+
+
+def _configured_cap(key, default):
+    try:
+        with open("/opt/data/config.yaml") as handle:
+            match = re.search(rf"^\s*{key}:\s*(\d+)", handle.read(), re.MULTILINE)
+        return int(match.group(1)) if match else default
+    except OSError:
+        return default
+
+
+PROMPT = PROMPT.replace("__MEM_CAP__", str(_configured_cap("memory_char_limit", 2200)))
+PROMPT = PROMPT.replace("__USER_CAP__", str(_configured_cap("user_char_limit", 1375)))
+
+MANAGED = {
+    "prompt": PROMPT,
+    "skills": ["hermes-troubleshooting"],
+    "skill": "hermes-troubleshooting",
+}
+DEFAULTS = {
+    "schedule": {"kind": "cron", "expr": "30 8 * * 0", "display": "30 8 * * 0"},
+    "schedule_display": "30 8 * * 0",
+    "enabled": True,
+    "deliver": "telegram",
+}
+
+existing = next(
+    (j for j in jobs if isinstance(j, dict) and j.get("name") == "memory-compact"),
+    None,
+)
+if existing is None:
+    jobs.append({
+        "id": uuid.uuid4().hex[:12],
+        "name": "memory-compact",
+        "context_from": ["self"],
+        "next_run_at": None,
+        "created_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        **DEFAULTS,
+        **MANAGED,
+    })
+    print("cron: memory-compact seeded")
+else:
+    changed = [key for key, value in MANAGED.items() if existing.get(key) != value]
+    for key in changed:
+        existing[key] = MANAGED[key]
+    print("cron: memory-compact migrated: " + ", ".join(sorted(changed)) if changed else "cron: memory-compact unchanged")
+
+with open(jobs_path, "w") as f:
+    json.dump({"jobs": jobs, "updated_at": datetime.datetime.now(datetime.timezone.utc).isoformat()}, f, indent=2)
+PYEOF
+
 # Seed memory-triage cron job (idempotent — drains the memory write-approval queue).
 # The job's scripts and skill are baked into the image (/opt/hermes-defaults), so a
 # reinstall re-seeds all three together: cron job, /opt/data/scripts/*, and the
@@ -778,7 +875,10 @@ CONTEXT: memory.write_approval is ON, so every memory write is staged to /opt/da
 SAFETY: the apply step is reversible by design. It takes a timestamped snapshot of the live memory files before mutating (rollback: bash /opt/data/scripts/memory-triage.sh restore --from <dir>), locks against concurrent runs, strictly validates the plan, caps it at 40 records, and appends an audit line to /opt/data/logs/memory-triage-audit.jsonl. Never bypass the script and never edit the memory files by hand.
 
 STEPS
-1. Run: bash /opt/data/scripts/memory-triage.sh list --full > /opt/data/tmp/triage-queue.json
+1. Start clean, then list the queue:
+   rm -f /opt/data/tmp/triage-queue.json /opt/data/tmp/triage-plan.json
+   bash /opt/data/scripts/memory-triage.sh list --full > /opt/data/tmp/triage-queue.json
+   The rm matters: the files are left over from the previous run, and write_file refuses to overwrite a file this task has not read, so a stale plan would block step 6 (or worse, step 7 would apply yesterday's plan).
    Always pass --full: without it the script truncates each op to 240 characters and you would judge a partial fact.
 2. Read that JSON. It has one entry per staged record with id, target (memory|user), origin, age_days, and the op text.
 3. Decide for every record in the oldest 40: approve, discard, or hold.
@@ -791,15 +891,29 @@ STEPS
    - then list that record in "discard" as well. Never file a fact and approve it in the same run — two copies of one fact will drift apart.
    Do the topic-file appends as the last thing before writing the plan, so a crash mid-run leaves the queue record staged rather than filed twice.
    Contradictory or unverifiable records are still held, never filed.
-6. Write the verdict plan to /opt/data/tmp/triage-plan.json as {"approve": ["<id>", ...], "discard": ["<id>", ...]}
+6. Write the verdict plan to /opt/data/tmp/triage-plan.json as {"approve": ["<id>", ...], "discard": ["<id>", ...]} (empty arrays when everything is held). If the write fails, stop and report it; never apply a plan you did not just write.
 7. Apply it: bash /opt/data/scripts/memory-triage.sh apply --plan /opt/data/tmp/triage-plan.json
    This replays approved ops through apply_memory_pending (bypassing the gate), moves discards into /opt/data/pending/memory-archive/<date>/, and snapshots live memory first. Read the printed report: applied_n, discarded_n, failed, remaining_n, snapshot.
-8. Reply with a SHORT digest (Telegram style, no code blocks, no raw JSON, max 5 lines of bullets):
-   - counts: applied / discarded / filed / held / still pending
-   - the 3-5 most valuable things now saved, one line each
-   - any topic file you appended to, by name
-   - any FAILED ops with their error, and anything deliberately held with a one-line reason
-   If nothing was staged, reply exactly: Memory queue empty — nothing staged.
+8. Reply with a SHORT digest for Telegram. Plain text, no code blocks, no raw JSON, no markdown tables. Use exactly this layout and drop any section that would be empty:
+
+🧠 Memory triage · <YYYY-MM-DD>
+✅ <n> applied · 🗑 <n> discarded · 📁 <n> filed · ⏸ <n> held · 📥 <n> pending
+Store: memory <used>/<cap> · user <used>/<cap>
+
+Saved
+• <one valuable fact now saved, one line>   (3-5 max)
+
+Filed
+• <topic file name>
+
+Held
+• <short id>, <short id>: <reason in under 12 words>
+
+Failed
+• <id>: <error>
+
+   Group held ids that share a reason on one line. Add "⚠️ store nearly full" to the Store line when either store is above 95%. Last line: snapshot <name>.
+   If nothing was staged, reply exactly: 🧠 Memory triage · queue empty, nothing staged.
 
 Do not stop until the apply step has actually run and been verified. If a step fails, say so plainly rather than reporting success."""
 
