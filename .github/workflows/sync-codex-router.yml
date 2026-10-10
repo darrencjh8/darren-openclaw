@@ -27,11 +27,11 @@ jobs:
           deployed_sha=""
           page=1
           while [ -z "$deployed_sha" ]; do
-            run_ids="$(gh api "repos/darrencjh8/darren-openclaw/actions/workflows/deploy.yml/runs?branch=main&status=success&per_page=100&page=$page" --jq '.workflow_runs[].id')"
+            run_ids="$(gh api "repos/${{ github.repository }}/actions/workflows/deploy.yml/runs?branch=main&status=success&per_page=100&page=$page" --jq '.workflow_runs[].id')"
             [ -n "$run_ids" ] || break
             for run_id in $run_ids; do
               rm -rf /tmp/router-sha
-              if gh run download "$run_id" --repo darrencjh8/darren-openclaw -n codex-router-sha -D /tmp/router-sha >/dev/null 2>&1; then
+              if gh run download "$run_id" --repo ${{ github.repository }} -n codex-router-sha -D /tmp/router-sha >/dev/null 2>&1; then
                 deployed_sha="$(cat /tmp/router-sha/codex-router-sha.txt)"
                 break
               fi
@@ -48,5 +48,5 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: >-
-          gh workflow run deploy.yml --repo darrencjh8/darren-openclaw
+          gh workflow run deploy.yml --repo ${{ github.repository }}
           --ref main -f components=codex-router

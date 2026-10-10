@@ -485,6 +485,28 @@ class LogIssueTriagePluginTest(unittest.TestCase):
         self.assertEqual(run.call_count, 2)
 
 
+class MainRepoOverrideTest(unittest.TestCase):
+    """The repo is moving; TRIAGE_MAIN_REPO retargets every in-repo component."""
+
+    def _load(self, env):
+        with patch.dict("os.environ", env, clear=False):
+            s = importlib.util.spec_from_file_location("triage_override", PLUGIN_PATH)
+            mod = importlib.util.module_from_spec(s)
+            s.loader.exec_module(mod)
+        return mod
+
+    def test_env_override_retargets_main_components(self):
+        mod = self._load({"TRIAGE_MAIN_REPO": "darrencjh8/friday"})
+        for comp in ("hermes", "expense-tracker", "portfolio-tracker", "actual-api"):
+            self.assertEqual(mod._COMPONENT_REPOS[comp], "darrencjh8/friday")
+        self.assertEqual(mod._COMPONENT_REPOS["codex-router"], "darrencjh8/codex-router")
+        self.assertEqual(mod._MAIN_REPO, "darrencjh8/friday")
+
+    def test_default_without_env(self):
+        mod = self._load({"TRIAGE_MAIN_REPO": ""})
+        self.assertEqual(mod._MAIN_REPO, "darrencjh8/darren-openclaw")
+
+
 class ActualApiCoverageTest(unittest.TestCase):
     """#740: actual-api is a production service, so triage must cover it."""
 
