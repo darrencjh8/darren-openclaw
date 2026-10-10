@@ -506,6 +506,8 @@ import sys
 content = open(sys.argv[1], encoding="utf-8").read()
 marker = "self-wiki-maintenance-and-reminders"
 pos = content.find(marker)
+if pos < 0:
+    print(""); raise SystemExit
 start_tag = "python3 <<'PYEOF' || true\n"
 start = content.find(start_tag, pos)
 block = content[start + len(start_tag):]
@@ -536,12 +538,20 @@ checks = {
     "display": j.get("schedule_display") == "every monday 9am",
     "enabled": j.get("enabled") is True,
     "deliver": j.get("deliver") == "telegram",
-    "skills": j.get("skills") == ["llm-wiki", "expense-tracker", "notion", "notion-pitfalls", "github-issues", "cron-job-inspection", "docs-accuracy-verification"],
+    "skills": j.get("skills") == ["llm-wiki", "expense-tracker", "notion", "notion-pitfalls", "github-issues", "cron-job-inspection", "docs-accuracy-verification", "portfolio-tracker"],
     "skill": j.get("skill") == "llm-wiki",
     "prompt_len": len(prompt) > 500,
     "raw_snapshot": "dated raw file" in prompt,
     "sha": "SHA-256" in prompt,
     "telegram_report": "Telegram" in prompt,
+    "wiki_path_env": "WIKI_PATH" in prompt,
+    "notion_accounts": "a21b499b-79ae-497b-9221-0ad59a75e812" in prompt,
+    "notion_plans": "fb21acfd-b555-4a99-8b54-54ed43d4b020" in prompt,
+    "portfolio_readonly": "portfolio_taxonomy" in prompt and "portfolio_sync" in prompt,
+    "mnemosyne": "Mnemosyne" in prompt,
+    "completeness": "has_more" in prompt,
+    "field_authority": "user correction" in prompt.lower(),
+    "audit_artifact": "audit" in prompt.lower(),
 }
 bad = [k for k, v in checks.items() if not v]
 print("pass" if not bad else "fail " + repr(bad))
@@ -591,7 +601,7 @@ checks = {
     "id_preserved": j.get("id") == "wikilegacy1",
     "user_field_preserved": j.get("user_note") == "keep me",
     "prompt_updated": "dated raw file" in prompt,
-    "skills_updated": j.get("skills") == ["llm-wiki", "expense-tracker", "notion", "notion-pitfalls", "github-issues", "cron-job-inspection", "docs-accuracy-verification"],
+    "skills_updated": j.get("skills") == ["llm-wiki", "expense-tracker", "notion", "notion-pitfalls", "github-issues", "cron-job-inspection", "docs-accuracy-verification", "portfolio-tracker"],
     "schedule_not_reverted": j.get("schedule_display") == "custom",
     "disabled_stays_disabled": j.get("enabled") is False,
     "deliver_not_reverted": j.get("deliver") == "origin",
@@ -607,6 +617,109 @@ esac
 case "$wiki_migrate_out" in
     *migrated*) ok "wiki migration is reported" ;;
     *) nope "wiki migration report" "got: $wiki_migrate_out" ;;
+esac
+
+echo "=== self-wiki-reminders-daily cron seeding ==="
+
+# A weekly cadence cannot honour lead-time reminders (e.g. claim miles ~2 months
+# before renewal), so a daily notifier is seeded alongside the weekly audit.
+daily_block=$(python3 - "$SEED_SCRIPT" <<'PY'
+import sys
+content = open(sys.argv[1], encoding="utf-8").read()
+marker = "self-wiki-reminders-daily"
+pos = content.find(marker)
+if pos < 0:
+    print(""); raise SystemExit
+start_tag = "python3 <<'PYEOF' || true\n"
+start = content.find(start_tag, pos)
+block = content[start + len(start_tag):]
+end = block.find("\nPYEOF")
+print(block[:end] if end >= 0 else "")
+PY
+)
+[ -n "$daily_block" ] && ok "seed has a self-wiki-reminders-daily PYEOF block" || nope "daily block" "not found"
+
+rm -rf "$TMPDIR/wikidaily"
+mkdir -p "$TMPDIR/wikidaily"
+echo '{"jobs": []}' > "$TMPDIR/wikidaily/jobs.json"
+daily_block_tmp=${daily_block//\/opt\/data\/cron\/jobs.json/$TMPDIR\/wikidaily\/jobs.json}
+python3 -c "$daily_block_tmp" >/dev/null 2>&1
+
+daily_fields=$(python3 - "$TMPDIR/wikidaily/jobs.json" <<'PY'
+import json, sys
+jobs = json.load(open(sys.argv[1]))["jobs"]
+if len(jobs) != 1:
+    print("fail count=%d" % len(jobs)); sys.exit()
+j = jobs[0]
+sched = j.get("schedule", {})
+prompt = j.get("prompt") or ""
+checks = {
+    "name": j.get("name") == "self-wiki-reminders-daily",
+    "kind": sched.get("kind") == "cron",
+    "expr": sched.get("expr") == "0 8 * * *",
+    "enabled": j.get("enabled") is True,
+    "deliver": j.get("deliver") == "telegram",
+    "prompt_len": len(prompt) > 300,
+    "lead_time": "lead_days" in prompt,
+    "dedupe": "already-notified" in prompt,
+}
+bad = [k for k, v in checks.items() if not v]
+print("pass" if not bad else "fail " + repr(bad))
+PY
+)
+case "$daily_fields" in
+    pass) ok "job: cron 0 8 * * * daily · telegram · lead-time reminders" ;;
+    *) nope "daily fields" "$daily_fields" ;;
+esac
+
+# Idempotency: re-running the daily block must not duplicate the job.
+python3 -c "$daily_block_tmp" >/dev/null 2>&1
+daily2=$(python3 -c "import json;print(len(json.load(open('$TMPDIR/wikidaily/jobs.json'))['jobs']))")
+[ "$daily2" = "1" ] && ok "idempotent: still 1 daily job on re-seed" || nope "daily idempotent" "got $daily2"
+
+# Migration: an existing install keeps its schedule/enabled/deliver.
+rm -rf "$TMPDIR/wikidaily-legacy"
+mkdir -p "$TMPDIR/wikidaily-legacy"
+python3 - "$TMPDIR/wikidaily-legacy/jobs.json" <<'PY'
+import json, sys
+json.dump({"jobs": [{
+    "id": "wikidailylegacy1",
+    "name": "self-wiki-reminders-daily",
+    "prompt": "legacy daily prompt",
+    "skills": ["llm-wiki"],
+    "schedule": {"kind": "cron", "expr": "0 12 * * *", "display": "custom"},
+    "schedule_display": "custom",
+    "enabled": False,
+    "deliver": "local",
+    "context_from": ["self"],
+    "created_at": "2026-01-01T00:00:00+00:00",
+    "user_note": "keep me too",
+}]}, open(sys.argv[1], "w"))
+PY
+daily_legacy_tmp=${daily_block//\/opt\/data\/cron\/jobs.json/$TMPDIR\/wikidaily-legacy\/jobs.json}
+daily_migrate_out=$(python3 -c "$daily_legacy_tmp" 2>&1)
+daily_migrate=$(python3 - "$TMPDIR/wikidaily-legacy/jobs.json" <<'PY'
+import json, sys
+jobs = json.load(open(sys.argv[1]))["jobs"]
+if len(jobs) != 1:
+    print("fail count=%d" % len(jobs)); sys.exit()
+j = jobs[0]
+prompt = j.get("prompt") or ""
+checks = {
+    "id_preserved": j.get("id") == "wikidailylegacy1",
+    "user_field_preserved": j.get("user_note") == "keep me too",
+    "prompt_updated": "lead_days" in prompt,
+    "schedule_not_reverted": j.get("schedule_display") == "custom",
+    "disabled_stays_disabled": j.get("enabled") is False,
+    "deliver_not_reverted": j.get("deliver") == "local",
+}
+bad = [k for k, v in checks.items() if not v]
+print("pass" if not bad else "fail " + repr(bad))
+PY
+)
+case "$daily_migrate" in
+    pass) ok "existing daily job migrated in place (prompt/skills only; schedule/enabled/deliver/user fields preserved)" ;;
+    *) nope "daily migration" "$daily_migrate" ;;
 esac
 
 echo ""
