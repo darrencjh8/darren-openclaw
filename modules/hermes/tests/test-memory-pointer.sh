@@ -32,7 +32,7 @@ ptr_tmp=${ptr_block//\/opt\/data\/memories\/MEMORY.md/$TMPDIR\/memories\/MEMORY.
 ptr_tmp=${ptr_tmp//\/opt\/data\/config.yaml/$TMPDIR\/config.yaml}
 python3 -c "$ptr_tmp" >/dev/null 2>&1 || true
 
-count=$(grep -c "memories/topics" "$TMPDIR/memories/MEMORY.md")
+count=$(grep -c "memories/topics" "$TMPDIR/memories/MEMORY.md" || true)
 [ "$count" = "1" ] && ok "reworded pointer is not duplicated" \
     || nope "test_reworded_pointer_idempotent" "occurrences: $count"
 
