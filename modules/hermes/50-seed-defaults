@@ -993,6 +993,75 @@ with open(jobs_path, "w") as f:
     json.dump({"jobs": jobs, "updated_at": datetime.datetime.now(datetime.timezone.utc).isoformat()}, f, indent=2)
 PYEOF
 
+# Seed self-wiki-maintenance-and-reminders cron job (MANAGED prompt/skills;
+# delivery telegram for new installs; existing installs keep their dashboard
+# schedule/enabled/deliver and only receive prompt/skill updates).
+python3 <<'PYEOF' || true
+import os, json, uuid, datetime
+jobs_path = "/opt/data/cron/jobs.json"
+os.makedirs(os.path.dirname(jobs_path), exist_ok=True)
+try:
+    with open(jobs_path) as f:
+        data = json.load(f)
+    jobs = data.get("jobs", []) if isinstance(data, dict) else data
+except (FileNotFoundError, json.JSONDecodeError):
+    jobs = []
+
+PROMPT = """Maintain the private wiki at /opt/data/home/wiki using its SCHEMA.md, the llm-wiki skill, and the full checklist in concepts/wiki-maintenance.md.
+
+Every Monday run a complete refresh, not a spot check:
+1. Read wiki index, schema, log, all entities/concepts, and the previous run output. Inventory page/source counts before work.
+2. Fetch (do not checkout/modify) origin/main for /workspace/darren-openclaw, /workspace/codex-router, and /workspace/friday-memory. Compare with recorded baselines; snapshot each new revision and changed relevant Markdown/doc source into a new dated raw file BEFORE updating summaries. Preserve old raw captures unchanged. Inspect diffs, not just commit subjects. Record repo docs that are stale versus implementation/live state.
+3. Read current Actual Budget accounts for both Darren SGD and MYR; read expense-tracker card suffix facts using targeted card-mapping queries only; query the Notion Accounts data source for status, country, action/annual-fee/reapply/charge dates; read live codex-router status. Save sanitized dated source projections with verified SHA-256. Exclude full card/PAN values, passwords, credentials, Notion notes/relations/task IDs, and unrelated personal data. Never infer an account mapping.
+4. Read /opt/data/memories/USER.md, MEMORY.md, and relevant topic files. Compare durable, explicit user preferences and confirmed decisions with entities/darren.md. Record only useful stable preferences; omit birth dates, legal identifiers, credentials, and unrelated account details. User corrections supersede stale imported labels, but retain immutable snapshots and state why they are superseded.
+5. Update every affected knowledge page (not just the index): provenance, facts, balances, date windows, repo baselines, updated dates, source lists, backlinks, and index summary. Dates and balances are volatile: show capture date and refresh before presenting as current. Notion is read-only; do not edit Notion, Actual transactions, repositories, or deploy anything.
+6. Lint the WHOLE wiki mechanically: required frontmatter, taxonomy tags, all declared source files exist, every raw hash verifies, every page is indexed exactly once, index page count is correct, all wikilinks resolve, every entity/concept has inbound links, and each content page has at least two outbound wikilinks. Also scan active pages for stale/conflicting claims, accidental secrets/whole card numbers, and outdated dates. Fix what is evidence-backed; preserve ambiguities with a named settling check.
+7. If a public repo document materially conflicts with current implementation or verified live behavior, search GitHub for an existing issue first. File a concise non-sensitive issue only for a clear actionable mismatch, with source paths and evidence; never disclose Darren's account data or secrets. Do not file duplicates.
+8. Append a dated log entry for all changes and audit results. Report only meaningful diffs, upcoming account dates within 30 days, open conflicts/issues, any failed checks, and source freshness. Send the digest to Telegram; keep it short (Telegram style, no code blocks, no raw JSON).
+
+If any source/tool is unavailable, preserve the last verified data with its old capture date, mark it stale/needs-verify, and report the blocker. Do not invent replacement data or claim a failed check passed."""
+
+MANAGED = {
+    "prompt": PROMPT,
+    "skills": ["llm-wiki", "expense-tracker", "notion", "notion-pitfalls", "github-issues", "cron-job-inspection", "docs-accuracy-verification"],
+    "skill": "llm-wiki",
+}
+DEFAULTS = {
+    "schedule": {"kind": "cron", "expr": "0 9 * * 1", "display": "every monday 9am"},
+    "schedule_display": "every monday 9am",
+    "enabled": True,
+    "deliver": "telegram",
+}
+
+existing = next(
+    (j for j in jobs if isinstance(j, dict) and j.get("name") == "self-wiki-maintenance-and-reminders"),
+    None,
+)
+
+if existing is None:
+    jobs.append({
+        "id": uuid.uuid4().hex[:12],
+        "name": "self-wiki-maintenance-and-reminders",
+        "context_from": ["self"],
+        "next_run_at": None,
+        "created_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        **DEFAULTS,
+        **MANAGED,
+    })
+    print("cron: self-wiki-maintenance-and-reminders seeded")
+else:
+    changed = [key for key, value in MANAGED.items() if existing.get(key) != value]
+    for key in changed:
+        existing[key] = MANAGED[key]
+    if changed:
+        print("cron: self-wiki-maintenance-and-reminders migrated: " + ", ".join(sorted(changed)))
+    else:
+        print("cron: self-wiki-maintenance-and-reminders unchanged")
+
+with open(jobs_path, "w") as f:
+    json.dump({"jobs": jobs, "updated_at": datetime.datetime.now(datetime.timezone.utc).isoformat()}, f, indent=2)
+PYEOF
+
 # Disable profile gateways (workers don't need their own gateways — they compete for Telegram token)
 for gw_dir in /run/service/gateway-*; do
     [ -d "$gw_dir" ] || continue
