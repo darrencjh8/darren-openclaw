@@ -65,7 +65,7 @@ if "/opt/hermes" not in sys.path:
     sys.path.insert(0, "/opt/hermes")
 
 from tools import write_approval as wa  # noqa: E402
-from tools.memory_tool import load_on_disk_store, apply_memory_pending  # noqa: E402
+from tools.memory_tool import load_on_disk_store, apply_memory_pending, _pin_matched_entries  # noqa: E402
 
 SUBSYSTEM = wa.MEMORY
 PENDING_DIR = Path(HERMES_HOME) / "pending" / SUBSYSTEM
@@ -73,6 +73,7 @@ ARCHIVE_ROOT = Path(HERMES_HOME) / "pending" / "memory-archive"
 SNAPSHOT_ROOT = Path(HERMES_HOME) / "memory-snapshots"
 AUDIT_LOG = Path(HERMES_HOME) / "logs" / "memory-triage-audit.jsonl"
 LOCK_PATH = Path(HERMES_HOME) / "tmp" / "memory-triage.lock"
+QUEUE_LISTING = Path(HERMES_HOME) / "tmp" / "triage-queue.json"
 MEMORY_FILES = {"memory": "MEMORY.md", "user": "USER.md"}
 
 DEFAULT_MAX_RECORDS = 40
@@ -249,6 +250,17 @@ def _archive(rec: dict) -> Path:
 
 def cmd_apply(args) -> int:
     plan_path = Path(args.plan)
+    # The cron judge lists the queue, then writes its plan. A plan older than
+    # that listing was judged against an earlier queue (a failed plan write
+    # leaves yesterday's file behind), so it is never applied.
+    try:
+        if plan_path.stat().st_mtime < QUEUE_LISTING.stat().st_mtime:
+            print(json.dumps({"ok": False, "error": (
+                f"plan {plan_path} is older than the queue listing {QUEUE_LISTING}; "
+                "re-judge the current queue and write a fresh plan")}, indent=2))
+            return 2
+    except FileNotFoundError:
+        pass
     try:
         plan = json.loads(plan_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as e:
@@ -406,6 +418,17 @@ def cmd_compact(args) -> int:
     live = Path(HERMES_HOME) / "memories" / MEMORY_FILES[target]
     before = len(live.read_text(encoding="utf-8")) if live.exists() else 0
 
+    # Hermes applies a replace/remove only to the exact entry pinned on it
+    # (`matched_entry`) and refuses unpinned ones, so pin with Hermes' own
+    # resolver before anything is filed. A pin failure stops here, dry-run too.
+    payload = {"action": "batch", "target": target, "operations": [dict(op) for op in ops]}
+    pin_error = _pin_matched_entries(load_on_disk_store(), payload)
+    if pin_error:
+        try:
+            return fail(json.loads(pin_error).get("error", pin_error))
+        except (ValueError, AttributeError):
+            return fail(pin_error)
+
     if args.dry_run:
         print(json.dumps({"ok": True, "dry_run": True, "target": target,
                           "operations": ops, "topic_appends": appends,
@@ -417,8 +440,7 @@ def cmd_compact(args) -> int:
     filed = [f"{a['file']}: {a['line']}" for a in appends if _append_topic(a["file"], a["line"])]
 
     try:
-        result = apply_memory_pending(
-            {"action": "batch", "target": target, "operations": ops}, load_on_disk_store())
+        result = apply_memory_pending(payload, load_on_disk_store())
     except Exception as e:
         result = {"success": False, "error": f"{type(e).__name__}: {e}"}
 

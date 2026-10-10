@@ -167,6 +167,10 @@ jobs:
               run: python modules/hermes/tests/test-seed-app-cron.py
             - name: Test memory_triage compact
               run: python -m unittest modules/hermes/tests/test_memory_triage_compact.py
+            - name: Test memory_triage apply plan freshness
+              run: python -m unittest modules/hermes/tests/test_memory_triage_apply.py
+            - name: Test mnemosyne-vacuum script
+              run: bash modules/hermes/tests/test-mnemosyne-vacuum.sh
             - name: Test lifecycle ledger startup patch
               run: python -m unittest modules/hermes/tests/test_lifecycle_ledger_patch.py
             - name: Test stale open webhook session patch
@@ -179,6 +183,8 @@ jobs:
               run: bash modules/hermes/tests/test-memory-backup.sh
             - name: Test memory restore script
               run: bash modules/hermes/tests/test-memory-restore.sh
+            - name: Test seed memory pointer
+              run: bash modules/hermes/tests/test-memory-pointer.sh
             - name: Test Hermes model routing
               run: bash modules/hermes/tests/test-model-routing.sh
             - name: Test Hermes dev-loop review policy

@@ -1,63 +1,117 @@
 #!/bin/bash
-# Mnemosyne + session vacuum report (no_agent script-only cron).
-# Never deletes memories or sessions. SQLite VACUUM reclaims space after
-# Mnemosyne TTL eviction/sleep and Hermes auto_prune have deleted rows.
-# Session deletion stays owned by sessions.auto_prune/retention_days
-# (currently 60); this script only counts sessions older than 30 days so an
-# operator can decide whether to tighten retention. Exits 0 always.
+# Weekly Mnemosyne maintenance (no_agent script-only cron).
+#
+# 1. Integrity check and row counts of the Mnemosyne DB.
+# 2. `hermes mnemosyne sleep --all-sessions`: consolidates old working memories
+#    of every session. Auto-sleep only consolidates a session holding more than
+#    sleep_threshold rows, so short sessions are never consolidated otherwise.
+# 3. SQLite VACUUM of the Mnemosyne DB and the Hermes session DBs.
+#
+# Never deletes memories or sessions; session deletion stays owned by
+# sessions.auto_prune/retention_days, and sessions older than 30 days are only
+# counted. The image ships no sqlite3 CLI, so all DB work goes through Python's
+# sqlite3 module. A VACUUM that cannot get the lock within the busy timeout is a
+# reported skip (the DB is intact; next week retries). The script exits non-zero
+# only when integrity is not ok or consolidation fails, which raises Hermes'
+# cron error alert. Output is a Markdown table.
 set -u
 
-HERMES_HOME="${HERMES_HOME:-/opt/data}"
-MNEMOSYNE_DIR="${MNEMOSYNE_DATA_DIR:-$HERMES_HOME/mnemosyne/data}"
-SESSION_MAX_AGE_DAYS="${SESSION_MAX_AGE_DAYS:-30}"
+export HERMES_HOME="${HERMES_HOME:-/opt/data}"
+export MNEMOSYNE_DIR="${MNEMOSYNE_DATA_DIR:-$HERMES_HOME/mnemosyne/data}"
+export SESSION_MAX_AGE_DAYS="${SESSION_MAX_AGE_DAYS:-30}"
+export MNEMOSYNE_VACUUM_BUSY_TIMEOUT="${MNEMOSYNE_VACUUM_BUSY_TIMEOUT:-30}"
 
-_size() { stat -c%s "$1" 2>/dev/null || stat -f%z "$1" 2>/dev/null || echo "?"; }
-
-echo "[vacuum] mnemosyne: $MNEMOSYNE_DIR/mnemosyne.db"
+HERMES_BIN=$(command -v hermes || echo /opt/hermes/.venv/bin/hermes)
+export SLEEP_JSON="" SLEEP_RC=0
 if [ -f "$MNEMOSYNE_DIR/mnemosyne.db" ]; then
-    if command -v sqlite3 >/dev/null 2>&1; then
-        _check=$(sqlite3 "$MNEMOSYNE_DIR/mnemosyne.db" "PRAGMA integrity_check;" 2>/dev/null | head -n 1)
-        echo "[vacuum] integrity: ${_check:-unknown}"
-        _tables=$(sqlite3 "$MNEMOSYNE_DIR/mnemosyne.db" ".tables" 2>/dev/null)
-        for _t in working_memory episodic_memory; do
-            case " $_tables " in
-                *" $_t "*) _n=$(sqlite3 "$MNEMOSYNE_DIR/mnemosyne.db" "SELECT COUNT(*) FROM $_t;" 2>/dev/null); echo "[vacuum] $_t: ${_n:-?}" ;;
-            esac
-        done
-        echo "[vacuum] size_before: $(_size "$MNEMOSYNE_DIR/mnemosyne.db")"
-        sqlite3 "$MNEMOSYNE_DIR/mnemosyne.db" "PRAGMA busy_timeout=5000; VACUUM;" 2>/dev/null || echo "[vacuum] VACUUM skipped (busy)"
-        echo "[vacuum] size_after: $(_size "$MNEMOSYNE_DIR/mnemosyne.db")"
-        unset _check _tables _t _n
-    else
-        echo "[vacuum] sqlite3 missing, size: $(_size "$MNEMOSYNE_DIR/mnemosyne.db")"
-    fi
-else
-    echo "[vacuum] mnemosyne.db absent, nothing to do"
+    SLEEP_JSON=$("$HERMES_BIN" mnemosyne sleep --all-sessions 2>/dev/null)
+    SLEEP_RC=$?
 fi
 
-echo "[vacuum] sessions older than ${SESSION_MAX_AGE_DAYS}d (report only, auto_prune owns deletion)"
-for _db in "$HERMES_HOME/state.db" "$HERMES_HOME"/profiles/*/state.db; do
-    [ -f "$_db" ] || continue
-    if command -v sqlite3 >/dev/null 2>&1; then
-        _tables=$(sqlite3 "$_db" ".tables" 2>/dev/null)
-        _old="?"
-        # Best-effort probe of known session-table shapes without assuming
-        # schema; TEXT timestamps can compare lexically and misreport, so a
-        # "?" means unknown, never a deletion trigger. Deletion stays owned
-        # by sessions.auto_prune regardless of what prints here.
-        for _q in \
-            "SELECT COUNT(*) FROM sessions WHERE updated_at < strftime('%s','now','-${SESSION_MAX_AGE_DAYS} days');" \
-            "SELECT COUNT(*) FROM sessions WHERE ended_at < strftime('%s','now','-${SESSION_MAX_AGE_DAYS} days');" \
-            "SELECT COUNT(*) FROM sessions WHERE last_active < datetime('now','-${SESSION_MAX_AGE_DAYS} days');" \
-        ; do
-            _n=$(sqlite3 "$_db" "$_q" 2>/dev/null) && case "$_n" in ''|*[!0-9]*) ;; *) _old="$_n"; break ;; esac
-        done
-        echo "[vacuum] $_db older_than_${SESSION_MAX_AGE_DAYS}d: $_old size_before: $(_size "$_db")"
-        sqlite3 "$_db" "PRAGMA busy_timeout=5000; VACUUM;" 2>/dev/null || echo "[vacuum] VACUUM skipped (busy): $_db"
-        echo "[vacuum] $_db size_after: $(_size "$_db")"
-        unset _tables _old _q _n
-    else
-        echo "[vacuum] $_db size: $(_size "$_db") (sqlite3 missing)"
-    fi
-    unset _db
-done
+exec python3 - <<'PY'
+import glob, json, os, sqlite3, sys, time
+
+home = os.environ["HERMES_HOME"]
+mdb = os.path.join(os.environ["MNEMOSYNE_DIR"], "mnemosyne.db")
+timeout = float(os.environ["MNEMOSYNE_VACUUM_BUSY_TIMEOUT"])
+max_age = int(os.environ["SESSION_MAX_AGE_DAYS"])
+rows, failed = [], False
+
+
+def size(path):
+    try:
+        return f"{os.path.getsize(path) / 1048576:.1f} MB"
+    except OSError:
+        return "?"
+
+
+def vacuum(path):
+    before = size(path)
+    try:
+        conn = sqlite3.connect(path, timeout=timeout, isolation_level=None)
+        conn.execute("VACUUM")
+        conn.close()
+        return f"{before} → {size(path)}"
+    except sqlite3.OperationalError as error:
+        if "locked" in str(error) or "busy" in str(error):
+            return f"{before}, VACUUM skipped (busy)"
+        return f"{before}, VACUUM failed: {error}"
+
+
+if not os.path.exists(mdb):
+    rows.append(("mnemosyne.db", "absent, nothing to do"))
+else:
+    try:
+        conn = sqlite3.connect(f"file:{mdb}?mode=ro", uri=True, timeout=timeout)
+        check = conn.execute("PRAGMA integrity_check").fetchone()[0]
+        tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        counts = {t: conn.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0]
+                  for t in ("working_memory", "episodic_memory") if t in tables}
+        conn.close()
+    except sqlite3.OperationalError as error:
+        busy = "locked" in str(error) or "busy" in str(error)
+        check, counts = ("skipped (busy)" if busy else f"unreadable: {error}"), {}
+    except sqlite3.DatabaseError as error:
+        check, counts = f"unreadable: {error}", {}
+    rows.append(("integrity", check))
+    failed |= check not in ("ok", "skipped (busy)")
+    for table, n in counts.items():
+        rows.append((table, n))
+
+    try:
+        sleep = json.loads(os.environ.get("SLEEP_JSON") or "{}")
+    except ValueError:
+        sleep = {}
+    if os.environ.get("SLEEP_RC") != "0" or sleep.get("errors"):
+        rows.append(("sleep", f"failed ({sleep.get('status', 'no result')})"))
+        failed = True
+    elif sleep.get("status") == "no_op":
+        rows.append(("sleep", "nothing old enough to consolidate"))
+    else:
+        rows.append(("sleep", f"{sleep.get('items_consolidated', 0)} items from "
+                              f"{sleep.get('sessions_consolidated', 0)} sessions"))
+    if check == "ok":
+        rows.append(("mnemosyne.db", vacuum(mdb)))
+
+cutoff = time.time() - max_age * 86400
+for db in [os.path.join(home, "state.db")] + sorted(glob.glob(os.path.join(home, "profiles/*/state.db"))):
+    if not os.path.exists(db):
+        continue
+    name = os.path.relpath(db, home)
+    try:
+        conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True, timeout=timeout)
+        old = conn.execute("SELECT COUNT(*) FROM sessions WHERE COALESCE(last_activity_at, ended_at, started_at) < ?", (cutoff,)).fetchone()[0]
+        conn.close()
+    except sqlite3.DatabaseError:
+        old = "?"
+    rows.append((f"{name} sessions >{max_age}d", f"{old} (report only)"))
+    rows.append((name, vacuum(db)))
+
+print("🧹 Mnemosyne weekly maintenance")
+print()
+print("| Check | Result |")
+print("|---|---|")
+for key, value in rows:
+    print(f"| {key} | {value} |")
+sys.exit(1 if failed else 0)
+PY

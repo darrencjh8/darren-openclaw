@@ -639,8 +639,8 @@ prompt = j.get("prompt") or ""
 checks = {
     "name": j.get("name") == "self-wiki-maintenance-and-reminders",
     "kind": sched.get("kind") == "cron",
-    "expr": sched.get("expr") == "0 9 * * 1",
-    "display": j.get("schedule_display") == "every monday 9am",
+    "expr": sched.get("expr") == "0 4 * * 1",
+    "display": j.get("schedule_display") == "every monday 4am",
     "enabled": j.get("enabled") is True,
     "deliver": j.get("deliver") == "telegram",
     "skills": j.get("skills") == ["llm-wiki", "expense-tracker", "notion", "notion-pitfalls", "github-issues", "cron-job-inspection", "docs-accuracy-verification", "portfolio-tracker"],
@@ -668,7 +668,7 @@ print("pass" if not bad else "fail " + repr(bad))
 PY
 )
 case "$wiki_fields" in
-    pass) ok "job: cron 0 9 * * 1 monday · telegram · llm-wiki skill set · full refresh prompt" ;;
+    pass) ok "job: cron 0 4 * * 1 monday · telegram · llm-wiki skill set · full refresh prompt" ;;
     *) nope "wiki fields" "$wiki_fields" ;;
 esac
 
@@ -768,7 +768,7 @@ prompt = j.get("prompt") or ""
 checks = {
     "name": j.get("name") == "self-wiki-reminders-daily",
     "kind": sched.get("kind") == "cron",
-    "expr": sched.get("expr") == "0 8 * * *",
+    "expr": sched.get("expr") == "15 8 * * *",
     "enabled": j.get("enabled") is True,
     "deliver": j.get("deliver") == "telegram",
     "prompt_len": len(prompt) > 300,
@@ -780,7 +780,7 @@ print("pass" if not bad else "fail " + repr(bad))
 PY
 )
 case "$daily_fields" in
-    pass) ok "job: cron 0 8 * * * daily · telegram · lead-time reminders" ;;
+    pass) ok "job: cron 15 8 * * * daily · telegram · lead-time reminders" ;;
     *) nope "daily fields" "$daily_fields" ;;
 esac
 
@@ -1356,7 +1356,7 @@ checks = {
     "fresh_plan": "rm -f /opt/data/tmp/triage-queue.json /opt/data/tmp/triage-plan.json" in prompt
         and prompt.find("rm -f /opt/data/tmp/triage") < prompt.find("Write the verdict plan"),
     "digest_header": "🧠 Memory triage" in prompt,
-    "digest_store_line": "Store:" in prompt,
+    "digest_store_table": "| Store | Used | Cap |" in prompt,
 }
 bad = [k for k, v in checks.items() if not v]
 print("pass" if not bad else "fail " + repr(bad))
@@ -1471,8 +1471,8 @@ if len(jobs) != 2 or len(mc) != 1:
 j = mc[0]
 prompt = j.get("prompt") or ""
 checks = {
-    "weekly": j.get("schedule", {}).get("expr") == "30 8 * * 0",
-    "display": j.get("schedule_display") == "30 8 * * 0",
+    "weekly": j.get("schedule", {}).get("expr") == "30 7 * * 0",
+    "display": j.get("schedule_display") == "30 7 * * 0",
     "enabled": j.get("enabled") is True,
     "deliver": j.get("deliver") == "telegram",
     "skills": j.get("skills") == ["hermes-troubleshooting"],
@@ -1490,7 +1490,7 @@ print("pass" if not bad else "fail " + repr(bad))
 PY
 )
 case "$mc_fields" in
-    pass) ok "memory-compact: weekly Sun 08:30 · telegram · compact cmd, dry-run, rollback; idempotent" ;;
+    pass) ok "memory-compact: weekly Sun 07:30 · telegram · compact cmd, dry-run, rollback; idempotent" ;;
     *) nope "memory-compact fields" "$mc_fields" ;;
 esac
 
@@ -1745,6 +1745,121 @@ seed_scripts_run || true
 grep -qx "new in image" "$SP/data/scripts/log-issue-triage-worker.sh" \
     && ok "retired name shipped by the image is kept" || nope "retired but shipped" "removed or stale"
 rm -f "$SP/defaults/scripts/log-issue-triage-worker.sh"
+
+echo ""
+echo "=== cron jobs.json safety (every seed block) ==="
+# A corrupt jobs.json must never be read as empty and rewritten: that wipes
+# every cron job. Each block that writes jobs.json must refuse and leave it.
+safety=$(python3 - "$SEED_SCRIPT" "$TMPDIR" <<'PY'
+import re, subprocess, sys, os
+content = open(sys.argv[1], encoding="utf-8").read()
+tmp = sys.argv[2]
+blocks = [b for b in re.findall(r"<<'PYEOF'[^\n]*\n(.*?)\nPYEOF", content, re.DOTALL)
+          if 'jobs_path = "/opt/data/cron/jobs.json"' in b]
+bad = []
+for i, block in enumerate(blocks):
+    d = os.path.join(tmp, f"corrupt-{i}")
+    os.makedirs(d, exist_ok=True)
+    path = os.path.join(d, "jobs.json")
+    open(path, "w").write('{"jobs": [{"name": "keep"')
+    code = block.replace("/opt/data/cron/jobs.json", path).replace("/opt/data/config.yaml", os.path.join(d, "none.yaml"))
+    subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, cwd=d)
+    if open(path).read() != '{"jobs": [{"name": "keep"':
+        name = re.search(r'"name": "([^"]+)"', block)
+        bad.append(name.group(1) if name else f"block{i}")
+    if 'open(jobs_path, "w")' in block:
+        bad.append(f"non-atomic write in block{i}")
+print(f"pass {len(blocks)}" if not bad and len(blocks) >= 8 else f"fail blocks={len(blocks)} {bad}")
+PY
+)
+case "$safety" in
+    pass*) ok "corrupt jobs.json left untouched by every cron block; writes are atomic ($safety)" ;;
+    *) nope "jobs.json safety" "$safety" ;;
+esac
+
+echo ""
+echo "=== one-time schedule migrations (wiki 04:00, compact 07:30, reminders 08:15) ==="
+migr=$(python3 - "$SEED_SCRIPT" "$TMPDIR" <<'PY'
+import json, re, subprocess, sys, os
+content = open(sys.argv[1], encoding="utf-8").read()
+tmp = sys.argv[2]
+blocks = re.findall(r"<<'PYEOF'[^\n]*\n(.*?)\nPYEOF", content, re.DOTALL)
+cases = [
+    ("self-wiki-maintenance-and-reminders", "0 9 * * 1", "every monday 9am", "0 4 * * 1", "every monday 4am"),
+    ("memory-compact", "30 8 * * 0", "30 8 * * 0", "30 7 * * 0", "30 7 * * 0"),
+    ("self-wiki-reminders-daily", "0 8 * * *", "every day 8am", "15 8 * * *", "every day 8:15am"),
+]
+bad = []
+for name, old, old_disp, new, new_disp in cases:
+    block = next((b for b in blocks if f'"name": "{name}"' in b), None)
+    if block is None:
+        bad.append(f"{name}: no block"); continue
+    for label, expr, disp, want in (("legacy", old, old_disp, new), ("custom", "5 6 * * 3", "custom", "5 6 * * 3")):
+        d = os.path.join(tmp, f"mig-{name}-{label}")
+        os.makedirs(d, exist_ok=True)
+        path = os.path.join(d, "jobs.json")
+        json.dump({"jobs": [{"id": "x1", "name": name, "prompt": "old", "enabled": False,
+                             "schedule": {"kind": "cron", "expr": expr, "display": disp},
+                             "schedule_display": disp}]}, open(path, "w"))
+        code = block.replace("/opt/data/cron/jobs.json", path).replace("/opt/data/config.yaml", os.path.join(d, "none.yaml"))
+        for _ in range(2):
+            subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
+        j = json.load(open(path))["jobs"][0]
+        if j["schedule"]["expr"] != want or j.get("enabled") is not False:
+            bad.append(f"{name}/{label}: {j['schedule']}")
+        if label == "legacy" and (j["schedule"].get("display") != new_disp or j.get("schedule_display") != new_disp):
+            bad.append(f"{name}/display: {j['schedule']} {j.get('schedule_display')}")
+print("pass" if not bad else "fail " + repr(bad))
+PY
+)
+[ "$migr" = "pass" ] && ok "exact legacy schedules move once; custom schedules and enabled flags kept" || nope "schedule migrations" "$migr"
+
+echo ""
+echo "=== Mnemosyne cross-session recall ==="
+cs_block=$(python3 - "$SEED_SCRIPT" <<'PY'
+import re, sys
+content = open(sys.argv[1], encoding="utf-8").read()
+blocks = re.findall(r"<<'PYCS'[^\n]*\n(.*?)\nPYCS", content, re.DOTALL)
+print(blocks[0] if blocks else "")
+PY
+)
+[ -n "$cs_block" ] && ok "seed has a cross_session block" || nope "cross_session block" "not found"
+cs_run() { python3 -c "${cs_block//\/opt\/data\/mnemosyne\/config.yaml/$1}" >/dev/null 2>&1; }
+mkdir -p "$TMPDIR/cs"
+printf '# header\nauto_sleep_enabled: true\ncross_session: false\ndefault_scope: session\n' > "$TMPDIR/cs/config.yaml"
+cs_run "$TMPDIR/cs/config.yaml"; cs_run "$TMPDIR/cs/config.yaml"
+[ "$(grep -c '^cross_session:' "$TMPDIR/cs/config.yaml")" = "1" ] && grep -qx 'cross_session: true' "$TMPDIR/cs/config.yaml" \
+    && grep -qx 'default_scope: session' "$TMPDIR/cs/config.yaml" && grep -qx '# header' "$TMPDIR/cs/config.yaml" \
+    && ok "cross_session flipped to true once; other keys and comments kept" || nope "cross_session edit" "$(cat "$TMPDIR/cs/config.yaml")"
+cs_run "$TMPDIR/cs/absent.yaml"
+grep -qx 'cross_session: true' "$TMPDIR/cs/absent.yaml" 2>/dev/null && ok "absent Mnemosyne config gets cross_session: true" \
+    || nope "cross_session absent file" "not created"
+
+echo ""
+echo "=== memory digests and wiki lint wording ==="
+wording=$(python3 - "$SEED_SCRIPT" "$SCRIPT_DIR/../config.yaml" <<'PY'
+import re, sys
+content = open(sys.argv[1], encoding="utf-8").read()
+blocks = re.findall(r"<<'PYEOF'[^\n]*\n(.*?)\nPYEOF", content, re.DOTALL)
+def block(name): return next((b for b in blocks if f'"name": "{name}"' in b), "")
+triage, compact, wiki = block("memory-triage"), block("memory-compact"), block("self-wiki-maintenance-and-reminders")
+cfg = open(sys.argv[2], encoding="utf-8").read()
+checks = {
+    "triage_table": "| Result | Count |" in triage,
+    "triage_needs_you": "Needs you" in triage and "age_days" in triage,
+    "triage_no_plain_text_rule": "Plain text, no code blocks" not in triage,
+    "compact_table": "| Store | Before | After | Cap |" in compact,
+    "wiki_runs_lint": "scripts/lint.py" in wiki,
+    "wiki_lint_fallback": "full read" in wiki and "missing" in wiki,
+    "wiki_monthly_full_read": "day of the month is 7 or less" in wiki,
+    "rich_messages": re.search(r"^    telegram:\n        extra:\n            rich_messages: true$", cfg, re.M) is not None,
+}
+bad = [k for k, v in checks.items() if not v]
+print("pass" if not bad else "fail " + repr(bad))
+PY
+)
+[ "$wording" = "pass" ] && ok "digests use tables; triage surfaces 7-day holds; wiki runs lint with full-read fallback; Telegram rich messages on" \
+    || nope "digest/lint wording" "$wording"
 
 echo ""
 echo "========================================="
