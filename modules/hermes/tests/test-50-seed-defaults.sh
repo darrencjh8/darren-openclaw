@@ -1412,7 +1412,8 @@ grep -qx "new in image" "$SP/data/scripts/log-issue-triage-worker.sh" \
     && ok "retired name shipped by the image is kept" || nope "retired but shipped" "removed or stale"
 rm -f "$SP/defaults/scripts/log-issue-triage-worker.sh"
 
-echo ""echo "========================================="
+echo ""
+echo "========================================="
 echo -e " Results: ${GREEN}$pass passed${NC}, ${RED}$fail failed${NC}"
 echo "========================================="
 [ "$fail" -eq 0 ] || exit 1
