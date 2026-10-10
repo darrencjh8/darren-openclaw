@@ -1580,6 +1580,17 @@ python3 -c "$ptr_tmp" >/dev/null 2>&1
 ptr_count=$(grep -c "memories/topics" "$TMPDIR/memories/MEMORY.md")
 [ "$ptr_count" = "1" ] && ok "pointer is idempotent (added once)" || nope "pointer idempotency" "occurrences: $ptr_count"
 
+# A core that already carries a reworded pointer (the agent wrote its own) must
+# not gain a second one once the trim frees room: the live prod core did exactly
+# that, so the exact-string check re-added a duplicate every boot.
+mkdir -p "$TMPDIR/rewordmem"
+printf '%s\n' 'Durable facts too big for core live in /opt/data/memories/topics/ - search there before recall answers.' > "$TMPDIR/rewordmem/MEMORY.md"
+ptr_reword_tmp=${ptr_block//\/opt\/data\/memories\/MEMORY.md/$TMPDIR\/rewordmem\/MEMORY.md}
+ptr_reword_tmp=${ptr_reword_tmp//\/opt\/data\/config.yaml/$TMPDIR\/triage-config.yaml}
+python3 -c "$ptr_reword_tmp" >/dev/null 2>&1
+reword_count=$(grep -c "memories/topics" "$TMPDIR/rewordmem/MEMORY.md")
+[ "$reword_count" = "1" ] && ok "reworded pointer is not duplicated" || nope "reworded pointer idempotency" "occurrences: $reword_count"
+
 # A full core must not be pushed over its cap by the pointer.
 mkdir -p "$TMPDIR/fullmem"
 python3 - "$TMPDIR/fullmem/MEMORY.md" <<'PY'

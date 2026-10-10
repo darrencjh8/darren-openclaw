@@ -630,7 +630,7 @@ try:
 except FileNotFoundError:
     content = ""
 
-if pointer not in content:
+if "/opt/data/memories/topics" not in content:
     candidate = (content.rstrip("\n") + "\n" + pointer + "\n") if content.strip() else pointer + "\n"
     if len(candidate) <= limit:
         with open(core, "w") as handle:
