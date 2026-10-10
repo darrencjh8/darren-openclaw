@@ -16,12 +16,14 @@ with open(sys.argv[1]) as f:
     config = yaml.safe_load(f)
 
 router_provider = {
-    "name": "Codex Router",
+    "name": "Model Router",
     "api": "http://codex-router:4100/v1",
     "api_key": "local",
     "transport": "responses",
 }
 router_route = "custom:codex-router"
+# Every route's primary is the auto-thinking pool; the only fallback anywhere
+# is the direct vanilla deepseek route as the terminal rung.
 deepseek_fallback = {
     "provider": "deepseek",
     "model": "deepseek-flash",
@@ -53,7 +55,10 @@ assert config["model"].get("provider") == router_route
 assert config["model"].get("default") == "auto-thinking"
 assert "base_url" not in config["model"]
 assert "api_key" not in config["model"]
-assert config["agent"]["reasoning_effort"] == "high"
+assert config["agent"]["reasoning_effort"] == "none"
+assert "moa" not in (config["agent"].get("disabled_toolsets") or []), (
+    "main agent must not disable the moa toolset"
+)
 assert config["compression"]["threshold_tokens"] == 300000, (
     f"compression.threshold_tokens: expected 300000, got {config['compression'].get('threshold_tokens')!r}"
 )
@@ -68,15 +73,15 @@ assert config["fallback_providers"] == [deepseek_fallback], (
 )
 assert_route(config["delegation"], "auto-thinking", "delegation")
 
-aux_flash = "commandcode/deepseek/deepseek-v4.1-flash"
+aux_pool = "auto-thinking"
 
 vision = config["auxiliary"]["vision"]
 assert vision.get("provider") == router_route, (
     "auxiliary.vision.provider: expected 'custom:codex-router', got "
     f"{vision.get('provider')!r}"
 )
-assert vision.get("model") == aux_flash, (
-    f"auxiliary.vision.model: expected {aux_flash!r}, got {vision.get('model')!r}"
+assert vision.get("model") == aux_pool, (
+    f"auxiliary.vision.model: expected {aux_pool!r}, got {vision.get('model')!r}"
 )
 assert vision.get("fallback_chain") == [deepseek_fallback], (
     "auxiliary.vision.fallback_chain must use deepseek-flash"
@@ -84,15 +89,15 @@ assert vision.get("fallback_chain") == [deepseek_fallback], (
 assert "base_url" not in vision, "auxiliary.vision must use its named provider URL"
 assert "api_key" not in vision, "auxiliary.vision must use its named provider API key"
 
-for task, model in {
-    "web_extract": aux_flash,
-    "compression": aux_flash,
-    "approval": "auto-thinking",
-    "triage_specifier": aux_flash,
-    "profile_describer": aux_flash,
-}.items():
+for task in (
+    "web_extract",
+    "compression",
+    "approval",
+    "triage_specifier",
+    "profile_describer",
+):
     route = config["auxiliary"][task]
-    assert_route(route, model, f"auxiliary.{task}")
+    assert_route(route, "auto-thinking", f"auxiliary.{task}")
     assert route.get("fallback_chain") == [deepseek_fallback], (
         f"auxiliary.{task}.fallback_chain must use deepseek-flash"
     )
@@ -103,8 +108,8 @@ assert decomposer.get("provider") == router_route, (
     "auxiliary.kanban_decomposer.provider: expected 'custom:codex-router', got "
     f"{decomposer.get('provider')!r}"
 )
-assert decomposer.get("model") == aux_flash, (
-    f"auxiliary.kanban_decomposer.model: expected {aux_flash!r}, got {decomposer.get('model')!r}"
+assert decomposer.get("model") == "auto-thinking", (
+    f"auxiliary.kanban_decomposer.model: expected 'auto-thinking', got {decomposer.get('model')!r}"
 )
 assert "base_url" not in decomposer, "auxiliary.kanban_decomposer must use its named provider URL"
 assert "api_key" not in decomposer, "auxiliary.kanban_decomposer must use its named provider API key"
@@ -118,16 +123,11 @@ for profile, effort in {
     "spec-auditor": "medium",
     "project-manager": "low",
 }.items():
-    model, fallback_model = "auto-thinking", "deepseek-flash"
+    model = "auto-thinking"
     profile_config_path = root / "modules/hermes/profiles" / profile / "config.yaml"
     assert profile_config_path.is_file(), f"{profile} profile config is missing"
     with open(profile_config_path) as f:
         profile_config = yaml.safe_load(f)
-    if profile == "code-reviewer":
-        # The reviewer is the one profile that does not run the auto-thinking pool:
-        # it pins the Command Code DeepSeek Flash route and escalates to
-        # auto-thinking only when that route is unavailable.
-        model = "commandcode/deepseek/deepseek-v4.1-flash"
     assert_provider(profile_config, model, profile)
     expected_provider = router_route
     assert profile_config["model"].get("provider") == expected_provider, (
@@ -140,21 +140,24 @@ for profile, effort in {
         f"{profile}.agent.reasoning_effort: expected {effort!r}, got "
         f"{profile_config['agent'].get('reasoning_effort')!r}"
     )
+    assert "moa" not in (profile_config["agent"].get("disabled_toolsets") or []), (
+        f"{profile} agent must not disable the moa toolset"
+    )
     fallback = profile_config["fallback_providers"]
+    # Every profile falls back to the direct vanilla deepseek route: the
+    # terminal rung when the pool itself is unavailable. Profiles carry their
+    # own api_key on the fallback, so only provider and model are asserted.
+    assert len(fallback) == 1, (
+        f"{profile} must keep exactly one fallback, got {fallback!r}"
+    )
+    assert fallback[0].get("provider") == "deepseek", (
+        f"{profile} fallback must use the deepseek provider, got {fallback!r}"
+    )
+    assert fallback[0].get("model") == "deepseek-flash", (
+        f"{profile} fallback must use deepseek-flash, got {fallback!r}"
+    )
     if profile == "code-reviewer":
-        # The reviewer's fallback is the pooled route, not the direct deepseek
-        # provider, and it is an availability fallback rather than a strength
-        # guarantee: the pool picks its own model per hop.
-        assert fallback == [{"provider": router_route, "model": "auto-thinking"}], (
-            "code-reviewer must fall back to the auto-thinking pool"
-        )
         assert profile_config["memory"]["memory_enabled"] is False, (
             "code-reviewer memory must be disabled so every review has a fresh context"
-        )
-    else:
-        assert len(fallback) == 1
-        assert fallback[0].get("provider") == "deepseek"
-        assert fallback[0].get("model") == fallback_model, (
-            f"{profile} fallback must use {fallback_model}, got {fallback[0].get('model')!r}"
         )
 PY

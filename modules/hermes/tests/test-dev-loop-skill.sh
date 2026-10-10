@@ -93,12 +93,12 @@ for profile_file in config.yaml profile.yaml SOUL.md; do
         && ok "code-reviewer profile has $profile_file" \
         || nope "code-reviewer profile has $profile_file"
 done
-grep -Eq '^    default: commandcode/deepseek/deepseek-v4.1-flash$' "$CODE_REVIEWER_PROFILE/config.yaml" \
-    && ok "code-reviewer profile pins the Command Code DeepSeek Flash default" \
-    || nope "code-reviewer profile pins the Command Code DeepSeek Flash default"
-grep -Eq '^ +model: auto-thinking$' "$CODE_REVIEWER_PROFILE/config.yaml" \
-    && ok "code-reviewer profile keeps the auto-thinking pool fallback" \
-    || nope "code-reviewer profile keeps the auto-thinking pool fallback"
+grep -Eq '^    default: auto-thinking$' "$CODE_REVIEWER_PROFILE/config.yaml" \
+    && ok "code-reviewer profile runs the auto-thinking pool" \
+    || nope "code-reviewer profile runs the auto-thinking pool"
+grep -Eq '^ +model: deepseek-flash$' "$CODE_REVIEWER_PROFILE/config.yaml" \
+    && ok "code-reviewer profile keeps the direct deepseek-flash fallback" \
+    || nope "code-reviewer profile keeps the direct deepseek-flash fallback"
 
 echo "=== repo rules keep the gate invariants ==="
 grep -Fq -- 'one approval on an unchanged HEAD' "$REPO_RULES" \

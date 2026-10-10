@@ -1,6 +1,6 @@
 providers:
     codex-router:
-        name: Codex Router
+        name: Model Router
         api: http://codex-router:4100/v1
         api_key: local
         transport: responses
@@ -21,9 +21,7 @@ compression:
     proactive_prune_tokens: 48000
 
 agent:
-    reasoning_effort: high
-    disabled_toolsets:
-        - moa
+    reasoning_effort: none
 
 display:
     show_reasoning: false
@@ -91,28 +89,27 @@ web:
     extract_backend: firecrawl
 
 auxiliary:
-    # Every auxiliary slot routes through codex-router. The Command Code
-    # DeepSeek Flash route is the shared workhorse; the approval judge keeps
-    # the auto-thinking pool so its verdict quality tracks the main agent.
-    # Each slot keeps exactly one direct deepseek-flash fallback. That fallback
-    # is terminal: it is the last rung, and the Command Code route itself has no
-    # cross-provider hop. The auto-thinking pool used by approval does hop
-    # internally (terra-3 -> deepseek-flash -> terra-2 -> terra-1).
+    # Every auxiliary slot runs the auto-thinking pool as its primary, with
+    # exactly one direct deepseek-flash fallback_chain as the terminal rung.
+    # Command Code is on its way out, so no slot pins a commandcode/* primary:
+    # when the route is retired the pool simply stops hopping to it instead of
+    # stranding a primary on an unpublished model. The approval judge uses the
+    # same pooled-primary shape so its verdict quality tracks the main agent.
     vision:
         provider: custom:codex-router
-        model: commandcode/deepseek/deepseek-v4.1-flash
+        model: auto-thinking
         fallback_chain:
             - provider: deepseek
               model: deepseek-flash
     web_extract:
         provider: custom:codex-router
-        model: commandcode/deepseek/deepseek-v4.1-flash
+        model: auto-thinking
         fallback_chain:
             - provider: deepseek
               model: deepseek-flash
     compression:
         provider: custom:codex-router
-        model: commandcode/deepseek/deepseek-v4.1-flash
+        model: auto-thinking
         fallback_chain:
             - provider: deepseek
               model: deepseek-flash
@@ -124,19 +121,19 @@ auxiliary:
               model: deepseek-flash
     kanban_decomposer:
         provider: custom:codex-router
-        model: commandcode/deepseek/deepseek-v4.1-flash
+        model: auto-thinking
         fallback_chain:
             - provider: deepseek
               model: deepseek-flash
     triage_specifier:
         provider: custom:codex-router
-        model: commandcode/deepseek/deepseek-v4.1-flash
+        model: auto-thinking
         fallback_chain:
             - provider: deepseek
               model: deepseek-flash
     profile_describer:
         provider: custom:codex-router
-        model: commandcode/deepseek/deepseek-v4.1-flash
+        model: auto-thinking
         fallback_chain:
             - provider: deepseek
               model: deepseek-flash

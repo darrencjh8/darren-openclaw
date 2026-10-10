@@ -159,14 +159,13 @@ class DeployWorkflowRouterTests(unittest.TestCase):
         reviewer = yaml.safe_load((Path(__file__).parents[1] / "hermes/profiles/code-reviewer/config.yaml").read_text(encoding="utf-8"))
         self.assertEqual(
             reviewer["model"],
-            {"provider": "custom:codex-router", "default": "commandcode/deepseek/deepseek-v4.1-flash"},
+            {"provider": "custom:codex-router", "default": "auto-thinking"},
         )
-        # The reviewer's fallback is the pooled route, not the direct deepseek
-        # provider; it is an availability fallback, so the pool may itself serve a
-        # weaker model than the pinned primary.
+        # The reviewer runs the pooled route with the direct vanilla deepseek
+        # route as its terminal fallback when the pool is unavailable.
         self.assertEqual(
             reviewer["fallback_providers"],
-            [{"provider": "custom:codex-router", "model": "auto-thinking"}],
+            [{"provider": "deepseek", "model": "deepseek-flash"}],
         )
         self.assertFalse(reviewer["memory"]["memory_enabled"])
         self.assertEqual(reviewer["agent"]["reasoning_effort"], "high")
