@@ -114,7 +114,7 @@ To: CITI CREDIT CARDS (Ref ending 2666)
     // separator, so the next label is glued onto the previous value
     // ("2026Time of Payment", "SGTAmount", "4.00From your account").
     const movement = parseBankMovement(
-      "Dear Valued CustomerAs you instructed, we have made the following bill payment:Date of Payment:01 Sep 2026Time of Payment:01:05 am SGTAmount:SGD 4.00From your account:111 Account (-166600)To account:OCBC 88.N Visa Card (-344400)Reference number:2609010085466037Billing Organisation may take up to three working days to process payment.",
+      "Dear Valued CustomerAs you instructed, we have made the following bill payment:Date of Payment:01 Sep 2026Time of Payment:01:05 am SGTAmount:SGD 4.00From your account:111 Account (-166600)To account:OCBC 88.N Visa Card (-344400)Reference number:2609010016084129Billing Organisation may take up to three working days to process payment.",
       { senderBank: "OCBC", receivedAt: "2026-09-01T01:06:00+08:00" },
     );
 
@@ -124,7 +124,7 @@ To: CITI CREDIT CARDS (Ref ending 2666)
       currency: "SGD",
       own_account: { bank: "OCBC", suffix: "166600" },
       counterparty: { bank: "OCBC", suffix: "344400" },
-      reference_number: expect.stringContaining("2609010085466037"),
+      reference_number: expect.stringContaining("2609010016084129"),
     });
   });
 
@@ -323,7 +323,7 @@ Account that money was deposited in : OCBC 360 (-6600)
     // for unrecognized shapes should happen.
     const movement = parseBankMovement(
       `Card Transaction Alert
-Transaction Ref: SP1300673370000000053852
+Transaction Ref: SP1300392943337844574576
 
 Dear Sir / Madam,
 
@@ -373,7 +373,7 @@ Time : 10:00 AM SGT`,
   // The fixture is the real forwarded body, PII-redacted the way the repo does
   // it elsewhere (suffixes kept, names/addresses shortened) — see the header of
   // tests/ocbc-trust-transfer-hold.test.js.
-  const SC_FAST_ADVICE = `Regards, Darren ---------- Forwarded message --------- From: <OnlineBanking.SG@sc.com> Date: Mon, Sep 28, 2026, 10:08 AM Subject: Confirmation Advice for FAST Transaction To: <ACCOUNTHOLDER@gmail.com> Dear Valued Customer, Your FAST transaction has been successful, transaction details below: Transaction reference: SG26050200693178180005 From account: ******2555 To account: ******7222 Amount: 1,275.00 Currency: SGD Transaction due date: 28/09/2026 10:08:02 Transaction type: FAST Payee Name: Darren DBS Payee Bank: Transaction message: Please call Client Contact Centre for enquiries. Thank you for using Standard Chartered Online Banking. Yours Sincerely, Transaction Banking Consumer Banking`;
+  const SC_FAST_ADVICE = `Regards, Darren ---------- Forwarded message --------- From: <OnlineBanking.SG@sc.com> Date: Mon, Sep 28, 2026, 10:08 AM Subject: Confirmation Advice for FAST Transaction To: <accountholder@example.com> Dear Valued Customer, Your FAST transaction has been successful, transaction details below: Transaction reference: SG26050277698692365980 From account: ******2555 To account: ******7222 Amount: 1,275.00 Currency: SGD Transaction due date: 28/09/2026 10:08:02 Transaction type: FAST Payee Name: Darren DBS Payee Bank: Transaction message: Please call Client Contact Centre for enquiries. Thank you for using Standard Chartered Online Banking. Yours Sincerely, Transaction Banking Consumer Banking`;
 
   it("parses the SC FAST advice and resolves both legs of the transfer", () => {
     const movement = parseBankMovement(SC_FAST_ADVICE, {
@@ -394,7 +394,7 @@ Time : 10:00 AM SGT`,
     expect(movement.counterparty.suffix).toBe("7222");
     // The transaction reference is the real one, not the "Transaction
     // reference:" label captured with the greeting.
-    expect(movement.reference_number).toBe("SG26050200693178180005");
+    expect(movement.reference_number).toBe("SG26050277698692365980");
     // 2026-09-28 10:08 SGT, from "Transaction due date". Minute precision is the
     // module's convention: every other bank alert resolves to :00 seconds too,
     // because isoDateTime() parses hour and minute only.
@@ -569,7 +569,7 @@ Time : 10:00 AM SGT`,
 });
 
 describe("SC FAST advice scoping (#639)", () => {
-  const SC = `Dear Customer, Your FAST transaction has been successful: Transaction reference: SG26050200693178180005 From account: ******2555 To account: ******7222 Amount: 1,275.00 Currency: SGD Transaction due date: 28/09/2026 10:08:02 Transaction type: FAST Payee Bank: Transaction message: Thank you for using Standard Chartered Online Banking. Yours Sincerely`;
+  const SC = `Dear Customer, Your FAST transaction has been successful: Transaction reference: SG26050277698692365980 From account: ******2555 To account: ******7222 Amount: 1,275.00 Currency: SGD Transaction due date: 28/09/2026 10:08:02 Transaction type: FAST Payee Bank: Transaction message: Thank you for using Standard Chartered Online Banking. Yours Sincerely`;
   const FOREIGN = `---------- Forwarded message --------- From: <alerts@examplebank.com> Subject: Debit Card Alert Transaction type: Debit Card Transaction From account: ******1111 To account: ******9999 Amount: 4,321.00 Currency: SGD Transaction due date: 28/09/2026 09:00:00 Thank you for using Standard Chartered Online Banking. Yours Sincerely, `;
   const opts = { senderBank: "UOB", receivedAt: "2026-10-01T09:00:00.000Z" };
 

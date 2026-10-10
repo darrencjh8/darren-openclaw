@@ -2,7 +2,7 @@
 
 ## Production Server
 
-- **Host:** `192.168.68.51` (SSH config alias: `192.168.68.51`)
+- **Host:** `<prod-host>` (SSH config alias: `<prod-host>`)
 - **User:** `darren` (sudoer)
 - **Auth:** SSH key at `~/.ssh/id_ed25519`
 - **Project root:** `~/darren-openclaw`

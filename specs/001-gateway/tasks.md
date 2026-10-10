@@ -151,12 +151,12 @@
 
 **Purpose**: Deploy Hermes to production alongside existing OpenClaw. Parallel run for validation. Cutover when stable.
 
-- [ ] T050 [US1] Backup production: `ssh darren@192.168.68.51 'cd ~/darren-openclaw && git pull && docker compose down'`
-- [ ] T051 [US1] `scp -r gateway/hermes/ darren@192.168.68.51:~/darren-openclaw/gateway/hermes/`
-- [ ] T052 [US1] `scp gateway/docker-compose.yml darren@192.168.68.51:~/darren-openclaw/gateway/docker-compose.yml`
+- [ ] T050 [US1] Backup production: `ssh darren@<prod-host> 'cd ~/darren-openclaw && git pull && docker compose down'`
+- [ ] T051 [US1] `scp -r gateway/hermes/ darren@<prod-host>:~/darren-openclaw/gateway/hermes/`
+- [ ] T052 [US1] `scp gateway/docker-compose.yml darren@<prod-host>:~/darren-openclaw/gateway/docker-compose.yml`
 - [ ] T053 [US1] Build & update expense-tracker with MCP: `scp` updated `modules/expense-tracker/` → `docker compose build expense-tracker`
-- [ ] T054 [US1] Start Hermes on production: `ssh darren@192.168.68.51 'cd ~/darren-openclaw/gateway && docker compose up -d hermes expense-tracker'`
-- [ ] T055 [US1] Verify Hermes gateway started: `ssh darren@192.168.68.51 'docker logs hermes --tail 20'` — confirm "Hermes Agent" banner, platforms connected
+- [ ] T054 [US1] Start Hermes on production: `ssh darren@<prod-host> 'cd ~/darren-openclaw/gateway && docker compose up -d hermes expense-tracker'`
+- [ ] T055 [US1] Verify Hermes gateway started: `ssh darren@<prod-host> 'docker logs hermes --tail 20'` — confirm "Hermes Agent" banner, platforms connected
 - [ ] T056 [US1] Keep OpenClaw running on alternate port (18800) — remove port 18789 mapping to avoid conflict, keep container running as safety net
 - [ ] T057 [US1] Verify Telegram: send message to bot → Hermes responds (not OpenClaw). Confirm by checking which container processed it.
 - [ ] T058 [US1] Verify Email: send test receipt → Hermes processes it → appears in AB. Confirm in Hermes logs.
@@ -256,5 +256,5 @@
 - Hermes memory has character limits (2,200 chars MEMORY.md, 1,375 chars USER.md). Consolidate facts during migration.
 - Docker socket access requires `HERMES_ALLOW_ROOT_GATEWAY=0` (default) — the container runs as non-root `hermes` user. Docker CLI works because `hermes` user is in `docker` group inside the container.
 - Production deployment keeps OpenClaw running as fallback during validation (Phase 9). Only decommission after 48h stable.
-- Production server: `192.168.68.51`, SSH as `darren`.
+- Production server: `<prod-host>`, SSH as `darren`.
 - All production commands require explicit approval per project rules.

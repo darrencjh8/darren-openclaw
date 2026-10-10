@@ -205,7 +205,7 @@ describe("Phase 1: LLM Analysis (3-phase)", () => {
     );
 
     const emailText = `Card Transaction Alert
-Transaction Ref: SP1300673370000000053852
+Transaction Ref: SP1300392943337844574576
 
 Dear Sir / Madam,
 

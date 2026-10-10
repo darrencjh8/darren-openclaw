@@ -355,7 +355,7 @@ This is deliberately conservative, because the match is on (account, amount,
 date) and cannot by itself prove the two rows are the same transfer — the
 trade-off tracked in #578. The upgrade path is a bank-reference column on
 `transfer_journal`; the two #598 alerts do share the reference
-`2609230000266880` (the DBS ref `012609230000266880EPS7678794` embeds the OCBC
+`2609230000266880` (the DBS ref `012609230000266880EPS6064508` embeds the OCBC
 ref as its middle segment), which such a column could key on.
 
 ### 6. Harden merchant inference

@@ -7,7 +7,7 @@ Production server running Hermes Agent and supporting services via Docker Compos
 | Detail | Value |
 |--------|-------|
 | Hostname | `darren` |
-| IP | `192.168.68.51` |
+| IP | `<prod-host>` |
 | OS | Debian-based Linux |
 | Docker | 26.1.5 |
 
