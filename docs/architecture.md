@@ -54,7 +54,7 @@ graph TB
 4. **Card suffix facts.** A fact such as `Card ending 7111 belongs to Epsilon Nova Card` maps the number in an alert to an account and overrides an LLM pick. Facts are managed with `search_facts`, `learn_fact`, `update_fact`, and `cleanup_facts`.
 5. **Actual Budget.** Transactions are written through `actual-api` (`ACTUAL_BUDGET_URL=http://actual-api:3000`), which syncs to the Actual Budget server.
 6. **Notifications.** `notify_user` posts to the Hermes webhook (`NOTIFY_URL`), which the `webhook` platform in `modules/hermes/config.yaml` relays to the home Telegram channel.
-7. **From chat.** Hermes calls the expense-tracker MCP tools directly — for example `fetch_accounts`, `check_duplicate`, `insert_transaction`, `resolve_merchant`, and `fetch_context` (MCP-only).
+7. **From chat.** Hermes calls the expense-tracker MCP tools directly — for example `insert_transaction`, `resolve_merchant`, `update_transaction`, and `fetch_context` (MCP-only). Read-only lookups such as `fetch_accounts` and `check_duplicate` are **not** MCP tools; they are REST-only (`POST /tools/<name>`), and `fetch_context` wraps the account, category and payee lookups for MCP callers.
 
 ### Portfolio tracking
 
