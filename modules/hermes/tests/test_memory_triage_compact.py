@@ -1,8 +1,11 @@
 """Tests for `memory_triage.py compact` (weekly MEMORY.md compaction).
 
-Hermes itself is not installed in CI, so the `tools` package is stubbed: the
-stub's apply_memory_pending records the payload it receives and applies
-replace/remove ops to MEMORY.md as plain substring edits.
+Hermes itself is not installed in CI, so the `tools` package is stubbed. The
+stub mirrors the two Hermes contracts compaction depends on
+(/opt/hermes/tools/memory_tool.py): `_pin_matched_entries(store, payload)`
+records on each replace/remove the full entry its old_text selects and returns
+an error string when the search fails, and `apply_memory_pending` refuses any
+replace/remove that carries no `matched_entry`.
 """
 
 import json
@@ -30,13 +33,28 @@ STUB_MT = textwrap.dedent('''
     HOME = Path(os.environ["HERMES_HOME"])
     def load_on_disk_store():
         return {}
+    def _path(payload):
+        name = "USER.md" if payload.get("target") == "user" else "MEMORY.md"
+        return HOME / "memories" / name
+    def _pin_matched_entries(store, payload):
+        entries = _path(payload).read_text().strip().split("\\n§\\n")
+        for op in payload.get("operations") or []:
+            if op.get("action") not in ("replace", "remove"):
+                continue
+            hits = [e for e in entries if op["old_text"] in e]
+            if len(hits) != 1:
+                return json.dumps({"success": False, "error": "old_text not found"})
+            op["matched_entry"] = hits[0]
+        return None
     def apply_memory_pending(payload, store):
         with open(HOME / "payloads.jsonl", "a") as f:
             f.write(json.dumps(payload) + "\\n")
-        name = "USER.md" if payload.get("target") == "user" else "MEMORY.md"
-        path = HOME / "memories" / name
+        ops = payload.get("operations") or []
+        if any(not op.get("matched_entry") for op in ops if op.get("action") in ("replace", "remove")):
+            return {"success": False, "error": "This destructive pending write predates entry pinning and cannot be verified; nothing was applied. Reject it and recreate the change."}
+        path = _path(payload)
         text = path.read_text()
-        for op in payload.get("operations") or []:
+        for op in ops:
             if op["old_text"] not in text:
                 return {"success": False, "error": "old_text not found"}
             text = text.replace(op["old_text"], op.get("content") or "", 1)
@@ -146,11 +164,27 @@ class CompactTest(unittest.TestCase):
         self.assertTrue(report["dry_run"])
         self.assertEqual(self.memory(), MEMORY)
 
-    def test_failed_apply_reports_failure(self):
+    def test_failed_pin_reports_failure_and_files_nothing(self):
         rc, report = self.run_compact({"target": "memory", "operations": [
-            {"action": "remove", "old_text": "not in memory"}]})
+            {"action": "remove", "old_text": "not in memory"}],
+            "topic_appends": [{"file": "infra.md", "line": "Router: x"}]})
         self.assertNotEqual(rc, 0)
         self.assertFalse(report["ok"])
+        self.assertIn("old_text not found", report["error"])
+        self.assertEqual(self.memory(), MEMORY)
+        self.assertFalse((self.home / "memories" / "topics" / "infra.md").exists())
+        self.assertEqual(self.payloads(), [])
+
+    def test_ops_are_pinned_to_their_entries(self):
+        rc, report = self.run_compact({"target": "memory", "operations": [
+            {"action": "remove", "old_text": "Old note"}]})
+        self.assertEqual(rc, 0, report)
+        self.assertEqual(self.payloads()[0]["operations"][0]["matched_entry"], "Old note one.")
+
+    def test_dry_run_refuses_unpinnable_plan(self):
+        rc, report = self.run_compact({"target": "memory", "operations": [
+            {"action": "remove", "old_text": "not in memory"}]}, "--dry-run")
+        self.assertNotEqual(rc, 0)
         self.assertIn("old_text not found", report["error"])
 
 
