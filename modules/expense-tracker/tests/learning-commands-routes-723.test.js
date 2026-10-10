@@ -1,10 +1,10 @@
 /**
- * Issue #723: with the learning bot configured, index.js starts it and does not
- * route confirm_learning over HTTP.
+ * Issue #723: with Hermes's bot configured, index.js mounts /learning/answer
+ * and does not route confirm_learning over HTTP.
  */
 import { describe, expect, it, vi } from "vitest";
 
-const { postMock, start, stop } = vi.hoisted(() => ({ postMock: vi.fn(), start: vi.fn(async () => {}), stop: vi.fn(async () => {}) }));
+const { postMock } = vi.hoisted(() => ({ postMock: vi.fn() }));
 
 vi.mock("express", () => {
     const app = {
@@ -24,7 +24,7 @@ vi.mock("../src/config.js", () => ({
     Config: {
         fromEnv: () => ({
             memoryPath: "m", dedupDbPath: ":memory:", statementDbPath: ":memory:",
-            learningBotToken: "1:t", learningBotChatId: "5",
+            telegramBotToken: "1:t", telegramHomeChannel: "5",
         }),
     },
 }));
@@ -34,12 +34,11 @@ vi.mock("../src/tools.js", () => ({
         setOrchestrator() {}
         setStatementJournal() {}
         setEmailContext() {}
-        setLearningBot() {}
+        setLearningNotifier() {}
         executeTool() { return true; }
     },
     StatementJournal: class {},
 }));
-vi.mock("../src/learning-bot.js", () => ({ LearningBot: class { start() { return start(); } stop() { return stop(); } } }));
 vi.mock("../src/orchestrator.js", () => ({ AgentOrchestrator: class {} }));
 vi.mock("../src/statement/orchestrator.js", () => ({ StatementProcessor: class {} }));
 vi.mock("../src/dedup.js", () => ({ DedupJournal: class { cleanup() {} } }));
@@ -47,14 +46,15 @@ vi.mock("../src/mcp-server.js", () => ({ createMcpServer: vi.fn() }));
 vi.mock("../src/classify.js", () => ({ classifyEmail: vi.fn(), dispatchEmail: vi.fn() }));
 vi.mock("../src/imap.js", () => ({ ImapIdleHandler: class { idleLoop() { return Promise.resolve(); } } }));
 
-describe("index.js with the learning bot (#723)", () => {
-    it("starts the bot and drops the confirm-learning route", async () => {
+describe("index.js with Hermes's bot configured (#723)", () => {
+    it("mounts the answer route and drops the confirm-learning route", async () => {
         await import("../src/index.js");
         await vi.waitFor(() => expect(postMock).toHaveBeenCalled());
         const paths = postMock.mock.calls.map(([p]) => p);
+        expect(paths).toContain("/learning/answer");
         expect(paths).not.toContain("/tools/confirm-learning");
         expect(paths).toContain("/tools/decline-learning");
         expect(paths).toContain("/tools/list-pending-learning");
-        await vi.waitFor(() => expect(start).toHaveBeenCalledTimes(1));
+        expect(paths.filter((p) => p.startsWith("/tools/")).some((p) => /answer|remember|forget/.test(p))).toBe(false);
     });
 });

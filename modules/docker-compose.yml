@@ -79,9 +79,10 @@ services:
         environment:
             - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}
             - JEV_API_KEY=${JEV_API_KEY:-}
-            # Dedicated bot for the Remember/Don't buttons; not hermes's bot (#723).
-            - LEARNING_BOT_TOKEN=${LEARNING_BOT_TOKEN:-}
-            - LEARNING_BOT_CHAT_ID=${LEARNING_BOT_CHAT_ID:-}
+            # Hermes's own bot, send-only here (Hermes polls it). Both set turns on
+            # the tappable /remember_<id> and /forget_<id> commands (#723).
+            - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
+            - TELEGRAM_HOME_CHANNEL=${TELEGRAM_HOME_CHANNEL:-}
             - LLM_PROVIDER=${LLM_PROVIDER:-litellm}
             - LLM_BASE_URL=${LLM_BASE_URL:-http://codex-router:4100/v1}
             - LLM_MODEL=${LLM_MODEL:-auto-thinking}

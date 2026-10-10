@@ -969,7 +969,7 @@ export class ToolRegistry {
   }
 
   getToolSchemas() {
-    return TOOLS.filter((t) => !(this.learningBotEnabled && t.name === "confirm_learning")).map((t) => ({
+    return TOOLS.filter((t) => !(this.learningCommandsEnabled && t.name === "confirm_learning")).map((t) => ({
       type: "function",
       function: {
         name: t.name,
@@ -2069,13 +2069,13 @@ export class ToolRegistry {
     return this._pending;
   }
 
-  setLearningBot(bot) {
-    this._learningBot = bot;
+  setLearningNotifier(notifier) {
+    this._learningNotifier = notifier;
   }
 
-  /** True when buttons answer offers, so the model gets no confirm path (#723). */
-  get learningBotEnabled() {
-    return Boolean(this._config.learningBotToken && this._config.learningBotChatId);
+  /** True when /remember and /forget answer offers, so the model gets no confirm path (#723). */
+  get learningCommandsEnabled() {
+    return Boolean(this._config.telegramBotToken && this._config.telegramHomeChannel);
   }
 
   /**
@@ -2099,9 +2099,9 @@ export class ToolRegistry {
       budgetId: budget_id || "",
     });
     const stored = this._pendingLearning.get(id);
-    if (this._learningBot && stored) {
+    if (this._learningNotifier && stored) {
       try {
-        await this._learningBot.sendOffer({ offer: stored });
+        await this._learningNotifier.sendOffer({ offer: stored });
       } catch (error) {
         logger.warn({ event: "learning_offer_send_failed", error: error.message });
       }
@@ -2117,7 +2117,7 @@ export class ToolRegistry {
   async _handle_list_pending_learning() {
     return {
       offers: this._pendingLearning.list().map((offer) => ({
-        ...(this.learningBotEnabled ? {} : { id: offer.id }),
+        ...(this.learningCommandsEnabled ? {} : { id: offer.id }),
         descriptor: offer.descriptor,
         payee: offer.payee,
         runner_up: offer.runnerUp,
@@ -2127,12 +2127,12 @@ export class ToolRegistry {
   }
 
   async _handle_confirm_learning({ id }) {
-    // The buttons are the only confirm path when the bot is on (#723).
-    if (this.learningBotEnabled) return { confirmed: false, reason: "use_buttons" };
+    // The user's command is the only confirm path when commands are on (#723).
+    if (this.learningCommandsEnabled) return { confirmed: false, reason: "use_commands" };
     return this._confirmLearning(id);
   }
 
-  /** Writes the fact for a live offer. Called by confirm_learning and the bot. */
+  /** Writes the fact for a live offer. Called by confirm_learning and the answer route. */
   async _confirmLearning(id) {
     const offer = this._pendingLearning.get(id);
     if (!offer) return { confirmed: false, reason: "unknown_or_expired" };

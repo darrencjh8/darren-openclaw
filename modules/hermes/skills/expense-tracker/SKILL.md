@@ -70,8 +70,12 @@ When memory has no payee and the pipeline could not decide, a model (Jev) may
 pick one from the full email, and the notification then asks "Remember this
 mapping?". That is a guess, so nothing is saved until the user says yes.
 
-- Call `list_pending_learning` to see the open offers (descriptor, payee,
-  runner-up, id).
+- When the tracker's own Telegram message carries `/remember_<id>` and
+  `/forget_<id>` commands, the user answers with a tap. You cannot confirm and
+  never see the id: do not ask the user to reply "yes" to you, and do not try
+  to call `confirm_learning` (it is not available).
+- Otherwise call `list_pending_learning` to see the open offers (descriptor,
+  payee, runner-up, id).
 - Only after an explicit user yes, in a later turn than the offer, call
   `confirm_learning` with that offer's id. If the user says no, call
   `decline_learning`. Declining never changes the booked transaction.
