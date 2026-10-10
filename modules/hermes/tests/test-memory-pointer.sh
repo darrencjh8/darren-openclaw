@@ -4,11 +4,11 @@
 # reference to the topics directory instead of re-adding its own on every boot.
 set -euo pipefail
 
-RED='\033[0;31m' GREEN='\033[0;32m' NC='\033[0m'
+GREEN='\033[0;32m' NC='\033[0m'
 pass=0 fail=0
 
 ok()   { echo -e "  ${GREEN}PASS${NC} $1"; pass=$((pass+1)); }
-nope() { echo -e "  ${RED}FAIL:${NC} $1 — $2"; fail=$((fail+1)); }
+nope() { echo "FAIL: $1 — $2"; fail=$((fail+1)); }
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 SEED_SCRIPT="$SCRIPT_DIR/../50-seed-defaults"
