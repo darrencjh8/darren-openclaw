@@ -954,6 +954,9 @@ else:
     if isinstance(schedule, dict) and schedule.get("expr") == LEGACY_SCHEDULE:
         existing["schedule"] = dict(DEFAULTS["schedule"])
         existing["schedule_display"] = DEFAULTS["schedule_display"]
+        # Drop the instant computed from the old expr so the scheduler recomputes it;
+        # a stale one is re-anchored past the first new occurrence without firing.
+        existing["next_run_at"] = None
         changed.append("schedule")
     print("cron: memory-compact migrated: " + ", ".join(sorted(changed)) if changed else "cron: memory-compact unchanged")
 
@@ -1104,6 +1107,9 @@ else:
     ):
         existing["schedule"] = dict(DEFAULTS["schedule"])
         existing["schedule_display"] = DEFAULTS["schedule_display"]
+        # Drop the instant computed from the old expr so the scheduler recomputes it;
+        # a stale one is re-anchored past the first new occurrence without firing.
+        existing["next_run_at"] = None
         changed.append("schedule")
     if changed:
         print("cron: memory-triage migrated: " + ", ".join(sorted(changed)))
@@ -1187,6 +1193,9 @@ else:
     if isinstance(schedule, dict) and schedule.get("expr") == LEGACY_SCHEDULE:
         existing["schedule"] = dict(DEFAULTS["schedule"])
         existing["schedule_display"] = DEFAULTS["schedule_display"]
+        # Drop the instant computed from the old expr so the scheduler recomputes it;
+        # a stale one is re-anchored past the first new occurrence without firing.
+        existing["next_run_at"] = None
         changed.append("schedule")
     if changed:
         print("cron: self-wiki-maintenance-and-reminders migrated: " + ", ".join(sorted(changed)))
@@ -1266,6 +1275,9 @@ else:
     if isinstance(schedule, dict) and schedule.get("expr") == LEGACY_SCHEDULE:
         existing["schedule"] = dict(DEFAULTS["schedule"])
         existing["schedule_display"] = DEFAULTS["schedule_display"]
+        # Drop the instant computed from the old expr so the scheduler recomputes it;
+        # a stale one is re-anchored past the first new occurrence without firing.
+        existing["next_run_at"] = None
         changed.append("schedule")
     if changed:
         print("cron: self-wiki-reminders-daily migrated: " + ", ".join(sorted(changed)))
