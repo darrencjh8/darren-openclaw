@@ -200,6 +200,43 @@ for profile_dir in /opt/hermes-defaults/profiles/*/; do
     fi
 done
 
+# Set the default profile's display name. 'default' is the implicit root profile:
+# its HERMES_HOME is the root itself and every stored path, cron profile field, and
+# skills directory keys off that canonical id, so it is never renamed. The friendly
+# label is profile.yaml display_name, which is presentation-only. This only fills an
+# empty name, so an operator's own choice is never overwritten.
+python3 <<'PYEOF' || true
+# SEED_DEFAULT_PROFILE_DISPLAY_NAME
+import os
+import tempfile
+
+import yaml
+
+DEFAULT_PROFILE_DISPLAY_NAME = "friday"
+PROFILE_META = "/opt/data/profile.yaml"
+
+existing = {}
+if os.path.exists(PROFILE_META):
+    try:
+        with open(PROFILE_META) as f:
+            existing = yaml.safe_load(f) or {}
+    except yaml.YAMLError:
+        existing = {}
+if not isinstance(existing, dict):
+    existing = {}
+
+if not str(existing.get("display_name") or "").strip():
+    existing["display_name"] = DEFAULT_PROFILE_DISPLAY_NAME
+    directory = os.path.dirname(PROFILE_META) or "."
+    fd, tmp_path = tempfile.mkstemp(dir=directory, prefix=".profile.", suffix=".yaml")
+    with os.fdopen(fd, "w") as f:
+        yaml.safe_dump(existing, f, sort_keys=False, default_flow_style=False)
+    os.replace(tmp_path, PROFILE_META)
+    print("profile: default display name set to " + DEFAULT_PROFILE_DISPLAY_NAME)
+else:
+    print("profile: default display name already set")
+PYEOF
+
 # Migrate only routing fields for managed profiles while preserving user-owned settings.
 python3 - <<'PY'
 from pathlib import Path

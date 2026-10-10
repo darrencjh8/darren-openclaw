@@ -496,6 +496,108 @@ print('present' if profiles and fields and reviewer_isolation else 'missing')
 ")
 [ "$managed_routing_migration" = "present" ] && ok "managed profile routing and reviewer isolation migrate on startup" || nope "managed profile migration" "got: $managed_routing_migration"
 
+echo ""
+echo "=== default profile display name ==="
+
+# `default` is the implicit root profile (its home IS HERMES_HOME=/opt/data), and
+# every path, cron profile field, and skills dir keys off that canonical id — so
+# it must never be renamed. The friendly label is profile.yaml display_name, which
+# is presentation-only. Seeded on boot, but an operator-set name wins.
+display_block=$(python3 - "$SEED_SCRIPT" <<'PY'
+import sys
+content = open(sys.argv[1], encoding="utf-8").read()
+marker = "SEED_DEFAULT_PROFILE_DISPLAY_NAME"
+pos = content.find(marker)
+if pos < 0:
+    print(""); raise SystemExit
+start_tag = "python3 <<'PYEOF' || true\n"
+start = content.rfind(start_tag, 0, pos)
+if start < 0:
+    print(""); raise SystemExit
+body = content[start + len(start_tag):]
+end = body.find("\nPYEOF")
+print(body[:end] if end >= 0 else "")
+PY
+)
+[ -n "$display_block" ] && ok "seed has a default profile display-name block" || nope "display-name block" "not found"
+
+# The id must stay 'default': a rename would break every stored path and cron
+# profile field, so the seed must not invoke the rename path for the id itself.
+if printf '%s\n' "$display_block" | grep -qE 'hermes profile rename default'; then
+    nope "default id is not renamed" "seed renames the default profile id"
+else
+    ok "default id is not renamed (display name only)"
+fi
+
+rm -rf "$TMPDIR/profhome"
+mkdir -p "$TMPDIR/profhome"
+display_block_tmp=${display_block//\/opt\/data\/profile.yaml/$TMPDIR\/profhome\/profile.yaml}
+display_run=$(python3 -c "$display_block_tmp" 2>&1)
+
+display_meta=$(python3 - "/tmp/unused" "$TMPDIR/profhome/profile.yaml" <<'PY'
+import sys
+path = sys.argv[2]
+try:
+    import yaml
+    data = yaml.safe_load(open(path).read()) or {}
+except FileNotFoundError:
+    data = None
+print("missing" if data is None else str(data.get("display_name") or ""))
+PY
+)
+[ "$display_meta" = "friday" ] && ok "fresh host: display name seeded as 'friday'" || nope "display name seed" "got: $display_meta"
+
+# Idempotent: a second boot must not churn the file.
+python3 -c "$display_block_tmp" >/dev/null 2>&1
+display_meta2=$(python3 - "$TMPDIR/profhome/profile.yaml" <<'PY'
+import sys, yaml
+try:
+    data = yaml.safe_load(open(sys.argv[1]).read()) or {}
+except FileNotFoundError:
+    data = {}
+print(str(data.get("display_name") or ""))
+PY
+)
+[ "$display_meta2" = "friday" ] && ok "idempotent: display name still 'friday' on re-seed" || nope "display name idempotent" "got: $display_meta2"
+
+# An operator-set name is a user decision, not a managed default.
+python3 - "$TMPDIR/profhome/profile.yaml" <<'PY'
+import sys, yaml
+p = sys.argv[1]
+data = yaml.safe_load(open(p).read()) or {}
+data["display_name"] = "not-friday"
+open(p, "w").write(yaml.safe_dump(data, sort_keys=False))
+PY
+python3 -c "$display_block_tmp" >/dev/null 2>&1
+display_meta3=$(python3 - "$TMPDIR/profhome/profile.yaml" <<'PY'
+import sys, yaml
+try:
+    data = yaml.safe_load(open(sys.argv[1]).read()) or {}
+except FileNotFoundError:
+    data = {}
+print(str(data.get("display_name") or ""))
+PY
+)
+[ "$display_meta3" = "not-friday" ] && ok "operator-set display name is preserved" || nope "display name preserved" "got: $display_meta3"
+
+# Other profile.yaml fields must survive the seed.
+python3 - "$TMPDIR/profhome/profile.yaml" <<'PY'
+import sys, yaml
+p = sys.argv[1]
+data = yaml.safe_load(open(p).read()) or {}
+data["description"] = "operator description"
+data["display_name"] = ""
+open(p, "w").write(yaml.safe_dump(data, sort_keys=False))
+PY
+python3 -c "$display_block_tmp" >/dev/null 2>&1
+display_kept=$(python3 - "$TMPDIR/profhome/profile.yaml" <<'PY'
+import sys, yaml
+data = yaml.safe_load(open(sys.argv[1]).read()) or {}
+print("ok" if data.get("description") == "operator description" and data.get("display_name") == "friday" else "fail")
+PY
+)
+[ "$display_kept" = "ok" ] && ok "seed fills an empty display name and keeps other fields" || nope "display name merge" "got: $display_kept"
+
 
 echo "=== self-wiki-maintenance-and-reminders cron seeding ==="
 
