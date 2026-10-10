@@ -34,7 +34,7 @@ python3 -c "$ptr_tmp" >/dev/null 2>&1 || true
 
 count=$(grep -c "memories/topics" "$TMPDIR/memories/MEMORY.md")
 [ "$count" = "1" ] && ok "reworded pointer is not duplicated" \
-    || nope "reworded pointer idempotency" "occurrences: $count"
+    || nope "test_reworded_pointer_idempotent" "occurrences: $count"
 
 echo ""
 echo "Results: $pass passed, $fail failed"
