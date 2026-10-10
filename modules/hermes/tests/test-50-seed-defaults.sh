@@ -606,12 +606,15 @@ echo "=== self-wiki-maintenance-and-reminders cron seeding ==="
 wiki_block=$(python3 - "$SEED_SCRIPT" <<'PY'
 import sys
 content = open(sys.argv[1], encoding="utf-8").read()
-marker = "self-wiki-maintenance-and-reminders"
+marker = "\"name\": \"self-wiki-maintenance-and-reminders\""
 pos = content.find(marker)
 if pos < 0:
     print(""); raise SystemExit
 start_tag = "python3 <<'PYEOF' || true\n"
-start = content.find(start_tag, pos)
+# Anchor on the "name" assignment INSIDE the block (unique), then walk BACK to
+# the block start. (The bare job name also appears in the comment line above the
+# block and four more times inside the block itself.)
+start = content.rfind(start_tag, 0, pos)
 block = content[start + len(start_tag):]
 end = block.find("\nPYEOF")
 print(block[:end] if end >= 0 else "")
@@ -651,6 +654,11 @@ checks = {
     "notion_plans": "fb21acfd-b555-4a99-8b54-54ed43d4b020" in prompt,
     "portfolio_readonly": "portfolio_taxonomy" in prompt and "portfolio_sync" in prompt,
     "mnemosyne": "Mnemosyne" in prompt,
+    # Regression: the prompt must not require MCP recall for memory (GH #764).
+    # skip_contexts cron makes the recall tools answer `memory_unavailable` in
+    # every cron session, so the run degraded every week. The prompt must point
+    # at the read-only DB projection instead.
+    "mnemosyne_cron_design": "skip_contexts" in prompt and "mnemosyne.db" in prompt,
     "completeness": "has_more" in prompt,
     "field_authority": "user correction" in prompt.lower(),
     "audit_artifact": "audit" in prompt.lower(),
@@ -728,12 +736,14 @@ echo "=== self-wiki-reminders-daily cron seeding ==="
 daily_block=$(python3 - "$SEED_SCRIPT" <<'PY'
 import sys
 content = open(sys.argv[1], encoding="utf-8").read()
-marker = "self-wiki-reminders-daily"
+marker = "\"name\": \"self-wiki-reminders-daily\""
 pos = content.find(marker)
 if pos < 0:
     print(""); raise SystemExit
 start_tag = "python3 <<'PYEOF' || true\n"
-start = content.find(start_tag, pos)
+# Same anchor rule as the weekly extractor: the "name" assignment is unique to
+# the block body; walk BACK to the block start.
+start = content.rfind(start_tag, 0, pos)
 block = content[start + len(start_tag):]
 end = block.find("\nPYEOF")
 print(block[:end] if end >= 0 else "")
