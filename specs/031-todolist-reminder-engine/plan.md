@@ -10,7 +10,7 @@ Hourly Hermes dispatcher cron evaluates file-backed todo definitions, compiles N
 
 ## Technical Context
 
-**Language/Version**: Node.js 24 ESM (expense-tracker container, post spec-012 migration)
+**Language/Version**: Node.js 24 ESM (expense-tracker container; follows the existing `tools.js` ESM registration pattern in `modules/expense-tracker`)
 **Primary Dependencies**: `better-sqlite3`, built-in `fetch` (Google Tasks REST), existing `notify_user` HMAC path
 **Storage**: `data/reminder.db` (new) + `config/reminders.json` (new)
 **Testing**: `vitest` (`.test.js`, RED-GREEN-REFACTOR per constitution 2.3)

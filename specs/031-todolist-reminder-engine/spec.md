@@ -83,7 +83,7 @@ After a card payment due date passes, the engine creates a "reconcile card X" to
 
 **Acceptance Scenarios**:
 
-1. **Given** a card payment reminder was created for due date D, **When** dispatcher runs on D+1, **Then** a reconcile-nudge task is created (once per billing cycle).
+1. **Given** a card payment reminder was created for due date D, **When** dispatcher runs on D+1, **Then** a reconcile-nudge task is created (once per billing cycle). Matching rule: the nudge's `card_key` MUST equal the payment reminder's `card_key`, and the journal MUST contain a row with that `card_key` and `due_date = D` (lookup via `idx_journal_card_due`); definition_id matching alone is not sufficient.
 2. **Given** no payment reminder was created for that cycle, **When** dispatcher runs, **Then** no nudge is created (no orphan nudges).
 
 ---
@@ -126,15 +126,15 @@ Each todo definition carries `remind_hour` (Telegram nudge via `notify_user`), `
 - **FR-004**: Google Task creation MUST be deduped by SHA-256 over `(definition_id, due_date)`; duplicates skipped and logged.
 - **FR-005**: Reminder-only definitions (`auto_doneable=true`) MUST be created then immediately marked completed.
 - **FR-006**: Card/subscription dates MUST be compiled from Notion rows into dated todos with configurable lead days (defaults: card 3, subscription 30).
-- **FR-007**: Reconcile nudge MUST fire D+1 after a card due date D, only if the payment reminder for that cycle was created.
+- **FR-007**: Reconcile nudge MUST fire D+1 after a card due date D, only if the payment reminder for that cycle was created — matched by `card_key` + journal lookup on `(card_key, due_date=D)`, not by definition_id alone.
 - **FR-008**: Telegram nudges MUST reuse the existing `notify_user` primitive.
 - **FR-009**: Config schema MUST be owned by this spec; the admin UI spec (sibling) consumes it.
 - **FR-010**: Every run MUST emit JSON-line logs with correlation ID = run timestamp.
 
 ### Key Entities
 
-- **TodoDefinition**: id, source (fixed | notion | knowledge_base), category (daily | weekly | monthly | card_payment | subscription_renewal | reconcile_nudge), schedule fields (weekday?, day_of_month?, lead_days?), remind_hour, send_hour, auto_doneable, enabled.
-- **DatedTodo**: definition_id, title, notes, due_date — output of the compiler for a given run date.
+- **TodoDefinition**: id (immutable; rename = delete + create), source (fixed | notion | knowledge_base), category (daily | weekly | monthly | card_payment | subscription_renewal | reconcile_nudge), schedule fields (weekday?, day_of_month?, lead_days?), remind_hour, send_hour (equal hours = nudge-first-then-create within the run; inverted hours legal), auto_doneable, enabled, card_key? (links reconcile_nudge to its parent card_payment).
+- **DatedTodo**: definition_id, title, notes, due_date (routine = run date; compiled card/subscription = event date D), card_key? — output of the compiler for a given run date.
 - **DispatchRecord**: dedupe_hash, definition_id, due_date, created_at, google_task_id, channel (gtasks | telegram | both).
 - **NotionDateRow**: source row id, label (card/subscription name), due/renewal date, parsed status.
 
